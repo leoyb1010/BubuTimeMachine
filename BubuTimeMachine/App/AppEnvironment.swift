@@ -74,6 +74,7 @@ final class AppEnvironment {
     func bootstrap(context: ModelContext) {
         syncEngine.attach(context: context)
         syncEngine.start()
+        ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)
     }
 
     /// 设置变更后重建客户端（用户改了服务器地址/账户/AI 开关时调用）。

@@ -187,16 +187,26 @@ struct GrowthMovieView: View {
 
     private func generate() async {
         done = false
-        // 记录任务
-        _ = try? await env.aiService.generateGrowthMovie(year: selectedYear)
         for i in stages.indices {
             stageIndex = i
             try? await Task.sleep(for: .milliseconds(800))
         }
+        // 旁白：真实 AI 优先（用该岁记录摘要），否则温柔占位
+        var narration = "这一年，布布从 \(selectedYear) 岁慢慢长大……"
+        if env.config.isAIConfigured, let ai = env.aiService as? BubuAIService {
+            let highlights = yearEntries.prefix(8).compactMap { $0.note }
+            if let text = try? await ai.movieNarration(
+                year: selectedYear, childName: env.config.childName, highlights: Array(highlights)),
+               !text.isEmpty {
+                narration = text
+            }
+        } else {
+            _ = try? await env.aiService.generateGrowthMovie(year: selectedYear)
+        }
         // 持久化一条 GrowthMovie 记录
         let movie = GrowthMovie(year: selectedYear)
         movie.status = "ready"
-        movie.narrationScript = "这一年，布布从 \(selectedYear) 岁慢慢长大……"
+        movie.narrationScript = narration
         context.insert(movie)
         try? context.save()
         withAnimation { done = true; stageIndex = stages.count }

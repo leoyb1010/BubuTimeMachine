@@ -13,6 +13,8 @@ struct CaptureHomeView: View {
     private var entries: [Entry]
 
     @State private var model: CaptureModel?
+    @State private var firstTimeSuggestion: String?
+    @State private var firstTimeEntryID: UUID?
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
@@ -55,6 +57,45 @@ struct CaptureHomeView: View {
                                      role: env.config.currentRole)
             }
         }
+        .onChange(of: model?.lastSavedEntryID) { _, newID in
+            if let id = newID { Task { await detectFirstTime(entryID: id) } }
+        }
+        .alert("这是布布的第一次吗？", isPresented: Binding(
+            get: { firstTimeSuggestion != nil },
+            set: { if !$0 { firstTimeSuggestion = nil } })) {
+            Button("是的，记一笔") { confirmFirstTime() }
+            Button("不是", role: .cancel) { firstTimeSuggestion = nil }
+        } message: {
+            Text(firstTimeSuggestion ?? "")
+        }
+    }
+
+    /// 保存后调用 AI 识别"第一次"（仅在启用真实 AI 时）。
+    private func detectFirstTime(entryID: UUID) async {
+        guard env.config.isAIConfigured else { return }
+        let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryID })
+        guard let entry = try? modelContext.fetch(descriptor).first,
+              !entry.media.isEmpty else { return }
+        if let suggestion = try? await env.aiService.detectFirstTime(media: entry.media),
+           suggestion.confidence > 0.4 {
+            firstTimeEntryID = entryID
+            firstTimeSuggestion = suggestion.what
+        }
+    }
+
+    private func confirmFirstTime() {
+        guard let what = firstTimeSuggestion, let id = firstTimeEntryID else { return }
+        let ft = FirstTime(what: what)
+        ft.detectedByAI = true
+        ft.confirmedByParent = true
+        let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+        if let entry = try? modelContext.fetch(descriptor).first {
+            ft.entry = entry
+            ft.happenedAt = entry.happenedAt
+        }
+        modelContext.insert(ft)
+        try? modelContext.save()
+        firstTimeSuggestion = nil
     }
 
     // MARK: 背景

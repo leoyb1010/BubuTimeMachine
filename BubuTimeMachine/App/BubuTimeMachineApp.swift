@@ -112,11 +112,26 @@ struct RootView: View {
 
     var body: some View {
         if env.hasCompletedOnboarding {
-            RootTabView()
-                .transition(.opacity)
+            content.transition(.opacity)
         } else {
-            OnboardingView()
-                .transition(.opacity)
+            OnboardingView().transition(.opacity)
         }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-uitest-settings") {
+            NavigationStack { SettingsView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-voice") {
+            NavigationStack { VoiceArchiveView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-export") {
+            NavigationStack { ExportView() }
+        } else {
+            RootTabView()
+        }
+        #else
+        RootTabView()
+        #endif
     }
 }

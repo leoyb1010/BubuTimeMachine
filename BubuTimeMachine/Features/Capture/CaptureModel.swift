@@ -26,6 +26,9 @@ final class CaptureModel {
     var detectedTags: [String] = []
     var detectedLocation: String?
 
+    /// 最近一次保存的 Entry id 与其标签（供首页做"第一次"识别）。
+    var lastSavedEntryID: UUID?
+
     private let mediaStore: MediaStore
     private let analyzer: PhotoAnalyzer
     private let role: FamilyRole
@@ -114,6 +117,7 @@ final class CaptureModel {
 
         do { try context.save() } catch { return false }
 
+        lastSavedEntryID = entry.id
         pickedItems = []
         note = ""
         mood = nil
