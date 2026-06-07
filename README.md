@@ -47,18 +47,32 @@
 - ✅ AES-GCM 加密封存，密钥由解锁时间派生——篡改时间无法解出
 - ✅ 倒计时锁定列表（未到期只显示倒计时），到期「庄重开启」仪式动画 + 解密读信
 
-成长之声 / 后端同步（PocketBase）/ 真实 AI（FastAPI）为后续阶段，协议与加密原语已就绪。
+**Wave H · 后端同步 + 真实 AI + 传承兜底**
+- ✅ `PocketBaseClient`：REST 鉴权 + 幂等 CRUD（localId 去重）+ multipart 上传带进度 + 轮询 Realtime
+- ✅ 双向 `SyncEngine`：本地未同步推送 + 远端拉回，三台 iPhone 记录自动汇合；离线照常用，联网自动补传
+- ✅ `BubuAIService` 接 DeepSeek（v4-flash 首选 / v4-pro 兜底）：第一人称改写 / 旁白 / 归类 / 第一次识别 / 语音转写
+- ✅ 成长之声：按岁归档布布的声音 + 家人对她说的话（声纹长卷，可转写）
+- ✅ 全量档案导出：静态 HTML + 媒体包 + zip 分享——双击即看，永久离线可读
+- ✅ 那年今日每日提醒 + 上传后 AI「这是第一次吗」确认弹窗
+- ✅ 自托管后端脚手架 `server/`：PocketBase 集合迁移 + FastAPI（DeepSeek）+ 启动脚本 + 部署文档
 
 ## 工程原则
 
 | 原则 | 落地 |
 |---|---|
-| 离线优先 | SwiftData 唯一真相源，UI 只读本地，断网全功能可用 |
+| 离线优先 | SwiftData 唯一真相源，UI 只读本地，断网全功能可用，联网自动同步 |
 | 现代并发 | 全程 `async/await` + `@Observable` + `@MainActor`，无 Combine/ObservableObject |
-| 隐私至上 | AI 走自托管 FastAPI；时间胶囊 AES-GCM 端到端加密；无第三方分析 |
-| 数据可迁移 | 媒体原文件 + 结构化数据双备份，可一键导出全量档案（规划中） |
+| 隐私至上 | AI 走自托管 FastAPI（只发文字不传图）；时间胶囊 AES-GCM 端到端加密；Tailscale 内网；无第三方分析 |
+| 数据可迁移 | 媒体原文件 + 结构化数据双备份，一键导出可离线打开的全量档案 |
 | 适老化一等公民 | 姥姥能用 = 验收标准 |
-| 接口先行 | 网络/AI 能力均为 protocol，先 Mock 后实现，UI 不依赖具体后端 |
+| 接口先行 | 网络/AI 能力均为 protocol，Mock 与真实实现可热切换，UI 不依赖具体后端 |
+
+## 自托管部署
+
+后端在 `server/` 目录，详见 [`server/README.md`](server/README.md)：
+- **PocketBase**（数据库+文件+鉴权+同步）跑在 Mac mini + 外接 SSD，Tailscale 内网访问
+- **FastAPI**（DeepSeek AI）独立服务，App 设置页填地址即可启用
+- App 设置页：填服务器地址 + 家庭账户 → 三台手机自动同步；开启 AI → 工坊从 Mock 变真实
 
 ## 构建运行
 
