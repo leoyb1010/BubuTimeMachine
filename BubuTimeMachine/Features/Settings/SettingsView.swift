@@ -1,36 +1,62 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - 设置
-/// 服务器配置（Base URL + 连接测试）、当前身份切换、孩子名字。
-/// M0 交付物：可填 Base URL + 连接测试。
+/// 布布档案、家庭成员、主题外观、服务器配置、当前身份。
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
+    @Query private var members: [FamilyMember]
     @State private var testing = false
     @State private var testResult: String?
+
+    private var currentMember: FamilyMember? {
+        members.first { $0.id == env.currentMemberId } ?? members.first
+    }
 
     var body: some View {
         @Bindable var config = env.config
         Form {
-            Section("我是谁") {
-                Picker("当前身份", selection: $config.currentRole) {
-                    ForEach(FamilyRole.allCases, id: \.self) { role in
-                        Text(role.displayName).tag(role)
+            // 当前身份
+            Section {
+                NavigationLink {
+                    MembersView()
+                } label: {
+                    HStack(spacing: 14) {
+                        Text(currentMember?.avatarEmoji ?? "🙂")
+                            .font(.system(size: 30))
+                            .frame(width: 50, height: 50)
+                            .background(Color(hex: currentMember?.themeColorHex ?? "#F28C9E").opacity(0.18), in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(currentMember?.name ?? "未设置").font(BubuTheme.Font.headline)
+                            Text("当前身份 · 点这里管理成员").font(BubuTheme.Font.caption)
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-
-                LabeledContent("孩子的名字") {
-                    TextField("布布", text: $config.childName)
-                        .multilineTextAlignment(.trailing)
                 }
             }
 
+            Section("布布") {
+                NavigationLink {
+                    ChildProfileView()
+                } label: {
+                    Label("布布的档案", systemImage: "figure.child")
+                }
+            }
+
+            Section("外观") {
+                NavigationLink {
+                    ThemeSettingsView()
+                } label: {
+                    Label("主题与外观", systemImage: "paintpalette")
+                }
+            }
+
+            // 服务器
             Section {
                 TextField("http://100.x.x.x:8090", text: $config.baseURLString)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-
                 Button {
                     Task { await testConnection() }
                 } label: {
