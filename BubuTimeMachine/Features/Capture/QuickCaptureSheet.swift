@@ -62,7 +62,8 @@ struct QuickCaptureSheet: View {
     }
 
     private var photoPicker: some View {
-        PhotosPicker(
+        let tint = theme
+        return PhotosPicker(
             selection: $model.pickedItems,
             maxSelectionCount: 9,
             matching: .any(of: [.images, .videos])
@@ -70,7 +71,7 @@ struct QuickCaptureSheet: View {
             VStack(spacing: 14) {
                 Image(systemName: "photo.badge.plus")
                     .font(.system(size: 56, weight: .medium))
-                    .foregroundStyle(theme)
+                    .foregroundStyle(tint)
                 Text("从相册选照片或视频")
                     .font(BubuTheme.Font.headline)
                     .foregroundStyle(BubuTheme.Color.warmBrown)

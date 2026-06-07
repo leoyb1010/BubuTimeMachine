@@ -7,17 +7,42 @@
 
 ## 当前进度
 
-已完成 **M0 地基** 与 **M1 本地闭环**（不依赖任何后端，离线全功能可用）：
+已完成 **完整的离线体验层**（不依赖任何后端，全功能本地可用）。核心闭环 + 六大专属能力：
 
-- ✅ Xcode 工程（xcodegen 生成）+ SwiftData ModelContainer（全部 8 个实体）
-- ✅ `AppEnvironment` 依赖容器（DI）+ `APIClient` / `AIService` 协议 + Mock 实现
-- ✅ `ServerConfig` 设置页：可填 Base URL + 连接测试 + 身份切换
-- ✅ `CaptureHomeView` 超大主按钮（适老）+ `PhotosPicker` 选片/选视频
-- ✅ 选片即写入 SwiftData（`syncState=.local`），`MediaStore` 存沙盒 + 生成缩略图
-- ✅ `TimelineView` 用 `@Query` 按 `happenedAt` 倒序、按「年-月」分段展示
-- ✅ 设计系统 `BubuTheme`（柔和色板 / 大字号 / 圆角 / 口语文案）+ `BigButton` + 仪式动画
+**地基**
+- ✅ Xcode 工程（xcodegen）+ SwiftData ModelContainer（11 个实体）
+- ✅ `AppEnvironment` 依赖容器（DI）+ `APIClient`/`AIService` 协议 + Mock 实现
+- ✅ 设计系统 `BubuTheme` + `BigButton` + 仪式动画 + 波形/流式布局组件
 
-灵魂功能（里程碑 / AI 工坊 / 时间胶囊）已留占位页与协议接口，待逐个深入。
+**Wave A · 家庭账号系统**
+- ✅ 首启引导三步（欢迎 → 布布生日 → 你是谁），温暖入场
+- ✅ 家庭成员系统：增删改、头像 emoji、专属主题色、一键切换身份（无密码，适老）
+- ✅ 布布档案：名字/生日/头像/出生地，生日驱动全局 `AgeCalculator`（X岁X月X天 / 来到世界第N天 / 距生日）
+
+**Wave B · 端侧图片自动分析（零后端、隐私至上）**
+- ✅ EXIF 提取拍摄时间 + GPS → `CLGeocoder` 反向地理编码出地名
+- ✅ Apple `Vision` 框架场景分类 + 人脸计数 → 自动中文标签
+- ✅ 保存时自动回填 Entry 的发生时间、地点、标签
+
+**Wave C · 语音记录 + 详情可编辑/补充**
+- ✅ `AudioRecorder`/`AudioPlayer`：录音 + 实时波形 + 播放
+- ✅ 心情标签、语音记录随手记；已保存内容可改文字/时间/心情、可追加照片与语音
+- ✅ 家人合奏：多成员对同一刻补充文字 + 语音，合成完整故事
+
+**Wave D · 里程碑成就墙**
+- ✅ 预设库（6 领域 24 项）一键添加 + 完全自定义
+- ✅ 已点亮（高亮）/ 待点亮（灰）网格 + 进度环 + 达成仪式动画
+
+**Wave E · AI 工坊（Mock 可玩，留真 LLM 接口）**
+- ✅ 第一人称日记（父母视角 → 布布口吻）
+- ✅ 年度成长电影：分阶段生成流程 + **真实可播放**的 Ken Burns 幻灯片（缩放平移 + 交叉淡入 + 旁白字幕）
+- ✅ 家人合奏 / 成长洞察（漏记的「第一次」提醒）
+
+**Wave F · 主题与首页仪表盘**
+- ✅ 6 套主题配色 + 首页背景（主题渐变 / 布布照片）
+- ✅ 首页成长仪表盘：年龄实时计数 + 统计卡 + 那年今日 + 最近精选
+
+时间胶囊 / 成长之声 / 后端同步（PocketBase）/ 真实 AI（FastAPI）为后续阶段，协议与加密原语已就绪。
 
 ## 工程原则
 
