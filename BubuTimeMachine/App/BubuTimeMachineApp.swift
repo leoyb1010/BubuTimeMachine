@@ -80,9 +80,28 @@ struct BubuTimeMachineApp: App {
             walk.ageDescription = AgeCalculator.ageDescription(birthday: birthday, at: walk.happenedAt!)
         }
 
+        // 时间胶囊：一封已可开启（解锁时间在过去）、一封锁定中
+        seedCapsule(into: context, title: "写给一岁的你",
+                    letter: "亲爱的布布，今天你刚满一岁。你最爱笑，一笑全家都化了。等你看到这封信，已经长大啦。",
+                    unlockAt: Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now, emoji: "🎂")
+        seedCapsule(into: context, title: "写给18岁的你",
+                    letter: "等你十八岁，妈妈想对你说……（这封要到那天才能打开哦）",
+                    unlockAt: Calendar.current.date(byAdding: .year, value: 17, to: .now) ?? .now, emoji: "🌟")
+
         try? context.save()
         env.currentMemberId = mama.id
         env.hasCompletedOnboarding = true
+    }
+
+    @MainActor
+    private func seedCapsule(into context: ModelContext, title: String, letter: String, unlockAt: Date, emoji: String) {
+        let capsule = TimeCapsule(title: title, fromRole: "妈妈", unlockAt: unlockAt)
+        capsule.coverEmoji = emoji
+        let payload = CapsulePayload(letter: letter)
+        if let blob = try? env.vault.seal(payload, unlockAt: unlockAt, salt: capsule.id.uuidString) {
+            capsule.encryptedBlobFileName = blob
+            context.insert(capsule)
+        }
     }
     #endif
 }

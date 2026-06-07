@@ -74,6 +74,26 @@ nonisolated struct MediaStore: Sendable {
         try? Data(contentsOf: mediaURL(for: fileName))
     }
 
+    // MARK: 加密 blob（时间胶囊）
+
+    /// 保存任意二进制（如时间胶囊加密载荷）到沙盒，返回相对文件名。
+    func saveBlob(_ data: Data, preferredExtension ext: String = "capsule") throws -> String {
+        let name = "\(UUID().uuidString).\(ext)"
+        let url = mediaDir.appendingPathComponent(name)
+        try data.write(to: url, options: .atomic)
+        return name
+    }
+
+    /// 读取沙盒中的二进制 blob。
+    func blob(named fileName: String) -> Data? {
+        try? Data(contentsOf: mediaURL(for: fileName))
+    }
+
+    /// 删除沙盒文件（媒体 / blob 通用）。
+    func deleteMedia(named fileName: String) {
+        try? FileManager.default.removeItem(at: mediaURL(for: fileName))
+    }
+
     // MARK: 缩略图
 
     /// 为图片生成并保存缩略图，返回缩略图相对文件名。
