@@ -29,10 +29,19 @@ struct TimelineEntryCard: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
+            if let mood = entry.mood {
+                Text(mood.emoji).font(.system(size: 18))
+            }
             Text(entry.happenedAt.formatted(date: .abbreviated, time: .shortened))
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
+            if let place = entry.locationName {
+                Label(place, systemImage: "mappin")
+                    .font(.system(size: 12))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(1)
+            }
             Spacer()
             Text(entry.authorRole)
                 .font(BubuTheme.Font.caption)
@@ -54,11 +63,20 @@ struct TimelineEntryCard: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 6) {
-            Image(systemName: syncSymbol)
-                .font(.system(size: 12))
-            Text(entry.syncState.friendlyText)
-                .font(BubuTheme.Font.caption)
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: syncSymbol).font(.system(size: 12))
+                Text(entry.syncState.friendlyText).font(BubuTheme.Font.caption)
+            }
+            Spacer()
+            if !entry.voiceNotes.isEmpty {
+                Label("\(entry.voiceNotes.count)", systemImage: "waveform")
+                    .font(.system(size: 12))
+            }
+            if !entry.comments.isEmpty {
+                Label("\(entry.comments.count)", systemImage: "person.2.fill")
+                    .font(.system(size: 12))
+            }
         }
         .foregroundStyle(BubuTheme.Color.secondaryText)
     }
