@@ -13,6 +13,7 @@ struct GrowthMovieView: View {
     @State private var selectedYear = 0
     @State private var stageIndex = -1
     @State private var done = false
+    @State private var showPlayer = false
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -38,6 +39,52 @@ struct GrowthMovieView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("年度成长电影")
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $showPlayer) {
+            GrowthMoviePlayer(
+                mediaFiles: yearPhotoFiles,
+                captions: yearCaptions,
+                title: "《\(env.config.childName)的第 \(selectedYear) 岁》",
+                mediaStore: env.mediaStore,
+                tint: theme,
+                onClose: { showPlayer = false })
+        }
+    }
+
+    /// 该岁所有照片（按发生时间排序）的沙盒文件名。
+    private var yearPhotoFiles: [String] {
+        yearEntries.flatMap { entry in
+            entry.media
+                .filter { $0.type == .photo }
+                .compactMap { $0.localFileName }
+        }
+    }
+
+    /// 配合照片的旁白字幕：用记录的备注 / 心情 / 年龄生成。
+    private var yearCaptions: [String] {
+        var caps: [String] = []
+        for entry in yearEntries {
+            let photos = entry.media.filter { $0.type == .photo }
+            guard !photos.isEmpty else { continue }
+            let base: String
+            if let note = entry.note, !note.isEmpty {
+                base = note
+            } else if let profile {
+                base = AgeCalculator.ageDescription(birthday: profile.birthday, at: entry.happenedAt)
+            } else {
+                base = entry.happenedAt.formatted(date: .abbreviated, time: .omitted)
+            }
+            // 每张照片共用该条记录的字幕
+            caps.append(contentsOf: Array(repeating: base, count: photos.count))
+        }
+        return caps
+    }
+
+    /// 该岁的记录，按时间正序。
+    private var yearEntries: [Entry] {
+        guard let profile else { return entries.sorted { $0.happenedAt < $1.happenedAt } }
+        return entries
+            .filter { AgeCalculator.ageYears(birthday: profile.birthday, at: $0.happenedAt) == selectedYear }
+            .sorted { $0.happenedAt < $1.happenedAt }
     }
 
     @ViewBuilder
@@ -59,7 +106,7 @@ struct GrowthMovieView: View {
                     Image(systemName: "play.circle.fill").font(.system(size: 64)).foregroundStyle(.white)
                     Text("《\(env.config.childName)的第 \(selectedYear) 岁》")
                         .font(BubuTheme.Font.title).foregroundStyle(.white)
-                    Text("约 \(clipCount) 个瞬间 · 1分30秒").font(BubuTheme.Font.caption).foregroundStyle(.white.opacity(0.85))
+                    Text("约 \(clipCount) 个瞬间 · 轻触播放").font(BubuTheme.Font.caption).foregroundStyle(.white.opacity(0.85))
                 } else {
                     Image(systemName: "film.stack").font(.system(size: 56)).foregroundStyle(.white.opacity(0.9))
                     Text("一部属于布布的小电影").font(BubuTheme.Font.headline).foregroundStyle(.white)
@@ -69,6 +116,8 @@ struct GrowthMovieView: View {
         }
         .frame(height: 200)
         .bubuCardShadow()
+        .contentShape(Rectangle())
+        .onTapGesture { if done { showPlayer = true } }
     }
 
     private var yearPicker: some View {
@@ -151,5 +200,10 @@ struct GrowthMovieView: View {
         context.insert(movie)
         try? context.save()
         withAnimation { done = true; stageIndex = stages.count }
+        // 生成完成，若该岁有照片则自动放映
+        if !yearPhotoFiles.isEmpty {
+            try? await Task.sleep(for: .milliseconds(400))
+            showPlayer = true
+        }
     }
 }
