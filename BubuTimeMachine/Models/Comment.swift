@@ -9,6 +9,8 @@ final class Comment {
     var authorRole: String
     var text: String?
     var voiceFileName: String?        // 也可语音补充（姥姥场景）
+    var voiceDuration: Double = 0
+    var voiceWaveform: [Float] = []
     var createdAt: Date
     var entry: Entry?
 

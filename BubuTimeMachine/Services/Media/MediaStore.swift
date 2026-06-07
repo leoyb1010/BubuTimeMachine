@@ -47,6 +47,18 @@ nonisolated struct MediaStore: Sendable {
         return name
     }
 
+    /// 将录音临时文件移入沙盒，返回相对文件名（.m4a）。
+    func importAudio(from sourceURL: URL) throws -> String {
+        let fm = FileManager.default
+        let name = "voice_\(UUID().uuidString).m4a"
+        let dest = mediaDir.appendingPathComponent(name)
+        if fm.fileExists(atPath: dest.path) {
+            try fm.removeItem(at: dest)
+        }
+        try fm.copyItem(at: sourceURL, to: dest)
+        return name
+    }
+
     // MARK: 读取
 
     /// 由相对文件名解析为沙盒绝对 URL。

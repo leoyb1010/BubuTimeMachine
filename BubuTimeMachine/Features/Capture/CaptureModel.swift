@@ -4,9 +4,9 @@ import PhotosUI
 import Observation
 
 // MARK: - 记录此刻 业务模型
-/// @Observable + @MainActor。负责把 PhotosPicker 选中的媒体落本地：
-/// 写入 SwiftData（Entry + Media，syncState=.local）→ 存沙盒 → 生成缩略图。
-/// M1 本地闭环核心：选片即可见，不依赖任何后端。
+/// @Observable + @MainActor。把选中的媒体落本地并自动分析：
+/// 写入 SwiftData（Entry + Media，syncState=.local）→ 存沙盒 → 缩略图 → 端侧分析。
+/// 端侧分析（EXIF/地理/Vision）自动回填发生时间、地点、标签，零后端、隐私至上。
 @Observable
 @MainActor
 final class CaptureModel {
@@ -14,70 +14,124 @@ final class CaptureModel {
     var pickedItems: [PhotosPickerItem] = []
     var isSaving = false
     var note: String = ""
-    var savedFlash = false      // 保存成功的轻提示
+    var mood: Mood?
+    var savedFlash = false
+
+    /// 录好的语音（待随本次记录一起保存）。
+    var pendingVoice: (fileName: String, duration: Double, waveform: [Float])?
+
+    /// 分析进度提示文案（"正在看看这张照片…"）。
+    var analyzingHint: String?
+    /// 本次分析聚合出的标签，用于保存后给用户看见"机器看懂了什么"。
+    var detectedTags: [String] = []
+    var detectedLocation: String?
 
     private let mediaStore: MediaStore
+    private let analyzer: PhotoAnalyzer
     private let role: FamilyRole
 
-    init(mediaStore: MediaStore, role: FamilyRole) {
+    init(mediaStore: MediaStore, analyzer: PhotoAnalyzer, role: FamilyRole) {
         self.mediaStore = mediaStore
+        self.analyzer = analyzer
         self.role = role
     }
 
     func startQuickCapture() {
         note = ""
+        mood = nil
         pickedItems = []
+        pendingVoice = nil
+        detectedTags = []
+        detectedLocation = nil
+        analyzingHint = nil
         showQuickCapture = true
     }
 
-    /// 将已选媒体保存为一个 Entry。返回是否成功保存了至少一项。
+    /// 是否有可保存内容（媒体 / 文字 / 语音 任一即可）。
+    var canSave: Bool {
+        !pickedItems.isEmpty || !note.isEmpty || pendingVoice != nil
+    }
+
+    /// 保存为一个 Entry。返回是否成功。
     @discardableResult
     func savePickedItems(into context: ModelContext) async -> Bool {
-        guard !pickedItems.isEmpty else { return false }
+        guard canSave else { return false }
         isSaving = true
         defer { isSaving = false }
 
         let entry = Entry(happenedAt: .now, authorRole: role.rawValue,
                           note: note.isEmpty ? nil : note)
+        entry.mood = mood
         context.insert(entry)
+
+        // 媒体 + 分析聚合
+        var earliestCapture: Date?
+        var aggregatedTags: [String] = []
+        var locationName: String?
+        var coordinate: (Double, Double)?
 
         var savedCount = 0
         for item in pickedItems {
-            if let media = await persist(item: item) {
-                media.entry = entry
-                context.insert(media)
-                savedCount += 1
+            guard let (media, analysis) = await persist(item: item) else { continue }
+            media.entry = entry
+            context.insert(media)
+            savedCount += 1
+
+            if let a = analysis {
+                if let d = a.captureDate {
+                    earliestCapture = min(earliestCapture ?? d, d)
+                }
+                aggregatedTags.append(contentsOf: a.tags)
+                media.aiTags = a.tags
+                if locationName == nil { locationName = a.locationName }
+                if coordinate == nil, let lat = a.latitude, let lon = a.longitude {
+                    coordinate = (lat, lon)
+                }
             }
         }
 
-        guard savedCount > 0 else {
+        // 语音
+        if let v = pendingVoice {
+            let voice = VoiceNote(localFileName: v.fileName, durationSeconds: v.duration,
+                                  authorRole: role.rawValue, waveformSamples: v.waveform)
+            voice.entry = entry
+            context.insert(voice)
+        }
+
+        guard savedCount > 0 || !note.isEmpty || pendingVoice != nil else {
             context.delete(entry)
             return false
         }
 
-        do {
-            try context.save()
-        } catch {
-            return false
-        }
+        // 应用分析结果
+        if let capture = earliestCapture { entry.happenedAt = capture }
+        if let loc = locationName { entry.locationName = loc }
+        if let (lat, lon) = coordinate { entry.latitude = lat; entry.longitude = lon }
 
-        // 清理 + 轻提示
+        let uniqueTags = Array(Set(aggregatedTags)).prefix(6)
+        detectedTags = Array(uniqueTags)
+        detectedLocation = locationName
+
+        do { try context.save() } catch { return false }
+
         pickedItems = []
         note = ""
+        mood = nil
+        pendingVoice = nil
         showQuickCapture = false
         flashSaved()
         return true
     }
 
-    /// 单个 PhotosPickerItem → 落沙盒 + 生成缩略图 → 返回 Media（未关联 entry）。
-    private func persist(item: PhotosPickerItem) async -> Media? {
-        // 视频
+    /// 单个 PhotosPickerItem → 落沙盒 + 缩略图 + 端侧分析。
+    private func persist(item: PhotosPickerItem) async -> (Media, PhotoAnalysis?)? {
+        // 视频（暂不分析，仅缩略图）
         if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
             guard let fileName = try? mediaStore.importFile(from: movie.url, preferredExtension: "mov")
             else { return nil }
             let media = Media(type: .video, localFileName: fileName)
             media.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
-            return media
+            return (media, nil)
         }
         // 图片
         if let data = try? await item.loadTransferable(type: Data.self),
@@ -87,7 +141,11 @@ final class CaptureModel {
             media.width = Int(image.size.width)
             media.height = Int(image.size.height)
             media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
-            return media
+
+            analyzingHint = "正在看看这张照片里有什么…"
+            let analysis = await analyzer.analyze(imageData: data)
+            analyzingHint = nil
+            return (media, analysis)
         }
         return nil
     }
@@ -95,14 +153,13 @@ final class CaptureModel {
     private func flashSaved() {
         savedFlash = true
         Task {
-            try? await Task.sleep(for: .seconds(1.6))
+            try? await Task.sleep(for: .seconds(1.8))
             savedFlash = false
         }
     }
 }
 
 // MARK: - 视频可传输类型
-/// PhotosPicker 视频导出到临时文件，再由 MediaStore 拷入沙盒。
 struct MovieTransfer: Transferable {
     let url: URL
 
@@ -110,7 +167,6 @@ struct MovieTransfer: Transferable {
         FileRepresentation(contentType: .movie) { movie in
             SentTransferredFile(movie.url)
         } importing: { received in
-            // 拷到临时目录，避免系统清理 received.file
             let temp = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(UUID().uuidString).mov")
             try? FileManager.default.removeItem(at: temp)
