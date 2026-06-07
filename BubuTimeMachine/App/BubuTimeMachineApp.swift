@@ -34,7 +34,7 @@ struct BubuTimeMachineApp: App {
                     #if DEBUG
                     seedForUITestingIfNeeded()
                     #endif
-                    env.bootstrap()
+                    env.bootstrap(context: modelContainer.mainContext)
                 }
         }
         .modelContainer(modelContainer)

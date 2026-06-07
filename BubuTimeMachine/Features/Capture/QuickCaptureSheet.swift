@@ -50,7 +50,10 @@ struct QuickCaptureSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        Task { await model.savePickedItems(into: modelContext) }
+                        Task {
+                            let ok = await model.savePickedItems(into: modelContext)
+                            if ok { env.syncEngine.syncNow() }
+                        }
                     } label: {
                         if model.isSaving { ProgressView() }
                         else { Text("保存").font(BubuTheme.Font.headline.weight(.bold)) }

@@ -26,21 +26,60 @@ final class ServerConfig {
         didSet { UserDefaults.standard.set(childName, forKey: Self.childNameKey) }
     }
 
+    /// 家庭共享登录账户（PocketBase users）。
+    var accountEmail: String {
+        didSet { UserDefaults.standard.set(accountEmail, forKey: Self.emailKey) }
+    }
+    var accountPassword: String {
+        didSet { UserDefaults.standard.set(accountPassword, forKey: Self.passwordKey) }
+    }
+
+    /// AI 服务（FastAPI）地址，例如 http://100.x.x.x:8000
+    var aiBaseURLString: String {
+        didSet { UserDefaults.standard.set(aiBaseURLString, forKey: Self.aiURLKey) }
+    }
+    /// 是否启用真实 AI（关闭则用 Mock，离线可玩）。
+    var aiEnabled: Bool {
+        didSet { UserDefaults.standard.set(aiEnabled, forKey: Self.aiEnabledKey) }
+    }
+    /// 是否开启"那年今日"每日提醒。
+    var dailyReminderEnabled: Bool {
+        didSet { UserDefaults.standard.set(dailyReminderEnabled, forKey: Self.reminderKey) }
+    }
+
     var baseURL: URL? {
         guard !baseURLString.isEmpty else { return nil }
         return URL(string: baseURLString)
     }
 
+    var aiBaseURL: URL? {
+        guard !aiBaseURLString.isEmpty else { return nil }
+        return URL(string: aiBaseURLString)
+    }
+
     /// 是否已配置真实服务器；未配置时全程走 Mock，仍可离线使用。
-    var isConfigured: Bool { baseURL != nil }
+    var isConfigured: Bool { baseURL != nil && !accountEmail.isEmpty }
+
+    /// 是否可用真实 AI。
+    var isAIConfigured: Bool { aiEnabled && aiBaseURL != nil }
 
     private static let baseURLKey = "bubu.server.baseURL"
     private static let roleKey = "bubu.server.role"
     private static let childNameKey = "bubu.child.name"
+    private static let emailKey = "bubu.server.email"
+    private static let passwordKey = "bubu.server.password"
+    private static let aiURLKey = "bubu.ai.baseURL"
+    private static let aiEnabledKey = "bubu.ai.enabled"
+    private static let reminderKey = "bubu.reminder.enabled"
 
     init() {
         self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? ""
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
+        self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""
+        self.accountPassword = UserDefaults.standard.string(forKey: Self.passwordKey) ?? ""
+        self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? ""
+        self.aiEnabled = UserDefaults.standard.bool(forKey: Self.aiEnabledKey)
+        self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
     }
 }

@@ -21,6 +21,9 @@ struct EntryDTO: Codable, Sendable {
     var latitude: Double?
     var longitude: Double?
     var authorRole: String
+    var mood: String?
+    var isArchived: Bool
+    var editedAt: Date?
     var createdAt: Date
 }
 
