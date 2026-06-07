@@ -1,0 +1,17 @@
+# Xcode / macOS
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+
+# xcodegen 生成物（由 project.yml 重建，不入库）
+*.xcodeproj
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# 本地媒体/沙盒（不应进仓库）
+*.mov
+*.mp4
