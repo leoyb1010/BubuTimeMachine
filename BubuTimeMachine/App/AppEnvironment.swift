@@ -27,9 +27,9 @@ final class AppEnvironment {
     }
 
     /// 首启引导是否完成（已设置布布生日 + 至少一个成员）。
+    /// 存储属性 + didSet 持久化：保证 SwiftUI 能观察到切换，完成引导后即时进入主界面。
     var hasCompletedOnboarding: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.onboardedKey) }
-        set { UserDefaults.standard.set(newValue, forKey: Self.onboardedKey) }
+        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: Self.onboardedKey) }
     }
 
     private static let memberKey = "bubu.current.memberId"
@@ -49,9 +49,10 @@ final class AppEnvironment {
         self.theme = ThemeManager()
         self.photoAnalyzer = PhotoAnalyzer()
 
-        if let raw = UserDefaults.standard.string(forKey: Self.memberKey) {
-            self.currentMemberId = UUID(uuidString: raw)
-        }
+        self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Self.onboardedKey)
+
+        self.currentMemberId = UserDefaults.standard.string(forKey: Self.memberKey)
+            .flatMap(UUID.init(uuidString:))
     }
 
     /// App 启动后调用：启动同步层（离线时无副作用）。
