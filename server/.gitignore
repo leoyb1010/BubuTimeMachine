@@ -1,0 +1,8 @@
+# 后端运行时产物 / 密钥，不入库
+pocketbase/pocketbase
+pocketbase/pb_data/
+pocketbase/pb_migrations/
+ai/.env
+ai/.venv/
+__pycache__/
+*.pyc
