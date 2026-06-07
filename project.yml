@@ -34,4 +34,5 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: 布布时光机需要访问相册，帮你把布布的照片和视频保存进时光轴。
         INFOPLIST_KEY_NSMicrophoneUsageDescription: 布布时光机需要使用麦克风，记录布布的声音和家人想对她说的话。
         INFOPLIST_KEY_NSCameraUsageDescription: 布布时光机需要使用相机，随手拍下布布此刻的样子。
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 布布时光机会用照片里的位置信息，自动标注每个瞬间发生的地方。
         TARGETED_DEVICE_FAMILY: "1"

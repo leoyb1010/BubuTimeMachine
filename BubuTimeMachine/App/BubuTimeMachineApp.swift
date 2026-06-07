@@ -14,7 +14,8 @@ struct BubuTimeMachineApp: App {
     init() {
         let schema = Schema([
             Entry.self, Media.self, Milestone.self, FirstTime.self,
-            TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self
+            TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self,
+            FamilyMember.self, ChildProfile.self, VoiceNote.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
@@ -26,11 +27,26 @@ struct BubuTimeMachineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
+            RootView()
                 .environment(env)
-                .tint(BubuTheme.Color.primary)
+                .tint(env.theme.theme.primary)
                 .task { env.bootstrap() }
         }
         .modelContainer(modelContainer)
+    }
+}
+
+// MARK: - 根视图：首启引导 or 主界面
+struct RootView: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        if env.hasCompletedOnboarding {
+            RootTabView()
+                .transition(.opacity)
+        } else {
+            OnboardingView()
+                .transition(.opacity)
+        }
     }
 }

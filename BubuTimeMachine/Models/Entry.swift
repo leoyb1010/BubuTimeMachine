@@ -15,8 +15,10 @@ final class Entry {
     var latitude: Double?
     var longitude: Double?
     var authorRole: String            // "爸爸"/"妈妈"/"姥姥"
+    var moodRaw: String?              // 心情标签（开心/平静/调皮/委屈…）
     var syncStateRaw: String = SyncState.local.rawValue
     var isArchived: Bool = false      // 软删除：永不物理丢失
+    var editedAt: Date?               // 最后编辑时间（已上传内容可改可补充）
     var createdAt: Date
 
     // 关系
@@ -24,6 +26,8 @@ final class Entry {
     var media: [Media] = []
     @Relationship(deleteRule: .cascade, inverse: \Comment.entry)
     var comments: [Comment] = []      // 家人合奏：多视角补充
+    @Relationship(deleteRule: .cascade, inverse: \VoiceNote.entry)
+    var voiceNotes: [VoiceNote] = []  // 语音记录（不止文字）
     @Relationship(inverse: \Milestone.entry)
     var milestone: Milestone?
     @Relationship(inverse: \FirstTime.entry)
@@ -32,6 +36,11 @@ final class Entry {
     var syncState: SyncState {
         get { SyncState(rawValue: syncStateRaw) ?? .local }
         set { syncStateRaw = newValue.rawValue }
+    }
+
+    var mood: Mood? {
+        get { moodRaw.flatMap(Mood.init(rawValue:)) }
+        set { moodRaw = newValue?.rawValue }
     }
 
     init(happenedAt: Date = .now, authorRole: String, note: String? = nil) {
