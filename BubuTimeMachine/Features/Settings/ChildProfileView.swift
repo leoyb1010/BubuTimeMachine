@@ -34,6 +34,7 @@ struct ChildProfileView: View {
     private func avatarSection(_ profile: ChildProfile) -> some View {
         let avatarData = profile.avatarMediaFileName.flatMap { env.mediaStore.data(forMedia: $0) }
         let avatarUI = avatarData.flatMap { UIImage(data: $0) }
+        let tint = theme.primary
         return Section {
             HStack {
                 Spacer()
@@ -43,17 +44,17 @@ struct ChildProfileView: View {
                             if let avatarUI {
                                 Image(uiImage: avatarUI).resizable().scaledToFill()
                             } else {
-                                theme.primary.opacity(0.15)
+                                tint.opacity(0.15)
                                 Text("👶").font(.system(size: 50))
                             }
                         }
                         .frame(width: 110, height: 110)
                         .clipShape(Circle())
-                        .overlay { Circle().stroke(theme.primary.opacity(0.3), lineWidth: 3) }
+                        .overlay { Circle().stroke(tint.opacity(0.3), lineWidth: 3) }
 
                         Image(systemName: "camera.circle.fill")
                             .font(.system(size: 28))
-                            .foregroundStyle(theme.primary)
+                            .foregroundStyle(tint)
                             .background(Circle().fill(.white))
                     }
                 }
@@ -89,10 +90,11 @@ struct ChildProfileView: View {
     }
 
     private func heroSection(_ profile: ChildProfile) -> some View {
-        Section {
+        let tint = theme.primary
+        return Section {
             PhotosPicker(selection: $heroPick, matching: .images) {
                 Label("选一张布布的照片做首页背景", systemImage: "photo.on.rectangle.angled")
-                    .foregroundStyle(theme.primary)
+                    .foregroundStyle(tint)
             }
             if profile.heroBackgroundFileName != nil {
                 Button(role: .destructive) {

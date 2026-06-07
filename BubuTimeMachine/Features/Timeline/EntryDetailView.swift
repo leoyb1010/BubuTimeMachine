@@ -97,14 +97,15 @@ struct EntryDetailView: View {
     @ViewBuilder
     private var appendPhotoButton: some View {
         if editing {
+            let tint = theme
             PhotosPicker(selection: $appendPick, maxSelectionCount: 9,
                          matching: .any(of: [.images, .videos])) {
                 Label("再添加照片/视频", systemImage: "plus.rectangle.on.rectangle")
                     .font(BubuTheme.Font.body)
-                    .foregroundStyle(theme)
+                    .foregroundStyle(tint)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(theme.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                    .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             }
         }
     }
