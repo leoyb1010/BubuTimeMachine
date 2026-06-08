@@ -132,6 +132,8 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("设置")
+        .scrollContentBackground(.hidden)
+        .background(BubuTheme.Color.background)
     }
 
     private var connectionText: String {

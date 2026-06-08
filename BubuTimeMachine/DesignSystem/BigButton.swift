@@ -1,25 +1,27 @@
 import SwiftUI
 
 // MARK: - 超大主按钮（适老）
-/// 占屏幕约 1/2，无需精准点击。姥姥场景的关键交付物。
+/// 首页主动作按钮。用标准 Button：在 ScrollView 里滚动时不会误触，
+/// 手指放在按钮上也能正常上下滑动（系统自动区分点按与滚动）。
 struct BigButton: View {
     let title: String
     let systemImage: String
     var action: () -> Void
 
-    @State private var pressed = false
-
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 72, weight: .medium))
+                    .font(.system(size: 58, weight: .medium))
                 Text(title)
                     .font(BubuTheme.Font.title)
+                Text("轻点打开 · 上下滑动浏览")
+                    .font(BubuTheme.Font.caption)
+                    .opacity(0.86)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 220)
+            .frame(height: 176)
             .background(
                 LinearGradient(
                     colors: [BubuTheme.Color.primary,
@@ -30,14 +32,17 @@ struct BigButton: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.button, style: .continuous))
             .bubuCardShadow()
-            .scaleEffect(pressed ? 0.97 : 1)
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in withAnimation(.easeOut(duration: 0.12)) { pressed = true } }
-                .onEnded { _ in withAnimation(.easeOut(duration: 0.18)) { pressed = false } }
-        )
+        .buttonStyle(BigButtonStyle())
+    }
+}
+
+/// 只在明确点按时做轻微缩放反馈，不拦截滚动手势。
+private struct BigButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 

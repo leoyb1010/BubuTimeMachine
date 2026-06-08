@@ -32,7 +32,7 @@ struct CommentComposeSheet: View {
                             .font(BubuTheme.Font.body)
                             .lineLimit(4...10)
                             .padding()
-                            .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
 
                         if let v = voice {
                             HStack {

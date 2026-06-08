@@ -59,11 +59,7 @@ struct VoiceArchiveView: View {
 
     @ViewBuilder
     private var background: some View {
-        switch env.theme.theme.backgroundStyle {
-        case .solid(let hex): Color(hex: hex)
-        case .gradient(let a, let b):
-            LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-        }
+        BubuThemedBackground()
     }
 
     private var intro: some View {
@@ -162,7 +158,7 @@ struct VoiceMemoRecorderSheet: View {
                         }
                         if let t = transcript {
                             Text(t).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
-                                .padding().background(.white, in: RoundedRectangle(cornerRadius: 12))
+                                .padding().background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12))
                         }
                     } else {
                         VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in

@@ -2,162 +2,133 @@ import SwiftUI
 import SwiftData
 
 // MARK: - 年度成长电影
-/// 选一岁 → 模拟"收集素材→编排→配乐→渲染"的生成流程 → 成片占位可播放。
-/// 真实部署时由服务端 ffmpeg + LLM 旁白生成，前端流程不变。
+/// 端侧生成“电影草稿”：按年龄 / 地点 / 时间筛选真实照片，套用模板播放。
 struct GrowthMovieView: View {
     @Environment(AppEnvironment.self) private var env
-    @Environment(\.modelContext) private var context
     @Query private var profiles: [ChildProfile]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }) private var entries: [Entry]
 
-    @State private var selectedYear = 0
+    @State private var selectedTemplate: MovieTemplate = .documentary
+    @State private var selectedYear: Int?
+    @State private var selectedLocation: String?
+    @State private var selectedRange: MovieTimeRange = .all
     @State private var stageIndex = -1
-    @State private var done = false
+    @State private var draft: MovieDraft?
     @State private var showPlayer = false
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
-
-    private let stages = ["收集这一岁的精选瞬间…", "按时间编排成故事线…", "配上温柔的背景音乐…", "渲染成片…"]
-
-    private var availableYears: [Int] {
-        guard let profile else { return [0] }
-        let maxAge = AgeCalculator.ageYears(birthday: profile.birthday, at: .now)
-        return Array(0...max(0, maxAge))
-    }
+    private let stages = ["筛选照片素材…", "整理时间和地点…", "套用电影模板…", "生成片头和字幕…"]
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 22) {
-                poster
-                yearPicker
+            VStack(spacing: 18) {
+                introCard
+                templatePicker
+                filterCard
+                materialPreview
                 if stageIndex >= 0 { progressArea }
-                generateButton
+                actionButtons
             }
             .padding()
         }
         .background(background.ignoresSafeArea())
         .navigationTitle("年度成长电影")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarLeading) { Text("← 右滑返回").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) } }
         .fullScreenCover(isPresented: $showPlayer) {
-            GrowthMoviePlayer(
-                mediaFiles: yearPhotoFiles,
-                captions: yearCaptions,
-                title: "《\(env.config.childName)的第 \(selectedYear) 岁》",
-                mediaStore: env.mediaStore,
-                tint: theme,
-                onClose: { showPlayer = false })
-        }
-    }
-
-    /// 该岁所有照片（按发生时间排序）的沙盒文件名。
-    private var yearPhotoFiles: [String] {
-        yearEntries.flatMap { entry in
-            entry.media
-                .filter { $0.type == .photo }
-                .compactMap { $0.localFileName }
-        }
-    }
-
-    /// 配合照片的旁白字幕：用记录的备注 / 心情 / 年龄生成。
-    private var yearCaptions: [String] {
-        var caps: [String] = []
-        for entry in yearEntries {
-            let photos = entry.media.filter { $0.type == .photo }
-            guard !photos.isEmpty else { continue }
-            let base: String
-            if let note = entry.note, !note.isEmpty {
-                base = note
-            } else if let profile {
-                base = AgeCalculator.ageDescription(birthday: profile.birthday, at: entry.happenedAt)
-            } else {
-                base = entry.happenedAt.formatted(date: .abbreviated, time: .omitted)
+            if let draft {
+                GrowthMoviePlayer(draft: draft, mediaStore: env.mediaStore, tint: theme) {
+                    showPlayer = false
+                }
             }
-            // 每张照片共用该条记录的字幕
-            caps.append(contentsOf: Array(repeating: base, count: photos.count))
         }
-        return caps
-    }
-
-    /// 该岁的记录，按时间正序。
-    private var yearEntries: [Entry] {
-        guard let profile else { return entries.sorted { $0.happenedAt < $1.happenedAt } }
-        return entries
-            .filter { AgeCalculator.ageYears(birthday: profile.birthday, at: $0.happenedAt) == selectedYear }
-            .sorted { $0.happenedAt < $1.happenedAt }
     }
 
     @ViewBuilder
     private var background: some View {
-        switch env.theme.theme.backgroundStyle {
-        case .solid(let hex): Color(hex: hex)
-        case .gradient(let a, let b):
-            LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-        }
+        BubuThemedBackground()
     }
 
-    private var poster: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
-                .fill(LinearGradient(colors: [theme.opacity(0.9), theme.opacity(0.5)],
-                                     startPoint: .top, endPoint: .bottom))
-            VStack(spacing: 10) {
-                if done {
-                    Image(systemName: "play.circle.fill").font(.system(size: 64)).foregroundStyle(.white)
-                    Text("《\(env.config.childName)的第 \(selectedYear) 岁》")
-                        .font(BubuTheme.Font.title).foregroundStyle(.white)
-                    Text("约 \(clipCount) 个瞬间 · 轻触播放").font(BubuTheme.Font.caption).foregroundStyle(.white.opacity(0.85))
-                } else {
-                    Image(systemName: "film.stack").font(.system(size: 56)).foregroundStyle(.white.opacity(0.9))
-                    Text("一部属于布布的小电影").font(BubuTheme.Font.headline).foregroundStyle(.white)
-                }
+    private var introCard: some View {
+        HStack(spacing: 14) {
+            BubuMascotBadge(size: 62, expression: .tv)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(draft == nil ? "做一支布布的小电影" : "电影草稿已准备好")
+                    .font(BubuTheme.Font.headline)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(draft == nil ? "先选模板，再按年龄、地点和时间挑照片。生成后可以预览播放，不会被旧记录背景干扰。" : "可以先播放看看，不满意就换模板或筛选条件重新生成。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(3)
             }
-            .padding()
+            Spacer()
         }
-        .frame(height: 200)
+        .padding()
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
-        .contentShape(Rectangle())
-        .onTapGesture { if done { showPlayer = true } }
     }
 
-    private var yearPicker: some View {
+    private var templatePicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("选择哪一岁").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(availableYears, id: \.self) { year in
-                        Button {
-                            selectedYear = year; stageIndex = -1; done = false
-                        } label: {
-                            Text(year == 0 ? "0岁" : "\(year)岁")
-                                .font(BubuTheme.Font.body.weight(.medium))
-                                .foregroundStyle(selectedYear == year ? .white : BubuTheme.Color.warmBrown)
-                                .padding(.horizontal, 18).padding(.vertical, 10)
-                                .background(selectedYear == year ? theme : Color.white,
-                                            in: Capsule())
+            Text("选择模板")
+                .font(BubuTheme.Font.headline)
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+                ForEach(MovieTemplate.allCases) { template in
+                    Button {
+                        selectedTemplate = template
+                        draft = nil
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(template.emoji).font(.system(size: 28))
+                            Text(template.title)
+                                .font(BubuTheme.Font.caption.weight(.semibold))
+                                .foregroundStyle(BubuTheme.Color.warmBrown)
+                            Text(template.subtitle)
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                                .lineLimit(2)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(selectedTemplate == template ? theme.opacity(0.14) : BubuTheme.Color.card,
+                                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous)
+                                .stroke(selectedTemplate == template ? theme : BubuTheme.Color.hairline.opacity(0.45), lineWidth: 1.5)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
-    private var progressArea: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
-                HStack(spacing: 12) {
-                    if idx < stageIndex || done {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme)
-                    } else if idx == stageIndex {
-                        ProgressView().tint(theme)
-                    } else {
-                        Image(systemName: "circle").foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.4))
+    private var filterCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("筛选素材", icon: "slider.horizontal.3")
+            chipRow(title: "年龄") {
+                FilterChip(title: "全部年龄", selected: selectedYear == nil, tint: theme) { selectedYear = nil; draft = nil }
+                ForEach(availableYears, id: \.self) { year in
+                    FilterChip(title: year == 0 ? "0岁" : "\(year)岁", selected: selectedYear == year, tint: theme) {
+                        selectedYear = year; draft = nil
                     }
-                    Text(stage)
-                        .font(BubuTheme.Font.body)
-                        .foregroundStyle(idx <= stageIndex || done ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
-                    Spacer()
+                }
+            }
+            chipRow(title: "地点") {
+                FilterChip(title: "全部地点", selected: selectedLocation == nil, tint: theme) { selectedLocation = nil; draft = nil }
+                ForEach(availableLocations, id: \.self) { location in
+                    FilterChip(title: location, selected: selectedLocation == location, tint: theme) {
+                        selectedLocation = location; draft = nil
+                    }
+                }
+            }
+            chipRow(title: "时间") {
+                ForEach(MovieTimeRange.allCases) { range in
+                    FilterChip(title: range.title, selected: selectedRange == range, tint: theme) {
+                        selectedRange = range; draft = nil
+                    }
                 }
             }
         }
@@ -166,54 +137,206 @@ struct GrowthMovieView: View {
         .bubuCardShadow()
     }
 
-    private var generateButton: some View {
-        Button {
-            Task { await generate() }
-        } label: {
-            Text(done ? "重新生成" : (stageIndex >= 0 ? "生成中…" : "开始生成这一岁的电影"))
-                .font(BubuTheme.Font.headline.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity).frame(height: 54)
-                .background(theme, in: Capsule())
+    private func chipRow<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(BubuTheme.Font.caption.weight(.semibold))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { content() }
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(stageIndex >= 0 && !done)
     }
 
-    private var clipCount: Int {
-        guard let profile else { return entries.count }
-        return entries.filter { AgeCalculator.ageYears(birthday: profile.birthday, at: $0.happenedAt) == selectedYear }.count
+    private var materialPreview: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                sectionTitle("将用于电影的素材", icon: "photo.stack")
+                Spacer()
+                Text("\(selectedPhotoFiles.count) 张")
+                    .font(BubuTheme.Font.caption.weight(.bold))
+                    .foregroundStyle(theme)
+            }
+            if selectedPhotoFiles.isEmpty {
+                HStack(spacing: 12) {
+                    BubuMascotBadge(size: 52, expression: .bye)
+                    Text("当前筛选下没有照片。可以换成全部年龄/全部地点，或先去时光轴补几张照片。")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                    ForEach(selectedPreviewMedia.prefix(6)) { media in
+                        MediaThumbnail(media: media, mediaStore: env.mediaStore)
+                            .frame(height: 86)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuCardShadow()
     }
 
-    private func generate() async {
-        done = false
+    private var progressArea: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
+                HStack(spacing: 10) {
+                    if idx < stageIndex || draft != nil { Image(systemName: "checkmark.circle.fill").foregroundStyle(theme) }
+                    else if idx == stageIndex { ProgressView().tint(theme) }
+                    else { Image(systemName: "circle").foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.45)) }
+                    Text(stage).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.warmBrown)
+                    Spacer()
+                }
+            }
+        }
+        .padding()
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+    }
+
+    private var actionButtons: some View {
+        VStack(spacing: 10) {
+            Button {
+                Task { await generateDraft() }
+            } label: {
+                Text(stageIndex >= 0 && draft == nil ? "生成中…" : (draft == nil ? "生成电影草稿" : "重新生成草稿"))
+                    .font(BubuTheme.Font.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 54)
+                    .background(selectedPhotoFiles.isEmpty ? BubuTheme.Color.secondaryText.opacity(0.35) : theme, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedPhotoFiles.isEmpty || (stageIndex >= 0 && draft == nil))
+
+            if draft != nil {
+                Button { showPlayer = true } label: {
+                    Label("播放电影", systemImage: "play.circle.fill")
+                        .font(BubuTheme.Font.headline.weight(.bold))
+                        .foregroundStyle(theme)
+                        .frame(maxWidth: .infinity).frame(height: 50)
+                        .background(theme.opacity(0.10), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .font(BubuTheme.Font.headline)
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+    }
+
+    private var availableYears: [Int] {
+        guard let profile else { return [] }
+        return Array(Set(entries.map { AgeCalculator.ageYears(birthday: profile.birthday, at: $0.happenedAt) })).sorted()
+    }
+
+    private var availableLocations: [String] {
+        Array(Set(entries.compactMap(\.locationName))).sorted().prefix(8).map { $0 }
+    }
+
+    private var filteredEntries: [Entry] {
+        entries.filter { entry in
+            let yearOK: Bool = {
+                guard let selectedYear, let profile else { return true }
+                return AgeCalculator.ageYears(birthday: profile.birthday, at: entry.happenedAt) == selectedYear
+            }()
+            let locationOK = selectedLocation == nil || entry.locationName == selectedLocation
+            let rangeOK: Bool = {
+                guard let start = selectedRange.startDate else { return true }
+                return entry.happenedAt >= start
+            }()
+            return yearOK && locationOK && rangeOK
+        }
+        .sorted { $0.happenedAt < $1.happenedAt }
+    }
+
+    private var selectedPreviewMedia: [Media] {
+        filteredEntries.flatMap { $0.media.filter { $0.type == .photo && $0.localFileName != nil } }
+    }
+
+    private var selectedPhotoFiles: [String] {
+        selectedPreviewMedia.compactMap(\.localFileName)
+    }
+
+    private func generateDraft() async {
+        guard !selectedPhotoFiles.isEmpty else { return }
+        draft = nil
         for i in stages.indices {
             stageIndex = i
-            try? await Task.sleep(for: .milliseconds(800))
+            try? await Task.sleep(for: .milliseconds(420))
         }
-        // 旁白：真实 AI 优先（用该岁记录摘要），否则温柔占位
-        var narration = "这一年，布布从 \(selectedYear) 岁慢慢长大……"
-        if env.config.isAIConfigured, let ai = env.aiService as? BubuAIService {
-            let highlights = yearEntries.prefix(8).compactMap { $0.note }
-            if let text = try? await ai.movieNarration(
-                year: selectedYear, childName: env.config.childName, highlights: Array(highlights)),
-               !text.isEmpty {
-                narration = text
-            }
-        } else {
-            _ = try? await env.aiService.generateGrowthMovie(year: selectedYear)
+        let title = draftTitle
+        let captions = buildCaptions()
+        withAnimation(.smooth) {
+            draft = MovieDraft(title: title, template: selectedTemplate, mediaFiles: selectedPhotoFiles, captions: captions)
+            stageIndex = -1
         }
-        // 持久化一条 GrowthMovie 记录
-        let movie = GrowthMovie(year: selectedYear)
-        movie.status = "ready"
-        movie.narrationScript = narration
-        context.insert(movie)
-        try? context.save()
-        withAnimation { done = true; stageIndex = stages.count }
-        // 生成完成，若该岁有照片则自动放映
-        if !yearPhotoFiles.isEmpty {
-            try? await Task.sleep(for: .milliseconds(400))
-            showPlayer = true
+    }
+
+    private var draftTitle: String {
+        let base = selectedYear.map { "第 \($0) 岁" } ?? selectedRange.title
+        let place = selectedLocation.map { " · \($0)" } ?? ""
+        return "《\(env.config.childName)的\(base)\(place)》"
+    }
+
+    private func buildCaptions() -> [String] {
+        var caps: [String] = []
+        for entry in filteredEntries {
+            let count = entry.media.filter { $0.type == .photo && $0.localFileName != nil }.count
+            guard count > 0 else { continue }
+            let text = entry.note?.isEmpty == false ? entry.note! : entry.happenedAt.formatted(date: .abbreviated, time: .omitted)
+            caps.append(contentsOf: Array(repeating: text, count: count))
         }
+        return caps
+    }
+}
+
+struct MovieDraft: Identifiable {
+    let id = UUID()
+    let title: String
+    let template: MovieTemplate
+    let mediaFiles: [String]
+    let captions: [String]
+}
+
+enum MovieTemplate: String, CaseIterable, Identifiable {
+    case documentary, travel, birthday, daily
+    var id: String { rawValue }
+    var title: String { switch self { case .documentary: "温柔纪录片"; case .travel: "出门旅行"; case .birthday: "生日回顾"; case .daily: "日常碎片" } }
+    var subtitle: String { switch self { case .documentary: "按时间慢慢讲"; case .travel: "适合公园和外出"; case .birthday: "更有仪式感"; case .daily: "短节奏、多照片" } }
+    var emoji: String { switch self { case .documentary: "🎬"; case .travel: "🧳"; case .birthday: "🎂"; case .daily: "✨" } }
+}
+
+enum MovieTimeRange: String, CaseIterable, Identifiable {
+    case all, recent3Months, recentYear
+    var id: String { rawValue }
+    var title: String { switch self { case .all: "全部时间"; case .recent3Months: "最近3个月"; case .recentYear: "最近1年" } }
+    var startDate: Date? {
+        switch self {
+        case .all: nil
+        case .recent3Months: Calendar.current.date(byAdding: .month, value: -3, to: .now)
+        case .recentYear: Calendar.current.date(byAdding: .year, value: -1, to: .now)
+        }
+    }
+}
+
+private struct FilterChip: View {
+    let title: String
+    let selected: Bool
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(BubuTheme.Font.caption.weight(.semibold))
+                .foregroundStyle(selected ? .white : BubuTheme.Color.warmBrown)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(selected ? tint : BubuTheme.Color.softFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }

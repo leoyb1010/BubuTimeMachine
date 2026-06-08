@@ -32,7 +32,7 @@ struct AIStudioHomeView: View {
 
                 capabilityCard(
                     icon: "chart.line.uptrend.xyaxis",
-                    title: "成长小报告",
+                    title: "成长报告",
                     subtitle: "这段时间，布布有哪些悄悄的变化",
                     destination: AnyView(GrowthReportView()))
 
@@ -46,23 +46,20 @@ struct AIStudioHomeView: View {
 
     @ViewBuilder
     private var background: some View {
-        switch env.theme.theme.backgroundStyle {
-        case .solid(let hex): Color(hex: hex)
-        case .gradient(let a, let b):
-            LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-        }
+        BubuThemedBackground()
     }
 
     private var banner: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "wand.and.stars").font(.system(size: 26))
-                Text("布布的 AI 工坊").font(BubuTheme.Font.title)
+                BubuMascotBadge(size: 58, expression: .drawing)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("布布的 AI 工坊").font(BubuTheme.Font.title)
+                    Text("把零散的瞬间，变成有温度的作品。")
+                        .font(BubuTheme.Font.body)
+                }
             }
             .foregroundStyle(.white)
-            Text("用自己家的 AI，把零散的瞬间，变成有温度的作品。")
-                .font(BubuTheme.Font.body)
-                .foregroundStyle(.white.opacity(0.9))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)

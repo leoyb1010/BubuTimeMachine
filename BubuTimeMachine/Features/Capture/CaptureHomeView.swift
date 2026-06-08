@@ -118,12 +118,7 @@ struct CaptureHomeView: View {
                                startPoint: .top, endPoint: .bottom)
             }
         } else {
-            switch theme.backgroundStyle {
-            case .solid(let hex):
-                Color(hex: hex)
-            case .gradient(let a, let b):
-                LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-            }
+            BubuThemedBackground()
         }
     }
 
@@ -133,6 +128,7 @@ struct CaptureHomeView: View {
     private var ageHeader: some View {
         if let profile {
             VStack(spacing: 8) {
+                BubuMascotBadge(size: 64, expression: .happy)
                 Text(profile.name)
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -179,7 +175,7 @@ struct CaptureHomeView: View {
             }
         }
         .padding(12)
-        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.82), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
 
     private var syncSummary: String {
@@ -215,7 +211,7 @@ struct CaptureHomeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
     }
 
@@ -245,7 +241,7 @@ struct CaptureHomeView: View {
                 }
             }
             .padding()
-            .background(.white.opacity(0.7), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(BubuTheme.Color.card.opacity(0.7), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         }
     }
 
@@ -294,11 +290,7 @@ struct CaptureHomeView: View {
             HealthHomeView()
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: "heart.text.square.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
-                    .background(theme.primary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                BubuMascotBadge(size: 48, expression: .eating)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("布布健康")
                         .font(BubuTheme.Font.headline)
@@ -314,7 +306,7 @@ struct CaptureHomeView: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding()
-            .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(BubuTheme.Color.card.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuCardShadow()
         }
         .buttonStyle(.plain)
@@ -323,10 +315,45 @@ struct CaptureHomeView: View {
     // MARK: 大记录按钮
 
     private var recordButton: some View {
-        BigButton(title: BubuTheme.Copy.recordNow, systemImage: "heart.circle.fill") {
+        Button {
             model?.startQuickCapture()
+        } label: {
+            HStack(spacing: 0) {
+                BubuMascotBadge(size: 82, expression: .travel)
+                    .padding(.leading, 4)
+                    .zIndex(1)
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(BubuTheme.Copy.recordNow)
+                            .font(.system(size: 25, weight: .bold, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("拍照、写一句、说给布布听")
+                            .font(BubuTheme.Font.caption)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Spacer()
+                    Image(systemName: "heart.circle.fill")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(theme.primary)
+                }
+                .padding(.vertical, 18)
+                .padding(.leading, 20)
+                .padding(.trailing, 18)
+                .background(BubuTheme.Color.card.opacity(0.92), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .overlay(alignment: .leading) {
+                    BubuSpeechTail()
+                        .fill(BubuTheme.Color.card.opacity(0.92))
+                        .frame(width: 18, height: 26)
+                        .offset(x: -10)
+                }
+                .bubuCardShadow()
+                .padding(.leading, -6)
+            }
+            .frame(maxWidth: .infinity)
         }
-        .accessibilityLabel("记录此刻，可以拍照、录视频或说话")
+        .buttonStyle(.plain)
+        .accessibilityLabel("记录此刻，可以拍照、写一句或说给布布听")
     }
 
     // MARK: 最近精选
@@ -346,10 +373,7 @@ struct CaptureHomeView: View {
                                     MediaThumbnail(media: media, mediaStore: env.mediaStore)
                                         .frame(width: 96, height: 96)
                                 } else {
-                                    RoundedRectangle(cornerRadius: BubuTheme.Radius.small)
-                                        .fill(theme.primary.opacity(0.1))
-                                        .frame(width: 96, height: 96)
-                                        .overlay { Text(entry.mood?.emoji ?? "📝").font(.system(size: 32)) }
+                                    BubuMascotBadge(size: 96, mood: entry.mood)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -372,5 +396,18 @@ struct CaptureHomeView: View {
         }
         .padding(.top, 8)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+}
+
+private struct BubuSpeechTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.midY),
+                          control: CGPoint(x: rect.minX + rect.width * 0.35, y: rect.minY + rect.height * 0.18))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY),
+                          control: CGPoint(x: rect.minX + rect.width * 0.35, y: rect.maxY - rect.height * 0.18))
+        path.closeSubpath()
+        return path
     }
 }

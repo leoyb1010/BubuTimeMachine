@@ -94,14 +94,21 @@ struct MilestonesHomeView: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
     }
 
     private var filters: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("搜索里程碑，比如 走路、吃饭、睡觉", text: $searchText)
-                .textFieldStyle(.roundedBorder)
+                .font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .padding(12)
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous)
+                        .stroke(BubuTheme.Color.hairline.opacity(0.7), lineWidth: 1)
+                }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(categoryOptions, id: \.self) { category in
@@ -112,7 +119,7 @@ struct MilestonesHomeView: View {
                                 .font(BubuTheme.Font.caption.weight(.semibold))
                                 .foregroundStyle(selectedCategory == category ? .white : theme)
                                 .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(selectedCategory == category ? theme : theme.opacity(0.1), in: Capsule())
+                                .background(selectedCategory == category ? theme : BubuTheme.Color.softFill, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -158,7 +165,7 @@ struct MilestonesHomeView: View {
                 .opacity(lit ? 1 : 0.45)
                 .frame(width: 72, height: 72)
                 .background(
-                    Circle().fill(lit ? theme.opacity(0.15) : Color.gray.opacity(0.1))
+                    Circle().fill(lit ? theme.opacity(0.15) : BubuTheme.Color.softFill)
                 )
                 .overlay { Circle().stroke(lit ? theme : .clear, lineWidth: 2) }
             Text(milestone.title)

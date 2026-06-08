@@ -26,6 +26,8 @@ struct MilestonePickerSheet: View {
                 }
             }
             .navigationTitle("从清单添加")
+            .scrollContentBackground(.hidden)
+            .background(BubuTheme.Color.background)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
@@ -143,6 +145,8 @@ struct MilestoneEditSheet: View {
                 }
             }
             .navigationTitle(milestone == nil ? "自定义里程碑" : "编辑里程碑")
+            .scrollContentBackground(.hidden)
+            .background(BubuTheme.Color.background)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

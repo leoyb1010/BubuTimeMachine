@@ -6,12 +6,15 @@ import SwiftData
 /// 离线优先：UI 只读本地 SwiftData，断网全功能可用。
 struct TimelineView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.modelContext) private var context
     @Query(
         filter: #Predicate<Entry> { !$0.isArchived },
         sort: \Entry.happenedAt,
         order: .reverse
     )
     private var entries: [Entry]
+    @State private var showFamilyFeed = false
+    @State private var entryPendingDelete: Entry?
 
     var body: some View {
         ZStack {
@@ -24,6 +27,27 @@ struct TimelineView: View {
             }
         }
         .navigationTitle("时光轴")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showFamilyFeed = true
+                } label: {
+                    Label("家庭动态", systemImage: "person.2.wave.2.fill")
+                }
+            }
+        }
+        .sheet(isPresented: $showFamilyFeed) {
+            NavigationStack { FamilyFeedView() }
+        }
+        .alert("删除这条记录？", isPresented: Binding(
+            get: { entryPendingDelete != nil },
+            set: { if !$0 { entryPendingDelete = nil } }
+        )) {
+            Button("删除", role: .destructive) { deletePendingEntry() }
+            Button("取消", role: .cancel) { entryPendingDelete = nil }
+        } message: {
+            Text("删除后会从时光轴隐藏，本地记录会标记为待同步删除。")
+        }
     }
 
     private var timeline: some View {
@@ -36,6 +60,20 @@ struct TimelineView: View {
                                 TimelineEntryCard(entry: entry, mediaStore: env.mediaStore)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    entryPendingDelete = entry
+                                } label: {
+                                    Label("删除记录", systemImage: "trash")
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    entryPendingDelete = entry
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                            }
                         }
                     } header: {
                         sectionHeader(section.key)
@@ -60,9 +98,7 @@ struct TimelineView: View {
 
     private var emptyState: some View {
         VStack(spacing: 18) {
-            Image(systemName: "clock.badge.questionmark")
-                .font(.system(size: 64))
-                .foregroundStyle(BubuTheme.Color.primary.opacity(0.7))
+            BubuMascotBadge(size: 78, expression: .bye)
             Text(BubuTheme.Copy.emptyTimeline)
                 .font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -97,5 +133,18 @@ struct TimelineView: View {
     private func monthTitle(_ comps: DateComponents) -> String {
         guard let year = comps.year, let month = comps.month else { return "" }
         return "\(year)年\(month)月"
+    }
+
+    private func deletePendingEntry() {
+        guard let entry = entryPendingDelete else { return }
+        entry.isArchived = true
+        entry.editedAt = .now
+        entry.syncState = .local
+        context.insert(FeedEvent(kind: .entryCreated,
+                                 actorRole: env.config.currentRole.rawValue,
+                                 summary: "删除了一条时光轴记录",
+                                 targetLocalId: entry.id.uuidString))
+        try? context.save()
+        entryPendingDelete = nil
     }
 }

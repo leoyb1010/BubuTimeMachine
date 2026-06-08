@@ -59,7 +59,7 @@ struct HealthHomeView: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                    .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -114,7 +114,7 @@ struct HealthHomeView: View {
             Spacer()
         }
         .padding(12)
-        .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
 
     private var disclaimer: some View {

@@ -23,7 +23,7 @@ struct PhotoAnalysis: Sendable {
 struct PhotoAnalyzer: Sendable {
 
     /// 分析一张图片的原始数据。
-    func analyze(imageData: Data) async -> PhotoAnalysis {
+    func analyze(imageData: Data, includeLocation: Bool = true) async -> PhotoAnalysis {
         var result = PhotoAnalysis(captureDate: nil, latitude: nil, longitude: nil,
                                    locationName: nil, tags: [], faceCount: 0)
 
@@ -31,7 +31,7 @@ struct PhotoAnalyzer: Sendable {
         if let source = CGImageSourceCreateWithData(imageData as CFData, nil),
            let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
             result.captureDate = Self.exifDate(from: props)
-            if let (lat, lon) = Self.gpsCoordinate(from: props) {
+            if includeLocation, let (lat, lon) = Self.gpsCoordinate(from: props) {
                 result.latitude = lat
                 result.longitude = lon
             }

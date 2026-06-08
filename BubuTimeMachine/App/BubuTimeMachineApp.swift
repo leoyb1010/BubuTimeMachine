@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 // MARK: - App 入口
 /// @main：装配 ModelContainer（全部 @Model）+ 注入全局 AppEnvironment（DI）。
@@ -69,6 +70,18 @@ struct BubuTimeMachineApp: App {
             e.mood = moods[i]
             e.locationName = i == 1 ? "家附近的公园" : "家"
             context.insert(e)
+
+            if let image = makeSeedImage(index: i),
+               let data = image.jpegData(compressionQuality: 0.92),
+               let fileName = try? env.mediaStore.savePhoto(data) {
+                let media = Media(type: .photo, localFileName: fileName)
+                media.width = Int(image.size.width)
+                media.height = Int(image.size.height)
+                media.thumbnailFileName = env.mediaStore.makePhotoThumbnail(fromImage: image)
+                media.aiTags = [["微笑", "家", "玩具"], ["公园", "小鸟", "阳光"], ["午睡", "奶香", "笑脸"], ["积木", "成长", "高光"]][i]
+                media.entry = e
+                context.insert(media)
+            }
         }
 
         for tpl in MilestoneTemplate.presets.prefix(6) {
@@ -80,6 +93,8 @@ struct BubuTimeMachineApp: App {
             walk.happenedAt = Calendar.current.date(byAdding: .day, value: -3, to: .now)
             walk.ageDescription = AgeCalculator.ageDescription(birthday: birthday, at: walk.happenedAt!)
         }
+
+        seedHealthRecords(into: context)
 
         // 时间胶囊：一封已可开启（解锁时间在过去）、一封锁定中
         seedCapsule(into: context, title: "写给一岁的你",
@@ -104,6 +119,72 @@ struct BubuTimeMachineApp: App {
             context.insert(capsule)
         }
     }
+
+    @MainActor
+    private func seedHealthRecords(into context: ModelContext) {
+        let meal = HealthRecord(kind: .meal, title: "南瓜米糊 + 蛋黄")
+        meal.amountText = "半碗"
+        meal.reaction = "吃得很香"
+        context.insert(meal)
+
+        let sleep = HealthRecord(kind: .sleep, title: "午睡")
+        sleep.amountText = "1 小时 40 分钟"
+        sleep.reaction = "醒来心情很好"
+        context.insert(sleep)
+
+        let water = HealthRecord(kind: .water, title: "温水")
+        water.amountText = "120ml"
+        context.insert(water)
+    }
+
+    @MainActor
+    private func makeSeedImage(index: Int) -> UIImage? {
+        let size = CGSize(width: 1200, height: 1600)
+        let colors: [(UIColor, UIColor)] = [
+            (UIColor(red: 1.0, green: 0.70, blue: 0.74, alpha: 1), UIColor(red: 1.0, green: 0.90, blue: 0.76, alpha: 1)),
+            (UIColor(red: 0.72, green: 0.88, blue: 1.0, alpha: 1), UIColor(red: 0.78, green: 0.95, blue: 0.78, alpha: 1)),
+            (UIColor(red: 0.95, green: 0.82, blue: 1.0, alpha: 1), UIColor(red: 1.0, green: 0.92, blue: 0.82, alpha: 1)),
+            (UIColor(red: 1.0, green: 0.82, blue: 0.62, alpha: 1), UIColor(red: 0.85, green: 0.92, blue: 1.0, alpha: 1))
+        ]
+        let pair = colors[index % colors.count]
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                      colors: [pair.0.cgColor, pair.1.cgColor] as CFArray,
+                                      locations: [0, 1])!
+            cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+
+            let circleColor = UIColor.white.withAlphaComponent(0.42)
+            circleColor.setFill()
+            cg.fillEllipse(in: CGRect(x: 150, y: 220, width: 900, height: 900))
+            UIColor.white.withAlphaComponent(0.72).setFill()
+            cg.fillEllipse(in: CGRect(x: 350, y: 430, width: 500, height: 500))
+
+            let emoji = ["👶🏻", "🌳", "🧸", "🧱"][index % 4]
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 260),
+                .paragraphStyle: {
+                    let style = NSMutableParagraphStyle()
+                    style.alignment = .center
+                    return style
+                }()
+            ]
+            emoji.draw(in: CGRect(x: 0, y: 520, width: size.width, height: 320), withAttributes: attrs)
+
+            let title = ["布布的笑", "公园小鸟", "午睡醒来", "积木高高"][index % 4]
+            let textAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 74, weight: .bold),
+                .foregroundColor: UIColor(red: 0.36, green: 0.30, blue: 0.27, alpha: 1),
+                .paragraphStyle: {
+                    let style = NSMutableParagraphStyle()
+                    style.alignment = .center
+                    return style
+                }()
+            ]
+            title.draw(in: CGRect(x: 80, y: 1040, width: size.width - 160, height: 110), withAttributes: textAttrs)
+        }
+    }
     #endif
 }
 
@@ -122,7 +203,17 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-uitest-settings") {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-capture") {
+            DebugQuickCapturePreviewView()
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-timeline") {
+            NavigationStack { TimelineView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-ai") {
+            NavigationStack { AIStudioHomeView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-movie") {
+            NavigationStack { GrowthMovieView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-report") {
+            NavigationStack { GrowthReportView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-settings") {
             NavigationStack { SettingsView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-voice") {
             NavigationStack { VoiceArchiveView() }

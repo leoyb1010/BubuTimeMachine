@@ -8,19 +8,38 @@ struct EntryDetailView: View {
     @Bindable var entry: Entry
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
     @Query private var profiles: [ChildProfile]
 
     @State private var editing = false
     @State private var appendPick: [PhotosPickerItem] = []
     @State private var showCommentSheet = false
     @State private var viewingMedia: Media?
+    @State private var showDeleteConfirm = false
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
+    private var timePerspectivePrefix: String {
+        let months = Calendar.current.dateComponents([.month], from: entry.happenedAt, to: .now).month ?? 0
+        return months <= 2 ? "此时" : "那时"
+    }
+    private var locationBinding: Binding<Bool> {
+        Binding(
+            get: { entry.locationName != nil || entry.latitude != nil || entry.longitude != nil },
+            set: { keep in
+                if !keep {
+                    entry.locationName = nil
+                    entry.latitude = nil
+                    entry.longitude = nil
+                    markEntryDirty()
+                }
+            }
+        )
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
+            VStack(alignment: .leading, spacing: 18) {
                 ageBadge
                 mediaSection
                 appendPhotoButton
@@ -37,6 +56,11 @@ struct EntryDetailView: View {
         .navigationTitle(entry.happenedAt.formatted(date: .abbreviated, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Text("← 右滑或点系统返回")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(editing ? "完成" : "编辑") {
                     if editing {
@@ -47,6 +71,14 @@ struct EntryDetailView: View {
                 }
                 .fontWeight(.semibold)
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .accessibilityLabel("删除记录")
+            }
         }
         .onChange(of: appendPick) { _, items in Task { await appendMedia(items) } }
         .sheet(isPresented: $showCommentSheet) {
@@ -54,6 +86,12 @@ struct EntryDetailView: View {
         }
         .sheet(item: $viewingMedia) { media in
             MediaViewer(media: media, mediaStore: env.mediaStore)
+        }
+        .alert("删除这条记录？", isPresented: $showDeleteConfirm) {
+            Button("删除", role: .destructive) { deleteEntry() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后会从时光轴隐藏，本地记录会标记为待同步删除。")
         }
     }
 
@@ -64,8 +102,8 @@ struct EntryDetailView: View {
         if let profile {
             HStack(spacing: 8) {
                 Text("🎂")
-                Text("那时的布布 · \(AgeCalculator.ageDescription(birthday: profile.birthday, at: entry.happenedAt))")
-                    .font(BubuTheme.Font.body.weight(.semibold))
+                Text("\(timePerspectivePrefix)的布布 · \(AgeCalculator.ageDescription(birthday: profile.birthday, at: entry.happenedAt))")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(theme)
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -132,6 +170,19 @@ struct EntryDetailView: View {
                 DatePicker("发生时间", selection: $entry.happenedAt, displayedComponents: [.date, .hourAndMinute])
                     .font(BubuTheme.Font.body)
                 MoodPicker(selection: $entry.mood, tint: theme)
+                Toggle(isOn: locationBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("保存地点")
+                            .font(BubuTheme.Font.caption.weight(.semibold))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text(entry.locationName ?? "关闭后会移除这条记录里的地点信息")
+                            .font(.system(size: 12, weight: .regular, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                }
+                .tint(theme)
+                .padding(12)
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             } else {
                 HStack(spacing: 16) {
                     Label(entry.authorRole, systemImage: "person.fill")
@@ -160,7 +211,7 @@ struct EntryDetailView: View {
                     .font(BubuTheme.Font.body)
                     .lineLimit(3...8)
                     .padding()
-                    .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                    .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             } else if let note = entry.note {
                 Text(note)
                     .font(BubuTheme.Font.body)
@@ -234,17 +285,28 @@ struct EntryDetailView: View {
     }
 
     private var firstPersonPlaceholder: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("布布第一人称日记", systemImage: "sparkles")
-                .font(BubuTheme.Font.headline)
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(theme)
-            Text(entry.firstPersonNote ?? "去「AI 工坊」，把这一刻改写成布布自己的话。")
-                .font(BubuTheme.Font.body)
+                .frame(width: 34, height: 34)
+                .background(theme.opacity(0.10), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text("布布第一人称日记")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(entry.firstPersonNote ?? "去 AI 工坊，把这一刻变成布布自己的话")
+                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(2)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(theme.opacity(0.07), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .padding(12)
+        .background(theme.opacity(0.07), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
 
     // MARK: 家人合奏
@@ -253,7 +315,7 @@ struct EntryDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("家人合奏", systemImage: "person.3.fill")
-                    .font(BubuTheme.Font.headline)
+                    .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
                 Button {
@@ -264,7 +326,7 @@ struct EntryDetailView: View {
                 .buttonStyle(.plain)
             }
             if entry.comments.isEmpty {
-                Text("还没有人补充。点 + 号，从你的视角说说这一刻。")
+                Text("还没有人补充。点 + 号，说说你的视角。")
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             } else {
@@ -339,6 +401,17 @@ struct EntryDetailView: View {
     private func markEntryDirty() {
         entry.editedAt = .now
         entry.syncState = .local
+    }
+
+    private func deleteEntry() {
+        entry.isArchived = true
+        markEntryDirty()
+        context.insert(FeedEvent(kind: .entryCreated,
+                                 actorRole: env.config.currentRole.rawValue,
+                                 summary: "删除了一条时光轴记录",
+                                 targetLocalId: entry.id.uuidString))
+        try? context.save()
+        dismiss()
     }
 }
 

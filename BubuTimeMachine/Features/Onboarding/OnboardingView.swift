@@ -103,7 +103,7 @@ struct OnboardingView: View {
                     .font(BubuTheme.Font.body)
             }
             .padding(20)
-            .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuCardShadow()
 
             // 实时年龄预览
@@ -133,7 +133,7 @@ struct OnboardingView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(selectedRelation == rel ? theme.primary.opacity(0.18) : Color.white,
+                        .background(selectedRelation == rel ? theme.primary.opacity(0.18) : BubuTheme.Color.softFill,
                                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -149,7 +149,7 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .font(BubuTheme.Font.body)
                 .padding()
-                .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
         }
     }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 布布主题
 /// 「高级育儿日记本」质感的统一来源：柔和色板、字号阶梯、圆角、阴影、口语文案。
@@ -8,20 +9,66 @@ nonisolated enum BubuTheme {
 
     // MARK: 色板（柔和、温暖、低饱和）
     enum Color {
-        /// 主色：温暖的珊瑚粉
-        static let primary = SwiftUI.Color(red: 0.95, green: 0.55, blue: 0.62)
-        /// 辅助：奶油底
-        static let cream = SwiftUI.Color(red: 0.99, green: 0.97, blue: 0.94)
-        /// 暖棕（文字/标题）
-        static let warmBrown = SwiftUI.Color(red: 0.36, green: 0.30, blue: 0.27)
-        /// 柔和次要文字
-        static let secondaryText = SwiftUI.Color(red: 0.55, green: 0.50, blue: 0.47)
-        /// 页面背景
-        static let background = SwiftUI.Color(red: 0.98, green: 0.96, blue: 0.93)
-        /// 卡片底
-        static let card = SwiftUI.Color.white
+        private static func dynamic(light: UIColor, dark: UIColor) -> SwiftUI.Color {
+            SwiftUI.Color(UIColor { traits in
+                traits.userInterfaceStyle == .dark ? dark : light
+            })
+        }
+
+        /// 主色：温暖的珊瑚粉；深色模式下保持粉色按钮识别度。
+        static let primary = dynamic(
+            light: UIColor(red: 0.95, green: 0.55, blue: 0.62, alpha: 1),
+            dark: UIColor(red: 1.00, green: 0.48, blue: 0.60, alpha: 1)
+        )
+        /// 辅助：奶油底 / 深色柔棕底。
+        static let cream = dynamic(
+            light: UIColor(red: 0.99, green: 0.97, blue: 0.94, alpha: 1),
+            dark: UIColor(red: 0.19, green: 0.16, blue: 0.15, alpha: 1)
+        )
+        /// 暖棕（文字/标题）。深色模式用暖米白，避免系统自动白字撞浅背景。
+        static let warmBrown = dynamic(
+            light: UIColor(red: 0.36, green: 0.30, blue: 0.27, alpha: 1),
+            dark: UIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
+        )
+        /// 柔和次要文字。
+        static let secondaryText = dynamic(
+            light: UIColor(red: 0.55, green: 0.50, blue: 0.47, alpha: 1),
+            dark: UIColor(red: 0.73, green: 0.66, blue: 0.60, alpha: 1)
+        )
+        /// 页面背景。
+        static let background = dynamic(
+            light: UIColor(red: 0.98, green: 0.96, blue: 0.93, alpha: 1),
+            dark: UIColor(red: 0.10, green: 0.085, blue: 0.08, alpha: 1)
+        )
+        /// 卡片底。
+        static let card = dynamic(
+            light: UIColor.white,
+            dark: UIColor(red: 0.15, green: 0.125, blue: 0.115, alpha: 1)
+        )
+        /// 稍高一层的卡片底。
+        static let elevatedCard = dynamic(
+            light: UIColor.white,
+            dark: UIColor(red: 0.19, green: 0.155, blue: 0.145, alpha: 1)
+        )
+        /// 轻填充，用于未选中 chip / 文本框。
+        static let softFill = dynamic(
+            light: UIColor(red: 0.96, green: 0.91, blue: 0.88, alpha: 1),
+            dark: UIColor(red: 0.24, green: 0.19, blue: 0.18, alpha: 1)
+        )
+        /// 分隔线。
+        static let hairline = dynamic(
+            light: UIColor(red: 0.86, green: 0.80, blue: 0.76, alpha: 1),
+            dark: UIColor(red: 0.36, green: 0.30, blue: 0.28, alpha: 1)
+        )
         /// 柔绿（同步成功等正向状态）
-        static let success = SwiftUI.Color(red: 0.55, green: 0.72, blue: 0.58)
+        static let success = dynamic(
+            light: UIColor(red: 0.55, green: 0.72, blue: 0.58, alpha: 1),
+            dark: UIColor(red: 0.46, green: 0.78, blue: 0.55, alpha: 1)
+        )
+        static let danger = dynamic(
+            light: UIColor(red: 0.86, green: 0.23, blue: 0.28, alpha: 1),
+            dark: UIColor(red: 1.0, green: 0.42, blue: 0.48, alpha: 1)
+        )
     }
 
     // MARK: 字号阶梯（偏大，适老）
@@ -58,8 +105,8 @@ nonisolated enum BubuTheme {
 
 // MARK: - 阴影修饰
 extension View {
-    /// 柔和卡片阴影。nonisolated：可在 @ViewBuilder 闭包等非隔离上下文中使用。
+    /// 柔和卡片阴影。深色模式下阴影更轻，主要靠卡片色和描边分层。
     nonisolated func bubuCardShadow() -> some View {
-        shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 4)
+        shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 4)
     }
 }

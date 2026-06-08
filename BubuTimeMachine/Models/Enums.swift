@@ -48,6 +48,18 @@ enum Mood: String, Codable, CaseIterable, Sendable {
     case sleepy = "困困"
     case grievance = "委屈"
     case milestone = "高光"
+    case eating = "香香"
+    case laughing = "咯咯笑"
+    case crying = "哭哭"
+    case angry = "生气"
+    case surprised = "惊喜"
+    case brave = "勇敢"
+    case cuddly = "黏人"
+    case sick = "不舒服"
+    case playful = "爱玩"
+    case focused = "认真"
+    case shy = "害羞"
+    case love = "被爱"
 
     var emoji: String {
         switch self {
@@ -59,6 +71,18 @@ enum Mood: String, Codable, CaseIterable, Sendable {
         case .sleepy:     return "😴"
         case .grievance:  return "🥺"
         case .milestone:  return "🌟"
+        case .eating:     return "😋"
+        case .laughing:   return "🤣"
+        case .crying:     return "😭"
+        case .angry:      return "😤"
+        case .surprised:  return "😮"
+        case .brave:      return "💪"
+        case .cuddly:     return "🤗"
+        case .sick:       return "🤒"
+        case .playful:    return "🧸"
+        case .focused:    return "👀"
+        case .shy:        return "🫣"
+        case .love:       return "💗"
         }
     }
 }

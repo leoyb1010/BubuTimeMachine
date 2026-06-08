@@ -13,6 +13,7 @@ import AVFoundation
 final class CaptureModel {
     var showQuickCapture = false
     var pickedItems: [PhotosPickerItem] = []
+    var cameraPhotos: [SelectedCameraPhoto] = []
     var selectedPreviews: [SelectedMediaPreview] = []
     var isLoadingPreviews = false
     var isSaving = false
@@ -20,6 +21,7 @@ final class CaptureModel {
     var lastSavedSummary: String?
     var note: String = ""
     var mood: Mood?
+    var includeLocation = false
     var savedFlash = false
 
     /// 录好的语音（待随本次记录一起保存）。
@@ -47,7 +49,9 @@ final class CaptureModel {
     func startQuickCapture() {
         note = ""
         mood = nil
+        includeLocation = false
         pickedItems = []
+        cameraPhotos = []
         selectedPreviews = []
         pendingVoice = nil
         detectedTags = []
@@ -60,7 +64,7 @@ final class CaptureModel {
 
     /// 是否有可保存内容（媒体 / 文字 / 语音 任一即可）。
     var canSave: Bool {
-        !pickedItems.isEmpty || !note.isEmpty || pendingVoice != nil
+        !pickedItems.isEmpty || !cameraPhotos.isEmpty || !note.isEmpty || pendingVoice != nil
     }
 
     /// 保存为一个 Entry。返回是否成功。
@@ -82,6 +86,21 @@ final class CaptureModel {
         var coordinate: (Double, Double)?
 
         var savedCount = 0
+        for photo in cameraPhotos {
+            guard let (media, analysis) = await persist(cameraPhoto: photo) else { continue }
+            media.entry = entry
+            context.insert(media)
+            savedCount += 1
+
+            if let a = analysis {
+                aggregatedTags.append(contentsOf: a.tags)
+                media.aiTags = a.tags
+                if locationName == nil { locationName = a.locationName }
+                if coordinate == nil, let lat = a.latitude, let lon = a.longitude {
+                    coordinate = (lat, lon)
+                }
+            }
+        }
         for item in pickedItems {
             guard let (media, analysis) = await persist(item: item) else { continue }
             media.entry = entry
@@ -117,12 +136,12 @@ final class CaptureModel {
 
         // 应用分析结果
         if let capture = earliestCapture { entry.happenedAt = capture }
-        if let loc = locationName { entry.locationName = loc }
-        if let (lat, lon) = coordinate { entry.latitude = lat; entry.longitude = lon }
+        if includeLocation, let loc = locationName { entry.locationName = loc }
+        if includeLocation, let (lat, lon) = coordinate { entry.latitude = lat; entry.longitude = lon }
 
         let uniqueTags = Array(Set(aggregatedTags)).prefix(6)
         detectedTags = Array(uniqueTags)
-        detectedLocation = locationName
+        detectedLocation = includeLocation ? locationName : nil
 
         do { try context.save() } catch {
             saveError = "保存失败：\(error.localizedDescription)"
@@ -139,6 +158,7 @@ final class CaptureModel {
         let voiceText = pendingVoice == nil ? "" : " · 1 段语音"
         lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
         pickedItems = []
+        cameraPhotos = []
         selectedPreviews = []
         note = ""
         mood = nil
@@ -153,8 +173,11 @@ final class CaptureModel {
         isLoadingPreviews = !items.isEmpty
         defer { isLoadingPreviews = false }
 
-        var previews: [SelectedMediaPreview] = []
-        for (index, item) in items.enumerated() {
+        var previews: [SelectedMediaPreview] = cameraPhotos.enumerated().map { index, photo in
+            SelectedMediaPreview(index: index, image: photo.image, isVideo: false, label: "拍照")
+        }
+        for (offset, item) in items.enumerated() {
+            let index = cameraPhotos.count + offset
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
                 let image = await Self.videoPreviewImage(url: movie.url)
                 previews.append(SelectedMediaPreview(index: index, image: image, isVideo: true, label: "视频"))
@@ -171,12 +194,35 @@ final class CaptureModel {
     }
 
     func removePickedItem(at index: Int) {
-        guard pickedItems.indices.contains(index) else { return }
-        pickedItems.remove(at: index)
+        if cameraPhotos.indices.contains(index) {
+            cameraPhotos.remove(at: index)
+        } else {
+            let pickedIndex = index - cameraPhotos.count
+            guard pickedItems.indices.contains(pickedIndex) else { return }
+            pickedItems.remove(at: pickedIndex)
+        }
         selectedPreviews.removeAll { $0.index == index }
         selectedPreviews = selectedPreviews.enumerated().map { offset, preview in
             SelectedMediaPreview(index: offset, image: preview.image, isVideo: preview.isVideo, label: preview.label)
         }
+    }
+
+    func addCameraPhoto(_ image: UIImage) {
+        cameraPhotos.append(SelectedCameraPhoto(image: image))
+        Task { await updatePreviews() }
+    }
+
+    private func persist(cameraPhoto: SelectedCameraPhoto) async -> (Media, PhotoAnalysis?)? {
+        guard let data = cameraPhoto.image.jpegData(compressionQuality: 0.92),
+              let fileName = try? mediaStore.savePhoto(data) else { return nil }
+        let media = Media(type: .photo, localFileName: fileName)
+        media.width = Int(cameraPhoto.image.size.width)
+        media.height = Int(cameraPhoto.image.size.height)
+        media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: cameraPhoto.image)
+        analyzingHint = "正在看看这张照片里有什么…"
+        let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation)
+        analyzingHint = nil
+        return (media, analysis)
     }
 
     private static func videoPreviewImage(url: URL) async -> UIImage? {
@@ -211,7 +257,7 @@ final class CaptureModel {
             media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
 
             analyzingHint = "正在看看这张照片里有什么…"
-            let analysis = await analyzer.analyze(imageData: data)
+            let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation)
             analyzingHint = nil
             return (media, analysis)
         }
@@ -225,6 +271,12 @@ final class CaptureModel {
             savedFlash = false
         }
     }
+}
+
+// MARK: - 相机照片
+struct SelectedCameraPhoto: Identifiable, Sendable {
+    let id = UUID()
+    let image: UIImage
 }
 
 // MARK: - 选择媒体预览

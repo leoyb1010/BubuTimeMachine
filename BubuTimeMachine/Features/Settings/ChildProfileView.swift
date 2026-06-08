@@ -55,7 +55,7 @@ struct ChildProfileView: View {
                         Image(systemName: "camera.circle.fill")
                             .font(.system(size: 28))
                             .foregroundStyle(tint)
-                            .background(Circle().fill(.white))
+                            .background(Circle().fill(BubuTheme.Color.card))
                     }
                 }
                 Spacer()

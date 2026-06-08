@@ -12,6 +12,8 @@ struct TimelineEntryCard: View {
 
             if !entry.media.isEmpty {
                 mediaGrid
+            } else {
+                noteOnlyMascot
             }
 
             if let note = entry.note, !note.isEmpty {
@@ -62,8 +64,8 @@ struct TimelineEntryCard: View {
         let count = min(entry.media.count, 9)
         if count == 1, let media = entry.media.first {
             MediaThumbnail(media: media, mediaStore: mediaStore)
-                .aspectRatio(4 / 3, contentMode: .fit)
-                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(width: 156, height: 156)
                 .clipped()
         } else {
             let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: count == 2 ? 2 : 3)
@@ -75,6 +77,18 @@ struct TimelineEntryCard: View {
                 }
             }
         }
+    }
+
+    private var noteOnlyMascot: some View {
+        HStack(spacing: 10) {
+            BubuMascotBadge(size: 54, mood: entry.mood)
+            Text("这一刻先用文字和声音收好了")
+                .font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+            Spacer()
+        }
+        .padding(10)
+        .background(BubuTheme.Color.cream.opacity(0.72), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
 
     private var footer: some View {

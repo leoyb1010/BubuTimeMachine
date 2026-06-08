@@ -49,11 +49,7 @@ struct ExportView: View {
 
     @ViewBuilder
     private var background: some View {
-        switch env.theme.theme.backgroundStyle {
-        case .solid(let hex): Color(hex: hex)
-        case .gradient(let a, let b):
-            LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-        }
+        BubuThemedBackground()
     }
 
     private var hero: some View {

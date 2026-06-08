@@ -7,13 +7,6 @@ struct FamilyFeedView: View {
     @Query(sort: \FeedEvent.happenedAt, order: .reverse) private var events: [FeedEvent]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
     @State private var selectedKind: FeedEventKind?
-    @State private var mode: TimeMode = .feed
-
-    private enum TimeMode: String, CaseIterable, Identifiable {
-        case feed = "家庭动态"
-        case timeline = "时间轴"
-        var id: String { rawValue }
-    }
 
     private var theme: Color { env.theme.theme.primary }
     private var filteredEvents: [FeedEvent] {
@@ -30,29 +23,20 @@ struct FamilyFeedView: View {
     }
 
     var body: some View {
-        Group {
-            if mode == .timeline {
-                TimelineView()
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        Picker("时光视图", selection: $mode) {
-                            ForEach(TimeMode.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        header
-                        filters
-                        ForEach(filteredEvents) { event in
-                            eventRow(event)
-                        }
-                        if filteredEvents.isEmpty { emptyState }
-                    }
-                    .padding()
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                header
+                filters
+                ForEach(filteredEvents) { event in
+                    eventRow(event)
                 }
-                .background(BubuTheme.Color.background.ignoresSafeArea())
-                .navigationTitle("时光")
+                if filteredEvents.isEmpty { emptyState }
             }
+            .padding()
         }
+        .background(BubuTheme.Color.background.ignoresSafeArea())
+        .navigationTitle("家庭动态")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Entry.self) { EntryDetailView(entry: $0) }
     }
 
@@ -123,7 +107,7 @@ struct FamilyFeedView: View {
                 Spacer()
             }
             .padding()
-            .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(entry(for: event) == nil)

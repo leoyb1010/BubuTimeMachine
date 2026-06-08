@@ -60,11 +60,7 @@ struct CapsuleComposeView: View {
 
     @ViewBuilder
     private var background: some View {
-        switch env.theme.theme.backgroundStyle {
-        case .solid(let hex): Color(hex: hex)
-        case .gradient(let a, let b):
-            LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-        }
+        BubuThemedBackground()
     }
 
     private var emojiPicker: some View {
@@ -73,7 +69,7 @@ struct CapsuleComposeView: View {
                 ForEach(emojiChoices, id: \.self) { e in
                     Text(e).font(.system(size: 30))
                         .frame(width: 50, height: 50)
-                        .background(emoji == e ? theme.opacity(0.18) : Color.white, in: Circle())
+                        .background(emoji == e ? theme.opacity(0.18) : BubuTheme.Color.softFill, in: Circle())
                         .overlay { Circle().stroke(emoji == e ? theme : .clear, lineWidth: 2) }
                         .onTapGesture { emoji = e }
                 }
@@ -87,7 +83,7 @@ struct CapsuleComposeView: View {
             TextField("如：写给18岁的你", text: $title)
                 .font(BubuTheme.Font.headline)
                 .padding()
-                .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
         }
     }
 
@@ -98,7 +94,7 @@ struct CapsuleComposeView: View {
                 .font(BubuTheme.Font.body)
                 .lineLimit(6...14)
                 .padding()
-                .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
         }
     }
 
@@ -136,7 +132,7 @@ struct CapsuleComposeView: View {
                                 .font(BubuTheme.Font.caption.weight(.medium))
                                 .foregroundStyle(isSelected(date) ? .white : BubuTheme.Color.warmBrown)
                                 .padding(.horizontal, 14).padding(.vertical, 9)
-                                .background(isSelected(date) ? theme : Color.white, in: Capsule())
+                                .background(isSelected(date) ? theme : BubuTheme.Color.softFill, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -144,7 +140,7 @@ struct CapsuleComposeView: View {
             }
             DatePicker("精确到天", selection: $unlockAt, in: Date.now..., displayedComponents: .date)
                 .padding()
-                .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             Text("封存后，到 \(unlockAt.formatted(date: .long, time: .omitted)) 之前都打不开。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(theme)

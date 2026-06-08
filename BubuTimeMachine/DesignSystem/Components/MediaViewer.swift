@@ -14,12 +14,24 @@ struct MediaViewer: View {
                 content
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Label("返回", systemImage: "chevron.left")
+                    }
+                    .foregroundStyle(.white)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("关闭") { dismiss() }
                         .foregroundStyle(.white)
                 }
             }
         }
+        .gesture(
+            DragGesture(minimumDistance: 28)
+                .onEnded { value in
+                    if value.translation.width > 70 { dismiss() }
+                }
+        )
     }
 
     @ViewBuilder

@@ -59,7 +59,7 @@ struct ThemeSettingsView: View {
                 }
             }
             .padding(12)
-            .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                     .stroke(selected ? theme.primary : .clear, lineWidth: 2.5)

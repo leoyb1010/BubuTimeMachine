@@ -29,21 +29,29 @@ struct FirstPersonDiaryView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("第一人称日记")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarLeading) { Text("← 右滑返回").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) } }
     }
 
     @ViewBuilder
     private var background: some View {
-        switch env.theme.theme.backgroundStyle {
-        case .solid(let hex): Color(hex: hex)
-        case .gradient(let a, let b):
-            LinearGradient(colors: [Color(hex: a), Color(hex: b)], startPoint: .top, endPoint: .bottom)
-        }
+        BubuThemedBackground()
     }
 
     private var intro: some View {
-        Text("选一条你写的记录，让布布用自己的口吻，重新讲一遍这一刻。")
-            .font(BubuTheme.Font.body)
-            .foregroundStyle(BubuTheme.Color.secondaryText)
+        HStack(spacing: 12) {
+            BubuMascotBadge(size: 54, expression: .love)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("让布布亲口讲这一刻")
+                    .font(BubuTheme.Font.headline)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text("选一条你写的记录，布布会像聊天一样，把它变成自己的小日记。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+        }
+        .padding()
+        .background(BubuTheme.Color.card.opacity(0.84), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuCardShadow()
     }
 
     @ViewBuilder
@@ -72,15 +80,18 @@ struct FirstPersonDiaryView: View {
         return Button {
             withAnimation { selected = entry; output = ""; displayed = "" }
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(entry.happenedAt.formatted(date: .abbreviated, time: .omitted))
-                    .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
-                Text(entry.note ?? "")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                    .lineLimit(3)
+            HStack(alignment: .top, spacing: 10) {
+                entryAvatar(entry, size: 42)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(entry.happenedAt.formatted(date: .abbreviated, time: .omitted))
+                        .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
+                    Text(entry.note ?? "")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .lineLimit(3)
+                }
             }
-            .frame(width: 150, height: 90, alignment: .topLeading)
+            .frame(width: 190, height: 96, alignment: .topLeading)
             .padding(10)
             .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             .overlay {
@@ -92,15 +103,27 @@ struct FirstPersonDiaryView: View {
     }
 
     @ViewBuilder
+    private func entryAvatar(_ entry: Entry, size: CGFloat) -> some View {
+        if let media = entry.media.first(where: { $0.type == .photo }) {
+            MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: size / 2)
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .overlay { Circle().stroke(.white, lineWidth: 2) }
+        } else {
+            BubuMascotBadge(size: size, mood: entry.mood)
+        }
+    }
+
+    @ViewBuilder
     private var generateArea: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Button {
                 Task { await generate() }
             } label: {
                 HStack {
                     if generating { ProgressView().tint(.white) }
                     else { Image(systemName: "wand.and.stars") }
-                    Text(generating ? "布布正在想……" : "改写成布布的话")
+                    Text(generating ? "布布正在想……" : "让布布说出来")
                 }
                 .font(BubuTheme.Font.headline.weight(.bold))
                 .foregroundStyle(.white)
@@ -111,26 +134,61 @@ struct FirstPersonDiaryView: View {
             .buttonStyle(.plain)
             .disabled(generating)
 
-            if !displayed.isEmpty {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(displayed)
-                        .font(.system(size: 18, weight: .regular, design: .serif))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                        .lineSpacing(7)
-                    if displayed == output && !output.isEmpty {
-                        Button {
-                            saveBack()
-                        } label: {
-                            Label("保存到这条记录", systemImage: "tray.and.arrow.down")
-                                .font(BubuTheme.Font.body.weight(.medium))
-                                .foregroundStyle(theme)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(theme.opacity(0.07), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            if generating && displayed.isEmpty {
+                thinkingBubble
             }
+
+            if !displayed.isEmpty, let selected {
+                bubuMessage(entry: selected)
+            }
+        }
+    }
+
+    private var thinkingBubble: some View {
+        HStack(alignment: .top, spacing: 10) {
+            BubuMascotBadge(size: 52, expression: .thinking)
+            Text("我在想，怎么把这一天讲给未来的自己听……")
+                .font(BubuTheme.Font.body)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+                .padding()
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+
+    private func bubuMessage(entry: Entry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            entryAvatar(entry, size: 54)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("布布说")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(theme)
+                Text(displayed)
+                    .font(.system(size: 18, weight: .regular, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .lineSpacing(6)
+
+                if displayed == output && !output.isEmpty {
+                    Button {
+                        saveBack()
+                    } label: {
+                        Label("保存到这条记录", systemImage: "tray.and.arrow.down")
+                            .font(BubuTheme.Font.caption.weight(.semibold))
+                            .foregroundStyle(theme)
+                            .padding(.top, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .background(theme.opacity(0.10), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(alignment: .leading) {
+                DiaryBubbleTail()
+                    .fill(theme.opacity(0.10))
+                    .frame(width: 16, height: 22)
+                    .offset(x: -9, y: -18)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -159,5 +217,18 @@ struct FirstPersonDiaryView: View {
         selected?.editedAt = .now
         selected?.syncState = .local
         try? context.save()
+    }
+}
+
+private struct DiaryBubbleTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.midY),
+                          control: CGPoint(x: rect.minX + rect.width * 0.32, y: rect.minY + rect.height * 0.16))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY),
+                          control: CGPoint(x: rect.minX + rect.width * 0.32, y: rect.maxY - rect.height * 0.16))
+        path.closeSubpath()
+        return path
     }
 }
