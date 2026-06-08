@@ -75,8 +75,14 @@ final class ServerConfig {
     private static let aiEnabledKey = "bubu.ai.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
 
+    /// 默认公网地址：通过 Cloudflare Tunnel 暴露家里 Mac mini 上的服务，
+    /// 任何网络（家庭 WiFi / 运营商 4G/5G）都可直连，无需 Tailscale。
+    /// 用户仍可在设置页改写为自己的内网地址。
+    static let defaultBaseURL = "https://bubu-api.leoyuan.top"
+    static let defaultAIBaseURL = "https://bubu-ai.leoyuan.top"
+
     init() {
-        self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? ""
+        self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
         self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""
@@ -86,8 +92,9 @@ final class ServerConfig {
             UserDefaults.standard.removeObject(forKey: Self.passwordKey)
         }
         self.accountPassword = KeychainStore.string(for: Self.passwordKey) ?? legacyPassword ?? ""
-        self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? ""
-        self.aiEnabled = UserDefaults.standard.bool(forKey: Self.aiEnabledKey)
+        self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? Self.defaultAIBaseURL
+        // AI 首次默认开启（已有公网地址）；用户改过则尊重其设置。
+        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? true
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
     }
 }
