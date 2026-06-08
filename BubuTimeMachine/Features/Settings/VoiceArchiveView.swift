@@ -197,6 +197,7 @@ struct VoiceMemoRecorderSheet: View {
         memo.localFileName = p.fileName
         memo.durationSeconds = p.duration
         memo.transcript = transcript
+        memo.syncState = .local
         if let profile {
             memo.ageYears = AgeCalculator.ageYears(birthday: profile.birthday, at: .now)
         }

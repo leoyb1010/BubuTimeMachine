@@ -13,6 +13,8 @@ struct AuthToken: Codable, Sendable {
 struct EntryDTO: Codable, Sendable {
     var id: String?                 // remoteId
     var localId: String             // 客户端 UUID，幂等去重用
+    var familyId: String?
+    var authorUserId: String?
     var title: String?
     var note: String?
     var firstPersonNote: String?
@@ -24,6 +26,112 @@ struct EntryDTO: Codable, Sendable {
     var mood: String?
     var isArchived: Bool
     var editedAt: Date?
+    var createdAt: Date
+}
+
+struct MediaDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var entryLocalId: String
+    var mediaType: String
+    var remoteURL: String?
+    var durationSeconds: Double?
+    var width: Int?
+    var height: Int?
+    var aiTags: [String]
+    var createdAt: Date
+}
+
+struct MilestoneDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var title: String
+    var category: String
+    var emoji: String
+    var detail: String?
+    var happenedAt: Date?
+    var ageDescription: String?
+    var isCustom: Bool
+    var createdAt: Date
+}
+
+struct FirstTimeDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var what: String
+    var happenedAt: Date
+    var detectedByAI: Bool
+    var confirmedByParent: Bool
+    var entryLocalId: String?
+    var createdAt: Date
+}
+
+struct FamilyMemberDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var name: String
+    var relation: String
+    var avatarEmoji: String
+    var themeColorHex: String
+    var isPrimary: Bool
+    var createdAt: Date
+}
+
+struct ChildProfileDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var name: String
+    var birthday: Date
+    var gender: String?
+    var birthPlace: String?
+    var createdAt: Date
+}
+
+struct HealthRecordDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var kind: String
+    var title: String
+    var detail: String?
+    var recordedAt: Date
+    var amountText: String?
+    var reaction: String?
+    var createdAt: Date
+}
+
+struct CommentDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var entryLocalId: String
+    var authorRole: String
+    var text: String?
+    var remoteURL: String?
+    var voiceDuration: Double
+    var voiceWaveform: [Float]
+    var createdAt: Date
+}
+
+struct VoiceNoteDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var entryLocalId: String
+    var authorRole: String
+    var remoteURL: String?
+    var durationSeconds: Double
+    var transcript: String?
+    var waveform: [Float]
+    var createdAt: Date
+}
+
+struct VoiceMemoDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var kind: String
+    var remoteURL: String?
+    var transcript: String?
+    var ageYears: Int?
+    var recordedAt: Date
+    var durationSeconds: Double?
     var createdAt: Date
 }
 

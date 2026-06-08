@@ -72,9 +72,22 @@ final class AppEnvironment {
 
     /// App 启动后调用：注入上下文、启动同步层（离线时无副作用）。
     func bootstrap(context: ModelContext) {
+        seedMilestonePresetsIfNeeded(context: context)
         syncEngine.attach(context: context)
         syncEngine.start()
         ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)
+    }
+
+    private func seedMilestonePresetsIfNeeded(context: ModelContext) {
+        guard hasCompletedOnboarding else { return }
+        let existing = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
+        let titles = Set(existing.map(\.title))
+        for tpl in MilestoneTemplate.presets where !titles.contains(tpl.title) {
+            let milestone = Milestone(title: tpl.title, category: tpl.category, emoji: tpl.emoji)
+            milestone.syncState = .local
+            context.insert(milestone)
+        }
+        try? context.save()
     }
 
     /// 设置变更后重建客户端（用户改了服务器地址/账户/AI 开关时调用）。

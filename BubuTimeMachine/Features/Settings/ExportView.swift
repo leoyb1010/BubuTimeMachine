@@ -9,6 +9,10 @@ struct ExportView: View {
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
     @Query private var milestones: [Milestone]
+    @Query(sort: \VoiceMemo.recordedAt, order: .reverse) private var voiceMemos: [VoiceMemo]
+    @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var healthRecords: [HealthRecord]
+    @Query(sort: \FirstTime.happenedAt, order: .reverse) private var firstTimes: [FirstTime]
+    @Query(sort: \TimeCapsule.unlockAt) private var timeCapsules: [TimeCapsule]
     @Query private var profiles: [ChildProfile]
 
     @State private var exporting = false
@@ -72,7 +76,11 @@ struct ExportView: View {
             Divider()
             row("照片视频", "\(entries.reduce(0) { $0 + $1.media.count }) 个")
             Divider()
+            row("声音", "\(entries.reduce(0) { $0 + $1.voiceNotes.count + $1.comments.filter { $0.voiceFileName != nil }.count } + voiceMemos.count) 段")
+            Divider()
             row("里程碑", "\(milestones.filter(\.isAchieved).count) 个")
+            Divider()
+            row("健康/第一次/胶囊", "\(healthRecords.count + firstTimes.count + timeCapsules.count) 项")
         }
         .padding()
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
@@ -120,16 +128,52 @@ struct ExportView: View {
                 firstPersonNote: e.firstPersonNote, locationName: e.locationName,
                 moodEmoji: e.mood?.emoji,
                 ageDescription: AgeCalculator.ageDescription(birthday: profile.birthday, at: e.happenedAt),
-                mediaFileNames: e.media.filter { $0.type == .photo }.compactMap { $0.localFileName },
+                media: e.media.compactMap { media in
+                    guard let fileName = media.localFileName else { return nil }
+                    return ArchiveExporter.MediaSnapshot(fileName: fileName, type: media.type.rawValue)
+                },
+                voiceNotes: e.voiceNotes.compactMap { voice in
+                    guard let fileName = voice.localFileName else { return nil }
+                    return ArchiveExporter.VoiceSnapshot(fileName: fileName, duration: voice.durationSeconds,
+                                                         authorRole: voice.authorRole, transcript: voice.transcript)
+                },
+                comments: e.comments.map { comment in
+                    ArchiveExporter.CommentSnapshot(authorRole: comment.authorRole, text: comment.text,
+                                                    voiceFileName: comment.voiceFileName,
+                                                    voiceDuration: comment.voiceDuration,
+                                                    createdAt: comment.createdAt)
+                },
                 tags: Array(Set(e.media.flatMap { $0.aiTags })))
         }
         let ms = milestones.map { m in
             ArchiveExporter.MilestoneSnapshot(
                 title: m.title, emoji: m.emoji, achieved: m.isAchieved, ageDescription: m.ageDescription)
         }
+        let memoSnapshots = voiceMemos.map { memo in
+            ArchiveExporter.VoiceMemoSnapshot(kind: memo.kindRaw, fileName: memo.localFileName,
+                                              transcript: memo.transcript, ageYears: memo.ageYears,
+                                              recordedAt: memo.recordedAt,
+                                              durationSeconds: memo.durationSeconds)
+        }
+        let healthSnapshots = healthRecords.map { record in
+            ArchiveExporter.HealthRecordSnapshot(kind: record.kind.title, title: record.title,
+                                                 detail: record.detail, recordedAt: record.recordedAt,
+                                                 amountText: record.amountText, reaction: record.reaction)
+        }
+        let firstTimeSnapshots = firstTimes.map { item in
+            ArchiveExporter.FirstTimeSnapshot(what: item.what, happenedAt: item.happenedAt,
+                                              confirmed: item.confirmedByParent)
+        }
+        let capsuleSnapshots = timeCapsules.map { capsule in
+            ArchiveExporter.TimeCapsuleSnapshot(title: capsule.title, fromRole: capsule.fromRole,
+                                                unlockAt: capsule.unlockAt, isLocked: capsule.isLocked,
+                                                coverEmoji: capsule.coverEmoji)
+        }
         let input = ArchiveExporter.ExportInput(
             childName: profile.name, birthday: profile.birthday,
-            entries: snapshots, milestones: ms)
+            entries: snapshots, milestones: ms, voiceMemos: memoSnapshots,
+            healthRecords: healthSnapshots, firstTimes: firstTimeSnapshots,
+            timeCapsules: capsuleSnapshots)
 
         let exporter = ArchiveExporter(mediaStore: env.mediaStore)
         do {

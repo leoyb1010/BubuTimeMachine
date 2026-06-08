@@ -19,45 +19,60 @@ struct TimelineEntryCard: View {
                     .font(BubuTheme.Font.body)
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             footer
         }
         .padding()
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            if let mood = entry.mood {
-                Text(mood.emoji).font(.system(size: 18))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                if let mood = entry.mood {
+                    Text(mood.emoji).font(.system(size: 18))
+                }
+                Text(entry.happenedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(entry.authorRole)
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(BubuTheme.Color.primary.opacity(0.12), in: Capsule())
             }
-            Text(entry.happenedAt.formatted(date: .abbreviated, time: .shortened))
-                .font(BubuTheme.Font.caption)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
             if let place = entry.locationName {
                 Label(place, systemImage: "mappin")
                     .font(.system(size: 12))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)
             }
-            Spacer()
-            Text(entry.authorRole)
-                .font(BubuTheme.Font.caption)
-                .foregroundStyle(BubuTheme.Color.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(BubuTheme.Color.primary.opacity(0.12), in: Capsule())
         }
     }
 
+    @ViewBuilder
     private var mediaGrid: some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
-        return LazyVGrid(columns: columns, spacing: 6) {
-            ForEach(entry.media.prefix(9)) { media in
-                MediaThumbnail(media: media, mediaStore: mediaStore)
-                    .aspectRatio(1, contentMode: .fill)
+        let count = min(entry.media.count, 9)
+        if count == 1, let media = entry.media.first {
+            MediaThumbnail(media: media, mediaStore: mediaStore)
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipped()
+        } else {
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: count == 2 ? 2 : 3)
+            LazyVGrid(columns: columns, spacing: 6) {
+                ForEach(entry.media.prefix(9)) { media in
+                    MediaThumbnail(media: media, mediaStore: mediaStore)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipped()
+                }
             }
         }
     }

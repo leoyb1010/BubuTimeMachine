@@ -50,7 +50,7 @@ struct VoiceRecorderBar: View {
                     .font(.system(size: 16, weight: .medium, design: .monospaced))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             } else {
-                Text("按住下面按钮，说给布布听")
+                Text("点一下开始，再点一下收好")
                     .font(BubuTheme.Font.body)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 Spacer()

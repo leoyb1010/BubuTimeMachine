@@ -12,7 +12,13 @@ final class TimeCapsule {
     var isLocked: Bool = true
     var encryptedBlobFileName: String? // 本地加密文件（信件文本+音视频）
     var coverEmoji: String?
+    var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
+
+    var syncState: SyncState {
+        get { SyncState(rawValue: syncStateRaw) ?? .local }
+        set { syncStateRaw = newValue.rawValue }
+    }
 
     init(title: String, fromRole: String, unlockAt: Date) {
         self.id = UUID()

@@ -5,6 +5,8 @@ import Foundation
 /// 正式部署时，把本类替换为调用自托管 FastAPI 的 BubuAIService，协议不变、UI 不改。
 final class MockAIService: AIService {
 
+    func ping() async throws -> Bool { true }
+
     func classify(entryId: UUID) async throws -> AIClassification {
         try? await Task.sleep(for: .milliseconds(400))
         return AIClassification(
@@ -32,13 +34,10 @@ final class MockAIService: AIService {
     func rewriteFirstPerson(note: String, childName: String) async throws -> String {
         try? await Task.sleep(for: .seconds(1))
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let body = trimmed.isEmpty ? "今天也是被爱包围的一天。" : trimmed
+        let body = trimmed.isEmpty ? "小手摸到软软的光，耳边有熟悉的声音，我慢慢眨眨眼。" : trimmed
         return """
-        今天我是\(childName)。
-        \(body)
-        我还不太会用语言说出来，但我什么都记得——\
-        阳光的味道、被抱起来时的安心，还有你们看我时的眼神。
-        等我长大，谢谢你们把这些都替我收好了。
+        我是\(childName)，这一刻有好多小感觉：\(body)
+        我的小手动了动，眼睛也忙着看。身边的声音软软的，我好像把这一点点暖暖的东西，都悄悄装进心里了。
         """
     }
 

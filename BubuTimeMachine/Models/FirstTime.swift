@@ -11,8 +11,14 @@ final class FirstTime {
     var detectedByAI: Bool = false    // 是否由 AI 主动识别
     var confirmedByParent: Bool = false
     var ceremonyPlayed: Bool = false
+    var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
     var entry: Entry?
+
+    var syncState: SyncState {
+        get { SyncState(rawValue: syncStateRaw) ?? .local }
+        set { syncStateRaw = newValue.rawValue }
+    }
 
     init(what: String, happenedAt: Date = .now) {
         self.id = UUID()

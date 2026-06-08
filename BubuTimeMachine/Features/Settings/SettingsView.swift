@@ -9,6 +9,8 @@ struct SettingsView: View {
     @Query private var members: [FamilyMember]
     @State private var testing = false
     @State private var testResult: String?
+    @State private var testingAI = false
+    @State private var aiTestResult: String?
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
@@ -81,6 +83,17 @@ struct SettingsView: View {
                 if config.aiEnabled {
                     TextField("http://100.x.x.x:8000", text: $config.aiBaseURLString)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    Button {
+                        Task { await testAIConnection() }
+                    } label: {
+                        HStack {
+                            Text("测试 AI 服务")
+                            Spacer()
+                            if testingAI { ProgressView() }
+                            else if let aiTestResult { Text(aiTestResult).foregroundStyle(BubuTheme.Color.secondaryText) }
+                        }
+                    }
+                    .disabled(config.aiBaseURLString.isEmpty || testingAI)
                 }
             } header: {
                 Text("AI 服务（工坊）")
@@ -110,6 +123,7 @@ struct SettingsView: View {
             // 同步状态
             Section("同步状态") {
                 LabeledContent("当前状态", value: connectionText)
+                LabeledContent("待同步", value: env.syncEngine.pendingCount == 0 ? "没有待同步内容" : "\(env.syncEngine.pendingCount) 项")
                 if let last = env.syncEngine.lastSyncedAt {
                     LabeledContent("上次同步", value: last.formatted(date: .omitted, time: .shortened))
                 }
@@ -136,5 +150,14 @@ struct SettingsView: View {
         env.reloadServices(context: context)
         let ok = (try? await env.apiClient.ping()) ?? false
         testResult = ok ? "通啦 ✓" : "连不上"
+    }
+
+    private func testAIConnection() async {
+        testingAI = true
+        aiTestResult = nil
+        defer { testingAI = false }
+        env.reloadServices(context: context)
+        let ok = (try? await env.aiService.ping()) ?? false
+        aiTestResult = ok ? "通啦 ✓" : "连不上"
     }
 }

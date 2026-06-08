@@ -74,7 +74,13 @@ struct CommentComposeSheet: View {
             comment.voiceWaveform = v.waveform
         }
         comment.entry = entry
+        entry.editedAt = .now
+        entry.syncState = .local
         context.insert(comment)
+        let event = FeedEvent(kind: .commentAdded, actorRole: role,
+                              summary: text.isEmpty ? "补充了一段语音" : "补充：\(text)",
+                              targetLocalId: entry.id.uuidString)
+        context.insert(event)
         try? context.save()
         dismiss()
     }

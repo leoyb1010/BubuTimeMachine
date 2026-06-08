@@ -94,6 +94,17 @@ nonisolated struct MediaStore: Sendable {
         try? FileManager.default.removeItem(at: mediaURL(for: fileName))
     }
 
+    /// 删除缩略图文件。
+    func deleteThumbnail(named fileName: String) {
+        try? FileManager.default.removeItem(at: thumbnailURL(for: fileName))
+    }
+
+    /// 删除一组本地文件，忽略不存在的文件，保证 UI 删除不会被 IO 失败阻塞。
+    func deleteLocalFiles(media fileName: String?, thumbnail thumbnailName: String? = nil) {
+        if let fileName { deleteMedia(named: fileName) }
+        if let thumbnailName { deleteThumbnail(named: thumbnailName) }
+    }
+
     // MARK: 缩略图
 
     /// 为图片生成并保存缩略图，返回缩略图相对文件名。

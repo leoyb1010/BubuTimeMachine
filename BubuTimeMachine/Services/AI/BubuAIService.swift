@@ -12,6 +12,13 @@ final class BubuAIService: AIService, @unchecked Sendable {
         self.baseURL = baseURL
     }
 
+    func ping() async throws -> Bool {
+        let url = baseURL.appendingPathComponent("health")
+        let (data, resp) = try await session.data(from: url)
+        try Self.check(resp, data)
+        return true
+    }
+
     func rewriteFirstPerson(note: String, childName: String) async throws -> String {
         let body: [String: Any] = ["note": note, "child_name": childName]
         let obj = try await post("rewrite-first-person", body)

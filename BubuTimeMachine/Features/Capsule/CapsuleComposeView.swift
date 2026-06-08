@@ -16,6 +16,7 @@ struct CapsuleComposeView: View {
     @State private var unlockAt = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
     @State private var pendingVoice: (fileName: String, duration: Double, waveform: [Float])?
     @State private var saving = false
+    @State private var errorText: String?
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -48,6 +49,11 @@ struct CapsuleComposeView: View {
                     }
                     .disabled(!canSave || saving)
                 }
+            }
+            .alert("封存失败", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
+                Button("好") { errorText = nil }
+            } message: {
+                Text(errorText ?? "")
             }
         }
     }
@@ -185,11 +191,12 @@ struct CapsuleComposeView: View {
             let blobName = try env.vault.seal(payload, unlockAt: unlockAt, salt: capsule.id.uuidString)
             capsule.encryptedBlobFileName = blobName
             capsule.isLocked = true
+            capsule.syncState = .local
             context.insert(capsule)
             try context.save()
             dismiss()
         } catch {
-            // 失败则不入库（已录语音保留在沙盒，无副作用）
+            errorText = "这封信还没有封存成功：\(error.localizedDescription)。录好的语音仍保留在手机里，可以稍后再试。"
         }
     }
 }

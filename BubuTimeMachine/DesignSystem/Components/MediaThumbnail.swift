@@ -15,14 +15,15 @@ struct MediaThumbnail: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(BubuTheme.Color.cream)
-                    .overlay {
-                        Image(systemName: placeholderSymbol)
-                            .font(.system(size: 28))
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
+            } else if let remote = media.remoteURL, let url = URL(string: remote), media.type == .photo {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    default: placeholder
                     }
+                }
+            } else {
+                placeholder
             }
 
             // 视频/音频角标
@@ -41,7 +42,18 @@ struct MediaThumbnail: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .clipped()
         .task(id: media.id) { await load() }
+    }
+
+    private var placeholder: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(BubuTheme.Color.cream)
+            .overlay {
+                Image(systemName: placeholderSymbol)
+                    .font(.system(size: 28))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
     }
 
     private var placeholderSymbol: String {

@@ -172,9 +172,41 @@ migrate((app) => {
   })
   app.save(childprofile)
 
+  // ---- healthrecords（布布健康：餐食/零食/营养补充/睡眠/不舒服）----
+  const healthrecords = new Collection({
+    type: 'base', name: 'healthrecords',
+    listRule: authRule, viewRule: authRule, createRule: authRule,
+    updateRule: authRule, deleteRule: authRule,
+    fields: baseFields([
+      { name: 'kind', type: 'text', required: true },
+      { name: 'title', type: 'text', required: true },
+      { name: 'detail', type: 'text' },
+      { name: 'recordedAt', type: 'date', required: true },
+      { name: 'amountText', type: 'text' },
+      { name: 'reaction', type: 'text' },
+    ]),
+  })
+  app.save(healthrecords)
+
+  // ---- feed_events（家庭动态墙：可由客户端同步/派生）----
+  const feed_events = new Collection({
+    type: 'base', name: 'feed_events',
+    listRule: authRule, viewRule: authRule, createRule: authRule,
+    updateRule: authRule, deleteRule: authRule,
+    fields: baseFields([
+      { name: 'kind', type: 'text', required: true },
+      { name: 'actorRole', type: 'text' },
+      { name: 'actorUserId', type: 'text' },
+      { name: 'targetLocalId', type: 'text' },
+      { name: 'summary', type: 'text', required: true },
+      { name: 'happenedAt', type: 'date', required: true },
+    ]),
+  })
+  app.save(feed_events)
+
 }, (app) => {
   // 回滚：删除全部集合
-  const names = ['media','comments','voicenotes','firsttimes','voicememos',
+  const names = ['feed_events','healthrecords','media','comments','voicenotes','firsttimes','voicememos',
                  'milestones','members','childprofile','entries']
   for (const n of names) {
     try { app.delete(app.findCollectionByNameOrId(n)) } catch (e) {}

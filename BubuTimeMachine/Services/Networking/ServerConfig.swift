@@ -31,7 +31,10 @@ final class ServerConfig {
         didSet { UserDefaults.standard.set(accountEmail, forKey: Self.emailKey) }
     }
     var accountPassword: String {
-        didSet { UserDefaults.standard.set(accountPassword, forKey: Self.passwordKey) }
+        didSet {
+            if accountPassword.isEmpty { KeychainStore.delete(Self.passwordKey) }
+            else { KeychainStore.set(accountPassword, for: Self.passwordKey) }
+        }
     }
 
     /// AI 服务（FastAPI）地址，例如 http://100.x.x.x:8000
@@ -77,7 +80,12 @@ final class ServerConfig {
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
         self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""
-        self.accountPassword = UserDefaults.standard.string(forKey: Self.passwordKey) ?? ""
+        let legacyPassword = UserDefaults.standard.string(forKey: Self.passwordKey)
+        if let legacyPassword, !legacyPassword.isEmpty {
+            KeychainStore.set(legacyPassword, for: Self.passwordKey)
+            UserDefaults.standard.removeObject(forKey: Self.passwordKey)
+        }
+        self.accountPassword = KeychainStore.string(for: Self.passwordKey) ?? legacyPassword ?? ""
         self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? ""
         self.aiEnabled = UserDefaults.standard.bool(forKey: Self.aiEnabledKey)
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)

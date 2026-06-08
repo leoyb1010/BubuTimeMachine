@@ -13,7 +13,13 @@ final class FamilyMember {
     var avatarEmoji: String           // 头像（emoji，适老、零素材依赖）
     var themeColorHex: String         // 专属主题色
     var isPrimary: Bool = false       // 是否主账号（首个创建者）
+    var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
+
+    var syncState: SyncState {
+        get { SyncState(rawValue: syncStateRaw) ?? .local }
+        set { syncStateRaw = newValue.rawValue }
+    }
 
     init(name: String, relation: String, avatarEmoji: String = "🙂",
          themeColorHex: String = "#F28C9E") {
@@ -39,7 +45,13 @@ final class ChildProfile {
     var heroBackgroundFileName: String? // 首页背景（布布的照片）
     var bloodType: String?
     var birthPlace: String?
+    var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
+
+    var syncState: SyncState {
+        get { SyncState(rawValue: syncStateRaw) ?? .local }
+        set { syncStateRaw = newValue.rawValue }
+    }
 
     init(name: String = "布布", birthday: Date) {
         self.id = UUID()

@@ -26,8 +26,10 @@ struct CaptureHomeView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     ageHeader
+                    saveHealthStrip
                     statRow
                     onThisDaySection
+                    healthEntryCard
                     recordButton
                     recentStrip
                     Spacer(minLength: 30)
@@ -94,6 +96,9 @@ struct CaptureHomeView: View {
             ft.happenedAt = entry.happenedAt
         }
         modelContext.insert(ft)
+        modelContext.insert(FeedEvent(kind: .firstTimeConfirmed, actorRole: env.config.currentRole.rawValue,
+                                      summary: "确认了「\(what)」",
+                                      targetLocalId: id.uuidString))
         try? modelContext.save()
         firstTimeSuggestion = nil
     }
@@ -140,7 +145,51 @@ struct CaptureHomeView: View {
             }
             .padding(.top, 8)
         } else {
-            Text("布布时光机").font(BubuTheme.Font.hugeTitle)
+            VStack(spacing: 12) {
+                Image("BubuLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 82, height: 82)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: theme.primary.opacity(0.18), radius: 10, y: 4)
+                Text("布布时光机").font(BubuTheme.Font.hugeTitle)
+            }
+        }
+    }
+
+    // MARK: 保存健康度
+
+    private var saveHealthStrip: some View {
+        HStack(spacing: 10) {
+            Image(systemName: env.syncEngine.pendingCount == 0 ? "checkmark.icloud.fill" : "arrow.triangle.2.circlepath.circle.fill")
+                .foregroundStyle(env.syncEngine.pendingCount == 0 ? BubuTheme.Color.success : theme.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("本地已保存")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(syncSummary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            Spacer()
+            NavigationLink { SettingsView() } label: {
+                Text("查看")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(theme.primary)
+            }
+        }
+        .padding(12)
+        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+    }
+
+    private var syncSummary: String {
+        switch env.syncEngine.connectionState {
+        case .offline:
+            return env.syncEngine.pendingCount == 0 ? "离线也可用，暂无待同步" : "离线可用，\(env.syncEngine.pendingCount) 项等服务器"
+        case .connecting:
+            return "正在连接家里的服务器…"
+        case .online:
+            return env.syncEngine.pendingCount == 0 ? "已和家里服务器同步" : "\(env.syncEngine.pendingCount) 项正在等待同步"
         }
     }
 
@@ -236,6 +285,39 @@ struct CaptureHomeView: View {
     private func yearsAgoText(_ date: Date) -> String {
         let years = Calendar.current.dateComponents([.year], from: date, to: .now).year ?? 0
         return years <= 0 ? "今年" : "\(years)年前的今天"
+    }
+
+    // MARK: 布布健康入口
+
+    private var healthEntryCard: some View {
+        NavigationLink {
+            HealthHomeView()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(theme.primary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("布布健康")
+                        .font(BubuTheme.Font.headline)
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("餐食、零食、营养补充、睡眠和不舒服都记在这里")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .padding()
+            .background(.white.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .bubuCardShadow()
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: 大记录按钮

@@ -156,6 +156,8 @@ struct FirstPersonDiaryView: View {
 
     private func saveBack() {
         selected?.firstPersonNote = output
+        selected?.editedAt = .now
+        selected?.syncState = .local
         try? context.save()
     }
 }

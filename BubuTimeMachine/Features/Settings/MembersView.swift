@@ -170,6 +170,7 @@ struct MemberEditSheet: View {
             member.relation = relation.rawValue
             member.avatarEmoji = emoji
             member.themeColorHex = colorHex
+            member.syncState = .local
         } else {
             let m = FamilyMember(name: finalName, relation: relation.rawValue,
                                  avatarEmoji: emoji, themeColorHex: colorHex)

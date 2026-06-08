@@ -6,6 +6,26 @@ protocol APIClient: Sendable {
     func authenticate(role: String) async throws -> AuthToken
     func createEntry(_ dto: EntryDTO) async throws -> EntryDTO
     func fetchEntries(since: Date?) async throws -> [EntryDTO]
+    func fetchMedia(since: Date?) async throws -> [MediaDTO]
+    func upsertMilestone(_ dto: MilestoneDTO) async throws -> MilestoneDTO
+    func fetchMilestones(since: Date?) async throws -> [MilestoneDTO]
+    func upsertFirstTime(_ dto: FirstTimeDTO) async throws -> FirstTimeDTO
+    func fetchFirstTimes(since: Date?) async throws -> [FirstTimeDTO]
+    func upsertFamilyMember(_ dto: FamilyMemberDTO) async throws -> FamilyMemberDTO
+    func fetchFamilyMembers(since: Date?) async throws -> [FamilyMemberDTO]
+    func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO
+    func fetchChildProfiles(since: Date?) async throws -> [ChildProfileDTO]
+    func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO
+    func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO]
+    func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO
+    func fetchComments(since: Date?) async throws -> [CommentDTO]
+    func uploadCommentVoice(commentId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
+    func upsertVoiceNote(_ dto: VoiceNoteDTO) async throws -> VoiceNoteDTO
+    func fetchVoiceNotes(since: Date?) async throws -> [VoiceNoteDTO]
+    func uploadVoiceNote(voiceId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
+    func upsertVoiceMemo(_ dto: VoiceMemoDTO) async throws -> VoiceMemoDTO
+    func fetchVoiceMemos(since: Date?) async throws -> [VoiceMemoDTO]
+    func uploadVoiceMemo(memoId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     /// 分片上传：返回可观察进度的异步流。
     func uploadMedia(_ file: MediaUploadRequest) -> AsyncThrowingStream<UploadEvent, Error>
     func subscribeRealtime() -> AsyncStream<RealtimeEvent>

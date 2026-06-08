@@ -71,19 +71,19 @@ struct ChildProfileView: View {
                 Spacer()
                 TextField("布布", text: Binding(
                     get: { profile.name },
-                    set: { profile.name = $0; env.config.childName = $0; try? context.save() }))
+                    set: { profile.name = $0; profile.syncState = .local; env.config.childName = $0; try? context.save() }))
                     .multilineTextAlignment(.trailing)
             }
             DatePicker("生日", selection: Binding(
                 get: { profile.birthday },
-                set: { profile.birthday = $0; try? context.save() }),
+                set: { profile.birthday = $0; profile.syncState = .local; try? context.save() }),
                 in: ...Date.now, displayedComponents: .date)
             HStack {
                 Text("出生地")
                 Spacer()
                 TextField("选填", text: Binding(
                     get: { profile.birthPlace ?? "" },
-                    set: { profile.birthPlace = $0.isEmpty ? nil : $0; try? context.save() }))
+                    set: { profile.birthPlace = $0.isEmpty ? nil : $0; profile.syncState = .local; try? context.save() }))
                     .multilineTextAlignment(.trailing)
             }
         }
@@ -99,6 +99,7 @@ struct ChildProfileView: View {
             if profile.heroBackgroundFileName != nil {
                 Button(role: .destructive) {
                     profile.heroBackgroundFileName = nil
+                    profile.syncState = .local
                     try? context.save()
                 } label: { Label("恢复主题背景", systemImage: "arrow.uturn.backward") }
             }
@@ -122,6 +123,7 @@ struct ChildProfileView: View {
               let profile else { return }
         if let name = try? env.mediaStore.savePhoto(data) {
             profile.avatarMediaFileName = name
+            profile.syncState = .local
             try? context.save()
         }
     }
@@ -131,6 +133,7 @@ struct ChildProfileView: View {
               let profile else { return }
         if let name = try? env.mediaStore.savePhoto(data) {
             profile.heroBackgroundFileName = name
+            profile.syncState = .local
             env.theme.heroMode = .photo
             try? context.save()
         }

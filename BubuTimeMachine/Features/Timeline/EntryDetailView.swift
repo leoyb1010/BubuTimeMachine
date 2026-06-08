@@ -13,6 +13,7 @@ struct EntryDetailView: View {
     @State private var editing = false
     @State private var appendPick: [PhotosPickerItem] = []
     @State private var showCommentSheet = false
+    @State private var viewingMedia: Media?
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -38,15 +39,21 @@ struct EntryDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(editing ? "完成" : "编辑") {
-                    if editing { entry.editedAt = .now; try? context.save() }
+                    if editing {
+                        markEntryDirty()
+                        try? context.save()
+                    }
                     withAnimation(.smooth) { editing.toggle() }
                 }
                 .fontWeight(.semibold)
             }
         }
-        .onChange(of: appendPick) { _, items in Task { await appendPhotos(items) } }
+        .onChange(of: appendPick) { _, items in Task { await appendMedia(items) } }
         .sheet(isPresented: $showCommentSheet) {
             CommentComposeSheet(entry: entry)
+        }
+        .sheet(item: $viewingMedia) { media in
+            MediaViewer(media: media, mediaStore: env.mediaStore)
         }
     }
 
@@ -71,13 +78,20 @@ struct EntryDetailView: View {
     @ViewBuilder
     private var mediaSection: some View {
         if !entry.media.isEmpty {
-            let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
+            let columns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(entry.media) { media in
                     ZStack(alignment: .topTrailing) {
-                        MediaThumbnail(media: media, mediaStore: env.mediaStore,
-                                       cornerRadius: BubuTheme.Radius.card)
-                            .aspectRatio(1, contentMode: .fill)
+                        Button {
+                            if !editing { viewingMedia = media }
+                        } label: {
+                            MediaThumbnail(media: media, mediaStore: env.mediaStore,
+                                           cornerRadius: BubuTheme.Radius.card)
+                                .aspectRatio(1, contentMode: .fit)
+                                .frame(maxWidth: .infinity)
+                                .clipped()
+                        }
+                        .buttonStyle(.plain)
                         if editing {
                             Button {
                                 deleteMedia(media)
@@ -148,7 +162,10 @@ struct EntryDetailView: View {
                     .padding()
                     .background(.white, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             } else if let note = entry.note {
-                Text(note).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(note)
+                    .font(BubuTheme.Font.body)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -189,7 +206,11 @@ struct EntryDetailView: View {
                         let voice = VoiceNote(localFileName: fileName, durationSeconds: duration,
                                               authorRole: env.config.currentRole.rawValue, waveformSamples: waveform)
                         voice.entry = entry
+                        markEntryDirty()
                         context.insert(voice)
+                        context.insert(FeedEvent(kind: .voiceAdded, actorRole: env.config.currentRole.rawValue,
+                                                 summary: "补充了一段语音记录",
+                                                 targetLocalId: entry.id.uuidString))
                         try? context.save()
                     }
                 }
@@ -277,8 +298,16 @@ struct EntryDetailView: View {
 
     // MARK: 操作
 
-    private func appendPhotos(_ items: [PhotosPickerItem]) async {
+    private func appendMedia(_ items: [PhotosPickerItem]) async {
         for item in items {
+            if let movie = try? await item.loadTransferable(type: MovieTransfer.self),
+               let fileName = try? env.mediaStore.importFile(from: movie.url, preferredExtension: "mov") {
+                let media = Media(type: .video, localFileName: fileName)
+                media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: fileName)
+                media.entry = entry
+                context.insert(media)
+                continue
+            }
             if let data = try? await item.loadTransferable(type: Data.self),
                let image = UIImage(data: data),
                let fileName = try? env.mediaStore.savePhoto(data) {
@@ -289,18 +318,27 @@ struct EntryDetailView: View {
             }
         }
         appendPick = []
-        entry.editedAt = .now
+        markEntryDirty()
         try? context.save()
     }
 
     private func deleteMedia(_ media: Media) {
+        env.mediaStore.deleteLocalFiles(media: media.localFileName, thumbnail: media.thumbnailFileName)
         context.delete(media)
+        markEntryDirty()
         try? context.save()
     }
 
     private func deleteVoice(_ voice: VoiceNote) {
+        env.mediaStore.deleteLocalFiles(media: voice.localFileName)
         context.delete(voice)
+        markEntryDirty()
         try? context.save()
+    }
+
+    private func markEntryDirty() {
+        entry.editedAt = .now
+        entry.syncState = .local
     }
 }
 

@@ -69,6 +69,7 @@ struct MilestonePickerSheet: View {
     private func addSelected() {
         for tpl in MilestoneTemplate.presets where selected.contains(tpl.title) {
             let m = Milestone(title: tpl.title, category: tpl.category, emoji: tpl.emoji)
+            m.syncState = .local
             context.insert(m)
         }
         try? context.save()
@@ -175,10 +176,16 @@ struct MilestoneEditSheet: View {
             context.insert(m)
         }
         m.detail = detail.isEmpty ? nil : detail
+        m.syncState = .local
         if achieved {
+            let wasNewlyAchieved = m.happenedAt == nil
             m.happenedAt = happenedAt
             if let profile {
                 m.ageDescription = AgeCalculator.ageDescription(birthday: profile.birthday, at: happenedAt)
+            }
+            if wasNewlyAchieved {
+                context.insert(FeedEvent(kind: .milestoneLit, actorRole: env.config.currentRole.rawValue,
+                                         summary: "点亮了「\(m.title)」"))
             }
         } else {
             m.happenedAt = nil

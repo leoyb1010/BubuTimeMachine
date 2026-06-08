@@ -138,6 +138,7 @@ struct CapsuleUnlockView: View {
                                              salt: capsule.id.uuidString)
                 payload = p
                 capsule.isLocked = false
+                capsule.syncState = .local
                 try? context.save()
             } catch {
                 errorText = (error as? CapsuleCrypto.CryptoError)?.errorDescription ?? "信件打不开了"

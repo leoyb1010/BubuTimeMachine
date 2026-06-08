@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import Observation
+import AVFoundation
 
 // MARK: - 记录此刻 业务模型
 /// @Observable + @MainActor。把选中的媒体落本地并自动分析：
@@ -12,7 +13,11 @@ import Observation
 final class CaptureModel {
     var showQuickCapture = false
     var pickedItems: [PhotosPickerItem] = []
+    var selectedPreviews: [SelectedMediaPreview] = []
+    var isLoadingPreviews = false
     var isSaving = false
+    var saveError: String?
+    var lastSavedSummary: String?
     var note: String = ""
     var mood: Mood?
     var savedFlash = false
@@ -43,10 +48,13 @@ final class CaptureModel {
         note = ""
         mood = nil
         pickedItems = []
+        selectedPreviews = []
         pendingVoice = nil
         detectedTags = []
         detectedLocation = nil
         analyzingHint = nil
+        saveError = nil
+        lastSavedSummary = nil
         showQuickCapture = true
     }
 
@@ -103,6 +111,7 @@ final class CaptureModel {
 
         guard savedCount > 0 || !note.isEmpty || pendingVoice != nil else {
             context.delete(entry)
+            saveError = "没有成功导入媒体或文字，请重新选择。"
             return false
         }
 
@@ -115,16 +124,71 @@ final class CaptureModel {
         detectedTags = Array(uniqueTags)
         detectedLocation = locationName
 
-        do { try context.save() } catch { return false }
+        do { try context.save() } catch {
+            saveError = "保存失败：\(error.localizedDescription)"
+            return false
+        }
+        let event = FeedEvent(kind: .entryCreated, actorRole: role.rawValue,
+                              summary: note.isEmpty ? "记录了布布的一个新瞬间" : "记录了：\(note)",
+                              targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt)
+        context.insert(event)
+        try? context.save()
 
         lastSavedEntryID = entry.id
+        let mediaText = savedCount > 0 ? " · \(savedCount) 个媒体" : ""
+        let voiceText = pendingVoice == nil ? "" : " · 1 段语音"
+        lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
         pickedItems = []
+        selectedPreviews = []
         note = ""
         mood = nil
         pendingVoice = nil
         showQuickCapture = false
         flashSaved()
         return true
+    }
+
+    func updatePreviews() async {
+        let items = pickedItems
+        isLoadingPreviews = !items.isEmpty
+        defer { isLoadingPreviews = false }
+
+        var previews: [SelectedMediaPreview] = []
+        for (index, item) in items.enumerated() {
+            if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
+                let image = await Self.videoPreviewImage(url: movie.url)
+                previews.append(SelectedMediaPreview(index: index, image: image, isVideo: true, label: "视频"))
+                continue
+            }
+            if let data = try? await item.loadTransferable(type: Data.self),
+               let image = UIImage(data: data) {
+                previews.append(SelectedMediaPreview(index: index, image: image, isVideo: false, label: "照片"))
+            } else {
+                previews.append(SelectedMediaPreview(index: index, image: nil, isVideo: false, label: "媒体"))
+            }
+        }
+        selectedPreviews = previews
+    }
+
+    func removePickedItem(at index: Int) {
+        guard pickedItems.indices.contains(index) else { return }
+        pickedItems.remove(at: index)
+        selectedPreviews.removeAll { $0.index == index }
+        selectedPreviews = selectedPreviews.enumerated().map { offset, preview in
+            SelectedMediaPreview(index: offset, image: preview.image, isVideo: preview.isVideo, label: preview.label)
+        }
+    }
+
+    private static func videoPreviewImage(url: URL) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            if let cg = try? generator.copyCGImage(at: .zero, actualTime: nil) {
+                return UIImage(cgImage: cg)
+            }
+            return nil
+        }.value
     }
 
     /// 单个 PhotosPickerItem → 落沙盒 + 缩略图 + 端侧分析。
@@ -161,6 +225,15 @@ final class CaptureModel {
             savedFlash = false
         }
     }
+}
+
+// MARK: - 选择媒体预览
+struct SelectedMediaPreview: Identifiable, Sendable {
+    let id = UUID()
+    let index: Int
+    let image: UIImage?
+    let isVideo: Bool
+    let label: String
 }
 
 // MARK: - 视频可传输类型

@@ -65,23 +65,119 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     func fetchEntries(since: Date?) async throws -> [EntryDTO] {
         let token = try await ensureToken()
-        var comps = URLComponents(
-            url: baseURL.appendingPathComponent("api/collections/entries/records"),
-            resolvingAgainstBaseURL: false)!
-        var query = [URLQueryItem(name: "perPage", value: "500"),
-                     URLQueryItem(name: "sort", value: "-happenedAt")]
-        if let since {
-            let iso = ISO8601DateFormatter().string(from: since)
-            query.append(URLQueryItem(name: "filter", value: "(updated>'\(iso)')"))
-        }
-        comps.queryItems = query
-        var req = URLRequest(url: comps.url!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data)
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let items = obj["items"] as? [[String: Any]] else { return [] }
+        let items = try await fetchRecords(collection: "entries", since: since, token: token, sort: "-happenedAt")
         return items.map { Self.entryDTO(from: $0, fallback: nil) }
+    }
+
+    func fetchMedia(since: Date?) async throws -> [MediaDTO] {
+        let token = try await ensureToken()
+        let items = try await fetchRecords(collection: "media", since: since, token: token, sort: "-created")
+        return items.map { self.mediaDTO(from: $0) }
+    }
+
+    func upsertMilestone(_ dto: MilestoneDTO) async throws -> MilestoneDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "milestones", localId: dto.localId, body: Self.milestoneBody(dto), token: token)
+        return Self.milestoneDTO(from: obj, fallback: dto)
+    }
+
+    func fetchMilestones(since: Date?) async throws -> [MilestoneDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "milestones", since: since, token: token).map { Self.milestoneDTO(from: $0, fallback: nil) }
+    }
+
+    func upsertFirstTime(_ dto: FirstTimeDTO) async throws -> FirstTimeDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "firsttimes", localId: dto.localId, body: Self.firstTimeBody(dto), token: token)
+        return Self.firstTimeDTO(from: obj, fallback: dto)
+    }
+
+    func fetchFirstTimes(since: Date?) async throws -> [FirstTimeDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "firsttimes", since: since, token: token).map { Self.firstTimeDTO(from: $0, fallback: nil) }
+    }
+
+    func upsertFamilyMember(_ dto: FamilyMemberDTO) async throws -> FamilyMemberDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "members", localId: dto.localId, body: Self.memberBody(dto), token: token)
+        return Self.memberDTO(from: obj, fallback: dto)
+    }
+
+    func fetchFamilyMembers(since: Date?) async throws -> [FamilyMemberDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "members", since: since, token: token).map { Self.memberDTO(from: $0, fallback: nil) }
+    }
+
+    func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "childprofile", localId: dto.localId, body: Self.childProfileBody(dto), token: token)
+        return Self.childProfileDTO(from: obj, fallback: dto)
+    }
+
+    func fetchChildProfiles(since: Date?) async throws -> [ChildProfileDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "childprofile", since: since, token: token).map { Self.childProfileDTO(from: $0, fallback: nil) }
+    }
+
+    func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "healthrecords", localId: dto.localId, body: Self.healthBody(dto), token: token)
+        return Self.healthDTO(from: obj, fallback: dto)
+    }
+
+    func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "healthrecords", since: since, token: token).map { Self.healthDTO(from: $0, fallback: nil) }
+    }
+
+    func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "comments", localId: dto.localId, body: Self.commentBody(dto), token: token)
+        return self.commentDTO(from: obj, fallback: dto)
+    }
+
+    func fetchComments(since: Date?) async throws -> [CommentDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "comments", since: since, token: token).map { self.commentDTO(from: $0, fallback: nil) }
+    }
+
+    func uploadCommentVoice(commentId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        uploadGenericFile(collection: "comments", localId: commentId.uuidString,
+                          fields: ["entryLocalId": entryLocalId.uuidString],
+                          fileField: "voiceFile", fileURL: fileURL, fileName: fileName)
+    }
+
+    func upsertVoiceNote(_ dto: VoiceNoteDTO) async throws -> VoiceNoteDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "voicenotes", localId: dto.localId, body: Self.voiceNoteBody(dto), token: token)
+        return self.voiceNoteDTO(from: obj, fallback: dto)
+    }
+
+    func fetchVoiceNotes(since: Date?) async throws -> [VoiceNoteDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "voicenotes", since: since, token: token).map { self.voiceNoteDTO(from: $0, fallback: nil) }
+    }
+
+    func uploadVoiceNote(voiceId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        uploadGenericFile(collection: "voicenotes", localId: voiceId.uuidString,
+                          fields: ["entryLocalId": entryLocalId.uuidString],
+                          fileField: "file", fileURL: fileURL, fileName: fileName)
+    }
+
+    func upsertVoiceMemo(_ dto: VoiceMemoDTO) async throws -> VoiceMemoDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "voicememos", localId: dto.localId, body: Self.voiceMemoBody(dto), token: token)
+        return self.voiceMemoDTO(from: obj, fallback: dto)
+    }
+
+    func fetchVoiceMemos(since: Date?) async throws -> [VoiceMemoDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "voicememos", since: since, token: token).map { self.voiceMemoDTO(from: $0, fallback: nil) }
+    }
+
+    func uploadVoiceMemo(memoId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        uploadGenericFile(collection: "voicememos", localId: memoId.uuidString,
+                          fields: [:], fileField: "file", fileURL: fileURL, fileName: fileName)
     }
 
     // MARK: 媒体上传（multipart + 进度）
@@ -163,6 +259,33 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return try await send(url: url, method: "POST", json: json, token: token)
     }
 
+    private func upsert(collection: String, localId: String, body: [String: Any], token: String) async throws -> [String: Any] {
+        if let existing = try await findRecord(collection: collection, localId: localId, token: token) {
+            return try await patch(collection: collection, id: existing, json: body, token: token)
+        }
+        return try await post(collection: collection, json: body, token: token)
+    }
+
+    private func fetchRecords(collection: String, since: Date?, token: String, sort: String = "-updated") async throws -> [[String: Any]] {
+        var comps = URLComponents(
+            url: baseURL.appendingPathComponent("api/collections/\(collection)/records"),
+            resolvingAgainstBaseURL: false)!
+        var query = [URLQueryItem(name: "perPage", value: "500"),
+                     URLQueryItem(name: "sort", value: sort)]
+        if let since {
+            let iso = ISO8601DateFormatter().string(from: since)
+            query.append(URLQueryItem(name: "filter", value: "(updated>'\(iso)')"))
+        }
+        comps.queryItems = query
+        var req = URLRequest(url: comps.url!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try Self.check(resp, data)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = obj["items"] as? [[String: Any]] else { return [] }
+        return items
+    }
+
     private func patch(collection: String, id: String, json: [String: Any], token: String) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent("api/collections/\(collection)/records/\(id)")
         return try await send(url: url, method: "PATCH", json: json, token: token)
@@ -177,6 +300,63 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try Self.check(resp, data)
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    private func uploadGenericFile(collection: String, localId: String, fields: [String: String],
+                                   fileField: String, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let token = try await ensureToken()
+                    let remoteId = try await self.multipartUpload(collection: collection, localId: localId,
+                                                                  fields: fields, fileField: fileField,
+                                                                  fileURL: fileURL, fileName: fileName,
+                                                                  token: token) { progress in
+                        continuation.yield(.progress(progress))
+                    }
+                    let urlStr = self.baseURL
+                        .appendingPathComponent("api/files/\(collection)/\(remoteId)/\(fileName)")
+                        .absoluteString
+                    continuation.yield(.completed(remoteId: remoteId, url: urlStr))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func multipartUpload(collection: String, localId: String, fields: [String: String], fileField: String,
+                                 fileURL: URL, fileName: String, token: String,
+                                 onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
+        let url = baseURL.appendingPathComponent("api/collections/\(collection)/records")
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let fileData = try Data(contentsOf: fileURL)
+        var body = Data()
+        func field(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        field("localId", localId)
+        for (key, value) in fields { field(key, value) }
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        let delegate = UploadProgressDelegate(onProgress: onProgress)
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        let (data, resp) = try await session.upload(for: req, from: body)
+        try Self.check(resp, data)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = obj["id"] as? String else { throw APIError.server(500, "上传响应异常") }
+        return id
     }
 
     private func multipartUpload(_ file: MediaUploadRequest, token: String,
@@ -229,6 +409,8 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             "createdAt": iso.string(from: dto.createdAt),
         ]
         if let v = dto.title { body["title"] = v }
+        if let v = dto.familyId { body["familyId"] = v }
+        if let v = dto.authorUserId { body["authorUserId"] = v }
         if let v = dto.note { body["note"] = v }
         if let v = dto.firstPersonNote { body["firstPersonNote"] = v }
         if let v = dto.locationName { body["locationName"] = v }
@@ -247,6 +429,8 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return EntryDTO(
             id: obj["id"] as? String ?? fallback?.id,
             localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+            familyId: obj["familyId"] as? String ?? fallback?.familyId,
+            authorUserId: obj["authorUserId"] as? String ?? fallback?.authorUserId,
             title: obj["title"] as? String ?? fallback?.title,
             note: obj["note"] as? String ?? fallback?.note,
             firstPersonNote: obj["firstPersonNote"] as? String ?? fallback?.firstPersonNote,
@@ -260,6 +444,204 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             editedAt: date("editedAt") ?? fallback?.editedAt,
             createdAt: date("createdAt") ?? fallback?.createdAt ?? .now
         )
+    }
+
+    private func mediaDTO(from obj: [String: Any]) -> MediaDTO {
+        let iso = ISO8601DateFormatter()
+        let id = obj["id"] as? String
+        let fileName = (obj["file"] as? String) ?? ""
+        let remoteURL = id.flatMap { recordId in
+            fileName.isEmpty ? nil : baseURL.appendingPathComponent("api/files/media/\(recordId)/\(fileName)").absoluteString
+        }
+        return MediaDTO(
+            id: id,
+            localId: obj["localId"] as? String ?? UUID().uuidString,
+            entryLocalId: obj["entryLocalId"] as? String ?? "",
+            mediaType: obj["mediaType"] as? String ?? "photo",
+            remoteURL: remoteURL,
+            durationSeconds: obj["durationSeconds"] as? Double,
+            width: obj["width"] as? Int,
+            height: obj["height"] as? Int,
+            aiTags: obj["aiTags"] as? [String] ?? [],
+            createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? .now
+        )
+    }
+
+    private static func milestoneBody(_ dto: MilestoneDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId, "title": dto.title, "category": dto.category, "emoji": dto.emoji, "isCustom": dto.isCustom]
+        if let v = dto.detail { body["detail"] = v }
+        if let v = dto.happenedAt { body["happenedAt"] = iso.string(from: v) }
+        if let v = dto.ageDescription { body["ageDescription"] = v }
+        return body
+    }
+
+    private static func milestoneDTO(from obj: [String: Any], fallback: MilestoneDTO?) -> MilestoneDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        return MilestoneDTO(id: obj["id"] as? String ?? fallback?.id,
+                            localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                            title: obj["title"] as? String ?? fallback?.title ?? "",
+                            category: obj["category"] as? String ?? fallback?.category ?? "",
+                            emoji: obj["emoji"] as? String ?? fallback?.emoji ?? "🌟",
+                            detail: obj["detail"] as? String ?? fallback?.detail,
+                            happenedAt: date("happenedAt") ?? fallback?.happenedAt,
+                            ageDescription: obj["ageDescription"] as? String ?? fallback?.ageDescription,
+                            isCustom: obj["isCustom"] as? Bool ?? fallback?.isCustom ?? false,
+                            createdAt: date("created") ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func firstTimeBody(_ dto: FirstTimeDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId, "what": dto.what, "happenedAt": iso.string(from: dto.happenedAt), "detectedByAI": dto.detectedByAI, "confirmedByParent": dto.confirmedByParent]
+        if let v = dto.entryLocalId { body["entryLocalId"] = v }
+        return body
+    }
+
+    private static func firstTimeDTO(from obj: [String: Any], fallback: FirstTimeDTO?) -> FirstTimeDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        return FirstTimeDTO(id: obj["id"] as? String ?? fallback?.id,
+                            localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                            what: obj["what"] as? String ?? fallback?.what ?? "",
+                            happenedAt: date("happenedAt") ?? fallback?.happenedAt ?? .now,
+                            detectedByAI: obj["detectedByAI"] as? Bool ?? fallback?.detectedByAI ?? false,
+                            confirmedByParent: obj["confirmedByParent"] as? Bool ?? fallback?.confirmedByParent ?? false,
+                            entryLocalId: obj["entryLocalId"] as? String ?? fallback?.entryLocalId,
+                            createdAt: date("created") ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func memberBody(_ dto: FamilyMemberDTO) -> [String: Any] {
+        ["localId": dto.localId, "name": dto.name, "relation": dto.relation, "avatarEmoji": dto.avatarEmoji, "themeColorHex": dto.themeColorHex, "isPrimary": dto.isPrimary]
+    }
+
+    private static func memberDTO(from obj: [String: Any], fallback: FamilyMemberDTO?) -> FamilyMemberDTO {
+        FamilyMemberDTO(id: obj["id"] as? String ?? fallback?.id,
+                        localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                        name: obj["name"] as? String ?? fallback?.name ?? "",
+                        relation: obj["relation"] as? String ?? fallback?.relation ?? "",
+                        avatarEmoji: obj["avatarEmoji"] as? String ?? fallback?.avatarEmoji ?? "🙂",
+                        themeColorHex: obj["themeColorHex"] as? String ?? fallback?.themeColorHex ?? "#F28C9E",
+                        isPrimary: obj["isPrimary"] as? Bool ?? fallback?.isPrimary ?? false,
+                        createdAt: fallback?.createdAt ?? .now)
+    }
+
+    private static func childProfileBody(_ dto: ChildProfileDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId, "name": dto.name, "birthday": iso.string(from: dto.birthday)]
+        if let v = dto.gender { body["gender"] = v }
+        if let v = dto.birthPlace { body["birthPlace"] = v }
+        return body
+    }
+
+    private static func childProfileDTO(from obj: [String: Any], fallback: ChildProfileDTO?) -> ChildProfileDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        return ChildProfileDTO(id: obj["id"] as? String ?? fallback?.id,
+                               localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                               name: obj["name"] as? String ?? fallback?.name ?? "布布",
+                               birthday: date("birthday") ?? fallback?.birthday ?? .now,
+                               gender: obj["gender"] as? String ?? fallback?.gender,
+                               birthPlace: obj["birthPlace"] as? String ?? fallback?.birthPlace,
+                               createdAt: fallback?.createdAt ?? .now)
+    }
+
+    private static func healthBody(_ dto: HealthRecordDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId, "kind": dto.kind, "title": dto.title, "recordedAt": iso.string(from: dto.recordedAt)]
+        if let v = dto.detail { body["detail"] = v }
+        if let v = dto.amountText { body["amountText"] = v }
+        if let v = dto.reaction { body["reaction"] = v }
+        return body
+    }
+
+    private static func healthDTO(from obj: [String: Any], fallback: HealthRecordDTO?) -> HealthRecordDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        return HealthRecordDTO(id: obj["id"] as? String ?? fallback?.id,
+                               localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                               kind: obj["kind"] as? String ?? fallback?.kind ?? "meal",
+                               title: obj["title"] as? String ?? fallback?.title ?? "",
+                               detail: obj["detail"] as? String ?? fallback?.detail,
+                               recordedAt: date("recordedAt") ?? fallback?.recordedAt ?? .now,
+                               amountText: obj["amountText"] as? String ?? fallback?.amountText,
+                               reaction: obj["reaction"] as? String ?? fallback?.reaction,
+                               createdAt: date("created") ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func commentBody(_ dto: CommentDTO) -> [String: Any] {
+        var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "voiceDuration": dto.voiceDuration, "voiceWaveform": dto.voiceWaveform]
+        if let v = dto.text { body["text"] = v }
+        return body
+    }
+
+    private func commentDTO(from obj: [String: Any], fallback: CommentDTO?) -> CommentDTO {
+        let iso = ISO8601DateFormatter()
+        let id = obj["id"] as? String
+        let fileName = (obj["voiceFile"] as? String) ?? ""
+        let remoteURL = remoteFileURL(collection: "comments", recordId: id, fileName: fileName)
+        return CommentDTO(id: id ?? fallback?.id,
+                          localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                          entryLocalId: obj["entryLocalId"] as? String ?? fallback?.entryLocalId ?? "",
+                          authorRole: obj["authorRole"] as? String ?? fallback?.authorRole ?? "",
+                          text: obj["text"] as? String ?? fallback?.text,
+                          remoteURL: remoteURL ?? fallback?.remoteURL,
+                          voiceDuration: obj["voiceDuration"] as? Double ?? fallback?.voiceDuration ?? 0,
+                          voiceWaveform: obj["voiceWaveform"] as? [Float] ?? fallback?.voiceWaveform ?? [],
+                          createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func voiceNoteBody(_ dto: VoiceNoteDTO) -> [String: Any] {
+        var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "durationSeconds": dto.durationSeconds, "waveform": dto.waveform]
+        if let v = dto.transcript { body["transcript"] = v }
+        return body
+    }
+
+    private func voiceNoteDTO(from obj: [String: Any], fallback: VoiceNoteDTO?) -> VoiceNoteDTO {
+        let iso = ISO8601DateFormatter()
+        let id = obj["id"] as? String
+        let fileName = (obj["file"] as? String) ?? ""
+        let remoteURL = remoteFileURL(collection: "voicenotes", recordId: id, fileName: fileName)
+        return VoiceNoteDTO(id: id ?? fallback?.id,
+                            localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                            entryLocalId: obj["entryLocalId"] as? String ?? fallback?.entryLocalId ?? "",
+                            authorRole: obj["authorRole"] as? String ?? fallback?.authorRole ?? "",
+                            remoteURL: remoteURL ?? fallback?.remoteURL,
+                            durationSeconds: obj["durationSeconds"] as? Double ?? fallback?.durationSeconds ?? 0,
+                            transcript: obj["transcript"] as? String ?? fallback?.transcript,
+                            waveform: obj["waveform"] as? [Float] ?? fallback?.waveform ?? [],
+                            createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func voiceMemoBody(_ dto: VoiceMemoDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId, "kind": dto.kind, "recordedAt": iso.string(from: dto.recordedAt)]
+        if let v = dto.transcript { body["transcript"] = v }
+        if let v = dto.ageYears { body["ageYears"] = v }
+        if let v = dto.durationSeconds { body["durationSeconds"] = v }
+        return body
+    }
+
+    private func voiceMemoDTO(from obj: [String: Any], fallback: VoiceMemoDTO?) -> VoiceMemoDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } }
+        let id = obj["id"] as? String
+        let fileName = (obj["file"] as? String) ?? ""
+        let remoteURL = remoteFileURL(collection: "voicememos", recordId: id, fileName: fileName)
+        return VoiceMemoDTO(id: id ?? fallback?.id,
+                            localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                            kind: obj["kind"] as? String ?? fallback?.kind ?? "childVoice",
+                            remoteURL: remoteURL ?? fallback?.remoteURL,
+                            transcript: obj["transcript"] as? String ?? fallback?.transcript,
+                            ageYears: obj["ageYears"] as? Int ?? fallback?.ageYears,
+                            recordedAt: date("recordedAt") ?? fallback?.recordedAt ?? .now,
+                            durationSeconds: obj["durationSeconds"] as? Double ?? fallback?.durationSeconds,
+                            createdAt: date("created") ?? fallback?.createdAt ?? .now)
+    }
+
+    private func remoteFileURL(collection: String, recordId: String?, fileName: String) -> String? {
+        guard let recordId, !fileName.isEmpty else { return nil }
+        return baseURL.appendingPathComponent("api/files/\(collection)/\(recordId)/\(fileName)").absoluteString
     }
 
     /// 兼容 PocketBase 的 "2024-01-01 12:00:00.000Z" 格式。

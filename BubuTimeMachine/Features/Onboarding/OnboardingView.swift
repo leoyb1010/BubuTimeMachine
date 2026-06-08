@@ -61,8 +61,11 @@ struct OnboardingView: View {
 
     private var welcomeStep: some View {
         VStack(spacing: 24) {
-            Text("🌷")
-                .font(.system(size: 88))
+            Image("BubuLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 112, height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .shadow(color: theme.primary.opacity(0.3), radius: 16, y: 8)
             VStack(spacing: 12) {
                 Text("欢迎来到布布时光机")

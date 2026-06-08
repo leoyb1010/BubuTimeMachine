@@ -13,17 +13,35 @@ struct MilestonesHomeView: View {
     @State private var showCustom = false
     @State private var ceremonyFor: Milestone?
     @State private var detailFor: Milestone?
+    @State private var searchText = ""
+    @State private var selectedCategory = "全部"
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
 
-    private var achieved: [Milestone] { milestones.filter(\.isAchieved) }
-    private var pending: [Milestone] { milestones.filter { !$0.isAchieved } }
+    private var achieved: [Milestone] { filteredMilestones.filter(\.isAchieved) }
+    private var allPending: [Milestone] { filteredMilestones.filter { !$0.isAchieved } }
+    private var pending: [Milestone] {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedCategory == "全部" {
+            return Array(allPending.prefix(12))
+        }
+        return allPending
+    }
+    private var filteredMilestones: [Milestone] {
+        milestones.filter { milestone in
+            let categoryOK = selectedCategory == "全部" || milestone.category == selectedCategory
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let searchOK = query.isEmpty || milestone.title.localizedCaseInsensitiveContains(query) || milestone.category.localizedCaseInsensitiveContains(query)
+            return categoryOK && searchOK
+        }
+    }
+    private var categoryOptions: [String] { ["全部"] + MilestoneTemplate.categories }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 progressHeader
+                filters
                 if !achieved.isEmpty { achievedWall }
                 if !pending.isEmpty { pendingWall }
                 if milestones.isEmpty { emptyState }
@@ -35,8 +53,8 @@ struct MilestonesHomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { showPicker = true } label: { Label("从清单选择", systemImage: "list.bullet") }
                     Button { showCustom = true } label: { Label("自定义里程碑", systemImage: "star.bubble") }
+                    Button { showPicker = true } label: { Label("管理预设清单", systemImage: "list.bullet") }
                 } label: { Image(systemName: "plus.circle.fill") }
             }
         }
@@ -47,6 +65,7 @@ struct MilestonesHomeView: View {
             CeremonyAnimation(title: "🎉 \(milestone.title)",
                               subtitle: profile.map { AgeCalculator.ageDescription(birthday: $0.birthday, at: milestone.happenedAt ?? .now) }) {
                 milestone.ceremonyPlayed = true
+                milestone.syncState = .local
                 try? context.save()
                 ceremonyFor = nil
             }
@@ -79,6 +98,29 @@ struct MilestonesHomeView: View {
         .bubuCardShadow()
     }
 
+    private var filters: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("搜索里程碑，比如 走路、吃饭、睡觉", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(categoryOptions, id: \.self) { category in
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            Text(category)
+                                .font(BubuTheme.Font.caption.weight(.semibold))
+                                .foregroundStyle(selectedCategory == category ? .white : theme)
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(selectedCategory == category ? theme : theme.opacity(0.1), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
     private var achievedWall: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("已点亮", systemImage: "star.fill").font(BubuTheme.Font.headline).foregroundStyle(theme)
@@ -93,7 +135,12 @@ struct MilestonesHomeView: View {
 
     private var pendingWall: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("待点亮", systemImage: "star").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.secondaryText)
+            Label("适龄推荐 · 待点亮", systemImage: "star").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.secondaryText)
+            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedCategory == "全部" {
+                Text("先看最可能发生的 12 个。其它里程碑可以用搜索或分类找到，不把 100 多项都压在眼前。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                 ForEach(pending) { milestone in
                     medallion(milestone, lit: false)

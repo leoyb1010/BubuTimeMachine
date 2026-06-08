@@ -16,9 +16,9 @@ struct RootTabView: View {
             .tag(0)
 
             NavigationStack {
-                TimelineView()
+                FamilyFeedView()
             }
-            .tabItem { Label("时光轴", systemImage: "clock.fill") }
+            .tabItem { Label("时光", systemImage: "clock.fill") }
             .tag(1)
 
             NavigationStack {
