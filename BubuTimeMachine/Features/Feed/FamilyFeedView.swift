@@ -100,7 +100,7 @@ struct FamilyFeedView: View {
                         .font(BubuTheme.Font.body)
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                         .lineLimit(3)
-                    Text(event.happenedAt.formatted(date: .abbreviated, time: .shortened))
+                    Text(BubuDateFormat.shortDateTime(event.happenedAt))
                         .font(BubuTheme.Font.caption)
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }

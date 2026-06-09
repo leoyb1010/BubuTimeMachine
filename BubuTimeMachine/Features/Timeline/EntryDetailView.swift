@@ -16,6 +16,7 @@ struct EntryDetailView: View {
     @State private var showCommentSheet = false
     @State private var viewingMedia: Media?
     @State private var showDeleteConfirm = false
+    @State private var appendMediaStatus: String?
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -41,6 +42,7 @@ struct EntryDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ageBadge
+                if let appendMediaStatus { mediaStatusRow(appendMediaStatus) }
                 mediaSection
                 appendPhotoButton
                 metaSection
@@ -53,7 +55,7 @@ struct EntryDetailView: View {
             .padding()
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
-        .navigationTitle(entry.happenedAt.formatted(date: .abbreviated, time: .omitted))
+        .navigationTitle(BubuDateFormat.shortDate(entry.happenedAt))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -66,6 +68,7 @@ struct EntryDetailView: View {
                     if editing {
                         markEntryDirty()
                         try? context.save()
+                        env.syncEngine.syncNow()
                     }
                     withAnimation(.smooth) { editing.toggle() }
                 }
@@ -160,6 +163,16 @@ struct EntryDetailView: View {
                     .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             }
         }
+    }
+
+    private func mediaStatusRow(_ text: String) -> some View {
+        Label(text, systemImage: "arrow.triangle.2.circlepath")
+            .font(BubuTheme.Font.caption)
+            .foregroundStyle(theme)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(theme.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
 
     // MARK: 元信息（时间/地点/心情/作者）
@@ -361,10 +374,16 @@ struct EntryDetailView: View {
     // MARK: 操作
 
     private func appendMedia(_ items: [PhotosPickerItem]) async {
+        appendMediaStatus = items.isEmpty ? nil : "正在整理新照片/视频…"
+        defer { appendMediaStatus = nil }
         for item in items {
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self),
-               let fileName = try? env.mediaStore.importFile(from: movie.url, preferredExtension: "mov") {
+               let imported = try? await env.mediaStore.importVideoForSync(from: movie.url) {
+                let fileName = imported.fileName
                 let media = Media(type: .video, localFileName: fileName)
+                if imported.wasCompressed {
+                    media.aiTags = ["已压缩", "视频"]
+                }
                 media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: fileName)
                 media.entry = entry
                 context.insert(media)
@@ -382,6 +401,7 @@ struct EntryDetailView: View {
         appendPick = []
         markEntryDirty()
         try? context.save()
+        env.syncEngine.syncNow()
     }
 
     private func deleteMedia(_ media: Media) {
@@ -389,6 +409,7 @@ struct EntryDetailView: View {
         context.delete(media)
         markEntryDirty()
         try? context.save()
+        env.syncEngine.syncNow()
     }
 
     private func deleteVoice(_ voice: VoiceNote) {
@@ -396,6 +417,7 @@ struct EntryDetailView: View {
         context.delete(voice)
         markEntryDirty()
         try? context.save()
+        env.syncEngine.syncNow()
     }
 
     private func markEntryDirty() {
@@ -411,6 +433,7 @@ struct EntryDetailView: View {
                                  summary: "删除了一条时光轴记录",
                                  targetLocalId: entry.id.uuidString))
         try? context.save()
+        env.syncEngine.syncNow()
         dismiss()
     }
 }

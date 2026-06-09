@@ -55,7 +55,7 @@ struct SettingsView: View {
 
             // 服务器（同步）
             Section {
-                TextField("http://100.x.x.x:8090", text: $config.baseURLString)
+                TextField(ServerConfig.defaultBaseURL, text: $config.baseURLString)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 TextField("家庭账户邮箱", text: $config.accountEmail)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
@@ -70,7 +70,7 @@ struct SettingsView: View {
                         else if let testResult { Text(testResult).foregroundStyle(BubuTheme.Color.secondaryText) }
                     }
                 }
-                .disabled(config.baseURLString.isEmpty || testing)
+                .disabled(!config.isConfigured || testing)
             } header: {
                 Text("家里的服务器（多设备同步）")
             } footer: {
@@ -81,7 +81,7 @@ struct SettingsView: View {
             Section {
                 Toggle("启用真实 AI", isOn: $config.aiEnabled)
                 if config.aiEnabled {
-                    TextField("http://100.x.x.x:8000", text: $config.aiBaseURLString)
+                    TextField(ServerConfig.defaultAIBaseURL, text: $config.aiBaseURLString)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     Button {
                         Task { await testAIConnection() }
@@ -125,7 +125,24 @@ struct SettingsView: View {
                 LabeledContent("当前状态", value: connectionText)
                 LabeledContent("待同步", value: env.syncEngine.pendingCount == 0 ? "没有待同步内容" : "\(env.syncEngine.pendingCount) 项")
                 if let last = env.syncEngine.lastSyncedAt {
-                    LabeledContent("上次同步", value: last.formatted(date: .omitted, time: .shortened))
+                    LabeledContent("上次同步", value: BubuDateFormat.shortTime(last))
+                }
+                if let progress = env.syncEngine.syncProgress,
+                   env.syncEngine.pendingCount > 0 || env.syncEngine.connectionState == .connecting {
+                    ProgressView(value: progress) {
+                        Text(env.syncEngine.currentSyncLabel ?? "正在同步")
+                    }
+                    .tint(env.theme.theme.primary)
+                }
+                if let notice = env.syncEngine.lastLargeFileNotice {
+                    Text(notice)
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(env.theme.theme.primary)
+                }
+                if let failure = env.syncEngine.lastFailureReason {
+                    Text(failure)
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.danger)
                 }
                 Button("立即同步") { env.syncEngine.syncNow() }
                     .disabled(!config.isConfigured)
@@ -148,10 +165,24 @@ struct SettingsView: View {
         testing = true
         testResult = nil
         defer { testing = false }
+        guard env.config.isConfigured else {
+            testResult = "先填账号密码"
+            return
+        }
         // 保存配置 → 重建客户端 → ping
         env.reloadServices(context: context)
         let ok = (try? await env.apiClient.ping()) ?? false
-        testResult = ok ? "通啦 ✓" : "连不上"
+        guard ok else {
+            testResult = "连不上"
+            return
+        }
+        do {
+            _ = try await env.apiClient.authenticate(role: env.config.currentRole.rawValue)
+            testResult = "账号可用 ✓"
+            env.syncEngine.syncNow()
+        } catch {
+            testResult = "账号不对"
+        }
     }
 
     private func testAIConnection() async {

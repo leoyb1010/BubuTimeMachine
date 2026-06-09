@@ -56,6 +56,7 @@ struct MilestonesHomeView: View {
                     Button { showCustom = true } label: { Label("自定义里程碑", systemImage: "star.bubble") }
                     Button { showPicker = true } label: { Label("管理预设清单", systemImage: "list.bullet") }
                 } label: { Image(systemName: "plus.circle.fill") }
+                .accessibilityLabel("添加里程碑")
             }
         }
         .sheet(isPresented: $showPicker) { MilestonePickerSheet() }

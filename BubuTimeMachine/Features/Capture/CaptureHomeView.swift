@@ -51,6 +51,8 @@ struct CaptureHomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
+                    .accessibilityLabel("设置")
+                    .bubuGlassButton()
             }
         }
         .onAppear {
@@ -60,7 +62,10 @@ struct CaptureHomeView: View {
             }
         }
         .onChange(of: model?.lastSavedEntryID) { _, newID in
-            if let id = newID { Task { await detectFirstTime(entryID: id) } }
+            if let id = newID {
+                env.syncEngine.syncNow()
+                Task { await detectFirstTime(entryID: id) }
+            }
         }
         .alert("这是布布的第一次吗？", isPresented: Binding(
             get: { firstTimeSuggestion != nil },
@@ -156,26 +161,49 @@ struct CaptureHomeView: View {
     // MARK: 保存健康度
 
     private var saveHealthStrip: some View {
-        HStack(spacing: 10) {
-            Image(systemName: env.syncEngine.pendingCount == 0 ? "checkmark.icloud.fill" : "arrow.triangle.2.circlepath.circle.fill")
-                .foregroundStyle(env.syncEngine.pendingCount == 0 ? BubuTheme.Color.success : theme.primary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("本地已保存")
-                    .font(BubuTheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text(syncSummary)
-                    .font(.system(size: 11))
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: env.syncEngine.pendingCount == 0 ? "checkmark.icloud.fill" : "arrow.triangle.2.circlepath.circle.fill")
+                    .foregroundStyle(env.syncEngine.pendingCount == 0 ? BubuTheme.Color.success : theme.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("本地已保存")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text(syncSummary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                Spacer()
+                NavigationLink { SettingsView() } label: {
+                    Text("查看")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(theme.primary)
+                }
             }
-            Spacer()
-            NavigationLink { SettingsView() } label: {
-                Text("查看")
-                    .font(BubuTheme.Font.caption.weight(.semibold))
+
+            if let progress = env.syncEngine.syncProgress,
+               env.syncEngine.pendingCount > 0 || env.syncEngine.connectionState == .connecting {
+                ProgressView(value: progress)
+                    .tint(theme.primary)
+                if let label = env.syncEngine.currentSyncLabel {
+                    Text(label)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+            }
+            if let notice = env.syncEngine.lastLargeFileNotice {
+                Text(notice)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(theme.primary)
+            } else if let failure = env.syncEngine.lastFailureReason {
+                Text(failure)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.danger)
             }
         }
         .padding(12)
-        .background(BubuTheme.Color.card.opacity(0.82), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.58), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme.primary)
     }
 
     private var syncSummary: String {
@@ -211,7 +239,8 @@ struct CaptureHomeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(BubuTheme.Color.card.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary)
         .bubuCardShadow()
     }
 
@@ -306,7 +335,8 @@ struct CaptureHomeView: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding()
-            .background(BubuTheme.Color.card.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
             .bubuCardShadow()
         }
         .buttonStyle(.plain)
@@ -340,10 +370,11 @@ struct CaptureHomeView: View {
                 .padding(.vertical, 18)
                 .padding(.leading, 20)
                 .padding(.trailing, 18)
-                .background(BubuTheme.Color.card.opacity(0.92), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .background(BubuTheme.Color.card.opacity(0.66), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .bubuGlassSurface(cornerRadius: 30, tint: theme.primary, interactive: true)
                 .overlay(alignment: .leading) {
                     BubuSpeechTail()
-                        .fill(BubuTheme.Color.card.opacity(0.92))
+                        .fill(BubuTheme.Color.card.opacity(0.66))
                         .frame(width: 18, height: 26)
                         .offset(x: -10)
                 }

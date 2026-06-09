@@ -42,6 +42,12 @@ final class MockAPIClient: APIClient {
     func upsertVoiceMemo(_ dto: VoiceMemoDTO) async throws -> VoiceMemoDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchVoiceMemos(since: Date?) async throws -> [VoiceMemoDTO] { [] }
     func uploadVoiceMemo(memoId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> { mockUpload(id: memoId, fileName: fileName) }
+    func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
+    func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO] { [] }
+    func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        mockUpload(id: capsuleId, fileName: fileName)
+    }
+    func downloadFile(from remoteURL: String) async throws -> Data { Data() }
 
     private func mockUpload(id: UUID, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
         AsyncThrowingStream { continuation in

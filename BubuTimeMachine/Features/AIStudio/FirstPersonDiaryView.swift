@@ -13,6 +13,7 @@ struct FirstPersonDiaryView: View {
     @State private var generating = false
     @State private var output = ""
     @State private var displayed = ""
+    @State private var errorText: String?
 
     private var theme: Color { env.theme.theme.primary }
     private var candidates: [Entry] { entries.filter { ($0.note?.isEmpty == false) } }
@@ -78,12 +79,12 @@ struct FirstPersonDiaryView: View {
     private func entryChip(_ entry: Entry) -> some View {
         let isSel = selected?.id == entry.id
         return Button {
-            withAnimation { selected = entry; output = ""; displayed = "" }
+            withAnimation { selected = entry; output = ""; displayed = ""; errorText = nil }
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 entryAvatar(entry, size: 42)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(entry.happenedAt.formatted(date: .abbreviated, time: .omitted))
+                    Text(BubuDateFormat.shortDate(entry.happenedAt))
                         .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
                     Text(entry.note ?? "")
                         .font(BubuTheme.Font.caption)
@@ -136,6 +137,15 @@ struct FirstPersonDiaryView: View {
 
             if generating && displayed.isEmpty {
                 thinkingBubble
+            }
+
+            if let errorText {
+                Text(errorText)
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.danger)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             }
 
             if !displayed.isEmpty, let selected {
@@ -196,11 +206,35 @@ struct FirstPersonDiaryView: View {
         guard let entry = selected else { return }
         generating = true
         displayed = ""
+        errorText = nil
         defer { generating = false }
-        let text = (try? await env.aiService.rewriteFirstPerson(
-            note: entry.note ?? "", childName: env.config.childName)) ?? ""
-        output = text
-        await typewriter(text)
+        let note = entry.note ?? ""
+        if let sparse = sparseRewrite(for: note) {
+            output = sparse
+            await typewriter(sparse)
+            return
+        }
+        do {
+            let text = try await env.aiService.rewriteFirstPerson(
+                note: note, childName: env.config.childName)
+            output = text
+            await typewriter(text)
+        } catch {
+            output = ""
+            errorText = "AI 暂时没想好，稍后再试一次。"
+        }
+    }
+
+    private func sparseRewrite(for note: String) -> String? {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let compact = trimmed.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        let laughingScalars = CharacterSet(charactersIn: "哈呵嘿嘻hHaAlLoO~～!！.。")
+        let isMostlyLaughing = compact.unicodeScalars.allSatisfy { laughingScalars.contains($0) }
+        if compact.count <= 8 || isMostlyLaughing {
+            return "这一刻小小的、软软的，我把它收进心里，留给长大的自己慢慢看。"
+        }
+        return nil
     }
 
     /// 打字机动效逐字显示。

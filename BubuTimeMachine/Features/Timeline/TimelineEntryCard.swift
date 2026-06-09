@@ -38,7 +38,7 @@ struct TimelineEntryCard: View {
                 if let mood = entry.mood {
                     Text(mood.emoji).font(.system(size: 18))
                 }
-                Text(entry.happenedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(BubuDateFormat.shortDateTime(entry.happenedAt))
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)

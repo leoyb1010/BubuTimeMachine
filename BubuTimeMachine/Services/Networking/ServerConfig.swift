@@ -6,7 +6,7 @@ import Observation
 /// App 启动读取，决定使用 Mock 还是真实 PocketBaseClient。
 @Observable
 final class ServerConfig {
-    /// 服务器基础地址，例如 Tailscale 内网地址 http://100.x.x.x:8090
+    /// 服务器基础地址，例如默认 Cloudflare 公网地址。
     var baseURLString: String {
         didSet { UserDefaults.standard.set(baseURLString, forKey: Self.baseURLKey) }
     }
@@ -37,7 +37,7 @@ final class ServerConfig {
         }
     }
 
-    /// AI 服务（FastAPI）地址，例如 http://100.x.x.x:8000
+    /// AI 服务（FastAPI）地址，例如默认 Cloudflare 公网地址。
     var aiBaseURLString: String {
         didSet { UserDefaults.standard.set(aiBaseURLString, forKey: Self.aiURLKey) }
     }
@@ -60,8 +60,13 @@ final class ServerConfig {
         return URL(string: aiBaseURLString)
     }
 
+    var hasServerCredentials: Bool {
+        !accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !accountPassword.isEmpty
+    }
+
     /// 是否已配置真实服务器；未配置时全程走 Mock，仍可离线使用。
-    var isConfigured: Bool { baseURL != nil && !accountEmail.isEmpty }
+    var isConfigured: Bool { baseURL != nil && hasServerCredentials }
 
     /// 是否可用真实 AI。
     var isAIConfigured: Bool { aiEnabled && aiBaseURL != nil }

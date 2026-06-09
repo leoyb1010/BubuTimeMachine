@@ -15,12 +15,26 @@ final class SyncEngine {
     private(set) var connectionState: ConnectionState = .offline
     private(set) var lastSyncedAt: Date?
     private(set) var pendingCount: Int = 0
+    private(set) var totalPendingAtStart: Int = 0
+    private(set) var processedThisRun: Int = 0
+    private(set) var currentSyncLabel: String?
+    private(set) var currentUploadProgress: Double?
+    private(set) var lastFailureReason: String?
+    private(set) var lastLargeFileNotice: String?
+
+    var syncProgress: Double? {
+        guard totalPendingAtStart > 0 else { return nil }
+        let uploadFraction = currentUploadProgress ?? 0
+        return min(1, (Double(processedThisRun) + uploadFraction) / Double(totalPendingAtStart))
+    }
 
     private var apiClient: APIClient
     private let config: ServerConfig
     private let mediaStore: MediaStore
     private var modelContext: ModelContext?
     private var realtimeTask: Task<Void, Never>?
+    private var syncTask: Task<Void, Never>?
+    private var needsAnotherSync = false
     private var pollTimer: Timer?
 
     init(apiClient: APIClient, config: ServerConfig, mediaStore: MediaStore) {
@@ -33,40 +47,95 @@ final class SyncEngine {
     func setClient(_ client: APIClient) {
         realtimeTask?.cancel()
         realtimeTask = nil
+        syncTask?.cancel()
+        syncTask = nil
+        pollTimer?.invalidate()
+        pollTimer = nil
         self.apiClient = client
     }
     /// 由 App 注入主上下文（同步需要读写 SwiftData）。
     func attach(context: ModelContext) {
         self.modelContext = context
+        refreshPendingCount()
     }
 
     /// 启动同步层：已配置则连接 + 首次全量推拉 + 起轮询；否则保持离线。
     func start() {
         guard config.isConfigured else {
             connectionState = .offline
+            pollTimer?.invalidate()
+            pollTimer = nil
+            refreshPendingCount()
             return
         }
-        connectionState = .connecting
-        Task { await connectAndSync() }
+        startPolling()
+        scheduleSync()
     }
 
     /// 手动触发一次同步（设置页/下拉刷新可调）。
     func syncNow() {
-        guard config.isConfigured else { return }
-        Task { await pushLocal(); await pullRemote() }
+        guard config.isConfigured else {
+            connectionState = .offline
+            refreshPendingCount()
+            return
+        }
+        scheduleSync()
     }
 
     // MARK: - 连接
 
+    private func startPolling() {
+        guard pollTimer == nil else { return }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 18, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.config.isConfigured else { return }
+                self.scheduleSync()
+            }
+        }
+    }
+
+    private func scheduleSync() {
+        guard syncTask == nil else {
+            needsAnotherSync = true
+            return
+        }
+        connectionState = .connecting
+        syncTask = Task { [weak self] in
+            guard let self else { return }
+            await self.connectAndSync()
+            self.syncTask = nil
+            if self.needsAnotherSync {
+                self.needsAnotherSync = false
+                self.scheduleSync()
+            }
+        }
+    }
+
     private func connectAndSync() async {
+        beginSyncRun()
         let ok = (try? await apiClient.ping()) ?? false
-        guard ok else { connectionState = .offline; return }
-        // 鉴权
-        _ = try? await apiClient.authenticate(role: config.currentRole.rawValue)
+        guard ok else {
+            connectionState = .offline
+            currentSyncLabel = nil
+            recordFailure(APIError.network("连不上家里的服务器"), item: "连接")
+            refreshPendingCount()
+            return
+        }
+        do {
+            _ = try await apiClient.authenticate(role: config.currentRole.rawValue)
+        } catch {
+            connectionState = .offline
+            currentSyncLabel = nil
+            recordFailure(error, item: "账号")
+            refreshPendingCount()
+            return
+        }
         connectionState = .online
 
         await pushLocal()
         await pullRemote()
+        currentSyncLabel = nil
+        currentUploadProgress = nil
         startRealtime()
     }
 
@@ -96,129 +165,335 @@ final class SyncEngine {
         guard let context = modelContext else { return }
         // 取所有未同步（local/failed）的 Entry
         let descriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" })
+            predicate: #Predicate {
+                $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
+            })
         guard let locals = try? context.fetch(descriptor) else { return }
-        pendingCount = locals.count
+        refreshPendingCount()
 
         for entry in locals {
+            beginItem("同步记录")
             entry.syncState = .uploading
+            saveAndRefresh(context)
             let dto = Self.makeDTO(entry)
             do {
                 let saved = try await apiClient.createEntry(dto)
                 entry.remoteId = saved.id
-                // 上传该 Entry 的媒体
-                await pushMedia(of: entry)
                 entry.syncState = .synced
             } catch {
                 entry.syncState = .failed
+                recordFailure(error, item: "记录")
             }
+            finishItem()
+            saveAndRefresh(context)
         }
+        await pushUnsyncedMedia(context)
         await pushLocalJSONObjects(context)
+        await pushTimeCapsules(context)
+        saveAndRefresh(context)
+    }
+
+    private func saveAndRefresh(_ context: ModelContext) {
         try? context.save()
-        pendingCount = 0
-        lastSyncedAt = .now
+        refreshPendingCount()
+    }
+
+    private func beginSyncRun() {
+        refreshPendingCount()
+        totalPendingAtStart = pendingCount
+        processedThisRun = 0
+        currentUploadProgress = nil
+        lastFailureReason = nil
+        lastLargeFileNotice = nil
+        currentSyncLabel = pendingCount > 0 ? "准备同步 \(pendingCount) 项" : "检查服务器"
+    }
+
+    private func beginItem(_ label: String) {
+        currentSyncLabel = label
+        currentUploadProgress = nil
+    }
+
+    private func finishItem() {
+        processedThisRun += 1
+        currentUploadProgress = nil
+    }
+
+    private func recordFailure(_ error: Error, item: String) {
+        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        lastFailureReason = "\(item)：\(message)"
+    }
+
+    private func refreshPendingCount() {
+        guard let context = modelContext else {
+            pendingCount = 0
+            return
+        }
+        pendingCount =
+            countPending(Entry.self, in: context) +
+            countPending(Media.self, in: context) +
+            countPending(Milestone.self, in: context) +
+            countPending(FirstTime.self, in: context) +
+            countPending(FamilyMember.self, in: context) +
+            countPending(ChildProfile.self, in: context) +
+            countPending(HealthRecord.self, in: context) +
+            countPending(Comment.self, in: context) +
+            countPending(VoiceNote.self, in: context) +
+            countPending(VoiceMemo.self, in: context) +
+            countPending(TimeCapsule.self, in: context)
+    }
+
+    private func countPending<T: PersistentModel>(_ type: T.Type, in context: ModelContext) -> Int {
+        let descriptor = FetchDescriptor<T>()
+        guard let items = try? context.fetch(descriptor) else { return 0 }
+        return items.reduce(0) { count, item in
+            count + (Self.isPending(item) ? 1 : 0)
+        }
+    }
+
+    private static func isPending<T: PersistentModel>(_ item: T) -> Bool {
+        switch item {
+        case let item as Entry:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as Media:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as Milestone:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as FirstTime:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as FamilyMember:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as ChildProfile:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as HealthRecord:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as Comment:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as VoiceNote:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as VoiceMemo:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        case let item as TimeCapsule:
+            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
+        default:
+            return false
+        }
     }
 
     private func pushLocalJSONObjects(_ context: ModelContext) async {
-        let localMilestones = (try? context.fetch(FetchDescriptor<Milestone>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let localMilestones = (try? context.fetch(FetchDescriptor<Milestone>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localMilestones {
-            do { let saved = try await apiClient.upsertMilestone(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed }
+            beginItem("同步里程碑")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertMilestone(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "里程碑") }
+            finishItem()
+            saveAndRefresh(context)
         }
-        let localFirstTimes = (try? context.fetch(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let localFirstTimes = (try? context.fetch(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localFirstTimes {
-            do { let saved = try await apiClient.upsertFirstTime(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed }
+            beginItem("同步第一次")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertFirstTime(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "第一次") }
+            finishItem()
+            saveAndRefresh(context)
         }
-        let localMembers = (try? context.fetch(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let localMembers = (try? context.fetch(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localMembers {
-            do { let saved = try await apiClient.upsertFamilyMember(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed }
+            beginItem("同步家庭成员")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertFamilyMember(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "家庭成员") }
+            finishItem()
+            saveAndRefresh(context)
         }
-        let localProfiles = (try? context.fetch(FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let localProfiles = (try? context.fetch(FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localProfiles {
-            do { let saved = try await apiClient.upsertChildProfile(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed }
+            beginItem("同步布布档案")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertChildProfile(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "布布档案") }
+            finishItem()
+            saveAndRefresh(context)
         }
-        let localHealth = (try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let localHealth = (try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localHealth {
-            do { let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed }
+            beginItem("同步健康记录")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "健康记录") }
+            finishItem()
+            saveAndRefresh(context)
         }
         await pushLocalFileObjects(context)
     }
 
     private func pushLocalFileObjects(_ context: ModelContext) async {
-        let comments = (try? context.fetch(FetchDescriptor<Comment>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let comments = (try? context.fetch(FetchDescriptor<Comment>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for comment in comments {
+            beginItem("同步家人补充")
             do {
+                comment.syncState = .uploading
+                saveAndRefresh(context)
                 var saved = try await apiClient.upsertComment(Self.makeDTO(comment))
                 if let fileName = comment.voiceFileName, let entryId = comment.entry?.id {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
                         for try await event in apiClient.uploadCommentVoice(commentId: comment.id, entryLocalId: entryId, fileURL: url, fileName: fileName) {
-                            if case .completed(let remoteId, let remoteURL) = event { saved.id = remoteId; comment.remoteURL = remoteURL }
+                            switch event {
+                            case .progress(let p): currentUploadProgress = p
+                            case .completed(let remoteId, let remoteURL): saved.id = remoteId; comment.remoteURL = remoteURL
+                            }
                         }
                     }
                 }
                 comment.remoteId = saved.id; comment.syncState = .synced
-            } catch { comment.syncState = .failed }
+            } catch { comment.syncState = .failed; recordFailure(error, item: "家人补充") }
+            finishItem()
+            saveAndRefresh(context)
         }
-        let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for note in notes {
+            beginItem("同步记录语音")
             do {
+                note.syncState = .uploading
+                saveAndRefresh(context)
                 var saved = try await apiClient.upsertVoiceNote(Self.makeDTO(note))
                 if let fileName = note.localFileName, let entryId = note.entry?.id {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
                         for try await event in apiClient.uploadVoiceNote(voiceId: note.id, entryLocalId: entryId, fileURL: url, fileName: fileName) {
-                            if case .completed(let remoteId, let remoteURL) = event { saved.id = remoteId; note.remoteURL = remoteURL }
+                            switch event {
+                            case .progress(let p): currentUploadProgress = p
+                            case .completed(let remoteId, let remoteURL): saved.id = remoteId; note.remoteURL = remoteURL
+                            }
                         }
                     }
                 }
                 note.remoteId = saved.id; note.syncState = .synced
-            } catch { note.syncState = .failed }
+            } catch { note.syncState = .failed; recordFailure(error, item: "记录语音") }
+            finishItem()
+            saveAndRefresh(context)
         }
-        let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" }))) ?? []
+        let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for memo in memos {
+            beginItem("同步成长之声")
             do {
+                memo.syncState = .uploading
+                saveAndRefresh(context)
                 var saved = try await apiClient.upsertVoiceMemo(Self.makeDTO(memo))
                 if let fileName = memo.localFileName {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
                         for try await event in apiClient.uploadVoiceMemo(memoId: memo.id, fileURL: url, fileName: fileName) {
-                            if case .completed(let remoteId, let remoteURL) = event { saved.id = remoteId; memo.remoteURL = remoteURL }
+                            switch event {
+                            case .progress(let p): currentUploadProgress = p
+                            case .completed(let remoteId, let remoteURL): saved.id = remoteId; memo.remoteURL = remoteURL
+                            }
                         }
                     }
                 }
                 memo.remoteId = saved.id; memo.syncState = .synced
-            } catch { memo.syncState = .failed }
+            } catch { memo.syncState = .failed; recordFailure(error, item: "成长之声") }
+            finishItem()
+            saveAndRefresh(context)
         }
     }
 
-    private func pushMedia(of entry: Entry) async {
-        for media in entry.media where media.syncState != .synced {
-            guard let fileName = media.localFileName else { continue }
-            let url = mediaStore.mediaURL(for: fileName)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            media.syncState = .uploading
-            let request = MediaUploadRequest(
-                mediaId: media.id, entryLocalId: entry.id,
-                fileURL: url, type: media.type, fileName: fileName)
+    private func pushUnsyncedMedia(_ context: ModelContext) async {
+        let descriptor = FetchDescriptor<Media>(
+            predicate: #Predicate {
+                $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
+            })
+        let mediaItems = (try? context.fetch(descriptor)) ?? []
+        for media in mediaItems {
+            beginItem(media.type == .video ? "同步视频" : "同步媒体")
+            guard let entry = media.entry else {
+                media.syncState = .failed
+                recordFailure(APIError.network("找不到这条媒体对应的记录"), item: "媒体")
+                finishItem()
+                saveAndRefresh(context)
+                continue
+            }
+            await pushMediaItem(media, entryLocalId: entry.id)
+            finishItem()
+            saveAndRefresh(context)
+        }
+    }
+
+    private func pushMediaItem(_ media: Media, entryLocalId: UUID) async {
+        guard let fileName = media.localFileName else {
+            media.syncState = .failed
+            recordFailure(APIError.network("本地文件名为空"), item: "媒体")
+            return
+        }
+        let url = mediaStore.mediaURL(for: fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            media.syncState = .failed
+            recordFailure(APIError.network("本地文件不见了"), item: "媒体")
+            return
+        }
+        if let bytes = mediaStore.fileSize(forMedia: fileName),
+           bytes > MediaStore.publicUploadSoftLimitBytes {
+            lastLargeFileNotice = "这个\(media.type == .video ? "视频" : "文件")约 \(max(1, bytes / 1_048_576))MB，公网会继续尝试上传，失败后可稍后重试。"
+        }
+        media.syncState = .uploading
+        let request = MediaUploadRequest(
+            mediaId: media.id, entryLocalId: entryLocalId,
+            fileURL: url, type: media.type, fileName: fileName)
+        do {
+            for try await event in apiClient.uploadMedia(request) {
+                switch event {
+                case .progress(let p):
+                    media.uploadProgress = p
+                    currentUploadProgress = p
+                case .completed(let remoteId, let remoteURL):
+                    media.remoteId = remoteId
+                    media.remoteURL = remoteURL
+                    media.uploadProgress = 1
+                    media.syncState = .synced
+                }
+            }
+        } catch {
+            media.syncState = .failed
+            recordFailure(error, item: media.type == .video ? "视频" : "媒体")
+        }
+    }
+
+    private func pushTimeCapsules(_ context: ModelContext) async {
+        let descriptor = FetchDescriptor<TimeCapsule>(
+            predicate: #Predicate {
+                $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
+            })
+        let capsules = (try? context.fetch(descriptor)) ?? []
+        for capsule in capsules {
+            beginItem("同步时间胶囊")
             do {
-                for try await event in apiClient.uploadMedia(request) {
-                    switch event {
-                    case .progress(let p): media.uploadProgress = p
-                    case .completed(let remoteId, let remoteURL):
-                        media.remoteId = remoteId
-                        media.remoteURL = remoteURL
-                        media.uploadProgress = 1
-                        media.syncState = .synced
+                capsule.syncState = .uploading
+                saveAndRefresh(context)
+                var saved = try await apiClient.upsertTimeCapsule(Self.makeDTO(capsule))
+                if let fileName = capsule.encryptedBlobFileName {
+                    let url = mediaStore.mediaURL(for: fileName)
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        for try await event in apiClient.uploadTimeCapsuleBlob(
+                            capsuleId: capsule.id,
+                            dto: Self.makeDTO(capsule),
+                            fileURL: url,
+                            fileName: fileName
+                        ) {
+                            switch event {
+                            case .progress(let p):
+                                currentUploadProgress = p
+                            case .completed(let remoteId, let remoteURL):
+                                saved.id = remoteId
+                                saved.encryptedBlobRemoteURL = remoteURL
+                            }
+                        }
                     }
                 }
+                capsule.remoteId = saved.id
+                capsule.syncState = .synced
             } catch {
-                media.syncState = .failed
+                capsule.syncState = .failed
+                recordFailure(error, item: "时间胶囊")
             }
+            finishItem()
+            saveAndRefresh(context)
         }
     }
 
@@ -253,6 +528,9 @@ final class SyncEngine {
         }
         if let voiceMemos = try? await apiClient.fetchVoiceMemos(since: lastSyncedAt) {
             for dto in voiceMemos { await mergeRemoteVoiceMemo(dto) }
+        }
+        if let capsules = try? await apiClient.fetchTimeCapsules(since: lastSyncedAt) {
+            for dto in capsules { await mergeRemoteTimeCapsule(dto) }
         }
         lastSyncedAt = .now
     }
@@ -415,6 +693,41 @@ final class SyncEngine {
         try? context.save()
     }
 
+    private func mergeRemoteTimeCapsule(_ dto: TimeCapsuleDTO) async {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+        let descriptor = FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == localId })
+        if let existing = try? context.fetch(descriptor).first {
+            if existing.syncState == .synced {
+                Self.apply(dto, to: existing)
+                existing.remoteId = dto.id
+                await ensureLocalCapsuleBlob(for: existing, dto: dto)
+            }
+        } else {
+            let item = TimeCapsule(title: dto.title, fromRole: dto.fromRole, unlockAt: dto.unlockAt)
+            item.id = localId
+            Self.apply(dto, to: item)
+            item.remoteId = dto.id
+            item.syncState = .synced
+            context.insert(item)
+            await ensureLocalCapsuleBlob(for: item, dto: dto)
+        }
+        try? context.save()
+    }
+
+    private func ensureLocalCapsuleBlob(for capsule: TimeCapsule, dto: TimeCapsuleDTO) async {
+        if let fileName = capsule.encryptedBlobFileName,
+           mediaStore.fileExists(forMedia: fileName) {
+            return
+        }
+        guard let remoteURL = dto.encryptedBlobRemoteURL else { return }
+        do {
+            let data = try await apiClient.downloadFile(from: remoteURL)
+            capsule.encryptedBlobFileName = try mediaStore.saveBlob(data)
+        } catch {
+            recordFailure(error, item: "下载时间胶囊")
+        }
+    }
+
     // MARK: - DTO 映射
 
     private static func makeDTO(_ entry: Entry) -> EntryDTO {
@@ -522,6 +835,21 @@ final class SyncEngine {
     private static func apply(_ dto: VoiceMemoDTO, to item: VoiceMemo) {
         item.kindRaw = dto.kind; item.remoteURL = dto.remoteURL; item.transcript = dto.transcript
         item.ageYears = dto.ageYears; item.recordedAt = dto.recordedAt; item.durationSeconds = dto.durationSeconds
+    }
+
+    private static func makeDTO(_ item: TimeCapsule) -> TimeCapsuleDTO {
+        TimeCapsuleDTO(id: item.remoteId, localId: item.id.uuidString, title: item.title,
+                       fromRole: item.fromRole, unlockAt: item.unlockAt, isLocked: item.isLocked,
+                       encryptedBlobRemoteURL: nil, coverEmoji: item.coverEmoji, createdAt: item.createdAt)
+    }
+
+    private static func apply(_ dto: TimeCapsuleDTO, to item: TimeCapsule) {
+        item.title = dto.title
+        item.fromRole = dto.fromRole
+        item.unlockAt = dto.unlockAt
+        item.isLocked = dto.isLocked
+        item.coverEmoji = dto.coverEmoji
+        item.createdAt = dto.createdAt
     }
 
     private static func apply(_ dto: EntryDTO, to entry: Entry) {

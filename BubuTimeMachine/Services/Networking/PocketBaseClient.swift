@@ -180,6 +180,35 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                           fields: [:], fileField: "file", fileURL: fileURL, fileName: fileName)
     }
 
+    func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO {
+        let token = try await ensureToken()
+        let obj = try await upsert(collection: "timecapsules", localId: dto.localId,
+                                   body: Self.timeCapsuleBody(dto), token: token)
+        return self.timeCapsuleDTO(from: obj, fallback: dto)
+    }
+
+    func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO] {
+        let token = try await ensureToken()
+        return try await fetchRecords(collection: "timecapsules", since: since, token: token)
+            .map { self.timeCapsuleDTO(from: $0, fallback: nil) }
+    }
+
+    func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        uploadGenericFile(collection: "timecapsules", localId: capsuleId.uuidString,
+                          fields: Self.timeCapsuleStringFields(dto),
+                          fileField: "encryptedBlob", fileURL: fileURL, fileName: fileName)
+    }
+
+    func downloadFile(from remoteURL: String) async throws -> Data {
+        guard let url = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
+        let token = try await ensureToken()
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try Self.check(resp, data)
+        return data
+    }
+
     // MARK: 媒体上传（multipart + 进度）
 
     func uploadMedia(_ file: MediaUploadRequest) -> AsyncThrowingStream<UploadEvent, Error> {
@@ -330,29 +359,23 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     private func multipartUpload(collection: String, localId: String, fields: [String: String], fileField: String,
                                  fileURL: URL, fileName: String, token: String,
                                  onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
-        let url = baseURL.appendingPathComponent("api/collections/\(collection)/records")
+        let existingId = try await findRecord(collection: collection, localId: localId, token: token)
+        let url = existingId.map {
+            baseURL.appendingPathComponent("api/collections/\(collection)/records/\($0)")
+        } ?? baseURL.appendingPathComponent("api/collections/\(collection)/records")
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: url)
-        req.httpMethod = "POST"
+        req.httpMethod = existingId == nil ? "POST" : "PATCH"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let fileData = try Data(contentsOf: fileURL)
-        var body = Data()
-        func field(_ name: String, _ value: String) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(value)\r\n".data(using: .utf8)!)
-        }
-        field("localId", localId)
-        for (key, value) in fields { field(key, value) }
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        body.append(fileData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        var uploadFields = fields
+        uploadFields["localId"] = localId
+        let bodyURL = try multipartBodyFile(boundary: boundary, fields: uploadFields,
+                                            fileField: fileField, fileURL: fileURL, fileName: fileName)
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
         let delegate = UploadProgressDelegate(onProgress: onProgress)
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        let (data, resp) = try await session.upload(for: req, from: body)
+        let (data, resp) = try await session.upload(for: req, fromFile: bodyURL)
         try Self.check(resp, data)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = obj["id"] as? String else { throw APIError.server(500, "上传响应异常") }
@@ -361,40 +384,73 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private func multipartUpload(_ file: MediaUploadRequest, token: String,
                                  onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
-        let url = baseURL.appendingPathComponent("api/collections/media/records")
+        let existingId = try await findRecord(collection: "media", localId: file.mediaId.uuidString, token: token)
+        let url = existingId.map {
+            baseURL.appendingPathComponent("api/collections/media/records/\($0)")
+        } ?? baseURL.appendingPathComponent("api/collections/media/records")
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: url)
-        req.httpMethod = "POST"
+        req.httpMethod = existingId == nil ? "POST" : "PATCH"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let fileData = try Data(contentsOf: file.fileURL)
-        var body = Data()
-        func field(_ name: String, _ value: String) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(value)\r\n".data(using: .utf8)!)
-        }
-        field("localId", file.mediaId.uuidString)
-        field("entryLocalId", file.entryLocalId.uuidString)
-        field("mediaType", file.type.rawValue)
-        // 文件
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(file.fileName)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        body.append(fileData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        let bodyURL = try multipartBodyFile(
+            boundary: boundary,
+            fields: [
+                "localId": file.mediaId.uuidString,
+                "entryLocalId": file.entryLocalId.uuidString,
+                "mediaType": file.type.rawValue,
+            ],
+            fileField: "file",
+            fileURL: file.fileURL,
+            fileName: file.fileName
+        )
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
 
         // 用 delegate 捕获上传进度
         let delegate = UploadProgressDelegate(onProgress: onProgress)
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        let (data, resp) = try await session.upload(for: req, from: body)
+        let (data, resp) = try await session.upload(for: req, fromFile: bodyURL)
         try Self.check(resp, data)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = obj["id"] as? String else {
             throw APIError.server(500, "上传响应异常")
         }
         return id
+    }
+
+    private func multipartBodyFile(boundary: String, fields: [String: String], fileField: String,
+                                   fileURL: URL, fileName: String) throws -> URL {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-upload-\(UUID().uuidString).body")
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: tempURL)
+        defer { try? output.close() }
+
+        func write(_ string: String) throws {
+            try output.write(contentsOf: Data(string.utf8))
+        }
+
+        for (key, value) in fields.sorted(by: { $0.key < $1.key }) {
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            try write("\(value)\r\n")
+        }
+
+        try write("--\(boundary)\r\n")
+        try write("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n")
+        try write("Content-Type: application/octet-stream\r\n\r\n")
+
+        let input = try FileHandle(forReadingFrom: fileURL)
+        defer { try? input.close() }
+        while true {
+            let chunk = try input.read(upToCount: 1_048_576)
+            guard let chunk, !chunk.isEmpty else { break }
+            try output.write(contentsOf: chunk)
+        }
+
+        try write("\r\n--\(boundary)--\r\n")
+        return tempURL
     }
 
     // MARK: - 私有：编解码
@@ -637,6 +693,46 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                             recordedAt: date("recordedAt") ?? fallback?.recordedAt ?? .now,
                             durationSeconds: obj["durationSeconds"] as? Double ?? fallback?.durationSeconds,
                             createdAt: date("created") ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func timeCapsuleBody(_ dto: TimeCapsuleDTO) -> [String: Any] {
+        var body = timeCapsuleStringFields(dto).reduce(into: [String: Any]()) { result, pair in
+            result[pair.key] = pair.value
+        }
+        body["isLocked"] = dto.isLocked
+        return body
+    }
+
+    private static func timeCapsuleStringFields(_ dto: TimeCapsuleDTO) -> [String: String] {
+        let iso = ISO8601DateFormatter()
+        var fields: [String: String] = [
+            "localId": dto.localId,
+            "title": dto.title,
+            "fromRole": dto.fromRole,
+            "unlockAt": iso.string(from: dto.unlockAt),
+            "isLocked": dto.isLocked ? "true" : "false",
+        ]
+        if let emoji = dto.coverEmoji { fields["coverEmoji"] = emoji }
+        return fields
+    }
+
+    private func timeCapsuleDTO(from obj: [String: Any], fallback: TimeCapsuleDTO?) -> TimeCapsuleDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } }
+        let id = obj["id"] as? String
+        let fileName = (obj["encryptedBlob"] as? String) ?? ""
+        let remoteURL = remoteFileURL(collection: "timecapsules", recordId: id, fileName: fileName)
+        return TimeCapsuleDTO(
+            id: id ?? fallback?.id,
+            localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+            title: obj["title"] as? String ?? fallback?.title ?? "",
+            fromRole: obj["fromRole"] as? String ?? fallback?.fromRole ?? "",
+            unlockAt: date("unlockAt") ?? fallback?.unlockAt ?? .now,
+            isLocked: obj["isLocked"] as? Bool ?? fallback?.isLocked ?? true,
+            encryptedBlobRemoteURL: remoteURL ?? fallback?.encryptedBlobRemoteURL,
+            coverEmoji: obj["coverEmoji"] as? String ?? fallback?.coverEmoji,
+            createdAt: date("created") ?? fallback?.createdAt ?? .now
+        )
     }
 
     private func remoteFileURL(collection: String, recordId: String?, fileName: String) -> String? {

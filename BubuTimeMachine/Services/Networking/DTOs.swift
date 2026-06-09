@@ -135,6 +135,18 @@ struct VoiceMemoDTO: Codable, Sendable {
     var createdAt: Date
 }
 
+struct TimeCapsuleDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var title: String
+    var fromRole: String
+    var unlockAt: Date
+    var isLocked: Bool
+    var encryptedBlobRemoteURL: String?
+    var coverEmoji: String?
+    var createdAt: Date
+}
+
 /// 一次媒体上传请求。
 struct MediaUploadRequest: Sendable {
     let mediaId: UUID

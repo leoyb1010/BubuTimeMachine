@@ -88,7 +88,7 @@ struct VoiceArchiveView: View {
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
-                Text(memo.recordedAt.formatted(date: .abbreviated, time: .omitted))
+                Text(BubuDateFormat.shortDate(memo.recordedAt))
                     .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
             }
             if let fileName = memo.localFileName {

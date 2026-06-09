@@ -16,6 +16,7 @@ struct QuickCaptureSheet: View {
     @State private var showCamera = false
     @State private var cameraAlert: CameraAlert?
     @State private var highlightedTarget: CaptureTarget?
+    @State private var requestingCamera = false
 
     private var theme: Color { env.theme.theme.primary }
 
@@ -140,6 +141,7 @@ struct QuickCaptureSheet: View {
                 actionCard("拍照", expression: .yeah, subtitle: "拍下此刻")
             }
             .buttonStyle(.plain)
+            .disabled(requestingCamera)
 
             Button { jump(to: .voice, proxy: proxy) } label: {
                 actionCard("说给布布", expression: .love, subtitle: "录一段声音")
@@ -373,6 +375,9 @@ struct QuickCaptureSheet: View {
 
     @MainActor
     private func requestCamera() async {
+        guard !requestingCamera else { return }
+        requestingCamera = true
+        defer { requestingCamera = false }
         noteFocused = false
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
             cameraAlert = .unavailable

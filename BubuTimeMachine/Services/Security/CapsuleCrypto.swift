@@ -13,7 +13,7 @@ struct CapsuleCrypto: Sendable {
         var errorDescription: String? {
             switch self {
             case .stillLocked(let date):
-                return "这封信要到 \(date.formatted(date: .long, time: .omitted)) 才能打开哦"
+                return "这封信要到 \(BubuDateFormat.longDate(date)) 才能打开哦"
             case .decryptionFailed:
                 return "信件打不开了，请检查备份"
             }

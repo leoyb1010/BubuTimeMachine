@@ -76,6 +76,7 @@ struct VoiceRecorderBar: View {
                 .symbolEffect(.pulse, isActive: recorder.state == .recording)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(recorder.state == .recording ? "停止录音" : "开始录音")
     }
 
     private var liveWaveform: some View {
@@ -127,6 +128,7 @@ struct VoicePlayerBubble: View {
                     .foregroundStyle(tint)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isThis && player.isPlaying ? "暂停语音" : "播放语音")
 
             WaveformView(samples: waveform.isEmpty ? Array(repeating: 0.3, count: 20) : waveform,
                          progress: isThis ? player.progress : 0, color: tint)

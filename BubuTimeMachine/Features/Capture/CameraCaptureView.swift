@@ -26,10 +26,12 @@ struct CameraCaptureView: UIViewControllerRepresentable {
 
         func imagePickerController(_ picker: UIImagePickerController,
                                    didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let image = info[.originalImage] as? UIImage {
-                parent.onImage(image)
-            }
             parent.onCancel()
+            if let image = info[.originalImage] as? UIImage {
+                DispatchQueue.main.async {
+                    self.parent.onImage(image)
+                }
+            }
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {

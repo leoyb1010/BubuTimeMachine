@@ -83,7 +83,8 @@ struct CapsuleComposeView: View {
             TextField("如：写给18岁的你", text: $title)
                 .font(BubuTheme.Font.headline)
                 .padding()
-                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .background(BubuTheme.Color.card.opacity(0.70), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme, interactive: true)
         }
     }
 
@@ -94,7 +95,8 @@ struct CapsuleComposeView: View {
                 .font(BubuTheme.Font.body)
                 .lineLimit(6...14)
                 .padding()
-                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .background(BubuTheme.Color.card.opacity(0.70), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme, interactive: true)
         }
     }
 
@@ -140,8 +142,9 @@ struct CapsuleComposeView: View {
             }
             DatePicker("精确到天", selection: $unlockAt, in: Date.now..., displayedComponents: .date)
                 .padding()
-                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
-            Text("封存后，到 \(unlockAt.formatted(date: .long, time: .omitted)) 之前都打不开。")
+                .background(BubuTheme.Color.card.opacity(0.70), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme, interactive: true)
+            Text("封存后，到 \(BubuDateFormat.longDate(unlockAt)) 之前都打不开。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(theme)
         }
@@ -190,6 +193,7 @@ struct CapsuleComposeView: View {
             capsule.syncState = .local
             context.insert(capsule)
             try context.save()
+            env.syncEngine.syncNow()
             dismiss()
         } catch {
             errorText = "这封信还没有封存成功：\(error.localizedDescription)。录好的语音仍保留在手机里，可以稍后再试。"

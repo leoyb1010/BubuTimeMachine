@@ -57,7 +57,7 @@ struct FamilyEnsembleView: View {
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.happenedAt.formatted(date: .abbreviated, time: .omitted))
+                            Text(BubuDateFormat.shortDate(entry.happenedAt))
                                 .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
                             Text(entry.note ?? "（无文字）").font(BubuTheme.Font.body)
                                 .foregroundStyle(BubuTheme.Color.warmBrown).lineLimit(1)
@@ -130,7 +130,7 @@ struct FamilyEnsembleView: View {
         let perspectives = [entry.authorRole + "说：" + (entry.note ?? "记录了这一刻")]
             + entry.comments.compactMap { c in c.text.map { "\(c.authorRole)说：\($0)" } }
         story = """
-        那是 \(entry.happenedAt.formatted(date: .long, time: .omitted))。
+        那是 \(BubuDateFormat.longDate(entry.happenedAt))。
         \(perspectives.joined(separator: "；"))。
         同一个瞬间，在每个人心里留下了不一样的温柔。这就是属于布布的、被全家人一起记住的一天。
         """

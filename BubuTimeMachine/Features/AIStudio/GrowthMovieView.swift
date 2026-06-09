@@ -286,7 +286,7 @@ struct GrowthMovieView: View {
         for entry in filteredEntries {
             let count = entry.media.filter { $0.type == .photo && $0.localFileName != nil }.count
             guard count > 0 else { continue }
-            let text = entry.note?.isEmpty == false ? entry.note! : entry.happenedAt.formatted(date: .abbreviated, time: .omitted)
+            let text = entry.note?.isEmpty == false ? entry.note! : BubuDateFormat.shortDate(entry.happenedAt)
             caps.append(contentsOf: Array(repeating: text, count: count))
         }
         return caps

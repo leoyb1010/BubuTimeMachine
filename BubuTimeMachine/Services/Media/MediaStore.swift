@@ -7,6 +7,7 @@ import AVFoundation
 /// 目录结构：Documents/Media/<原文件>，Documents/Thumbnails/<缩略图>
 /// nonisolated：缩略图解码在 Task.detached 后台执行，不绑定 MainActor。
 nonisolated struct MediaStore: Sendable {
+    static let publicUploadSoftLimitBytes: Int64 = 96 * 1_048_576
 
     private var mediaDir: URL {
         directory(named: "Media")
@@ -45,6 +46,35 @@ nonisolated struct MediaStore: Sendable {
         }
         try fm.copyItem(at: sourceURL, to: dest)
         return name
+    }
+
+    func importVideoForSync(from sourceURL: URL,
+                            targetMaxBytes: Int64 = Self.publicUploadSoftLimitBytes) async throws -> ImportedVideo {
+        let originalBytes = fileSize(at: sourceURL) ?? 0
+        let originalExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
+        guard originalBytes > targetMaxBytes else {
+            let fileName = try importFile(from: sourceURL, preferredExtension: originalExtension)
+            return ImportedVideo(fileName: fileName, originalBytes: originalBytes,
+                                 storedBytes: fileSize(forMedia: fileName) ?? originalBytes,
+                                 wasCompressed: false)
+        }
+
+        let presets = [AVAssetExportPresetMediumQuality, AVAssetExportPresetLowQuality]
+        for preset in presets {
+            guard let exported = try? await exportVideo(sourceURL, presetName: preset) else { continue }
+            defer { try? FileManager.default.removeItem(at: exported) }
+            let exportedBytes = fileSize(at: exported) ?? 0
+            guard exportedBytes > 0, exportedBytes < originalBytes else { continue }
+            let fileName = try importFile(from: exported, preferredExtension: "mp4")
+            return ImportedVideo(fileName: fileName, originalBytes: originalBytes,
+                                 storedBytes: fileSize(forMedia: fileName) ?? exportedBytes,
+                                 wasCompressed: true)
+        }
+
+        let fileName = try importFile(from: sourceURL, preferredExtension: originalExtension)
+        return ImportedVideo(fileName: fileName, originalBytes: originalBytes,
+                             storedBytes: fileSize(forMedia: fileName) ?? originalBytes,
+                             wasCompressed: false)
     }
 
     /// 将录音临时文件移入沙盒，返回相对文件名（.m4a）。
@@ -87,6 +117,20 @@ nonisolated struct MediaStore: Sendable {
     /// 读取沙盒中的二进制 blob。
     func blob(named fileName: String) -> Data? {
         try? Data(contentsOf: mediaURL(for: fileName))
+    }
+
+    func fileExists(forMedia fileName: String) -> Bool {
+        FileManager.default.fileExists(atPath: mediaURL(for: fileName).path)
+    }
+
+    func fileSize(forMedia fileName: String) -> Int64? {
+        fileSize(at: mediaURL(for: fileName))
+    }
+
+    func fileSize(at url: URL) -> Int64? {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize else { return nil }
+        return Int64(size)
     }
 
     /// 删除沙盒文件（媒体 / blob 通用）。
@@ -135,6 +179,26 @@ nonisolated struct MediaStore: Sendable {
             return nil
         }
     }
+
+    private func exportVideo(_ sourceURL: URL, presetName: String) async throws -> URL {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: presetName) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-compressed-\(UUID().uuidString).mp4")
+        try? FileManager.default.removeItem(at: outputURL)
+        exporter.shouldOptimizeForNetworkUse = true
+        try await exporter.export(to: outputURL, as: .mp4)
+        return outputURL
+    }
+}
+
+struct ImportedVideo: Sendable {
+    let fileName: String
+    let originalBytes: Int64
+    let storedBytes: Int64
+    let wasCompressed: Bool
 }
 
 // MARK: - UIImage 缩放工具

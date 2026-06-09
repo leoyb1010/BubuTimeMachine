@@ -9,14 +9,19 @@ struct CapsulePayload: Codable, Sendable {
     var voiceDuration: Double
     var voiceWaveform: [Float]
     var photoFileNames: [String]        // 附带照片（已加密的 blob）
+    var embeddedVoiceData: Data?
+    var embeddedVoiceFileExtension: String?
 
     init(letter: String = "", voiceFileName: String? = nil, voiceDuration: Double = 0,
-         voiceWaveform: [Float] = [], photoFileNames: [String] = []) {
+         voiceWaveform: [Float] = [], photoFileNames: [String] = [],
+         embeddedVoiceData: Data? = nil, embeddedVoiceFileExtension: String? = nil) {
         self.letter = letter
         self.voiceFileName = voiceFileName
         self.voiceDuration = voiceDuration
         self.voiceWaveform = voiceWaveform
         self.photoFileNames = photoFileNames
+        self.embeddedVoiceData = embeddedVoiceData
+        self.embeddedVoiceFileExtension = embeddedVoiceFileExtension
     }
 }
 
@@ -29,6 +34,14 @@ struct CapsuleVault: Sendable {
 
     /// 加密并落盘，返回加密 blob 文件名。salt 用胶囊 id 保证每封信密钥唯一。
     func seal(_ payload: CapsulePayload, unlockAt: Date, salt: String) throws -> String {
+        var payload = payload
+        if let voiceFileName = payload.voiceFileName,
+           payload.embeddedVoiceData == nil,
+           let data = mediaStore.data(forMedia: voiceFileName) {
+            payload.embeddedVoiceData = data
+            let ext = URL(fileURLWithPath: voiceFileName).pathExtension
+            payload.embeddedVoiceFileExtension = ext.isEmpty ? "m4a" : ext
+        }
         let plain = try JSONEncoder().encode(payload)
         let cipher = try crypto.encrypt(plain, unlockAt: unlockAt, salt: salt)
         return try mediaStore.saveBlob(cipher)
@@ -40,6 +53,15 @@ struct CapsuleVault: Sendable {
             throw CapsuleCrypto.CryptoError.decryptionFailed
         }
         let plain = try crypto.decrypt(cipher, unlockAt: unlockAt, salt: salt, now: now)
-        return try JSONDecoder().decode(CapsulePayload.self, from: plain)
+        var payload = try JSONDecoder().decode(CapsulePayload.self, from: plain)
+        if let data = payload.embeddedVoiceData {
+            let existingName = payload.voiceFileName
+            let hasExistingFile = existingName.map { mediaStore.fileExists(forMedia: $0) } ?? false
+            if !hasExistingFile {
+                let ext = payload.embeddedVoiceFileExtension ?? "m4a"
+                payload.voiceFileName = try mediaStore.saveBlob(data, preferredExtension: ext)
+            }
+        }
+        return payload
     }
 }

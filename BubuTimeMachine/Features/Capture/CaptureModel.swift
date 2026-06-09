@@ -64,7 +64,11 @@ final class CaptureModel {
 
     /// 是否有可保存内容（媒体 / 文字 / 语音 任一即可）。
     var canSave: Bool {
-        !pickedItems.isEmpty || !cameraPhotos.isEmpty || !note.isEmpty || pendingVoice != nil
+        !pickedItems.isEmpty || !cameraPhotos.isEmpty || !trimmedNote.isEmpty || pendingVoice != nil
+    }
+
+    private var trimmedNote: String {
+        note.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 保存为一个 Entry。返回是否成功。
@@ -74,8 +78,9 @@ final class CaptureModel {
         isSaving = true
         defer { isSaving = false }
 
+        let noteText = trimmedNote
         let entry = Entry(happenedAt: .now, authorRole: role.rawValue,
-                          note: note.isEmpty ? nil : note)
+                          note: noteText.isEmpty ? nil : noteText)
         entry.mood = mood
         context.insert(entry)
 
@@ -128,7 +133,7 @@ final class CaptureModel {
             context.insert(voice)
         }
 
-        guard savedCount > 0 || !note.isEmpty || pendingVoice != nil else {
+        guard savedCount > 0 || !noteText.isEmpty || pendingVoice != nil else {
             context.delete(entry)
             saveError = "没有成功导入媒体或文字，请重新选择。"
             return false
@@ -148,7 +153,7 @@ final class CaptureModel {
             return false
         }
         let event = FeedEvent(kind: .entryCreated, actorRole: role.rawValue,
-                              summary: note.isEmpty ? "记录了布布的一个新瞬间" : "记录了：\(note)",
+                              summary: noteText.isEmpty ? "记录了布布的一个新瞬间" : "记录了：\(noteText)",
                               targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt)
         context.insert(event)
         try? context.save()
@@ -226,24 +231,30 @@ final class CaptureModel {
     }
 
     private static func videoPreviewImage(url: URL) async -> UIImage? {
-        await Task.detached(priority: .userInitiated) {
-            let asset = AVURLAsset(url: url)
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            if let cg = try? generator.copyCGImage(at: .zero, actualTime: nil) {
-                return UIImage(cgImage: cg)
-            }
-            return nil
-        }.value
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        if let cg = try? await generator.image(at: .zero).image {
+            return UIImage(cgImage: cg)
+        }
+        return nil
     }
 
     /// 单个 PhotosPickerItem → 落沙盒 + 缩略图 + 端侧分析。
     private func persist(item: PhotosPickerItem) async -> (Media, PhotoAnalysis?)? {
         // 视频（暂不分析，仅缩略图）
         if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
-            guard let fileName = try? mediaStore.importFile(from: movie.url, preferredExtension: "mov")
-            else { return nil }
+            analyzingHint = "正在整理这段视频，太大时会先压缩…"
+            guard let imported = try? await mediaStore.importVideoForSync(from: movie.url) else {
+                analyzingHint = nil
+                return nil
+            }
+            analyzingHint = nil
+            let fileName = imported.fileName
             let media = Media(type: .video, localFileName: fileName)
+            if imported.wasCompressed {
+                media.aiTags = ["已压缩", "视频"]
+            }
             media.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
             return (media, nil)
         }

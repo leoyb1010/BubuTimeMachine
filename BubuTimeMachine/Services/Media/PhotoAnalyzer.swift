@@ -1,6 +1,7 @@
 import Foundation
 import ImageIO
 import CoreLocation
+import MapKit
 import Vision
 import UIKit
 
@@ -17,7 +18,7 @@ struct PhotoAnalysis: Sendable {
 // MARK: - 端侧图片分析器
 /// 全部端侧、零后端、隐私至上：
 /// - EXIF：拍摄时间 + GPS 坐标
-/// - CLGeocoder：坐标 → 地名（如"上海市·静安区"）
+    /// - MapKit：坐标 → 地名（如"上海市·静安区"）
 /// - Vision：场景/物体分类 + 人脸计数 → 自动标签
 /// 离线时 EXIF 与 Vision 仍可用；地名需联网（失败则跳过，不影响主流程）。
 struct PhotoAnalyzer: Sendable {
@@ -142,15 +143,20 @@ struct PhotoAnalyzer: Sendable {
     // MARK: 地理编码
 
     private static func reverseGeocode(lat: Double, lon: Double) async -> String? {
-        let geocoder = CLGeocoder()
         let location = CLLocation(latitude: lat, longitude: lon)
-        let preferred = Locale(identifier: "zh_Hans_CN")
-        guard let placemarks = try? await geocoder.reverseGeocodeLocation(location, preferredLocale: preferred),
-              let p = placemarks.first else { return nil }
-        // 组装"城市·区/地标"
-        let parts = [p.locality, p.subLocality ?? p.name]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-        return parts.isEmpty ? p.administrativeArea : parts.joined(separator: "·")
+        guard let request = MKReverseGeocodingRequest(location: location) else { return nil }
+        request.preferredLocale = Locale(identifier: "zh_Hans_CN")
+        guard let item = try? await request.mapItems.first else { return nil }
+        let representations = item.addressRepresentations
+        let candidates = [
+            item.address?.shortAddress,
+            representations?.cityName,
+            representations?.cityWithContext,
+            item.name,
+            item.address?.fullAddress,
+        ]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
     }
 }

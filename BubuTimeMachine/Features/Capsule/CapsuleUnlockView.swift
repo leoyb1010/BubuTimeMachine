@@ -53,7 +53,7 @@ struct CapsuleUnlockView: View {
             VStack(spacing: 8) {
                 Text(capsule.title).font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-                Text("来自\(capsule.fromRole) · 封存于 \(capsule.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                Text("来自\(capsule.fromRole) · 封存于 \(BubuDateFormat.shortDate(capsule.createdAt))")
                     .font(BubuTheme.Font.caption).foregroundStyle(.white.opacity(0.85))
             }
             Button { open() } label: {
@@ -114,7 +114,7 @@ struct CapsuleUnlockView: View {
                         }
                     }
 
-                    Text("—— 来自\(capsule.fromRole)，写于 \(capsule.createdAt.formatted(date: .long, time: .omitted))")
+                    Text("—— 来自\(capsule.fromRole)，写于 \(BubuDateFormat.longDate(capsule.createdAt))")
                         .font(BubuTheme.Font.caption)
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -140,6 +140,7 @@ struct CapsuleUnlockView: View {
                 capsule.isLocked = false
                 capsule.syncState = .local
                 try? context.save()
+                env.syncEngine.syncNow()
             } catch {
                 errorText = (error as? CapsuleCrypto.CryptoError)?.errorDescription ?? "信件打不开了"
             }

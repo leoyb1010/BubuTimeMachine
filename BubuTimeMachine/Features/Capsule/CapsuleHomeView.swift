@@ -36,6 +36,8 @@ struct CapsuleHomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showCompose = true } label: { Image(systemName: "square.and.pencil") }
+                    .accessibilityLabel("写时间胶囊")
+                    .bubuGlassButton()
             }
         }
         .sheet(isPresented: $showCompose) { CapsuleComposeView() }
@@ -106,7 +108,8 @@ struct CapsuleHomeView: View {
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .padding()
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(open ? 0.72 : 0.62), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: open ? theme : BubuTheme.Color.secondaryText, interactive: open)
         .bubuCardShadow()
     }
 
@@ -127,7 +130,7 @@ struct CapsuleHomeView: View {
                     .padding(.horizontal, 28).padding(.vertical, 14)
                     .background(theme, in: Capsule())
             }
-            .buttonStyle(.plain)
+            .bubuGlassButton(prominent: true)
             .padding(.top, 8)
         }
         .padding(40)
@@ -141,7 +144,7 @@ struct CapsuleHomeView: View {
         let days = Calendar.current.dateComponents([.day], from: .now, to: date).day ?? 0
         if days > 365 {
             let years = days / 365
-            return "还要等 \(years) 年 · \(date.formatted(.dateTime.year().month().day()))"
+            return "还要等 \(years) 年 · \(BubuDateFormat.yearMonthDay(date))"
         }
         if days > 0 { return "还有 \(days) 天解锁" }
         return "今天就能开啦"

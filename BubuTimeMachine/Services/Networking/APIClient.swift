@@ -26,6 +26,10 @@ protocol APIClient: Sendable {
     func upsertVoiceMemo(_ dto: VoiceMemoDTO) async throws -> VoiceMemoDTO
     func fetchVoiceMemos(since: Date?) async throws -> [VoiceMemoDTO]
     func uploadVoiceMemo(memoId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
+    func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO
+    func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO]
+    func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
+    func downloadFile(from remoteURL: String) async throws -> Data
     /// 分片上传：返回可观察进度的异步流。
     func uploadMedia(_ file: MediaUploadRequest) -> AsyncThrowingStream<UploadEvent, Error>
     func subscribeRealtime() -> AsyncStream<RealtimeEvent>
@@ -39,6 +43,7 @@ enum APIError: LocalizedError, Sendable {
     case unauthorized
     case network(String)
     case server(Int, String)
+    case fileTooLarge(bytes: Int64, limit: Int64)
 
     var errorDescription: String? {
         switch self {
@@ -46,6 +51,12 @@ enum APIError: LocalizedError, Sendable {
         case .unauthorized:  return "身份过期了，请重新进入"
         case .network(let m): return "网络不太通：\(m)"
         case .server(let code, let m): return "服务器开小差了（\(code)）：\(m)"
+        case .fileTooLarge(let bytes, let limit):
+            return "这个文件有 \(Self.megabytes(bytes))MB，公网建议压到 \(Self.megabytes(limit))MB 以内"
         }
+    }
+
+    private static func megabytes(_ bytes: Int64) -> Int64 {
+        max(1, bytes / 1_048_576)
     }
 }

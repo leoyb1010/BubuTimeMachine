@@ -188,6 +188,22 @@ migrate((app) => {
   })
   app.save(healthrecords)
 
+  // ---- timecapsules（时间胶囊：客户端加密 blob）----
+  const timecapsules = new Collection({
+    type: 'base', name: 'timecapsules',
+    listRule: authRule, viewRule: authRule, createRule: authRule,
+    updateRule: authRule, deleteRule: authRule,
+    fields: baseFields([
+      { name: 'title', type: 'text', required: true },
+      { name: 'fromRole', type: 'text', required: true },
+      { name: 'unlockAt', type: 'date', required: true },
+      { name: 'isLocked', type: 'bool' },
+      { name: 'coverEmoji', type: 'text' },
+      { name: 'encryptedBlob', type: 'file', maxSelect: 1, maxSize: 209715200 },
+    ]),
+  })
+  app.save(timecapsules)
+
   // ---- feed_events（家庭动态墙：可由客户端同步/派生）----
   const feed_events = new Collection({
     type: 'base', name: 'feed_events',
@@ -206,7 +222,7 @@ migrate((app) => {
 
 }, (app) => {
   // 回滚：删除全部集合
-  const names = ['feed_events','healthrecords','media','comments','voicenotes','firsttimes','voicememos',
+  const names = ['feed_events','timecapsules','healthrecords','media','comments','voicenotes','firsttimes','voicememos',
                  'milestones','members','childprofile','entries']
   for (const n of names) {
     try { app.delete(app.findCollectionByNameOrId(n)) } catch (e) {}

@@ -99,7 +99,7 @@ struct HealthHomeView: View {
                 Text(record.title).font(BubuTheme.Font.body.weight(.semibold)).foregroundStyle(BubuTheme.Color.warmBrown)
                 HStack(spacing: 8) {
                     Text(record.kind.title)
-                    Text(record.recordedAt.formatted(date: .omitted, time: .shortened))
+                    Text(BubuDateFormat.shortTime(record.recordedAt))
                     if let amount = record.amountText, !amount.isEmpty { Text(amount) }
                 }
                 .font(BubuTheme.Font.caption)
