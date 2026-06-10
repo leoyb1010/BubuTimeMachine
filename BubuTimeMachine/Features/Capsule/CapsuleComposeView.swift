@@ -195,6 +195,8 @@ struct CapsuleComposeView: View {
             capsule.syncState = .local
             context.insert(capsule)
             try context.save()
+            // 封存要有「盖章」的确定感
+            BubuHaptics.stamp()
             env.syncEngine.syncNow()
             dismiss()
         } catch {

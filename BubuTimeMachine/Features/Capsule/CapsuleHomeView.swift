@@ -5,10 +5,12 @@ import SwiftData
 /// 写给未来布布的信，到期前加密锁定、只显示倒计时。到期后可庄重开启。
 struct CapsuleHomeView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Query(sort: \TimeCapsule.unlockAt) private var capsules: [TimeCapsule]
 
     @State private var showCompose = false
     @State private var unlocking: TimeCapsule?
+    @State private var glowPulse = false
 
     private var theme: Color { env.theme.theme.primary }
     private var locked: [TimeCapsule] { capsules.filter { !canOpen($0) } }
@@ -68,18 +70,26 @@ struct CapsuleHomeView: View {
         }
     }
 
+    /// 每分钟刷新一次倒计时；最后 24 小时进入「即将开启」呼吸发光。
     private var lockedSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("静静等待", systemImage: "lock.fill")
-                .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
-            ForEach(locked) { capsule in
-                capsuleCard(capsule, open: false)
+        SwiftUI.TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(alignment: .leading, spacing: 12) {
+                Label("静静等待", systemImage: "lock.fill")
+                    .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                ForEach(locked) { capsule in
+                    capsuleCard(capsule, open: false, now: context.date)
+                }
             }
+        }
+        .onAppear {
+            guard !reduceMotion, !glowPulse else { return }
+            withAnimation(BubuMotion.breathe) { glowPulse = true }
         }
     }
 
-    private func capsuleCard(_ capsule: TimeCapsule, open: Bool) -> some View {
-        HStack(spacing: 16) {
+    private func capsuleCard(_ capsule: TimeCapsule, open: Bool, now: Date = .now) -> some View {
+        let imminent = !open && capsule.unlockAt.timeIntervalSince(now) < 86_400
+        return HStack(spacing: 16) {
             Text(capsule.coverEmoji ?? "💌")
                 .font(.system(size: 40))
                 .frame(width: 60, height: 60)
@@ -98,24 +108,27 @@ struct CapsuleHomeView: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(theme)
                 } else {
-                    Text(countdownText(capsule.unlockAt))
+                    Text(countdownText(capsule.unlockAt, now: now))
                         .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                         .foregroundStyle(theme)
                 }
             }
             Spacer()
-            Image(systemName: open ? "chevron.right" : "lock.fill")
-                .foregroundStyle(BubuTheme.Color.secondaryText)
+            Image(systemName: open ? "chevron.right" : (imminent ? "lock.open" : "lock.fill"))
+                .foregroundStyle(imminent ? theme : BubuTheme.Color.secondaryText)
         }
         .padding()
         .background(BubuTheme.Color.card.opacity(open ? 0.72 : 0.62), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: open ? theme : BubuTheme.Color.secondaryText, interactive: open)
-        .bubuCardShadow()
+        .shadow(color: imminent ? theme.opacity(glowPulse ? 0.45 : 0.15) : .black.opacity(0.10),
+                radius: imminent ? (glowPulse ? 16 : 8) : 12, y: 4)
     }
 
     private var emptyState: some View {
         VStack(spacing: 18) {
-            Text("💌").font(.system(size: 64))
+            BubuMascotBadge(size: 84, expression: .love)
             Text("还没有时间胶囊")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -140,13 +153,15 @@ struct CapsuleHomeView: View {
         Date.now >= capsule.unlockAt
     }
 
-    private func countdownText(_ date: Date) -> String {
-        let days = Calendar.current.dateComponents([.day], from: .now, to: date).day ?? 0
+    private func countdownText(_ date: Date, now: Date = .now) -> String {
+        let days = Calendar.current.dateComponents([.day], from: now, to: date).day ?? 0
         if days > 365 {
             let years = days / 365
             return "还要等 \(years) 年 · \(BubuDateFormat.yearMonthDay(date))"
         }
         if days > 0 { return "还有 \(days) 天解锁" }
-        return "今天就能开啦"
+        let hours = max(0, Calendar.current.dateComponents([.hour], from: now, to: date).hour ?? 0)
+        if hours > 0 { return "还有 \(hours) 小时就能打开啦" }
+        return "马上就能开啦"
     }
 }
