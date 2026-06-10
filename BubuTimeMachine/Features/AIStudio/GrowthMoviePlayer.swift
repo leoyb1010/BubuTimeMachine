@@ -1,19 +1,23 @@
 import SwiftUI
+import ImageIO
 
 // MARK: - Ken Burns 成长电影播放器
-/// 把真实照片串成会动的幻灯片：模板片头 + 缓慢缩放 + 字幕 + 可关闭/重播。
+/// 把真实照片串成会动的幻灯片：模板片头 + 缓慢缩放平移 + 字幕 + 可关闭/重播。
+/// 性能：原图经 ImageIO 降采样后展示（不在主线程解码全尺寸原图），并预载下一张。
 struct GrowthMoviePlayer: View {
     let draft: MovieDraft
     let mediaStore: MediaStore
     var tint: Color = BubuTheme.Color.primary
     var onClose: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var index = 0
     @State private var zoomIn = true
     @State private var isPlaying = true
     @State private var progress: Double = 0
     @State private var showIntro = true
     @State private var timer: Timer?
+    @State private var slideImages: [Int: UIImage] = [:]
 
     private var perSlide: Double { draft.template == .daily ? 2.3 : 3.2 }
 
@@ -35,7 +39,13 @@ struct GrowthMoviePlayer: View {
             if isFinished { finishOverlay }
         }
         .contentShape(Rectangle())
-        .onAppear { startTimer() }
+        .onAppear {
+            startTimer()
+            Task { await loadImages(around: 0) }
+        }
+        .onChange(of: index) { _, newIndex in
+            Task { await loadImages(around: newIndex) }
+        }
         .onDisappear { timer?.invalidate() }
         .onTapGesture { if !isFinished { togglePlay() } }
         .gesture(
@@ -47,9 +57,7 @@ struct GrowthMoviePlayer: View {
 
     @ViewBuilder
     private var currentSlide: some View {
-        if draft.mediaFiles.indices.contains(index),
-           let data = mediaStore.data(forMedia: draft.mediaFiles[index]),
-           let ui = UIImage(data: data) {
+        if let ui = slideImages[index] {
             ZStack {
                 Image(uiImage: ui)
                     .resizable()
@@ -60,7 +68,8 @@ struct GrowthMoviePlayer: View {
                 Image(uiImage: ui)
                     .resizable()
                     .scaledToFit()
-                    .scaleEffect(zoomIn ? 1.035 : 1.0)
+                    .scaleEffect(reduceMotion ? 1.0 : (zoomIn ? 1.045 : 1.0))
+                    .offset(x: reduceMotion ? 0 : panOffset)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 86)
                     .animation(.easeInOut(duration: perSlide), value: zoomIn)
@@ -74,6 +83,38 @@ struct GrowthMoviePlayer: View {
                 .ignoresSafeArea()
                 .overlay { Text("🎬").font(.system(size: 80)) }
         }
+    }
+
+    /// Ken Burns 平移：逐张交替左右缓移，配合缩放更像「镜头在动」。
+    private var panOffset: CGFloat {
+        let direction: CGFloat = index.isMultiple(of: 2) ? 1 : -1
+        return (zoomIn ? 9 : -9) * direction
+    }
+
+    /// 当前张 + 前后邻张降采样预载；远处的释放，控住内存峰值。
+    private func loadImages(around center: Int) async {
+        for i in [center, center + 1, center - 1] where draft.mediaFiles.indices.contains(i) {
+            guard slideImages[i] == nil else { continue }
+            let url = mediaStore.mediaURL(for: draft.mediaFiles[i])
+            let image = await Task.detached(priority: .userInitiated) {
+                Self.downsampledImage(url: url, maxPixel: 1600)
+            }.value
+            if let image { slideImages[i] = image }
+        }
+        slideImages = slideImages.filter { abs($0.key - center) <= 1 }
+    }
+
+    nonisolated private static func downsampledImage(url: URL, maxPixel: CGFloat) -> UIImage? {
+        let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, srcOpts) else { return nil }
+        let thumbOpts = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ] as CFDictionary
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOpts) else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     private var topBar: some View {

@@ -29,11 +29,29 @@ nonisolated struct MediaStore: Sendable {
     // MARK: 写入
 
     /// 保存图片数据到沙盒，返回相对文件名。
+    /// 扩展名按数据真实格式嗅探（HEIC/PNG/GIF/JPEG）——相册选出的 HEIC 不再被存成说谎的 .jpg，
+    /// 30 年后脱离本 App 的通用读取（HTML 档案、其它看图软件）才不会踩坑。
     func savePhoto(_ data: Data, preferredExtension ext: String = "jpg") throws -> String {
-        let name = "\(UUID().uuidString).\(ext)"
+        let name = "\(UUID().uuidString).\(Self.sniffImageExtension(data) ?? ext)"
         let url = mediaDir.appendingPathComponent(name)
         try data.write(to: url, options: .atomic)
         return name
+    }
+
+    /// 按文件头识别常见图片格式；识别不出返回 nil（用调用方给的默认值）。
+    static func sniffImageExtension(_ data: Data) -> String? {
+        guard data.count >= 12 else { return nil }
+        let bytes = [UInt8](data.prefix(12))
+        if bytes[0] == 0xFF, bytes[1] == 0xD8 { return "jpg" }
+        if bytes[0] == 0x89, bytes[1] == 0x50, bytes[2] == 0x4E, bytes[3] == 0x47 { return "png" }
+        if bytes[0] == 0x47, bytes[1] == 0x49, bytes[2] == 0x46 { return "gif" }
+        // ISO BMFF：offset 4 起为 "ftyp"，再看 brand
+        if bytes[4] == 0x66, bytes[5] == 0x74, bytes[6] == 0x79, bytes[7] == 0x70 {
+            let brand = String(bytes: bytes[8...11], encoding: .ascii) ?? ""
+            if brand.hasPrefix("heic") || brand.hasPrefix("heix") || brand.hasPrefix("mif1") { return "heic" }
+            if brand.hasPrefix("avif") { return "avif" }
+        }
+        return nil
     }
 
     /// 将外部文件（如 PhotosPicker 导出的视频）拷入沙盒，返回相对文件名。

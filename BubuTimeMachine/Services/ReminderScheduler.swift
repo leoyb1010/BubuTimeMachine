@@ -3,15 +3,21 @@ import SwiftData
 import UserNotifications
 
 // MARK: - 那年今日 · 提醒调度
-/// 每天固定时间提醒一次：往年的今天，布布在做什么。
-/// 内容在 App 在前台时从 SwiftData 实时取；为保证后台也能触发，
-/// 注册一个每日重复的本地通知，文案在 App 活跃时刷新。
+/// 每天上午 9:00 提醒一次：往年的今天，布布在做什么。
+/// 旧实现是「单条 repeats=true 通知」——文案在 App 打开那天算好后每天重复，
+/// 第二天起内容必然过期/错误。现改为预排未来 7 天，每天各自取对应日期的回忆；
+/// App 每次活跃时滚动刷新这 7 天。
 @MainActor
 final class ReminderScheduler {
     static let shared = ReminderScheduler()
     private init() {}
 
-    private let identifier = "bubu.onThisDay.daily"
+    private let identifierPrefix = "bubu.onThisDay."
+    private let daysAhead = 7
+
+    private var allIdentifiers: [String] {
+        (0..<daysAhead).map { "\(identifierPrefix)\($0)" }
+    }
 
     /// 开关变化时调用。
     func update(enabled: Bool, context: ModelContext) async {
@@ -19,56 +25,64 @@ final class ReminderScheduler {
         if enabled {
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             guard granted else { return }
-            scheduleDaily(center: center, context: context)
+            scheduleWeekAhead(center: center, context: context)
         } else {
-            center.removePendingNotificationRequests(withIdentifiers: [identifier])
+            center.removePendingNotificationRequests(withIdentifiers: allIdentifiers + ["bubu.onThisDay.daily"])
         }
     }
 
-    /// App 启动时按开关状态刷新（文案用最新数据）。
+    /// App 启动时按开关状态刷新（滚动重排未来 7 天）。
     func refreshIfEnabled(enabled: Bool, context: ModelContext) {
         guard enabled else { return }
-        scheduleDaily(center: .current(), context: context)
+        scheduleWeekAhead(center: .current(), context: context)
     }
 
-    private func scheduleDaily(center: UNUserNotificationCenter, context: ModelContext) {
-        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+    private func scheduleWeekAhead(center: UNUserNotificationCenter, context: ModelContext) {
+        // 连旧版的单条重复通知一起清掉
+        center.removePendingNotificationRequests(withIdentifiers: allIdentifiers + ["bubu.onThisDay.daily"])
 
-        let memories = onThisDayMemories(context: context)
-        let content = UNMutableNotificationContent()
-        content.title = "那年今日 · 布布时光机"
-        content.body = memories.isEmpty
-            ? "翻一翻布布的时光轴，今天也想她了吧。"
-            : memories
-        content.sound = .default
+        let cal = Calendar.current
+        for offset in 0..<daysAhead {
+            guard let day = cal.date(byAdding: .day, value: offset, to: .now) else { continue }
+            var comps = cal.dateComponents([.year, .month, .day], from: day)
+            comps.hour = 9
+            comps.minute = 0
+            // 今天 9 点已过则跳过今天
+            if let fireDate = cal.date(from: comps), fireDate <= .now { continue }
 
-        // 每天上午 9:00
-        var date = DateComponents()
-        date.hour = 9
-        date.minute = 0
-        let trigger = UNCalendarNotificationTrigger(dateMatching: date, repeats: true)
-        let req = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-        center.add(req)
+            let content = UNMutableNotificationContent()
+            content.title = "那年今日 · 布布时光机"
+            let memory = onThisDayMemory(context: context, for: day)
+            content.body = memory.isEmpty
+                ? "翻一翻布布的时光轴，今天也想她了吧。"
+                : memory
+            content.sound = .default
+
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            let req = UNNotificationRequest(identifier: "\(identifierPrefix)\(offset)",
+                                            content: content, trigger: trigger)
+            center.add(req)
+        }
     }
 
-    /// 取"往年同月同日"的一条记录摘要。
-    private func onThisDayMemories(context: ModelContext) -> String {
+    /// 取指定日期「往年同月同日」的一条记录摘要。
+    private func onThisDayMemory(context: ModelContext, for day: Date) -> String {
         let descriptor = FetchDescriptor<Entry>(
             predicate: #Predicate { !$0.isArchived },
             sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
         guard let entries = try? context.fetch(descriptor) else { return "" }
         let cal = Calendar.current
-        let today = cal.dateComponents([.month, .day], from: .now)
+        let target = cal.dateComponents([.month, .day], from: day)
         let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
 
         for e in entries {
             let c = cal.dateComponents([.month, .day], from: e.happenedAt)
-            let pastYear = !cal.isDate(e.happenedAt, inSameDayAs: .now)
-            if c.month == today.month && c.day == today.day && pastYear {
-                let years = cal.dateComponents([.year], from: e.happenedAt, to: .now).year ?? 0
+            let pastYear = !cal.isDate(e.happenedAt, inSameDayAs: day)
+            if c.month == target.month && c.day == target.day && pastYear {
+                let years = cal.dateComponents([.year], from: e.happenedAt, to: day).year ?? 0
                 let age = profile.map { AgeCalculator.ageDescription(birthday: $0.birthday, at: e.happenedAt) } ?? ""
                 let note = e.note ?? "那天的布布"
-                return "\(years)年前的今天（\(age)）：\(note)"
+                return years > 0 ? "\(years)年前的今天（\(age)）：\(note)" : "那年今日（\(age)）：\(note)"
             }
         }
         return ""
