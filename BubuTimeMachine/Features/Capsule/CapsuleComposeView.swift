@@ -177,7 +177,9 @@ struct CapsuleComposeView: View {
         saving = true
         defer { saving = false }
 
-        let capsule = TimeCapsule(title: title, fromRole: env.config.currentRole.rawValue, unlockAt: unlockAt)
+        // 规整到整秒：密钥派生与服务器存储格式一致，同步往返不会破坏解密。
+        let sealedUnlockAt = CapsuleCrypto.normalized(unlockAt)
+        let capsule = TimeCapsule(title: title, fromRole: env.config.currentRole.rawValue, unlockAt: sealedUnlockAt)
         capsule.coverEmoji = emoji
 
         let payload = CapsulePayload(
@@ -187,7 +189,7 @@ struct CapsuleComposeView: View {
             voiceWaveform: pendingVoice?.waveform ?? []
         )
         do {
-            let blobName = try env.vault.seal(payload, unlockAt: unlockAt, salt: capsule.id.uuidString)
+            let blobName = try env.vault.seal(payload, unlockAt: sealedUnlockAt, salt: capsule.id.uuidString)
             capsule.encryptedBlobFileName = blobName
             capsule.isLocked = true
             capsule.syncState = .local

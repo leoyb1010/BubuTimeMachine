@@ -37,3 +37,29 @@ targets:
         INFOPLIST_KEY_NSCameraUsageDescription: 布布时光机需要使用相机，随手拍下布布此刻的样子。
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: 布布时光机会用照片里的位置信息，自动标注每个瞬间发生的地方。
         TARGETED_DEVICE_FAMILY: "1"
+
+  BubuTimeMachineTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: BubuTimeMachineTests
+    dependencies:
+      - target: BubuTimeMachine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/BubuTimeMachine.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BubuTimeMachine"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  BubuTimeMachine:
+    build:
+      targets:
+        BubuTimeMachine: all
+        BubuTimeMachineTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - BubuTimeMachineTests
