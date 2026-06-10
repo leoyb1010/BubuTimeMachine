@@ -42,14 +42,17 @@
 - ✅ 6 套主题配色 + 首页背景（主题渐变 / 布布照片）
 - ✅ 首页成长仪表盘：年龄实时计数 + 统计卡 + 那年今日 + 最近精选
 
-**Wave G · 时间胶囊（端到端加密）**
+**Wave G · 时间胶囊（加密时间锁）**
 - ✅ 写信（文字 + 语音）给未来的布布，设解锁时间（明年今天 / 6·12·18 岁生日快捷项）
-- ✅ AES-GCM 加密封存，密钥由解锁时间派生——篡改时间无法解出
+- ✅ AES-GCM 加密封存（v2：密钥由规范化解锁时间派生，同步往返安全；兼容解开 v1 旧信）
 - ✅ 倒计时锁定列表（未到期只显示倒计时），到期「庄重开启」仪式动画 + 解密读信
+- ⚠️ 定位是「仪式感时间锁」而非严格端到端加密：密钥材料随记录同步，防的是到期前的
+  随手翻看；真 E2E（随机密钥 + iCloud Keychain + 恢复码）在路线图上
 
 **Wave H · 后端同步 + 真实 AI + 传承兜底**
-- ✅ `PocketBaseClient`：REST 鉴权 + 幂等 CRUD（localId 去重）+ multipart 上传带进度 + 轮询 Realtime
-- ✅ 双向 `SyncEngine`：本地未同步推送 + 远端拉回，三台 iPhone 记录自动汇合；离线照常用，联网自动补传
+- ✅ `PocketBaseClient`：REST 鉴权（token 复用 + 401 自动重登）+ 幂等 CRUD（localId 去重）+ 分页拉全量 + multipart 上传带进度
+- ✅ 双向 `SyncEngine`：本地未同步推送 + 远端拉回（按集合持久化增量游标，失败不丢窗口）+ 远端媒体/语音自动下载落地——多设备也是真·离线优先
+- ✅ AI 服务带 `X-API-Key` 鉴权 + 限流（fail-closed，不配 key 不服务）；App 默认不配置任何服务器、AI 默认关闭——数据外发必须用户显式开启
 - ✅ `BubuAIService` 接 DeepSeek（v4-flash 首选 / v4-pro 兜底）：第一人称改写 / 旁白 / 归类 / 第一次识别 / 语音转写
 - ✅ 成长之声：按岁归档布布的声音 + 家人对她说的话（声纹长卷，可转写）
 - ✅ 全量档案导出：静态 HTML + 媒体包 + zip 分享——双击即看，永久离线可读
@@ -87,6 +90,10 @@ xcodegen generate
 # 编译并运行（命令行）
 xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
   -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+
+# 单元测试（加密/格式嗅探等回归）
+xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
+  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 
 # 或直接 open BubuTimeMachine.xcodeproj 用 Xcode 运行
 ```

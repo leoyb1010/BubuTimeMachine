@@ -114,32 +114,51 @@ server/                           自托管后端（详见 server/README.md）
 
 ---
 
-## 4. 未做 / 可继续（按价值排序）
+## 4. 2026-06-10 深度 review 后的落地（重要，新会话必读）
 
-1. **远端同步扩面**：当前 SyncEngine 只同步 Entry + Media。Comment / VoiceNote / Milestone /
-   FirstTime / VoiceMemo / TimeCapsule / ChildProfile / FamilyMember 的远端同步未做
-   （集合已在 PocketBase 迁移里定义好，缺 App 端推拉逻辑）。
-2. **成长电影真实成片**：现为前端 Ken Burns 幻灯片占位 + AI 旁白。真实 ffmpeg 服务端合成 MP4 未做。
-3. **Realtime 长连**：现为 8 秒轮询（`PocketBaseClient.subscribeRealtime`）。可换 SSE EventSource。
+- **安全**：`.env.example` 的真实 DeepSeek key 已清除（需在 DeepSeek 控制台吊销旧 key！）；
+  FastAPI 全业务路由要求 `X-API-Key`（fail-closed）+ 按 IP 限流；CORS 全关。
+  App 默认服务器/AI 地址为空、AI 默认关闭（此前默认指向作者私人域名，已纠正）。
+  ServerConfig 新增 `aiAPIKey`（Keychain），设置页有「AI 访问密钥」字段。
+- **时间胶囊 P0 修复**：v1 密钥派生用 `timeIntervalSince1970`（含亚秒），同步 ISO 截断后
+  永久解不开。v2 改用规范化 ISO 字符串派生 + "BTC2" 魔数前缀，旧 blob 兼容解密；
+  SyncEngine 不再用远端覆盖已存在胶囊的 unlockAt。回归测试在 `BubuTimeMachineTests/`。
+  文案上时间胶囊定位为「仪式感时间锁」，不再宣称端到端加密（密钥材料随记录同步）。
+- **同步 v2**：分页拉全量（不再受 500 条上限）；按集合持久化增量游标（UserDefaults
+  `bubu.sync.cursor.*`，失败不推进，留 60 秒重叠余量）；token 复用 + 401 自动重登
+  （不再每周期密码登录）；拉回的 Media/VoiceNote/Comment/VoiceMemo 缺失文件每轮限量下载落地；
+  去掉 subscribeRealtime 的 8 秒重复轮询，同步循环 30 秒，进后台 `stopPolling()` 省电。
+- **其它**：那年今日通知改预排未来 7 天（每天内容各自正确）；savePhoto 按文件头嗅探
+  HEIC/PNG 真实扩展名；删除事件 FeedEventKind 新增 `entryArchived`；
+  GrowthMoviePlayer 用 ImageIO 降采样 + 邻片预载 + 平移；CeremonyAnimation 加触觉反馈，
+  两处都尊重 reduceMotion。
+
+## 5. 未做 / 可继续（按价值排序）
+
+1. **真 E2E 时间胶囊**：随机密钥 + iCloud Keychain 同步 + 打印恢复码。
+2. **成长电影真实成片**：现为前端 Ken Burns 幻灯片 + AI 旁白。真实 ffmpeg 服务端合成 MP4 未做。
+3. **Realtime 长连**：可接 SSE EventSource，替代 30 秒轮询（接入点在 SyncEngine.connectAndSync 尾部注释处）。
 4. **后台上传**：现为前台 URLSession。可换 background URLSession + 断点续传（UploadQueue 有骨架）。
 5. **冲突解决**：现策略是"本地已 synced 才接受远端覆盖"。多端并发编辑同一条的合并策略可细化。
+6. **产品向**：桌面 Widget（年龄 + 那年今日）/ PDF 年册导出 / SpeechAnalyzer 端侧转写替代 Whisper 服务。
 
 ---
 
-## 5. 自托管部署（用户侧，三步）
+## 6. 自托管部署（用户侧，三步）
 
 详见 `server/README.md`。简版：
 1. **PocketBase**：从 github releases 下载 macOS(arm64) 二进制放 `server/pocketbase/`，
    `./start_pocketbase.sh /Volumes/你的SSD/pb_data`，后台建管理员 + 一个家庭登录账户。
-2. **AI 服务**：`cd server/ai && cp .env.example .env`（DeepSeek key 已预填）→ `./start_ai.sh`。
-3. **App 设置页**：填两个 Tailscale 地址（:8090 和 :8000）+ 家庭账户，开「启用真实 AI」。
+2. **AI 服务**：`cd server/ai && cp .env.example .env`，填自己的 DEEPSEEK_API_KEY +
+   生成 AI_API_KEY（`openssl rand -hex 24`）→ `./start_ai.sh`。
+3. **App 设置页**：填两个 Tailscale 地址（:8090 和 :8000）+ 家庭账户 + AI 访问密钥，开「启用真实 AI」。
 
 硬件：Mac mini + 外接 SSD 作数据盘 + 第二块盘做备份（单盘=单点故障，存的是布布的一生）。
 网络：Tailscale 内网，无需公网 IP/域名/暴露端口。
 
 ---
 
-## 6. 给接手者的提醒
+## 7. 给接手者的提醒
 
 - **clean build 才可信**：增量构建经常缓存出"找不到类型/重复声明"的误报，验证一律 clean。
 - **改 project.yml 后必须 `xcodegen generate`**，否则新增文件不进工程。
