@@ -27,9 +27,8 @@ struct CeremonyAnimation: View {
                         sparkleRing(count: 6, size: 12, near: -30, far: -92, fired: secondWave)
                             .rotationEffect(.degrees(22))
                     }
-                    Image(systemName: "star.circle.fill")
-                        .font(.system(size: 88))
-                        .foregroundStyle(BubuTheme.Color.primary)
+                    // 自家 IP 比系统图标更有庆祝感
+                    BubuMascotBadge(size: 96, expression: .yeah)
                         .scaleEffect(appear ? 1 : 0.4)
                 }
 
@@ -49,7 +48,7 @@ struct CeremonyAnimation: View {
             .opacity(appear ? 1 : 0)
         }
         .onAppear {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            BubuHaptics.success()
             guard !reduceMotion else {
                 appear = true
                 return

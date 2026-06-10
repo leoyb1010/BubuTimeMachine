@@ -88,13 +88,22 @@ struct VoiceRecorderBar: View {
     private func toggle() {
         if recorder.state == .recording {
             guard let result = recorder.stop() else { return }
+            // 结束：双击感（两次轻触觉）
+            BubuHaptics.tapLight()
+            Task {
+                try? await Task.sleep(for: .milliseconds(120))
+                BubuHaptics.tapLight()
+            }
             if let fileName = try? mediaStore.importFile(from: result.url, preferredExtension: "m4a") {
                 onFinished(fileName, result.duration, result.waveform)
             }
         } else {
             Task {
                 let granted = await recorder.requestPermission()
-                if granted { recorder.start() } else { denied = true }
+                if granted {
+                    BubuHaptics.tapLight()
+                    recorder.start()
+                } else { denied = true }
             }
         }
     }

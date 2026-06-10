@@ -16,7 +16,8 @@ struct MoodPicker: View {
                     ForEach(Mood.allCases, id: \.self) { mood in
                         let selected = selection == mood
                         Button {
-                            withAnimation(.smooth(duration: 0.2)) {
+                            BubuHaptics.selection()
+                            withAnimation(BubuMotion.quick) {
                                 selection = selected ? nil : mood
                             }
                         } label: {

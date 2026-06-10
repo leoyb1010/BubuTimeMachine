@@ -276,10 +276,11 @@ final class CaptureModel {
     }
 
     private func flashSaved() {
-        savedFlash = true
+        BubuHaptics.success()
+        withAnimation(BubuMotion.gentle) { savedFlash = true }
         Task {
             try? await Task.sleep(for: .seconds(1.8))
-            savedFlash = false
+            withAnimation(BubuMotion.gentle) { savedFlash = false }
         }
     }
 }
