@@ -219,13 +219,25 @@ struct CaptureHomeView: View {
 
     // MARK: 统计行
 
+    /// 三张统计卡都可点：瞬间 → 时光轴；照片 → 照片墙；生日 → 倒计时页。
     private var statRow: some View {
         HStack(spacing: 12) {
-            statCard(value: "\(entries.count)", label: "个瞬间", icon: "sparkles")
-            statCard(value: "\(totalPhotos)", label: "张照片", icon: "photo.stack")
+            NavigationLink { TimelineView() } label: {
+                statCard(value: "\(entries.count)", label: "个瞬间", icon: "sparkles")
+            }
+            .buttonStyle(BubuPressableStyle())
+
+            NavigationLink { PhotoWallView() } label: {
+                statCard(value: "\(totalPhotos)", label: "张照片", icon: "photo.stack")
+            }
+            .buttonStyle(BubuPressableStyle())
+
             if let profile {
-                statCard(value: "\(AgeCalculator.daysUntilNextBirthday(birthday: profile.birthday))",
-                         label: "天后生日", icon: "gift")
+                NavigationLink { BirthdayCountdownView() } label: {
+                    statCard(value: "\(AgeCalculator.daysUntilNextBirthday(birthday: profile.birthday))",
+                             label: "天后生日", icon: "gift")
+                }
+                .buttonStyle(BubuPressableStyle())
             }
         }
     }
@@ -234,13 +246,15 @@ struct CaptureHomeView: View {
         VStack(spacing: 6) {
             Image(systemName: icon).font(.system(size: 18)).foregroundStyle(theme.primary)
             Text(value).font(.system(size: 22, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             Text(label).font(.system(size: 12)).foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary)
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
         .bubuCardShadow()
     }
 
@@ -415,18 +429,22 @@ struct CaptureHomeView: View {
         }
     }
 
+    /// 保存成功：布布「耶」贴纸弹入 + 成功触觉（haptic 在 CaptureModel.flashSaved 触发）。
     private var savedToast: some View {
         VStack {
-            Label("已经收好啦", systemImage: "checkmark.circle.fill")
-                .font(BubuTheme.Font.body)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20).padding(.vertical, 12)
-                .background(BubuTheme.Color.success, in: Capsule())
-                .bubuCardShadow()
+            HStack(spacing: 10) {
+                BubuMascotBadge(size: 44, expression: .yeah)
+                Text("已经收好啦")
+                    .font(BubuTheme.Font.body.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 10)
+            .background(BubuTheme.Color.success, in: Capsule())
+            .bubuCardShadow()
             Spacer()
         }
         .padding(.top, 8)
-        .transition(.move(edge: .top).combined(with: .opacity))
+        .transition(.scale(scale: 0.5, anchor: .top).combined(with: .opacity))
     }
 }
 
