@@ -140,12 +140,15 @@ struct FirstPersonDiaryView: View {
             }
 
             if let errorText {
-                Text(errorText)
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.danger)
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+                HStack(alignment: .top, spacing: 10) {
+                    BubuMascotBadge(size: 44, expression: .shy)
+                    Text(errorText)
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             }
 
             if !displayed.isEmpty, let selected {
@@ -157,6 +160,7 @@ struct FirstPersonDiaryView: View {
     private var thinkingBubble: some View {
         HStack(alignment: .top, spacing: 10) {
             BubuMascotBadge(size: 52, expression: .thinking)
+                .bubuFloating()
             Text("我在想，怎么把这一天讲给未来的自己听……")
                 .font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)

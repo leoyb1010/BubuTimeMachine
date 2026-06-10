@@ -41,7 +41,7 @@ struct AIStudioHomeView: View {
             .padding()
         }
         .background(background.ignoresSafeArea())
-        .navigationTitle("AI 工坊")
+        .navigationTitle("布布的故事")
     }
 
     @ViewBuilder
@@ -54,7 +54,7 @@ struct AIStudioHomeView: View {
             HStack {
                 BubuMascotBadge(size: 58, expression: .drawing)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("布布的 AI 工坊").font(BubuTheme.Font.title)
+                    Text("布布的故事").font(BubuTheme.Font.title)
                     Text("把零散的瞬间，变成有温度的作品。")
                         .font(BubuTheme.Font.body)
                 }

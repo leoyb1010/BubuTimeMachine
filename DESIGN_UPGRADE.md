@@ -155,11 +155,21 @@ enum BubuMotion {
 
 ## 5. 优先级与排期建议
 
-| 批次 | 内容 | 预估 |
+| 批次 | 内容 | 状态 |
 |---|---|---|
-| **P0（一周）** | 贴纸空状态全覆盖 · 统计卡可点 · 那年今日上首页 · zoom 转场 · 胶囊倒计时活化 + 开启三幕制 · BubuMotion/BubuHaptics 两个文件落地 | 视觉收益最大的一批 |
-| **P1（第二周）** | 主题套色彻底化 · 时光轴月份年龄锚点/卡片层级/入场动效 · 里程碑进度环与点亮预览 · AI 工坊更名 + 等待态 · monospacedDigit 清扫 | |
-| **P2（机动）** | 设置页玻璃化 + 高级项折叠 · 引导页活化 · tab 图标统一 · 滚动年份指示器 · 季节图标 | |
+| **P0** | 贴纸空状态全覆盖 · 统计卡可点（照片墙/生日倒计时落地页） · 那年今日上首页（原已有） · zoom 转场 · 胶囊倒计时活化 + 开启三幕制 · BubuMotion/BubuHaptics 两个文件落地 | ✅ 2026-06-10 已落地 |
+| **P1（部分提前）** | ✅ 时光轴月份年龄锚点 + 入场动效 · ✅ AI 工坊更名「布布的故事」+ 等待态浮动 · ✅ monospacedDigit（统计卡/倒计时） ｜ ⬜ 主题套色彻底化 · ⬜ 里程碑进度环动画与点亮预览 · ⬜ 时光轴卡片层级重排 | 进行中 |
+| **P2（机动）** | 设置页玻璃化 + 高级项折叠 · 引导页活化 · tab 图标统一 · 滚动年份指示器 · 季节图标 | 未开始 |
+
+**P0 落地明细（代码位置）**：
+- `DesignSystem/BubuMotion.swift`：五曲线 token + `BubuPressableStyle` + `entranceEffect` + `bubuFloating`
+- `DesignSystem/BubuHaptics.swift`：success/warning/selection/tapLight/stamp/breakSeal 六个语义触觉
+- `Features/Capture/HomeDestinations.swift`：照片墙 + 生日倒计时两个统计卡落地页
+- 时光轴：`matchedTransitionSource` + `navigationTransition(.zoom)`、首屏前 6 卡错峰淡入、月份头年龄胶囊
+- 胶囊：列表每分钟实时倒计时（`SwiftUI.TimelineView`）、24h 内呼吸发光、开启三幕制（破封粒子→时光回溯字幕→信纸展开，可点击跳过）、封存盖章触觉
+- 贴纸空态：里程碑(.cheer)/胶囊(.love)/成长之声(.music)/照片墙(.surprised)/AI 失败(.shy)/仪式中央(.yeah)
+- 微交互：保存成功贴纸 toast + success 触觉、心情选中 selection 触觉、录音起止轻触觉、删除 warning 触觉
+- 全部循环/位移动效带 `accessibilityReduceMotion` 降级
 
 **验收标准**（每批完成时过一遍）：
 1. clean build 零警告,既有 7 个单元测试全过;

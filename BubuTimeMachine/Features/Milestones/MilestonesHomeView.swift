@@ -181,7 +181,7 @@ struct MilestonesHomeView: View {
 
     private var emptyState: some View {
         VStack(spacing: 16) {
-            Text("✨").font(.system(size: 56))
+            BubuMascotBadge(size: 84, expression: .cheer)
             Text("还没有里程碑\n点右上角 + 号，从清单选或自定义布布的第一次")
                 .font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)

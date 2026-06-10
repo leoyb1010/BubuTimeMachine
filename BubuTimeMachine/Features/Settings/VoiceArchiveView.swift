@@ -107,7 +107,7 @@ struct VoiceArchiveView: View {
 
     private var emptyState: some View {
         VStack(spacing: 18) {
-            Image(systemName: "waveform").font(.system(size: 60)).foregroundStyle(theme.opacity(0.7))
+            BubuMascotBadge(size: 84, expression: .music)
             Text("还没有声音").font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
             Text("点右上角，录下布布此刻的声音。").font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)

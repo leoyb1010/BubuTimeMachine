@@ -30,7 +30,7 @@ struct RootTabView: View {
             NavigationStack {
                 AIStudioHomeView()
             }
-            .tabItem { Label("AI 工坊", systemImage: "wand.and.stars") }
+            .tabItem { Label("布布的故事", systemImage: "wand.and.stars.inverse") }
             .tag(3)
 
             NavigationStack {
