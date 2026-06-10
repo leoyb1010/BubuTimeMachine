@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import UIKit
 
 // MARK: - 同步引擎
 /// 双向收敛：本地未同步的 Entry/Media 推送到 PocketBase；远端变更拉回本地。
@@ -32,10 +33,22 @@ final class SyncEngine {
     private let config: ServerConfig
     private let mediaStore: MediaStore
     private var modelContext: ModelContext?
-    private var realtimeTask: Task<Void, Never>?
     private var syncTask: Task<Void, Never>?
     private var needsAnotherSync = false
     private var pollTimer: Timer?
+
+    // MARK: - 增量游标（按集合持久化）
+    /// 任一集合拉取失败则该集合游标不推进，下次补拉；游标回退 60 秒容忍时钟偏差（合并幂等）。
+    private static let cursorOverlap: TimeInterval = 60
+
+    private func cursor(for collection: String) -> Date? {
+        UserDefaults.standard.object(forKey: "bubu.sync.cursor.\(collection)") as? Date
+    }
+
+    private func setCursor(_ date: Date, for collection: String) {
+        UserDefaults.standard.set(date.addingTimeInterval(-Self.cursorOverlap),
+                                  forKey: "bubu.sync.cursor.\(collection)")
+    }
 
     init(apiClient: APIClient, config: ServerConfig, mediaStore: MediaStore) {
         self.apiClient = apiClient
@@ -45,13 +58,17 @@ final class SyncEngine {
 
     /// 设置变更后替换底层客户端并重连。
     func setClient(_ client: APIClient) {
-        realtimeTask?.cancel()
-        realtimeTask = nil
         syncTask?.cancel()
         syncTask = nil
         pollTimer?.invalidate()
         pollTimer = nil
         self.apiClient = client
+    }
+
+    /// 进后台时调用：停掉轮询，省电；回前台 start() 会重启。
+    func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
     /// 由 App 注入主上下文（同步需要读写 SwiftData）。
     func attach(context: ModelContext) {
@@ -86,7 +103,7 @@ final class SyncEngine {
 
     private func startPolling() {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 18, repeats: true) { [weak self] _ in
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.config.isConfigured else { return }
                 self.scheduleSync()
@@ -134,29 +151,13 @@ final class SyncEngine {
 
         await pushLocal()
         await pullRemote()
+        if let context = modelContext {
+            await downloadMissingFiles(context)
+        }
         currentSyncLabel = nil
         currentUploadProgress = nil
-        startRealtime()
-    }
-
-    private func startRealtime() {
-        realtimeTask?.cancel()
-        realtimeTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in apiClient.subscribeRealtime() {
-                if Task.isCancelled { break }
-                await self.handle(event)
-            }
-        }
-    }
-
-    private func handle(_ event: RealtimeEvent) async {
-        switch event {
-        case .entryChanged(let dto): await mergeRemoteEntry(dto)
-        case .entryDeleted: break
-        case .connected: connectionState = .online
-        case .disconnected: connectionState = .offline
-        }
+        // 注：不再叠加 subscribeRealtime 的 8 秒轮询——与 30 秒同步循环重复，纯耗电。
+        // 后续接 SSE 长连时在这里恢复订阅。
     }
 
     // MARK: - 推：本地 → 远端
@@ -223,60 +224,28 @@ final class SyncEngine {
         lastFailureReason = "\(item)：\(message)"
     }
 
+    /// 用 fetchCount（SQL COUNT）代替全表取回内存过滤——数据量大也不卡。
     private func refreshPendingCount() {
         guard let context = modelContext else {
             pendingCount = 0
             return
         }
         pendingCount =
-            countPending(Entry.self, in: context) +
-            countPending(Media.self, in: context) +
-            countPending(Milestone.self, in: context) +
-            countPending(FirstTime.self, in: context) +
-            countPending(FamilyMember.self, in: context) +
-            countPending(ChildProfile.self, in: context) +
-            countPending(HealthRecord.self, in: context) +
-            countPending(Comment.self, in: context) +
-            countPending(VoiceNote.self, in: context) +
-            countPending(VoiceMemo.self, in: context) +
-            countPending(TimeCapsule.self, in: context)
+            count(context, #Predicate<Entry> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<Media> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<Milestone> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<FirstTime> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<FamilyMember> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<ChildProfile> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<HealthRecord> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<Comment> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<VoiceNote> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<VoiceMemo> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<TimeCapsule> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
     }
 
-    private func countPending<T: PersistentModel>(_ type: T.Type, in context: ModelContext) -> Int {
-        let descriptor = FetchDescriptor<T>()
-        guard let items = try? context.fetch(descriptor) else { return 0 }
-        return items.reduce(0) { count, item in
-            count + (Self.isPending(item) ? 1 : 0)
-        }
-    }
-
-    private static func isPending<T: PersistentModel>(_ item: T) -> Bool {
-        switch item {
-        case let item as Entry:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as Media:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as Milestone:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as FirstTime:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as FamilyMember:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as ChildProfile:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as HealthRecord:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as Comment:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as VoiceNote:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as VoiceMemo:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        case let item as TimeCapsule:
-            return item.syncState == .local || item.syncState == .failed || item.syncState == .uploading
-        default:
-            return false
-        }
+    private func count<T: PersistentModel>(_ context: ModelContext, _ predicate: Predicate<T>) -> Int {
+        (try? context.fetchCount(FetchDescriptor<T>(predicate: predicate))) ?? 0
     }
 
     private func pushLocalJSONObjects(_ context: ModelContext) async {
@@ -499,40 +468,102 @@ final class SyncEngine {
 
     // MARK: - 拉：远端 → 本地
 
+    /// 每个集合独立游标：成功才推进，失败下次补拉，互不影响。
     private func pullRemote() async {
-        guard let entries = try? await apiClient.fetchEntries(since: lastSyncedAt) else { return }
-        for dto in entries { await mergeRemoteEntry(dto) }
-        if let media = try? await apiClient.fetchMedia(since: lastSyncedAt) {
-            for dto in media { await mergeRemoteMedia(dto) }
+        await pull("entries") { try await self.apiClient.fetchEntries(since: $0) }
+            merge: { await self.mergeRemoteEntry($0) }
+        await pull("media") { try await self.apiClient.fetchMedia(since: $0) }
+            merge: { await self.mergeRemoteMedia($0) }
+        await pull("milestones") { try await self.apiClient.fetchMilestones(since: $0) }
+            merge: { await self.mergeRemoteMilestone($0) }
+        await pull("firsttimes") { try await self.apiClient.fetchFirstTimes(since: $0) }
+            merge: { await self.mergeRemoteFirstTime($0) }
+        await pull("members") { try await self.apiClient.fetchFamilyMembers(since: $0) }
+            merge: { await self.mergeRemoteMember($0) }
+        await pull("childprofile") { try await self.apiClient.fetchChildProfiles(since: $0) }
+            merge: { await self.mergeRemoteChildProfile($0) }
+        await pull("healthrecords") { try await self.apiClient.fetchHealthRecords(since: $0) }
+            merge: { await self.mergeRemoteHealth($0) }
+        await pull("comments") { try await self.apiClient.fetchComments(since: $0) }
+            merge: { await self.mergeRemoteComment($0) }
+        await pull("voicenotes") { try await self.apiClient.fetchVoiceNotes(since: $0) }
+            merge: { await self.mergeRemoteVoiceNote($0) }
+        await pull("voicememos") { try await self.apiClient.fetchVoiceMemos(since: $0) }
+            merge: { await self.mergeRemoteVoiceMemo($0) }
+        await pull("timecapsules") { try await self.apiClient.fetchTimeCapsules(since: $0) }
+            merge: { await self.mergeRemoteTimeCapsule($0) }
+    }
+
+    private func pull<DTO>(_ collection: String,
+                           fetch: (Date?) async throws -> [DTO],
+                           merge: (DTO) async -> Void) async {
+        let started = Date.now
+        guard let items = try? await fetch(cursor(for: collection)) else {
+            recordFailure(APIError.network("拉取\(collection)失败，下次补拉"), item: "同步")
+            return
         }
-        if let milestones = try? await apiClient.fetchMilestones(since: lastSyncedAt) {
-            for dto in milestones { await mergeRemoteMilestone(dto) }
+        for dto in items { await merge(dto) }
+        setCursor(started, for: collection)
+        lastSyncedAt = started
+    }
+
+    // MARK: - 下载：把远端媒体/语音落到本地（离线优先对多设备同样成立）
+
+    /// 每轮同步最多下载若干个缺失文件，避免长时间占用；下一轮继续。
+    private func downloadMissingFiles(_ context: ModelContext) async {
+        let media = (try? context.fetch(FetchDescriptor<Media>(
+            predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
+        for item in media.prefix(8) {
+            guard let remoteURL = item.remoteURL else { continue }
+            currentSyncLabel = item.type == .video ? "下载视频" : "下载照片"
+            do {
+                let data = try await apiClient.downloadFile(from: remoteURL)
+                let ext = URL(string: remoteURL)?.pathExtension ?? ""
+                let fileName = try mediaStore.saveBlob(data, preferredExtension: ext.isEmpty ? "bin" : ext)
+                item.localFileName = fileName
+                if item.type == .photo, let image = UIImage(data: data) {
+                    item.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
+                } else if item.type == .video {
+                    item.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
+                }
+            } catch {
+                recordFailure(error, item: "下载媒体")
+            }
+            try? context.save()
         }
-        if let firstTimes = try? await apiClient.fetchFirstTimes(since: lastSyncedAt) {
-            for dto in firstTimes { await mergeRemoteFirstTime(dto) }
+
+        let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(
+            predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
+        for note in notes.prefix(10) {
+            guard let remoteURL = note.remoteURL else { continue }
+            currentSyncLabel = "下载语音"
+            if let data = try? await apiClient.downloadFile(from: remoteURL) {
+                note.localFileName = try? mediaStore.saveBlob(data, preferredExtension: "m4a")
+            }
+            try? context.save()
         }
-        if let members = try? await apiClient.fetchFamilyMembers(since: lastSyncedAt) {
-            for dto in members { await mergeRemoteMember(dto) }
+
+        let comments = (try? context.fetch(FetchDescriptor<Comment>(
+            predicate: #Predicate { $0.voiceFileName == nil && $0.remoteURL != nil }))) ?? []
+        for comment in comments.prefix(10) {
+            guard let remoteURL = comment.remoteURL else { continue }
+            currentSyncLabel = "下载家人语音"
+            if let data = try? await apiClient.downloadFile(from: remoteURL) {
+                comment.voiceFileName = try? mediaStore.saveBlob(data, preferredExtension: "m4a")
+            }
+            try? context.save()
         }
-        if let profiles = try? await apiClient.fetchChildProfiles(since: lastSyncedAt) {
-            for dto in profiles { await mergeRemoteChildProfile(dto) }
+
+        let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(
+            predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
+        for memo in memos.prefix(10) {
+            guard let remoteURL = memo.remoteURL else { continue }
+            currentSyncLabel = "下载成长之声"
+            if let data = try? await apiClient.downloadFile(from: remoteURL) {
+                memo.localFileName = try? mediaStore.saveBlob(data, preferredExtension: "m4a")
+            }
+            try? context.save()
         }
-        if let health = try? await apiClient.fetchHealthRecords(since: lastSyncedAt) {
-            for dto in health { await mergeRemoteHealth(dto) }
-        }
-        if let comments = try? await apiClient.fetchComments(since: lastSyncedAt) {
-            for dto in comments { await mergeRemoteComment(dto) }
-        }
-        if let voiceNotes = try? await apiClient.fetchVoiceNotes(since: lastSyncedAt) {
-            for dto in voiceNotes { await mergeRemoteVoiceNote(dto) }
-        }
-        if let voiceMemos = try? await apiClient.fetchVoiceMemos(since: lastSyncedAt) {
-            for dto in voiceMemos { await mergeRemoteVoiceMemo(dto) }
-        }
-        if let capsules = try? await apiClient.fetchTimeCapsules(since: lastSyncedAt) {
-            for dto in capsules { await mergeRemoteTimeCapsule(dto) }
-        }
-        lastSyncedAt = .now
     }
 
     /// 把远端 Entry 合并进本地（按 localId 去重；远端较新则更新）。
@@ -846,7 +877,9 @@ final class SyncEngine {
     private static func apply(_ dto: TimeCapsuleDTO, to item: TimeCapsule) {
         item.title = dto.title
         item.fromRole = dto.fromRole
-        item.unlockAt = dto.unlockAt
+        // 不覆盖 unlockAt：封存后不可变，密钥派生依赖它；
+        // 远端 ISO 序列化会截断亚秒，覆盖会让旧版(v1)胶囊永久解不开。
+        // 新建路径由 TimeCapsule(init:) 直接用远端值，不经过这里。
         item.isLocked = dto.isLocked
         item.coverEmoji = dto.coverEmoji
         item.createdAt = dto.createdAt

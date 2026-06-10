@@ -21,7 +21,14 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     // MARK: 鉴权
 
+    /// 复用已有 token；过期由各请求的 401 自动重登兜底。
+    /// 不再每个同步周期跑一次密码登录（省电、少打服务器）。
     func authenticate(role: String) async throws -> AuthToken {
+        AuthToken(token: try await ensureToken(), role: role, expiresAt: nil)
+    }
+
+    /// 真正的密码登录。
+    private func login() async throws -> String {
         let url = baseURL.appendingPathComponent("api/collections/users/auth-with-password")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -36,109 +43,104 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             throw APIError.server(500, "鉴权响应异常")
         }
         await tokenBox.set(token)
-        return AuthToken(token: token, role: role, expiresAt: nil)
+        return token
     }
 
     private func ensureToken() async throws -> String {
         if let t = await tokenBox.get() { return t }
-        _ = try await authenticate(role: "")
-        guard let t = await tokenBox.get() else { throw APIError.unauthorized }
-        return t
+        return try await login()
+    }
+
+    /// token 过期（401/403）时清掉缓存、重新登录并重试一次。
+    private func withAuthRetry<T>(_ op: (String) async throws -> T) async throws -> T {
+        let token = try await ensureToken()
+        do {
+            return try await op(token)
+        } catch APIError.unauthorized {
+            await tokenBox.set(nil)
+            let fresh = try await ensureToken()
+            return try await op(fresh)
+        }
     }
 
     // MARK: Entry CRUD（幂等）
 
     func createEntry(_ dto: EntryDTO) async throws -> EntryDTO {
-        let token = try await ensureToken()
         let body = Self.entryBody(dto)
 
         // 先按 localId 查是否已存在
         if let existing = try await findRecord(collection: "entries",
-                                               localId: dto.localId, token: token) {
+                                               localId: dto.localId) {
             let updated = try await patch(collection: "entries", id: existing,
-                                          json: body, token: token)
+                                          json: body)
             return Self.entryDTO(from: updated, fallback: dto)
         }
-        let created = try await post(collection: "entries", json: body, token: token)
+        let created = try await post(collection: "entries", json: body)
         return Self.entryDTO(from: created, fallback: dto)
     }
 
     func fetchEntries(since: Date?) async throws -> [EntryDTO] {
-        let token = try await ensureToken()
-        let items = try await fetchRecords(collection: "entries", since: since, token: token, sort: "-happenedAt")
+        let items = try await fetchRecords(collection: "entries", since: since, sort: "-happenedAt")
         return items.map { Self.entryDTO(from: $0, fallback: nil) }
     }
 
     func fetchMedia(since: Date?) async throws -> [MediaDTO] {
-        let token = try await ensureToken()
-        let items = try await fetchRecords(collection: "media", since: since, token: token, sort: "-created")
+        let items = try await fetchRecords(collection: "media", since: since, sort: "-created")
         return items.map { self.mediaDTO(from: $0) }
     }
 
     func upsertMilestone(_ dto: MilestoneDTO) async throws -> MilestoneDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "milestones", localId: dto.localId, body: Self.milestoneBody(dto), token: token)
+        let obj = try await upsert(collection: "milestones", localId: dto.localId, body: Self.milestoneBody(dto))
         return Self.milestoneDTO(from: obj, fallback: dto)
     }
 
     func fetchMilestones(since: Date?) async throws -> [MilestoneDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "milestones", since: since, token: token).map { Self.milestoneDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "milestones", since: since).map { Self.milestoneDTO(from: $0, fallback: nil) }
     }
 
     func upsertFirstTime(_ dto: FirstTimeDTO) async throws -> FirstTimeDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "firsttimes", localId: dto.localId, body: Self.firstTimeBody(dto), token: token)
+        let obj = try await upsert(collection: "firsttimes", localId: dto.localId, body: Self.firstTimeBody(dto))
         return Self.firstTimeDTO(from: obj, fallback: dto)
     }
 
     func fetchFirstTimes(since: Date?) async throws -> [FirstTimeDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "firsttimes", since: since, token: token).map { Self.firstTimeDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "firsttimes", since: since).map { Self.firstTimeDTO(from: $0, fallback: nil) }
     }
 
     func upsertFamilyMember(_ dto: FamilyMemberDTO) async throws -> FamilyMemberDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "members", localId: dto.localId, body: Self.memberBody(dto), token: token)
+        let obj = try await upsert(collection: "members", localId: dto.localId, body: Self.memberBody(dto))
         return Self.memberDTO(from: obj, fallback: dto)
     }
 
     func fetchFamilyMembers(since: Date?) async throws -> [FamilyMemberDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "members", since: since, token: token).map { Self.memberDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "members", since: since).map { Self.memberDTO(from: $0, fallback: nil) }
     }
 
     func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "childprofile", localId: dto.localId, body: Self.childProfileBody(dto), token: token)
+        let obj = try await upsert(collection: "childprofile", localId: dto.localId, body: Self.childProfileBody(dto))
         return Self.childProfileDTO(from: obj, fallback: dto)
     }
 
     func fetchChildProfiles(since: Date?) async throws -> [ChildProfileDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "childprofile", since: since, token: token).map { Self.childProfileDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "childprofile", since: since).map { Self.childProfileDTO(from: $0, fallback: nil) }
     }
 
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "healthrecords", localId: dto.localId, body: Self.healthBody(dto), token: token)
+        let obj = try await upsert(collection: "healthrecords", localId: dto.localId, body: Self.healthBody(dto))
         return Self.healthDTO(from: obj, fallback: dto)
     }
 
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "healthrecords", since: since, token: token).map { Self.healthDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "healthrecords", since: since).map { Self.healthDTO(from: $0, fallback: nil) }
     }
 
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "comments", localId: dto.localId, body: Self.commentBody(dto), token: token)
+        let obj = try await upsert(collection: "comments", localId: dto.localId, body: Self.commentBody(dto))
         return self.commentDTO(from: obj, fallback: dto)
     }
 
     func fetchComments(since: Date?) async throws -> [CommentDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "comments", since: since, token: token).map { self.commentDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "comments", since: since).map { self.commentDTO(from: $0, fallback: nil) }
     }
 
     func uploadCommentVoice(commentId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
@@ -148,14 +150,12 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     func upsertVoiceNote(_ dto: VoiceNoteDTO) async throws -> VoiceNoteDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "voicenotes", localId: dto.localId, body: Self.voiceNoteBody(dto), token: token)
+        let obj = try await upsert(collection: "voicenotes", localId: dto.localId, body: Self.voiceNoteBody(dto))
         return self.voiceNoteDTO(from: obj, fallback: dto)
     }
 
     func fetchVoiceNotes(since: Date?) async throws -> [VoiceNoteDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "voicenotes", since: since, token: token).map { self.voiceNoteDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "voicenotes", since: since).map { self.voiceNoteDTO(from: $0, fallback: nil) }
     }
 
     func uploadVoiceNote(voiceId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
@@ -165,14 +165,12 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     func upsertVoiceMemo(_ dto: VoiceMemoDTO) async throws -> VoiceMemoDTO {
-        let token = try await ensureToken()
-        let obj = try await upsert(collection: "voicememos", localId: dto.localId, body: Self.voiceMemoBody(dto), token: token)
+        let obj = try await upsert(collection: "voicememos", localId: dto.localId, body: Self.voiceMemoBody(dto))
         return self.voiceMemoDTO(from: obj, fallback: dto)
     }
 
     func fetchVoiceMemos(since: Date?) async throws -> [VoiceMemoDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "voicememos", since: since, token: token).map { self.voiceMemoDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "voicememos", since: since).map { self.voiceMemoDTO(from: $0, fallback: nil) }
     }
 
     func uploadVoiceMemo(memoId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
@@ -181,15 +179,13 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO {
-        let token = try await ensureToken()
         let obj = try await upsert(collection: "timecapsules", localId: dto.localId,
-                                   body: Self.timeCapsuleBody(dto), token: token)
+                                   body: Self.timeCapsuleBody(dto))
         return self.timeCapsuleDTO(from: obj, fallback: dto)
     }
 
     func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO] {
-        let token = try await ensureToken()
-        return try await fetchRecords(collection: "timecapsules", since: since, token: token)
+        return try await fetchRecords(collection: "timecapsules", since: since)
             .map { self.timeCapsuleDTO(from: $0, fallback: nil) }
     }
 
@@ -201,12 +197,13 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     func downloadFile(from remoteURL: String) async throws -> Data {
         guard let url = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
-        let token = try await ensureToken()
-        var req = URLRequest(url: url)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data)
-        return data
+        return try await withAuthRetry { token in
+            var req = URLRequest(url: url)
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            try Self.check(resp, data)
+            return data
+        }
     }
 
     // MARK: 媒体上传（multipart + 进度）
@@ -265,70 +262,98 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     // MARK: - 私有：REST 基础
 
-    private func findRecord(collection: String, localId: String, token: String) async throws -> String? {
-        var comps = URLComponents(
-            url: baseURL.appendingPathComponent("api/collections/\(collection)/records"),
-            resolvingAgainstBaseURL: false)!
-        comps.queryItems = [
-            URLQueryItem(name: "filter", value: "(localId='\(localId)')"),
-            URLQueryItem(name: "perPage", value: "1"),
-        ]
-        var req = URLRequest(url: comps.url!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data)
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let items = obj["items"] as? [[String: Any]],
-              let first = items.first, let id = first["id"] as? String else { return nil }
-        return id
+    /// PocketBase filter 字符串里的单引号转义，杜绝注入面。
+    private static func filterEscape(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+             .replacingOccurrences(of: "'", with: "\\'")
     }
 
-    private func post(collection: String, json: [String: Any], token: String) async throws -> [String: Any] {
+    private func findRecord(collection: String, localId: String) async throws -> String? {
+        try await withAuthRetry { token in
+            var comps = URLComponents(
+                url: self.baseURL.appendingPathComponent("api/collections/\(collection)/records"),
+                resolvingAgainstBaseURL: false)!
+            comps.queryItems = [
+                URLQueryItem(name: "filter", value: "(localId='\(Self.filterEscape(localId))')"),
+                URLQueryItem(name: "perPage", value: "1"),
+            ]
+            var req = URLRequest(url: comps.url!)
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            try Self.check(resp, data)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = obj["items"] as? [[String: Any]],
+                  let first = items.first, let id = first["id"] as? String else { return nil }
+            return id
+        }
+    }
+
+    private func post(collection: String, json: [String: Any]) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent("api/collections/\(collection)/records")
-        return try await send(url: url, method: "POST", json: json, token: token)
+        return try await send(url: url, method: "POST", json: json)
     }
 
-    private func upsert(collection: String, localId: String, body: [String: Any], token: String) async throws -> [String: Any] {
-        if let existing = try await findRecord(collection: collection, localId: localId, token: token) {
-            return try await patch(collection: collection, id: existing, json: body, token: token)
+    private func upsert(collection: String, localId: String, body: [String: Any]) async throws -> [String: Any] {
+        if let existing = try await findRecord(collection: collection, localId: localId) {
+            return try await patch(collection: collection, id: existing, json: body)
         }
-        return try await post(collection: collection, json: body, token: token)
+        return try await post(collection: collection, json: body)
     }
 
-    private func fetchRecords(collection: String, since: Date?, token: String, sort: String = "-updated") async throws -> [[String: Any]] {
-        var comps = URLComponents(
-            url: baseURL.appendingPathComponent("api/collections/\(collection)/records"),
-            resolvingAgainstBaseURL: false)!
-        var query = [URLQueryItem(name: "perPage", value: "500"),
-                     URLQueryItem(name: "sort", value: sort)]
-        if let since {
-            let iso = ISO8601DateFormatter().string(from: since)
-            query.append(URLQueryItem(name: "filter", value: "(updated>'\(iso)')"))
+    /// 翻页拉全量：不再受单页 500 条上限限制——换机首次全量恢复也能拉完整个集合。
+    private func fetchRecords(collection: String, since: Date?, sort: String = "-updated") async throws -> [[String: Any]] {
+        var all: [[String: Any]] = []
+        var page = 1
+        while true {
+            let (items, totalPages) = try await fetchPage(collection: collection, since: since, sort: sort, page: page)
+            all.append(contentsOf: items)
+            if page >= totalPages || items.isEmpty { break }
+            page += 1
         }
-        comps.queryItems = query
-        var req = URLRequest(url: comps.url!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data)
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let items = obj["items"] as? [[String: Any]] else { return [] }
-        return items
+        return all
     }
 
-    private func patch(collection: String, id: String, json: [String: Any], token: String) async throws -> [String: Any] {
+    private func fetchPage(collection: String, since: Date?, sort: String,
+                           page: Int) async throws -> (items: [[String: Any]], totalPages: Int) {
+        try await withAuthRetry { token in
+            var comps = URLComponents(
+                url: self.baseURL.appendingPathComponent("api/collections/\(collection)/records"),
+                resolvingAgainstBaseURL: false)!
+            var query = [URLQueryItem(name: "perPage", value: "200"),
+                         URLQueryItem(name: "page", value: "\(page)"),
+                         URLQueryItem(name: "sort", value: sort)]
+            if let since {
+                let iso = ISO8601DateFormatter().string(from: since)
+                query.append(URLQueryItem(name: "filter", value: "(updated>'\(iso)')"))
+            }
+            comps.queryItems = query
+            var req = URLRequest(url: comps.url!)
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            try Self.check(resp, data)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = obj["items"] as? [[String: Any]] else { return ([], 1) }
+            let totalPages = obj["totalPages"] as? Int ?? 1
+            return (items, totalPages)
+        }
+    }
+
+    private func patch(collection: String, id: String, json: [String: Any]) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent("api/collections/\(collection)/records/\(id)")
-        return try await send(url: url, method: "PATCH", json: json, token: token)
+        return try await send(url: url, method: "PATCH", json: json)
     }
 
-    private func send(url: URL, method: String, json: [String: Any], token: String) async throws -> [String: Any] {
-        var req = URLRequest(url: url)
-        req.httpMethod = method
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try JSONSerialization.data(withJSONObject: json)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data)
-        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    private func send(url: URL, method: String, json: [String: Any]) async throws -> [String: Any] {
+        try await withAuthRetry { token in
+            var req = URLRequest(url: url)
+            req.httpMethod = method
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: json)
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            try Self.check(resp, data)
+            return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        }
     }
 
     private func uploadGenericFile(collection: String, localId: String, fields: [String: String],
@@ -359,7 +384,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     private func multipartUpload(collection: String, localId: String, fields: [String: String], fileField: String,
                                  fileURL: URL, fileName: String, token: String,
                                  onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
-        let existingId = try await findRecord(collection: collection, localId: localId, token: token)
+        let existingId = try await findRecord(collection: collection, localId: localId)
         let url = existingId.map {
             baseURL.appendingPathComponent("api/collections/\(collection)/records/\($0)")
         } ?? baseURL.appendingPathComponent("api/collections/\(collection)/records")
@@ -384,7 +409,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private func multipartUpload(_ file: MediaUploadRequest, token: String,
                                  onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
-        let existingId = try await findRecord(collection: "media", localId: file.mediaId.uuidString, token: token)
+        let existingId = try await findRecord(collection: "media", localId: file.mediaId.uuidString)
         let url = existingId.map {
             baseURL.appendingPathComponent("api/collections/media/records/\($0)")
         } ?? baseURL.appendingPathComponent("api/collections/media/records")

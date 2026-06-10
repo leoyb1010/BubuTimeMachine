@@ -36,6 +36,7 @@ final class FeedEvent {
 
 enum FeedEventKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case entryCreated
+    case entryArchived
     case commentAdded
     case voiceAdded
     case milestoneLit
@@ -47,6 +48,7 @@ enum FeedEventKind: String, Codable, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .entryCreated: return "瞬间"
+        case .entryArchived: return "删除"
         case .commentAdded: return "评论"
         case .voiceAdded: return "语音"
         case .milestoneLit: return "里程碑"
@@ -58,6 +60,7 @@ enum FeedEventKind: String, Codable, CaseIterable, Identifiable, Sendable {
     var icon: String {
         switch self {
         case .entryCreated: return "heart.circle.fill"
+        case .entryArchived: return "trash.circle.fill"
         case .commentAdded: return "text.bubble.fill"
         case .voiceAdded: return "waveform.circle.fill"
         case .milestoneLit: return "star.circle.fill"

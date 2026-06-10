@@ -140,7 +140,7 @@ struct TimelineView: View {
         entry.isArchived = true
         entry.editedAt = .now
         entry.syncState = .local
-        context.insert(FeedEvent(kind: .entryCreated,
+        context.insert(FeedEvent(kind: .entryArchived,
                                  actorRole: env.config.currentRole.rawValue,
                                  summary: "删除了一条时光轴记录",
                                  targetLocalId: entry.id.uuidString))

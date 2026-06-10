@@ -11,6 +11,7 @@ struct BubuTimeMachineApp: App {
 
     /// 全局依赖容器。@State 持有，保证生命周期与 App 一致。
     @State private var env = AppEnvironment()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let schema = Schema([
@@ -40,6 +41,14 @@ struct BubuTimeMachineApp: App {
                 }
         }
         .modelContainer(modelContainer)
+        .onChange(of: scenePhase) { _, phase in
+            // 进后台停轮询省电；回前台立刻补一轮同步
+            switch phase {
+            case .active: env.syncEngine.start()
+            case .background: env.syncEngine.stopPolling()
+            default: break
+            }
+        }
     }
 
     #if DEBUG
