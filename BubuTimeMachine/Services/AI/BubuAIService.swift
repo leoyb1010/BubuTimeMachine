@@ -6,17 +6,32 @@ import Foundation
 final class BubuAIService: AIService, @unchecked Sendable {
 
     private let baseURL: URL
+    private let apiKey: String
     private let session = URLSession(configuration: .default)
 
-    init(baseURL: URL) {
+    init(baseURL: URL, apiKey: String = "") {
         self.baseURL = baseURL
+        self.apiKey = apiKey
     }
 
     func ping() async throws -> Bool {
         let url = baseURL.appendingPathComponent("health")
-        let (data, resp) = try await session.data(from: url)
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
+        // 服务端开启鉴权时，health 会回 auth 字段；key 不对则视为未连通。
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let auth = obj["auth"] as? Bool, !auth, !apiKey.isEmpty {
+            return false
+        }
         return true
+    }
+
+    private func applyAuth(_ req: inout URLRequest) {
+        if !apiKey.isEmpty {
+            req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        }
     }
 
     func rewriteFirstPerson(note: String, childName: String) async throws -> String {
@@ -60,6 +75,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        applyAuth(&req)
         let fileData = try Data(contentsOf: audioURL)
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -96,6 +112,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&req)
         req.timeoutInterval = 90
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await session.data(for: req)

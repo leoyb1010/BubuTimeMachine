@@ -53,12 +53,16 @@
 
 ```bash
 cd server/ai
-cp .env.example .env          # 填入 DEEPSEEK_API_KEY（已预填你的 key）
+cp .env.example .env          # 填入你自己的 DEEPSEEK_API_KEY
+openssl rand -hex 24          # 生成一个 AI_API_KEY，填进 .env，App 设置页填同一个
 ./start_ai.sh                 # 首次自动建 venv 装依赖并启动
 ```
 
+- **鉴权是必须的（fail-closed）**：`.env` 不配 `AI_API_KEY` 时所有业务接口直接返回 503，
+  防止把无鉴权服务误暴露到公网。所有请求需带 `X-API-Key` 头，App 端在设置页填写后自动携带。
+- 内置按 IP 限流（默认 30 次/分钟，`AI_RATE_LIMIT_PER_MINUTE` 可调）；`/transcribe` 上限 50MB。
 - 默认模型：`deepseek-v4-flash`（首选）→ `deepseek-v4-pro`（兜底）。
-- 健康检查：`curl http://localhost:8000/health`
+- 健康检查：`curl http://localhost:8000/health`（不带 key 只返回 ok，不泄露配置信息）。
 - 语音转写为可选：需要时 `pip install faster-whisper` 并重启；未装时 `/transcribe` 返回 501，App 端会优雅降级。
 
 接口：
@@ -77,7 +81,9 @@ cp .env.example .env          # 填入 DEEPSEEK_API_KEY（已预填你的 key）
 
 打开 App → 设置：
 1. **家里的服务器**：填 PocketBase 地址 `http://<mac的tailscale-ip>:8090`，点「连接测试」。
-2. **AI 服务**：填 `http://<mac的tailscale-ip>:8000`，打开「启用真实 AI」。
+2. **AI 服务**：填 `http://<mac的tailscale-ip>:8000` + AI 访问密钥（即 `.env` 的 `AI_API_KEY`），打开「启用真实 AI」。
+
+> App 出厂默认**不配置任何服务器、AI 默认关闭**——隐私至上，任何数据外发都必须你显式填地址。
 
 配置好后：
 - 三台 iPhone 的记录会自动汇到一起（离线照常用，联网自动同步）。
@@ -98,5 +104,8 @@ cp .env.example .env          # 填入 DEEPSEEK_API_KEY（已预填你的 key）
 ## 安全须知
 
 - **不要把 `.env` 和 `pocketbase` 二进制、`pb_data/` 提交到 git**（已在 `.gitignore` 排除）。
-- DeepSeek API 走云端：只发送**文字**（记录摘要），从不上传照片，降低隐私暴露。
+  `.env.example` 永远只放空占位符——真实 key 一旦推上 GitHub 就要立刻吊销重发。
+- **公网暴露（Cloudflare Tunnel 等）务必三件套**：AI 服务的 `AI_API_KEY`、强密码的
+  PocketBase 家庭账户、最好再加一层 Cloudflare Access。能用 Tailscale 内网就不要走公网。
+- DeepSeek API 走云端：只发送**文字**（记录摘要），从不上传照片；语音转写在你自己的服务器本地跑。
   若要完全不出家门，可把 `llm.py` 的 base_url 指向本地 Ollama。

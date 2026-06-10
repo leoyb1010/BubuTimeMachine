@@ -18,23 +18,50 @@
 from __future__ import annotations
 
 import os
+import time
+from collections import defaultdict, deque
+from threading import Lock
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
 
 from llm import LLMClient, LLMError
 
-app = FastAPI(title="布布时光机 AI 服务", version="1.0.0")
-
-# 家庭内网，放开 CORS（仅 Tailscale 可达，外部访问不到）
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-)
+app = FastAPI(title="布布时光机 AI 服务", version="1.1.0")
 
 llm = LLMClient()
+
+# ---------- 鉴权 + 限流（公网暴露时的最低防线）----------
+# 客户端是原生 App，无需 CORS；浏览器跨域一律不放行（不挂 CORSMiddleware 即默认拒绝）。
+
+_API_KEY = os.environ.get("AI_API_KEY", "")
+_RATE_LIMIT = int(os.environ.get("AI_RATE_LIMIT_PER_MINUTE", "30"))
+_rate_lock = Lock()
+_rate_buckets: dict[str, deque] = defaultdict(deque)
+
+
+def _check_rate(client_ip: str) -> None:
+    now = time.monotonic()
+    with _rate_lock:
+        bucket = _rate_buckets[client_ip]
+        while bucket and now - bucket[0] > 60:
+            bucket.popleft()
+        if len(bucket) >= _RATE_LIMIT:
+            raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试。")
+        bucket.append(now)
+
+
+def require_api_key(request: Request,
+                    x_api_key: Optional[str] = Header(default=None)) -> None:
+    """业务路由必须带 X-API-Key。未配置 AI_API_KEY 时拒绝服务（fail-closed），
+    防止把无鉴权服务误暴露到公网。"""
+    if not _API_KEY:
+        raise HTTPException(status_code=503,
+                            detail="服务端未配置 AI_API_KEY，请在 .env 设置后重启。")
+    if x_api_key != _API_KEY:
+        raise HTTPException(status_code=401, detail="鉴权失败：X-API-Key 不正确。")
+    _check_rate(request.client.host if request.client else "unknown")
 
 
 # ---------- 请求/响应模型 ----------
@@ -88,11 +115,16 @@ class MovieResp(BaseModel):
 # ---------- 路由 ----------
 
 @app.get("/health")
-def health():
-    return {"ok": True, "model": llm.model, "configured": llm.is_configured}
+def health(x_api_key: Optional[str] = Header(default=None)):
+    # 连通性检查无需鉴权，但只有带正确 key 才返回服务详情。
+    if _API_KEY and x_api_key == _API_KEY:
+        return {"ok": True, "model": llm.model, "configured": llm.is_configured,
+                "auth": True}
+    return {"ok": True, "auth": False}
 
 
-@app.post("/rewrite-first-person", response_model=RewriteResp)
+@app.post("/rewrite-first-person", response_model=RewriteResp,
+          dependencies=[Depends(require_api_key)])
 def rewrite_first_person(req: RewriteReq):
     sys = (
         f"你在替孩子「{req.child_name}」写一小段第一人称成长日记。"
@@ -117,7 +149,8 @@ def rewrite_first_person(req: RewriteReq):
     return RewriteResp(first_person=text.strip())
 
 
-@app.post("/classify", response_model=ClassifyResp)
+@app.post("/classify", response_model=ClassifyResp,
+          dependencies=[Depends(require_api_key)])
 def classify(req: ClassifyReq):
     sys = (
         "你是图片/记录归类助手。基于给定的视觉标签、文字、地点，"
@@ -137,7 +170,8 @@ def classify(req: ClassifyReq):
     )
 
 
-@app.post("/detect-first-time", response_model=DetectFirstResp)
+@app.post("/detect-first-time", response_model=DetectFirstResp,
+          dependencies=[Depends(require_api_key)])
 def detect_first_time(req: DetectFirstReq):
     sys = (
         f"你判断一张照片是否可能是孩子「{req.child_name}」的人生第一次。"
@@ -156,7 +190,8 @@ def detect_first_time(req: DetectFirstReq):
     )
 
 
-@app.post("/movie-narration", response_model=MovieResp)
+@app.post("/movie-narration", response_model=MovieResp,
+          dependencies=[Depends(require_api_key)])
 def movie_narration(req: MovieReq):
     sys = (
         f"你是温暖的家庭纪录片旁白撰稿人。为孩子「{req.child_name}」第{req.year}岁的"
@@ -171,7 +206,7 @@ def movie_narration(req: MovieReq):
     return MovieResp(narration=text.strip())
 
 
-@app.post("/transcribe")
+@app.post("/transcribe", dependencies=[Depends(require_api_key)])
 async def transcribe(file: UploadFile = File(...)):
     """语音转写。需安装 faster-whisper（见 requirements）；未装则返回 501。"""
     try:
@@ -182,6 +217,8 @@ async def transcribe(file: UploadFile = File(...)):
             detail="转写功能未启用：请在服务器安装 faster-whisper（pip install faster-whisper）。",
         )
     data = await file.read()
+    if len(data) > 52_428_800:  # 50MB 上限，防止公网恶意大文件耗尽 CPU/磁盘
+        raise HTTPException(status_code=413, detail="音频文件太大（上限 50MB）。")
     try:
         text = transcribe_audio(data, file.filename or "audio.m4a")
     except Exception as e:  # noqa: BLE001

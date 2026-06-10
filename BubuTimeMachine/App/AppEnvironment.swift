@@ -67,7 +67,7 @@ final class AppEnvironment {
 
     private static func makeAIService(config: ServerConfig) -> AIService {
         guard config.isAIConfigured, let url = config.aiBaseURL else { return MockAIService() }
-        return BubuAIService(baseURL: url)
+        return BubuAIService(baseURL: url, apiKey: config.aiAPIKey)
     }
 
     /// App 启动后调用：注入上下文、启动同步层（离线时无副作用）。

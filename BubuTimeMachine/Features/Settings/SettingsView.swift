@@ -55,7 +55,7 @@ struct SettingsView: View {
 
             // 服务器（同步）
             Section {
-                TextField(ServerConfig.defaultBaseURL, text: $config.baseURLString)
+                TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 TextField("家庭账户邮箱", text: $config.accountEmail)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
@@ -81,8 +81,10 @@ struct SettingsView: View {
             Section {
                 Toggle("启用真实 AI", isOn: $config.aiEnabled)
                 if config.aiEnabled {
-                    TextField(ServerConfig.defaultAIBaseURL, text: $config.aiBaseURLString)
+                    TextField(ServerConfig.aiBaseURLPlaceholder, text: $config.aiBaseURLString)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    SecureField("AI 访问密钥（服务端 AI_API_KEY）", text: $config.aiAPIKey)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button {
                         Task { await testAIConnection() }
                     } label: {
@@ -98,7 +100,7 @@ struct SettingsView: View {
             } header: {
                 Text("AI 服务（工坊）")
             } footer: {
-                Text("关闭时，AI 工坊用本地模拟。开启并填好地址后，改写、旁白、转写走你自托管的服务。")
+                Text("关闭时，AI 工坊用本地模拟。开启并填好地址和密钥后，改写、旁白、转写走你自托管的服务。密钥与服务器 .env 里的 AI_API_KEY 一致。")
             }
 
             // 提醒

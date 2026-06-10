@@ -37,9 +37,16 @@ final class ServerConfig {
         }
     }
 
-    /// AI 服务（FastAPI）地址，例如默认 Cloudflare 公网地址。
+    /// AI 服务（FastAPI）地址。默认空：必须用户自己填，绝不默认把数据发到任何外部服务器。
     var aiBaseURLString: String {
         didSet { UserDefaults.standard.set(aiBaseURLString, forKey: Self.aiURLKey) }
+    }
+    /// AI 服务访问密钥（与服务端 .env 的 AI_API_KEY 一致），存 Keychain。
+    var aiAPIKey: String {
+        didSet {
+            if aiAPIKey.isEmpty { KeychainStore.delete(Self.aiKeyKey) }
+            else { KeychainStore.set(aiAPIKey, for: Self.aiKeyKey) }
+        }
     }
     /// 是否启用真实 AI（关闭则用 Mock，离线可玩）。
     var aiEnabled: Bool {
@@ -77,14 +84,17 @@ final class ServerConfig {
     private static let emailKey = "bubu.server.email"
     private static let passwordKey = "bubu.server.password"
     private static let aiURLKey = "bubu.ai.baseURL"
+    private static let aiKeyKey = "bubu.ai.apiKey"
     private static let aiEnabledKey = "bubu.ai.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
 
-    /// 默认公网地址：通过 Cloudflare Tunnel 暴露家里 Mac mini 上的服务，
-    /// 任何网络（家庭 WiFi / 运营商 4G/5G）都可直连，无需 Tailscale。
-    /// 用户仍可在设置页改写为自己的内网地址。
-    static let defaultBaseURL = "https://bubu-api.leoyuan.top"
-    static let defaultAIBaseURL = "https://bubu-ai.leoyuan.top"
+    /// 默认地址一律为空：隐私至上，任何数据外发都必须由用户显式配置。
+    /// （此前默认指向作者私人 Cloudflare 域名，等于所有安装者的数据默认发往他人服务器，已纠正。）
+    static let defaultBaseURL = ""
+    static let defaultAIBaseURL = ""
+    /// 设置页占位示例。
+    static let baseURLPlaceholder = "https://你的服务器地址:8090"
+    static let aiBaseURLPlaceholder = "https://你的AI服务地址:8000"
 
     init() {
         self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
@@ -98,8 +108,9 @@ final class ServerConfig {
         }
         self.accountPassword = KeychainStore.string(for: Self.passwordKey) ?? legacyPassword ?? ""
         self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? Self.defaultAIBaseURL
-        // AI 首次默认开启（已有公网地址）；用户改过则尊重其设置。
-        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? true
+        self.aiAPIKey = KeychainStore.string(for: Self.aiKeyKey) ?? ""
+        // 隐私默认：AI 默认关闭，用户填好自己的服务地址后再开。
+        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
     }
 }
