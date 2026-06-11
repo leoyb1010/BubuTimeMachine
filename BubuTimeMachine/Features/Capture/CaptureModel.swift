@@ -14,6 +14,7 @@ final class CaptureModel {
     var showQuickCapture = false
     var pickedItems: [PhotosPickerItem] = []
     var cameraPhotos: [SelectedCameraPhoto] = []
+    var cameraVideos: [SelectedCameraVideo] = []
     var selectedPreviews: [SelectedMediaPreview] = []
     var isLoadingPreviews = false
     var isSaving = false
@@ -52,6 +53,7 @@ final class CaptureModel {
         includeLocation = false
         pickedItems = []
         cameraPhotos = []
+        cameraVideos = []
         selectedPreviews = []
         pendingVoice = nil
         detectedTags = []
@@ -64,7 +66,7 @@ final class CaptureModel {
 
     /// 是否有可保存内容（媒体 / 文字 / 语音 任一即可）。
     var canSave: Bool {
-        !pickedItems.isEmpty || !cameraPhotos.isEmpty || !trimmedNote.isEmpty || pendingVoice != nil
+        !pickedItems.isEmpty || !cameraPhotos.isEmpty || !cameraVideos.isEmpty || !trimmedNote.isEmpty || pendingVoice != nil
     }
 
     private var trimmedNote: String {
@@ -124,6 +126,12 @@ final class CaptureModel {
                 }
             }
         }
+        for video in cameraVideos {
+            guard let media = await persist(cameraVideo: video) else { continue }
+            media.entry = entry
+            context.insert(media)
+            savedCount += 1
+        }
 
         // 语音
         if let v = pendingVoice {
@@ -164,6 +172,7 @@ final class CaptureModel {
         lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
         pickedItems = []
         cameraPhotos = []
+        cameraVideos = []
         selectedPreviews = []
         note = ""
         mood = nil
@@ -181,8 +190,12 @@ final class CaptureModel {
         var previews: [SelectedMediaPreview] = cameraPhotos.enumerated().map { index, photo in
             SelectedMediaPreview(index: index, image: photo.image, isVideo: false, label: "拍照")
         }
+        previews += cameraVideos.enumerated().map { offset, video in
+            SelectedMediaPreview(index: cameraPhotos.count + offset, image: video.thumbnail, isVideo: true, label: "录像")
+        }
+        let baseCount = cameraPhotos.count + cameraVideos.count
         for (offset, item) in items.enumerated() {
-            let index = cameraPhotos.count + offset
+            let index = baseCount + offset
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
                 let image = await Self.videoPreviewImage(url: movie.url)
                 previews.append(SelectedMediaPreview(index: index, image: image, isVideo: true, label: "视频"))
@@ -201,8 +214,10 @@ final class CaptureModel {
     func removePickedItem(at index: Int) {
         if cameraPhotos.indices.contains(index) {
             cameraPhotos.remove(at: index)
+        } else if index - cameraPhotos.count >= 0 && index - cameraPhotos.count < cameraVideos.count {
+            cameraVideos.remove(at: index - cameraPhotos.count)
         } else {
-            let pickedIndex = index - cameraPhotos.count
+            let pickedIndex = index - cameraPhotos.count - cameraVideos.count
             guard pickedItems.indices.contains(pickedIndex) else { return }
             pickedItems.remove(at: pickedIndex)
         }
@@ -215,6 +230,26 @@ final class CaptureModel {
     func addCameraPhoto(_ image: UIImage) {
         cameraPhotos.append(SelectedCameraPhoto(image: image))
         Task { await updatePreviews() }
+    }
+
+    /// 直接录像：拷入沙盒临时位置，生成缩略图，加入待保存列表。
+    func addCameraVideo(url: URL) {
+        Task {
+            let thumb = await Self.videoPreviewImage(url: url)
+            cameraVideos.append(SelectedCameraVideo(url: url, thumbnail: thumb))
+            await updatePreviews()
+        }
+    }
+
+    private func persist(cameraVideo: SelectedCameraVideo) async -> Media? {
+        analyzingHint = "正在整理这段录像，太大时会先压缩…"
+        defer { analyzingHint = nil }
+        guard let imported = try? await mediaStore.importVideoForSync(from: cameraVideo.url) else { return nil }
+        let fileName = imported.fileName
+        let media = Media(type: .video, localFileName: fileName)
+        if imported.wasCompressed { media.aiTags = ["已压缩", "视频"] }
+        media.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
+        return media
     }
 
     private func persist(cameraPhoto: SelectedCameraPhoto) async -> (Media, PhotoAnalysis?)? {
@@ -289,6 +324,13 @@ final class CaptureModel {
 struct SelectedCameraPhoto: Identifiable, Sendable {
     let id = UUID()
     let image: UIImage
+}
+
+// MARK: - 相机录像
+struct SelectedCameraVideo: Identifiable, Sendable {
+    let id = UUID()
+    let url: URL
+    let thumbnail: UIImage?
 }
 
 // MARK: - 选择媒体预览

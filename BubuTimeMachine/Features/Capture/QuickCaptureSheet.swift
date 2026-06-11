@@ -14,6 +14,7 @@ struct QuickCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     @FocusState private var noteFocused: Bool
     @State private var showCamera = false
+    @State private var showVideoCamera = false
     @State private var cameraAlert: CameraAlert?
     @State private var highlightedTarget: CaptureTarget?
     @State private var requestingCamera = false
@@ -90,6 +91,14 @@ struct QuickCaptureSheet: View {
                 }
                 .ignoresSafeArea()
             }
+            .sheet(isPresented: $showVideoCamera) {
+                VideoCaptureView { url in
+                    model.addCameraVideo(url: url)
+                } onCancel: {
+                    showVideoCamera = false
+                }
+                .ignoresSafeArea()
+            }
             .navigationTitle("记录此刻")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: model.pickedItems) { _, _ in
@@ -137,8 +146,14 @@ struct QuickCaptureSheet: View {
 
     private func primaryActions(proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 10) {
-            Button { Task { await requestCamera() } } label: {
+            Button { Task { await requestCamera(video: false) } } label: {
                 actionCard("拍照", expression: .yeah, subtitle: "拍下此刻")
+            }
+            .buttonStyle(.plain)
+            .disabled(requestingCamera)
+
+            Button { Task { await requestCamera(video: true) } } label: {
+                actionCard("录像", expression: .playing, subtitle: "录一段(≤60秒)")
             }
             .buttonStyle(.plain)
             .disabled(requestingCamera)
@@ -374,7 +389,7 @@ struct QuickCaptureSheet: View {
     }
 
     @MainActor
-    private func requestCamera() async {
+    private func requestCamera(video: Bool) async {
         guard !requestingCamera else { return }
         requestingCamera = true
         defer { requestingCamera = false }
@@ -383,12 +398,13 @@ struct QuickCaptureSheet: View {
             cameraAlert = .unavailable
             return
         }
+        func present() { if video { showVideoCamera = true } else { showCamera = true } }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            showCamera = true
+            present()
         case .notDetermined:
             let granted = await AVCaptureDevice.requestAccess(for: .video)
-            if granted { showCamera = true } else { cameraAlert = .denied }
+            if granted { present() } else { cameraAlert = .denied }
         case .denied, .restricted:
             cameraAlert = .denied
         @unknown default:
