@@ -15,6 +15,7 @@ migrate((app) => {
     deleteRule: authRule,
     fields: [
       { name: 'localId', type: 'text', required: true, presentable: true, unique: true },
+      { name: 'clientUpdatedAt', type: 'date' },
       { name: 'title', type: 'text', required: true },
       { name: 'fromRole', type: 'text', required: true },
       { name: 'unlockAt', type: 'date', required: true },

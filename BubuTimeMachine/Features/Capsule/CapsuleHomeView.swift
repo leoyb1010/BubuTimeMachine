@@ -5,10 +5,12 @@ import SwiftData
 /// 写给未来布布的信，到期前加密锁定、只显示倒计时。到期后可庄重开启。
 struct CapsuleHomeView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Query(sort: \TimeCapsule.unlockAt) private var capsules: [TimeCapsule]
 
     @State private var showCompose = false
+    @State private var editing: TimeCapsule?
     @State private var unlocking: TimeCapsule?
     @State private var glowPulse = false
 
@@ -43,6 +45,7 @@ struct CapsuleHomeView: View {
             }
         }
         .sheet(isPresented: $showCompose) { CapsuleComposeView() }
+        .sheet(item: $editing) { capsule in CapsuleComposeView(editing: capsule) }
         .fullScreenCover(item: $unlocking) { capsule in
             CapsuleUnlockView(capsule: capsule)
         }
@@ -66,6 +69,12 @@ struct CapsuleHomeView: View {
             ForEach(openable) { capsule in
                 Button { unlocking = capsule } label: { capsuleCard(capsule, open: true) }
                     .buttonStyle(.plain)
+                    .contextMenu { capsuleActions(capsule) }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { deleteCapsule(capsule) } label: { Label("删除", systemImage: "trash") }
+                        Button { editing = capsule } label: { Label("修改", systemImage: "pencil") }
+                            .tint(theme)
+                    }
             }
         }
     }
@@ -78,6 +87,12 @@ struct CapsuleHomeView: View {
                     .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
                 ForEach(locked) { capsule in
                     capsuleCard(capsule, open: false, now: context.date)
+                        .contextMenu { capsuleActions(capsule) }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) { deleteCapsule(capsule) } label: { Label("删除", systemImage: "trash") }
+                            Button { editing = capsule } label: { Label("修改", systemImage: "pencil") }
+                                .tint(theme)
+                        }
                 }
             }
         }
@@ -163,5 +178,23 @@ struct CapsuleHomeView: View {
         let hours = max(0, Calendar.current.dateComponents([.hour], from: now, to: date).hour ?? 0)
         if hours > 0 { return "还有 \(hours) 小时就能打开啦" }
         return "马上就能开啦"
+    }
+
+    @ViewBuilder
+    private func capsuleActions(_ capsule: TimeCapsule) -> some View {
+        Button { editing = capsule } label: { Label("修改", systemImage: "pencil") }
+        Button(role: .destructive) { deleteCapsule(capsule) } label: { Label("删除", systemImage: "trash") }
+    }
+
+    private func deleteCapsule(_ capsule: TimeCapsule) {
+        if let blob = capsule.encryptedBlobFileName {
+            env.mediaStore.deleteMedia(named: blob)
+        }
+        let remoteId = capsule.remoteId
+        context.delete(capsule)
+        try? context.save()
+        if let remoteId {
+            Task { try? await env.apiClient.deleteTimeCapsule(remoteId: remoteId) }
+        }
     }
 }

@@ -80,12 +80,12 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     func fetchEntries(since: Date?) async throws -> [EntryDTO] {
-        let items = try await fetchRecords(collection: "entries", since: since, sort: "-happenedAt")
+        let items = try await fetchRecords(collection: "entries", since: since)
         return items.map { Self.entryDTO(from: $0, fallback: nil) }
     }
 
     func fetchMedia(since: Date?) async throws -> [MediaDTO] {
-        let items = try await fetchRecords(collection: "media", since: since, sort: "-created")
+        let items = try await fetchRecords(collection: "media", since: since)
         return items.map { self.mediaDTO(from: $0) }
     }
 
@@ -195,6 +195,10 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                           fileField: "encryptedBlob", fileURL: fileURL, fileName: fileName)
     }
 
+    func deleteTimeCapsule(remoteId: String) async throws {
+        try await delete(collection: "timecapsules", id: remoteId)
+    }
+
     func downloadFile(from remoteURL: String) async throws -> Data {
         guard let url = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
         return try await withAuthRetry { token in
@@ -300,8 +304,8 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return try await post(collection: collection, json: body)
     }
 
-    /// 翻页拉全量：不再受单页 500 条上限限制——换机首次全量恢复也能拉完整个集合。
-    private func fetchRecords(collection: String, since: Date?, sort: String = "-updated") async throws -> [[String: Any]] {
+    /// 翻页拉增量：统一使用 App 自有的 clientUpdatedAt 游标，避免依赖 PocketBase 系统字段。
+    private func fetchRecords(collection: String, since: Date?, sort: String? = "clientUpdatedAt") async throws -> [[String: Any]] {
         var all: [[String: Any]] = []
         var page = 1
         while true {
@@ -313,20 +317,13 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return all
     }
 
-    private func fetchPage(collection: String, since: Date?, sort: String,
+    private func fetchPage(collection: String, since: Date?, sort: String?,
                            page: Int) async throws -> (items: [[String: Any]], totalPages: Int) {
         try await withAuthRetry { token in
             var comps = URLComponents(
                 url: self.baseURL.appendingPathComponent("api/collections/\(collection)/records"),
                 resolvingAgainstBaseURL: false)!
-            var query = [URLQueryItem(name: "perPage", value: "200"),
-                         URLQueryItem(name: "page", value: "\(page)"),
-                         URLQueryItem(name: "sort", value: sort)]
-            if let since {
-                let iso = ISO8601DateFormatter().string(from: since)
-                query.append(URLQueryItem(name: "filter", value: "(updated>'\(iso)')"))
-            }
-            comps.queryItems = query
+            comps.queryItems = Self.listRecordsQueryItems(since: since, sort: sort, page: page)
             var req = URLRequest(url: comps.url!)
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
@@ -338,18 +335,37 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         }
     }
 
+    static func listRecordsQueryItems(since: Date?, sort: String?, page: Int) -> [URLQueryItem] {
+        var query = [URLQueryItem(name: "perPage", value: "200"),
+                     URLQueryItem(name: "page", value: "\(page)")]
+        if let sort, !sort.isEmpty {
+            query.append(URLQueryItem(name: "sort", value: sort))
+        }
+        if let since {
+            query.append(URLQueryItem(name: "filter", value: "(clientUpdatedAt>'\(syncTimestampString(since))')"))
+        }
+        return query
+    }
+
     private func patch(collection: String, id: String, json: [String: Any]) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent("api/collections/\(collection)/records/\(id)")
         return try await send(url: url, method: "PATCH", json: json)
+    }
+
+    private func delete(collection: String, id: String) async throws {
+        let url = baseURL.appendingPathComponent("api/collections/\(collection)/records/\(id)")
+        _ = try await send(url: url, method: "DELETE", json: [:])
     }
 
     private func send(url: URL, method: String, json: [String: Any]) async throws -> [String: Any] {
         try await withAuthRetry { token in
             var req = URLRequest(url: url)
             req.httpMethod = method
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            req.httpBody = try JSONSerialization.data(withJSONObject: json)
+            if method != "DELETE" {
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = try JSONSerialization.data(withJSONObject: json)
+            }
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
             return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
@@ -395,6 +411,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         var uploadFields = fields
         uploadFields["localId"] = localId
+        Self.addSyncTimestamp(to: &uploadFields)
         let bodyURL = try multipartBodyFile(boundary: boundary, fields: uploadFields,
                                             fileField: fileField, fileURL: fileURL, fileName: fileName)
         defer { try? FileManager.default.removeItem(at: bodyURL) }
@@ -419,13 +436,15 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
+        var fields = [
+            "localId": file.mediaId.uuidString,
+            "entryLocalId": file.entryLocalId.uuidString,
+            "mediaType": file.type.rawValue,
+        ]
+        Self.addSyncTimestamp(to: &fields)
         let bodyURL = try multipartBodyFile(
             boundary: boundary,
-            fields: [
-                "localId": file.mediaId.uuidString,
-                "entryLocalId": file.entryLocalId.uuidString,
-                "mediaType": file.type.rawValue,
-            ],
+            fields: fields,
             fileField: "file",
             fileURL: file.fileURL,
             fileName: file.fileName
@@ -480,6 +499,18 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     // MARK: - 私有：编解码
 
+    static func syncTimestampString(_ date: Date = .now) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    static func addSyncTimestamp(to body: inout [String: Any], date: Date = .now) {
+        body["clientUpdatedAt"] = syncTimestampString(date)
+    }
+
+    static func addSyncTimestamp(to fields: inout [String: String], date: Date = .now) {
+        fields["clientUpdatedAt"] = syncTimestampString(date)
+    }
+
     private static func entryBody(_ dto: EntryDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         var body: [String: Any] = [
@@ -499,6 +530,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         if let v = dto.longitude { body["longitude"] = v }
         if let v = dto.mood { body["mood"] = v }
         if let v = dto.editedAt { body["editedAt"] = iso.string(from: v) }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -554,6 +586,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         if let v = dto.detail { body["detail"] = v }
         if let v = dto.happenedAt { body["happenedAt"] = iso.string(from: v) }
         if let v = dto.ageDescription { body["ageDescription"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -576,6 +609,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         let iso = ISO8601DateFormatter()
         var body: [String: Any] = ["localId": dto.localId, "what": dto.what, "happenedAt": iso.string(from: dto.happenedAt), "detectedByAI": dto.detectedByAI, "confirmedByParent": dto.confirmedByParent]
         if let v = dto.entryLocalId { body["entryLocalId"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -593,7 +627,9 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     private static func memberBody(_ dto: FamilyMemberDTO) -> [String: Any] {
-        ["localId": dto.localId, "name": dto.name, "relation": dto.relation, "avatarEmoji": dto.avatarEmoji, "themeColorHex": dto.themeColorHex, "isPrimary": dto.isPrimary]
+        var body: [String: Any] = ["localId": dto.localId, "name": dto.name, "relation": dto.relation, "avatarEmoji": dto.avatarEmoji, "themeColorHex": dto.themeColorHex, "isPrimary": dto.isPrimary]
+        addSyncTimestamp(to: &body)
+        return body
     }
 
     private static func memberDTO(from obj: [String: Any], fallback: FamilyMemberDTO?) -> FamilyMemberDTO {
@@ -612,6 +648,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         var body: [String: Any] = ["localId": dto.localId, "name": dto.name, "birthday": iso.string(from: dto.birthday)]
         if let v = dto.gender { body["gender"] = v }
         if let v = dto.birthPlace { body["birthPlace"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -633,6 +670,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         if let v = dto.detail { body["detail"] = v }
         if let v = dto.amountText { body["amountText"] = v }
         if let v = dto.reaction { body["reaction"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -653,6 +691,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     private static func commentBody(_ dto: CommentDTO) -> [String: Any] {
         var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "voiceDuration": dto.voiceDuration, "voiceWaveform": dto.voiceWaveform]
         if let v = dto.text { body["text"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -675,6 +714,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     private static func voiceNoteBody(_ dto: VoiceNoteDTO) -> [String: Any] {
         var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "durationSeconds": dto.durationSeconds, "waveform": dto.waveform]
         if let v = dto.transcript { body["transcript"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -700,6 +740,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         if let v = dto.transcript { body["transcript"] = v }
         if let v = dto.ageYears { body["ageYears"] = v }
         if let v = dto.durationSeconds { body["durationSeconds"] = v }
+        addSyncTimestamp(to: &body)
         return body
     }
 
@@ -738,6 +779,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             "isLocked": dto.isLocked ? "true" : "false",
         ]
         if let emoji = dto.coverEmoji { fields["coverEmoji"] = emoji }
+        addSyncTimestamp(to: &fields)
         return fields
     }
 

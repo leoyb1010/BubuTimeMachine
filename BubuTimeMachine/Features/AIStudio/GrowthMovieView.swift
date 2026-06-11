@@ -14,6 +14,7 @@ struct GrowthMovieView: View {
     @State private var selectedRange: MovieTimeRange = .all
     @State private var stageIndex = -1
     @State private var draft: MovieDraft?
+    @State private var aiNarration: String?
     @State private var showPlayer = false
 
     private var theme: Color { env.theme.theme.primary }
@@ -168,7 +169,10 @@ struct GrowthMovieView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
                     ForEach(selectedPreviewMedia.prefix(6)) { media in
                         MediaThumbnail(media: media, mediaStore: env.mediaStore)
+                            .aspectRatio(1, contentMode: .fill)
+                            .frame(maxWidth: .infinity)
                             .frame(height: 86)
+                            .clipped()
                     }
                 }
             }
@@ -268,9 +272,20 @@ struct GrowthMovieView: View {
             try? await Task.sleep(for: .milliseconds(420))
         }
         let title = draftTitle
-        let captions = buildCaptions()
+        var captions = buildCaptions()
+        if env.config.isAIConfigured {
+            let highlights = Array(Set(captions.filter { !$0.isEmpty })).prefix(8).map { String($0) }
+            if let narration = try? await env.aiService.movieNarration(
+                year: selectedYear ?? Calendar.current.component(.year, from: .now),
+                childName: env.config.childName,
+                highlights: highlights
+            ), !narration.isEmpty {
+                aiNarration = narration
+                captions = distributeNarration(narration, count: selectedPhotoFiles.count)
+            }
+        }
         withAnimation(.smooth) {
-            draft = MovieDraft(title: title, template: selectedTemplate, mediaFiles: selectedPhotoFiles, captions: captions)
+            draft = MovieDraft(title: title, template: selectedTemplate, mediaFiles: selectedPhotoFiles, captions: captions, narration: aiNarration)
             stageIndex = -1
         }
     }
@@ -291,6 +306,16 @@ struct GrowthMovieView: View {
         }
         return caps
     }
+
+    private func distributeNarration(_ narration: String, count: Int) -> [String] {
+        guard count > 0 else { return [] }
+        let sentences = narration
+            .split(whereSeparator: { "。！？!?\n".contains($0) })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !sentences.isEmpty else { return Array(repeating: narration, count: count) }
+        return (0..<count).map { sentences[$0 % sentences.count] }
+    }
 }
 
 struct MovieDraft: Identifiable {
@@ -299,6 +324,7 @@ struct MovieDraft: Identifiable {
     let template: MovieTemplate
     let mediaFiles: [String]
     let captions: [String]
+    var narration: String?
 }
 
 enum MovieTemplate: String, CaseIterable, Identifiable {

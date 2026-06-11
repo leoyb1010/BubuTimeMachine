@@ -47,6 +47,7 @@ final class MockAPIClient: APIClient {
     func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
         mockUpload(id: capsuleId, fileName: fileName)
     }
+    func deleteTimeCapsule(remoteId: String) async throws {}
     func downloadFile(from remoteURL: String) async throws -> Data { Data() }
 
     private func mockUpload(id: UUID, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {

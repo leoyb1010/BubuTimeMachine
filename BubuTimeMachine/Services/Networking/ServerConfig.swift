@@ -76,7 +76,9 @@ final class ServerConfig {
     var isConfigured: Bool { baseURL != nil && hasServerCredentials }
 
     /// 是否可用真实 AI。
-    var isAIConfigured: Bool { aiEnabled && aiBaseURL != nil }
+    var isAIConfigured: Bool {
+        aiEnabled && aiBaseURL != nil && !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private static let baseURLKey = "bubu.server.baseURL"
     private static let roleKey = "bubu.server.role"
@@ -88,10 +90,17 @@ final class ServerConfig {
     private static let aiEnabledKey = "bubu.ai.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
 
-    /// 默认地址一律为空：隐私至上，任何数据外发都必须由用户显式配置。
-    /// （此前默认指向作者私人 Cloudflare 域名，等于所有安装者的数据默认发往他人服务器，已纠正。）
-    static let defaultBaseURL = ""
-    static let defaultAIBaseURL = ""
+    /// 默认指向家庭自托管服务；真实用户是家庭内测版本，首装即可同步/使用 AI。
+    static let defaultBaseURL = "https://bubu-api.leoyuan.top"
+    static let defaultAIBaseURL = "https://bubu-ai.leoyuan.top"
+    /// 可用 Info.plist 或调试环境注入，避免把真实密钥提交到 GitHub。
+    private static var defaultAIAPIKey: String {
+        let infoValue = Bundle.main.object(forInfoDictionaryKey: "BUBU_DEFAULT_AI_API_KEY") as? String
+        let envValue = ProcessInfo.processInfo.environment["BUBU_DEFAULT_AI_API_KEY"]
+        return [infoValue, envValue]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && !$0.hasPrefix("$(") } ?? ""
+    }
     /// 设置页占位示例。
     static let baseURLPlaceholder = "https://你的服务器地址:8090"
     static let aiBaseURLPlaceholder = "https://你的AI服务地址:8000"
@@ -108,9 +117,14 @@ final class ServerConfig {
         }
         self.accountPassword = KeychainStore.string(for: Self.passwordKey) ?? legacyPassword ?? ""
         self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? Self.defaultAIBaseURL
-        self.aiAPIKey = KeychainStore.string(for: Self.aiKeyKey) ?? ""
-        // 隐私默认：AI 默认关闭，用户填好自己的服务地址后再开。
-        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
+        let storedAIKey = KeychainStore.string(for: Self.aiKeyKey) ?? ""
+        let initialAIKey = storedAIKey.isEmpty ? Self.defaultAIAPIKey : storedAIKey
+        self.aiAPIKey = initialAIKey
+        if storedAIKey.isEmpty, !initialAIKey.isEmpty {
+            KeychainStore.set(initialAIKey, for: Self.aiKeyKey)
+        }
+        // 家庭内测默认启用真实 AI；如果用户手动关闭过，则尊重用户设置。
+        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? true
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
     }
 }

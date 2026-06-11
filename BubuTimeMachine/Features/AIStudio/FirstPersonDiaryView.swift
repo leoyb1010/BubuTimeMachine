@@ -213,11 +213,6 @@ struct FirstPersonDiaryView: View {
         errorText = nil
         defer { generating = false }
         let note = entry.note ?? ""
-        if let sparse = sparseRewrite(for: note) {
-            output = sparse
-            await typewriter(sparse)
-            return
-        }
         do {
             let text = try await env.aiService.rewriteFirstPerson(
                 note: note, childName: env.config.childName)
@@ -229,24 +224,12 @@ struct FirstPersonDiaryView: View {
         }
     }
 
-    private func sparseRewrite(for note: String) -> String? {
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let compact = trimmed.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
-        let laughingScalars = CharacterSet(charactersIn: "哈呵嘿嘻hHaAlLoO~～!！.。")
-        let isMostlyLaughing = compact.unicodeScalars.allSatisfy { laughingScalars.contains($0) }
-        if compact.count <= 8 || isMostlyLaughing {
-            return "这一刻小小的、软软的，我把它收进心里，留给长大的自己慢慢看。"
-        }
-        return nil
-    }
-
     /// 打字机动效逐字显示。
     private func typewriter(_ text: String) async {
         displayed = ""
         for ch in text {
             displayed.append(ch)
-            try? await Task.sleep(for: .milliseconds(28))
+            try? await Task.sleep(for: .milliseconds(18))
         }
     }
 

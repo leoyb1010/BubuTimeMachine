@@ -221,7 +221,11 @@ struct CapsuleUnlockView: View {
 
     private func decrypt() {
         do {
-            let p = try env.vault.unseal(fileName: capsule.encryptedBlobFileName ?? "",
+            guard let blob = capsule.encryptedBlobFileName, !blob.isEmpty else {
+                errorText = "这封胶囊的加密内容还没同步到本机，请先回到设置里点一次立即同步。"
+                return
+            }
+            let p = try env.vault.unseal(fileName: blob,
                                          unlockAt: capsule.unlockAt,
                                          salt: capsule.id.uuidString)
             payload = p

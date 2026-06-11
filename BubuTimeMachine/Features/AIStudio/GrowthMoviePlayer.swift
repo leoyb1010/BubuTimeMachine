@@ -35,6 +35,7 @@ struct GrowthMoviePlayer: View {
                 progressBar
             }
             .padding()
+            .zIndex(3)
 
             if isFinished { finishOverlay }
         }
@@ -62,16 +63,18 @@ struct GrowthMoviePlayer: View {
                 Image(uiImage: ui)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: 30)
-                    .brightness(-0.30)
+                    .brightness(-0.42)
+                    .saturation(0.85)
                     .ignoresSafeArea()
+                    .overlay(.black.opacity(0.18))
                 Image(uiImage: ui)
                     .resizable()
                     .scaledToFit()
                     .scaleEffect(reduceMotion ? 1.0 : (zoomIn ? 1.045 : 1.0))
                     .offset(x: reduceMotion ? 0 : panOffset)
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 86)
+                    .padding(.top, 104)
+                    .padding(.bottom, 150)
                     .animation(.easeInOut(duration: perSlide), value: zoomIn)
                     .animation(.easeInOut(duration: perSlide), value: index)
                     .id(index)
@@ -165,7 +168,7 @@ struct GrowthMoviePlayer: View {
                 .font(.system(size: 20, weight: .medium, design: .rounded))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
-                .lineLimit(3)
+                .lineLimit(2)
                 .shadow(color: .black.opacity(0.55), radius: 4)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
@@ -186,7 +189,8 @@ struct GrowthMoviePlayer: View {
             }
         }
         .frame(height: 4)
-        .padding(.top, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
 
     private var finishOverlay: some View {

@@ -15,6 +15,7 @@ migrate((app) => {
     return [
       { name: 'localId', type: 'text', required: true, presentable: true,
         unique: true },
+      { name: 'clientUpdatedAt', type: 'date' },
       ...extra,
     ]
   }

@@ -6,6 +6,8 @@ import PhotosUI
 /// 专属布布的主屏：年龄实时计数 + 那年今日 + 统计 + 精选 + 大记录按钮。
 /// 背景可用主题渐变或布布的照片。
 struct CaptureHomeView: View {
+    var openTimeline: (() -> Void)?
+
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var modelContext
     @Query private var profiles: [ChildProfile]
@@ -222,22 +224,22 @@ struct CaptureHomeView: View {
     /// 三张统计卡都可点：瞬间 → 时光轴；照片 → 照片墙；生日 → 倒计时页。
     private var statRow: some View {
         HStack(spacing: 12) {
-            NavigationLink { TimelineView() } label: {
+            Button { openTimeline?() } label: {
                 statCard(value: "\(entries.count)", label: "个瞬间", icon: "sparkles")
             }
-            .buttonStyle(BubuPressableStyle())
+            .buttonStyle(.plain)
 
             NavigationLink { PhotoWallView() } label: {
                 statCard(value: "\(totalPhotos)", label: "张照片", icon: "photo.stack")
             }
-            .buttonStyle(BubuPressableStyle())
+            .buttonStyle(.plain)
 
             if let profile {
                 NavigationLink { BirthdayCountdownView() } label: {
                     statCard(value: "\(AgeCalculator.daysUntilNextBirthday(birthday: profile.birthday))",
                              label: "天后生日", icon: "gift")
                 }
-                .buttonStyle(BubuPressableStyle())
+                .buttonStyle(.plain)
             }
         }
     }

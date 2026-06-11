@@ -45,4 +45,8 @@ final class MockAIService: AIService {
         try? await Task.sleep(for: .milliseconds(500))
         return GrowthMovieJob(jobId: "mock-job-\(year)", year: year, status: "generating")
     }
+
+    func movieNarration(year: Int, childName: String, highlights: [String]) async throws -> String {
+        "这是\(childName)的一小段成长电影。" + highlights.prefix(3).joined(separator: "，")
+    }
 }

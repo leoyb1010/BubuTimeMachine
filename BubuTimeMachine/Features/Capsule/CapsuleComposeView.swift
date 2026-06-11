@@ -9,6 +9,7 @@ struct CapsuleComposeView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query private var profiles: [ChildProfile]
+    let editing: TimeCapsule?
 
     @State private var title = ""
     @State private var emoji = "💌"
@@ -21,6 +22,10 @@ struct CapsuleComposeView: View {
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
     private let emojiChoices = ["💌","🎁","🌟","🎂","🧸","🌷","📮","🕰️","💝","🍼"]
+
+    init(editing: TimeCapsule? = nil) {
+        self.editing = editing
+    }
 
     var body: some View {
         NavigationStack {
@@ -38,7 +43,7 @@ struct CapsuleComposeView: View {
                     .padding()
                 }
             }
-            .navigationTitle("写给未来的布布")
+            .navigationTitle(editing == nil ? "写给未来的布布" : "修改时间胶囊")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
@@ -55,6 +60,7 @@ struct CapsuleComposeView: View {
             } message: {
                 Text(errorText ?? "")
             }
+            .onAppear(perform: loadEditing)
         }
     }
 
@@ -141,10 +147,11 @@ struct CapsuleComposeView: View {
                 }
             }
             DatePicker("精确到天", selection: $unlockAt, in: Date.now..., displayedComponents: .date)
+                .disabled(editing != nil && !canRewritePayload)
                 .padding()
                 .background(BubuTheme.Color.card.opacity(0.70), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
                 .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme, interactive: true)
-            Text("封存后，到 \(BubuDateFormat.longDate(unlockAt)) 之前都打不开。")
+            Text(editing != nil && !canRewritePayload ? "未到期的胶囊只能改标题和封面；内容与解锁日保持封存。" : "封存后，到 \(BubuDateFormat.longDate(unlockAt)) 之前都打不开。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(theme)
         }
@@ -170,7 +177,26 @@ struct CapsuleComposeView: View {
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty &&
-        (!letter.trimmingCharacters(in: .whitespaces).isEmpty || pendingVoice != nil)
+        (editing != nil || !letter.trimmingCharacters(in: .whitespaces).isEmpty || pendingVoice != nil)
+    }
+
+    private var canRewritePayload: Bool {
+        editing == nil || (editing?.unlockAt ?? .now) <= .now
+    }
+
+    private func loadEditing() {
+        guard let editing, title.isEmpty else { return }
+        title = editing.title
+        emoji = editing.coverEmoji ?? "💌"
+        unlockAt = max(editing.unlockAt, .now)
+        if let blob = editing.encryptedBlobFileName,
+           editing.unlockAt <= .now,
+           let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt, salt: editing.id.uuidString) {
+            letter = payload.letter
+            if let voice = payload.voiceFileName {
+                pendingVoice = (voice, payload.voiceDuration, payload.voiceWaveform)
+            }
+        }
     }
 
     private func save() async {
@@ -179,8 +205,19 @@ struct CapsuleComposeView: View {
 
         // 规整到整秒：密钥派生与服务器存储格式一致，同步往返不会破坏解密。
         let sealedUnlockAt = CapsuleCrypto.normalized(unlockAt)
-        let capsule = TimeCapsule(title: title, fromRole: env.config.currentRole.rawValue, unlockAt: sealedUnlockAt)
+        let capsule = editing ?? TimeCapsule(title: title, fromRole: env.config.currentRole.rawValue, unlockAt: sealedUnlockAt)
+        capsule.title = title
         capsule.coverEmoji = emoji
+
+        if editing != nil, !canRewritePayload {
+            capsule.syncState = .local
+            try? context.save()
+            env.syncEngine.syncNow()
+            dismiss()
+            return
+        }
+
+        capsule.unlockAt = sealedUnlockAt
 
         let payload = CapsulePayload(
             letter: letter,
@@ -193,7 +230,7 @@ struct CapsuleComposeView: View {
             capsule.encryptedBlobFileName = blobName
             capsule.isLocked = true
             capsule.syncState = .local
-            context.insert(capsule)
+            if editing == nil { context.insert(capsule) }
             try context.save()
             // 封存要有「盖章」的确定感
             BubuHaptics.stamp()

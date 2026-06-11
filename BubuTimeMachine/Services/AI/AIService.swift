@@ -9,4 +9,5 @@ protocol AIService: Sendable {
     func transcribe(audioURL: URL) async throws -> String
     func rewriteFirstPerson(note: String, childName: String) async throws -> String
     func generateGrowthMovie(year: Int) async throws -> GrowthMovieJob
+    func movieNarration(year: Int, childName: String, highlights: [String]) async throws -> String
 }
