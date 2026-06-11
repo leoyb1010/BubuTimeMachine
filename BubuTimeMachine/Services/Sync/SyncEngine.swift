@@ -22,6 +22,12 @@ final class SyncEngine {
     private(set) var currentUploadProgress: Double?
     private(set) var lastFailureReason: String?
     private(set) var lastLargeFileNotice: String?
+    /// 可自愈的瞬时波动提示（平和措辞、非报红）。仅当连续多轮仍失败才显示。
+    private(set) var softNotice: String?
+
+    // 瞬时失败的轮内标记与跨轮连发计数（避免偶发抖动立刻报红）。
+    private var softFailureThisRun = false
+    private var softFailureStreak = 0
 
     var syncProgress: Double? {
         guard totalPendingAtStart > 0 else { return nil }
@@ -134,6 +140,7 @@ final class SyncEngine {
         guard ok else {
             connectionState = .offline
             currentSyncLabel = nil
+            softNotice = nil
             recordFailure(APIError.network("连不上家里的服务器"), item: "连接")
             refreshPendingCount()
             return
@@ -143,6 +150,7 @@ final class SyncEngine {
         } catch {
             connectionState = .offline
             currentSyncLabel = nil
+            softNotice = nil
             recordFailure(error, item: "账号")
             refreshPendingCount()
             return
@@ -156,8 +164,22 @@ final class SyncEngine {
         }
         currentSyncLabel = nil
         currentUploadProgress = nil
+        finalizeRun()
         // 注：不再叠加 subscribeRealtime 的 8 秒轮询——与 30 秒同步循环重复，纯耗电。
         // 后续接 SSE 长连时在这里恢复订阅。
+    }
+
+    /// 一轮结束后评估瞬时失败：单轮抖动静默自愈，连续两轮（≈60s）仍失败才平和提示。
+    private func finalizeRun() {
+        if softFailureThisRun {
+            softFailureStreak += 1
+            if softFailureStreak >= 2 {
+                softNotice = "有几项还在等网络，正在自动补拉…"
+            }
+        } else {
+            softFailureStreak = 0
+            softNotice = nil
+        }
     }
 
     // MARK: - 推：本地 → 远端
@@ -206,6 +228,7 @@ final class SyncEngine {
         currentUploadProgress = nil
         lastFailureReason = nil
         lastLargeFileNotice = nil
+        softFailureThisRun = false
         currentSyncLabel = pendingCount > 0 ? "准备同步 \(pendingCount) 项" : "检查服务器"
     }
 
@@ -498,13 +521,15 @@ final class SyncEngine {
                            fetch: (Date?) async throws -> [DTO],
                            merge: (DTO) async -> Void) async {
         let started = Date.now
-        guard let items = try? await fetch(cursor(for: collection)) else {
-            recordFailure(APIError.network("拉取\(collection)失败，下次补拉"), item: "同步")
-            return
+        do {
+            let items = try await fetch(cursor(for: collection))
+            for dto in items { await merge(dto) }
+            setCursor(started, for: collection)
+            lastSyncedAt = started
+        } catch {
+            // 瞬时拉取失败不立刻报红：标记本轮软失败，游标不推进，下轮自动补拉。
+            softFailureThisRun = true
         }
-        for dto in items { await merge(dto) }
-        setCursor(started, for: collection)
-        lastSyncedAt = started
     }
 
     // MARK: - 下载：把远端媒体/语音落到本地（离线优先对多设备同样成立）
@@ -527,7 +552,8 @@ final class SyncEngine {
                     item.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
                 }
             } catch {
-                recordFailure(error, item: "下载媒体")
+                // 缺失文件下载失败属瞬时、可自愈：标记软失败，下轮继续补拉，不立刻报红。
+                softFailureThisRun = true
             }
             try? context.save()
         }

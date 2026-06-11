@@ -208,6 +208,10 @@ struct CaptureHomeView: View {
                 Text(failure)
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.danger)
+            } else if let soft = env.syncEngine.softNotice {
+                Text(soft)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
         .padding(12)

@@ -51,16 +51,48 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return try await login()
     }
 
-    /// token 过期（401/403）时清掉缓存、重新登录并重试一次。
+    /// token 过期（401/403）时清掉缓存、重新登录并重试一次；
+    /// 瞬时网络抖动（超时/连接被重置/5xx 网关错误，常见于 Cloudflare 隧道/Tailscale）自动退避重试，
+    /// 避免家用网络的偶发抖动被上层当成「同步失败」反复报红。
     private func withAuthRetry<T>(_ op: (String) async throws -> T) async throws -> T {
-        let token = try await ensureToken()
-        do {
-            return try await op(token)
-        } catch APIError.unauthorized {
-            await tokenBox.set(nil)
-            let fresh = try await ensureToken()
-            return try await op(fresh)
+        func attempt() async throws -> T {
+            let token = try await ensureToken()
+            do {
+                return try await op(token)
+            } catch APIError.unauthorized {
+                await tokenBox.set(nil)
+                let fresh = try await ensureToken()
+                return try await op(fresh)
+            }
         }
+        var lastError: Error?
+        for i in 0..<3 {
+            do { return try await attempt() }
+            catch {
+                lastError = error
+                guard Self.isTransient(error), i < 2 else { throw error }
+                try? await Task.sleep(for: .milliseconds(400 * (i + 1)))
+            }
+        }
+        throw lastError ?? APIError.network("请求失败")
+    }
+
+    /// 是否为可自愈的瞬时错误（值得退避重试，而非直接判失败）。
+    private static func isTransient(_ error: Error) -> Bool {
+        if let urlErr = error as? URLError {
+            switch urlErr.code {
+            case .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                 .networkConnectionLost, .notConnectedToInternet, .resourceUnavailable,
+                 .badServerResponse, .secureConnectionFailed, .httpTooManyRedirects:
+                return true
+            default: return false
+            }
+        }
+        if case APIError.server(let code, _) = error, (500...599).contains(code) {
+            return true   // 502/503/504：网关/隧道瞬时不可用
+        }
+        if case APIError.network = error { return true }
+        return false
     }
 
     // MARK: Entry CRUD（幂等）
