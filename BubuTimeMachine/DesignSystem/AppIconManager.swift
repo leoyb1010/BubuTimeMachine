@@ -2,13 +2,13 @@ import UIKit
 
 // MARK: - App 图标随主题切换
 /// 每套主题一枚备用图标；切换主题时同步换 Home Screen 图标。
-/// 生日月可强制「生日彩带」图标。`setAlternateIconName(nil)` 回到主图标（= 珊瑚款）。
+/// 生日月可强制「生日彩带」图标。`setAlternateIconName(nil)` 回到主图标（飞碟·布布的时光机）。
 @MainActor
 enum AppIconManager {
     /// 主题 id → 备用图标名。珊瑚是主图标，传 nil 走默认。
     static func iconName(forThemeId id: String) -> String? {
         switch id {
-        case "coral": return nil               // 主图标即珊瑚
+        case "coral": return nil               // 默认主题用主图标（飞碟·布布的时光机）
         case "sky": return "AppIcon-sky"
         case "mint": return "AppIcon-mint"
         case "lavender": return "AppIcon-lavender"
