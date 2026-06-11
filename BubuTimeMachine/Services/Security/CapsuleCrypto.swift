@@ -27,6 +27,8 @@ struct CapsuleCrypto: Sendable {
 
     /// v2 blob 魔数前缀。
     static let v2Magic = Data("BTC2".utf8)
+    /// v3 blob 魔数前缀（真 E2E：随机助记词派生密钥，密钥不随记录同步）。
+    static let v3Magic = Data("BTC3".utf8)
 
     /// 把解锁时间规整到整秒——封存与派生都必须用规整后的值。
     static func normalized(_ date: Date) -> Date {
@@ -52,6 +54,41 @@ struct CapsuleCrypto: Sendable {
         let hash = SHA256.hash(data: Data(material.utf8))
         return SymmetricKey(data: hash)
     }
+
+    // MARK: v3 真 E2E —— 助记词派生密钥
+    /// v3 密钥由「24 词助记词 + salt」派生。助记词存 iCloud Keychain（家庭设备共享）+ 打印恢复码，
+    /// **不随记录同步**——服务器即使被攻破也拿不到密钥。salt 用胶囊 id 保证每封信密钥唯一。
+    func deriveKeyV3(recoveryCode: String, salt: String) -> SymmetricKey {
+        // 规范化助记词：小写、压缩空白，避免抄写时大小写/多空格导致解不开。
+        let normalized = recoveryCode.lowercased()
+            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .joined(separator: " ")
+        let material = "\(normalized)|\(salt)|bubu-time-capsule-v3"
+        let hash = SHA256.hash(data: Data(material.utf8))
+        return SymmetricKey(data: hash)
+    }
+
+    /// v3 加密：用恢复码派生的密钥加密，输出带 v3 魔数。
+    func encryptV3(_ plaintext: Data, recoveryCode: String, salt: String) throws -> Data {
+        let key = deriveKeyV3(recoveryCode: recoveryCode, salt: salt)
+        let sealed = try AES.GCM.seal(plaintext, using: key)
+        guard let combined = sealed.combined else { throw CryptoError.decryptionFailed }
+        return Self.v3Magic + combined
+    }
+
+    /// v3 解密：到期校验照旧；密钥来自恢复码而非 unlockAt。
+    func decryptV3(_ ciphertext: Data, recoveryCode: String, salt: String,
+                   unlockAt: Date, now: Date = .now) throws -> Data {
+        guard now >= Self.normalized(unlockAt) else {
+            throw CryptoError.stillLocked(unlockAt: unlockAt)
+        }
+        guard ciphertext.starts(with: Self.v3Magic) else { throw CryptoError.decryptionFailed }
+        let body = ciphertext.dropFirst(Self.v3Magic.count)
+        return try open(body, with: deriveKeyV3(recoveryCode: recoveryCode, salt: salt))
+    }
+
+    /// 判断一段密文是否 v3。
+    static func isV3(_ ciphertext: Data) -> Bool { ciphertext.starts(with: v3Magic) }
 
     /// 加密明文（信件文本 / 序列化后的音视频引用）。输出带 v2 魔数前缀。
     func encrypt(_ plaintext: Data, unlockAt: Date, salt: String) throws -> Data {

@@ -47,12 +47,38 @@ struct CapsuleVault: Sendable {
         return try mediaStore.saveBlob(cipher)
     }
 
+    /// v3 真 E2E 封存：密钥来自家庭恢复码，不随记录同步。
+    func sealV3(_ payload: CapsulePayload, recoveryCode: String, salt: String) throws -> String {
+        var payload = payload
+        if let voiceFileName = payload.voiceFileName,
+           payload.embeddedVoiceData == nil,
+           let data = mediaStore.data(forMedia: voiceFileName) {
+            payload.embeddedVoiceData = data
+            let ext = URL(fileURLWithPath: voiceFileName).pathExtension
+            payload.embeddedVoiceFileExtension = ext.isEmpty ? "m4a" : ext
+        }
+        let plain = try JSONEncoder().encode(payload)
+        let cipher = try crypto.encryptV3(plain, recoveryCode: recoveryCode, salt: salt)
+        return try mediaStore.saveBlob(cipher)
+    }
+
     /// 到期解密读出。未到期抛 CapsuleCrypto.CryptoError.stillLocked。
-    func unseal(fileName: String, unlockAt: Date, salt: String, now: Date = .now) throws -> CapsulePayload {
+    /// v3 blob 需提供 recoveryCode（来自 iCloud Keychain 或纸条）；v1/v2 自动按旧逻辑解。
+    func unseal(fileName: String, unlockAt: Date, salt: String,
+                recoveryCode: String? = nil, now: Date = .now) throws -> CapsulePayload {
         guard let cipher = mediaStore.blob(named: fileName) else {
             throw CapsuleCrypto.CryptoError.decryptionFailed
         }
-        let plain = try crypto.decrypt(cipher, unlockAt: unlockAt, salt: salt, now: now)
+        let plain: Data
+        if CapsuleCrypto.isV3(cipher) {
+            guard let recoveryCode, !recoveryCode.isEmpty else {
+                throw CapsuleCrypto.CryptoError.decryptionFailed
+            }
+            plain = try crypto.decryptV3(cipher, recoveryCode: recoveryCode, salt: salt,
+                                         unlockAt: unlockAt, now: now)
+        } else {
+            plain = try crypto.decrypt(cipher, unlockAt: unlockAt, salt: salt, now: now)
+        }
         var payload = try JSONDecoder().decode(CapsulePayload.self, from: plain)
         if let data = payload.embeddedVoiceData {
             let existingName = payload.voiceFileName

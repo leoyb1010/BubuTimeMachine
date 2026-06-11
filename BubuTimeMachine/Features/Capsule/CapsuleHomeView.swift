@@ -13,6 +13,7 @@ struct CapsuleHomeView: View {
     @State private var editing: TimeCapsule?
     @State private var unlocking: TimeCapsule?
     @State private var glowPulse = false
+    @State private var showRecovery = false
 
     private var theme: Color { env.theme.theme.primary }
     private var locked: [TimeCapsule] { capsules.filter { !canOpen($0) } }
@@ -38,6 +39,11 @@ struct CapsuleHomeView: View {
         }
         .navigationTitle("时间胶囊")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { showRecovery = true } label: { Image(systemName: "key.horizontal.fill") }
+                    .accessibilityLabel("恢复码")
+                    .bubuGlassButton()
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showCompose = true } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel("写时间胶囊")
@@ -45,6 +51,7 @@ struct CapsuleHomeView: View {
             }
         }
         .sheet(isPresented: $showCompose) { CapsuleComposeView() }
+        .sheet(isPresented: $showRecovery) { CapsuleRecoveryView() }
         .sheet(item: $editing) { capsule in CapsuleComposeView(editing: capsule) }
         .fullScreenCover(item: $unlocking) { capsule in
             CapsuleUnlockView(capsule: capsule)

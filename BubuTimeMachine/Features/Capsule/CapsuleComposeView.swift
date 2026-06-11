@@ -191,7 +191,9 @@ struct CapsuleComposeView: View {
         unlockAt = max(editing.unlockAt, .now)
         if let blob = editing.encryptedBlobFileName,
            editing.unlockAt <= .now,
-           let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt, salt: editing.id.uuidString) {
+           let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt,
+                                               salt: editing.id.uuidString,
+                                               recoveryCode: CapsuleRecovery.current()) {
             letter = payload.letter
             if let voice = payload.voiceFileName {
                 pendingVoice = (voice, payload.voiceDuration, payload.voiceWaveform)
@@ -226,7 +228,9 @@ struct CapsuleComposeView: View {
             voiceWaveform: pendingVoice?.waveform ?? []
         )
         do {
-            let blobName = try env.vault.seal(payload, unlockAt: sealedUnlockAt, salt: capsule.id.uuidString)
+            // v3 真 E2E：用家庭恢复码派生密钥加密，密钥不随记录同步。
+            let recoveryCode = CapsuleRecovery.currentOrCreate()
+            let blobName = try env.vault.sealV3(payload, recoveryCode: recoveryCode, salt: capsule.id.uuidString)
             capsule.encryptedBlobFileName = blobName
             capsule.isLocked = true
             capsule.syncState = .local

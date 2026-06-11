@@ -227,14 +227,23 @@ struct CapsuleUnlockView: View {
             }
             let p = try env.vault.unseal(fileName: blob,
                                          unlockAt: capsule.unlockAt,
-                                         salt: capsule.id.uuidString)
+                                         salt: capsule.id.uuidString,
+                                         recoveryCode: CapsuleRecovery.current())
             payload = p
             capsule.isLocked = false
             capsule.syncState = .local
             try? context.save()
             env.syncEngine.syncNow()
         } catch {
-            errorText = (error as? CapsuleCrypto.CryptoError)?.errorDescription ?? "信件打不开了"
+            if (error as? CapsuleCrypto.CryptoError) != nil,
+               let blob = capsule.encryptedBlobFileName,
+               let cipher = env.mediaStore.blob(named: blob),
+               CapsuleCrypto.isV3(cipher),
+               CapsuleRecovery.current() == nil {
+                errorText = "这封信是加密的，需要家庭恢复码才能打开。请在另一台已登录同一 iCloud 的设备上打开过一次，或到设置里用纸条恢复码恢复。"
+            } else {
+                errorText = (error as? CapsuleCrypto.CryptoError)?.errorDescription ?? "信件打不开了"
+            }
         }
     }
 }
