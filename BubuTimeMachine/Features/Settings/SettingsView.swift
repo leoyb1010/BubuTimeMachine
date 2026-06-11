@@ -122,6 +122,8 @@ struct SettingsView: View {
     private var dataCard: some View {
         group("数据") {
             BackupHealthCard()
+            row("做一本 PDF 年册", icon: "book.closed.fill",
+                tint: env.theme.theme.primary) { YearbookView() }
             row("导出布布的全量档案", icon: "square.and.arrow.up.on.square.fill",
                 tint: env.theme.theme.secondary) { ExportView() }
         }
