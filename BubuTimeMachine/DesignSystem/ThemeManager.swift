@@ -135,6 +135,8 @@ final class ThemeManager {
         withAnimation(.smooth(duration: 0.4)) {
             currentThemeId = theme.id
         }
+        // 同步切换 Home Screen 图标（每套主题一枚）。
+        AppIconManager.apply(themeId: theme.id)
     }
 }
 

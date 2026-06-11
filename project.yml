@@ -29,6 +29,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIcon-coral AppIcon-sky AppIcon-mint AppIcon-lavender AppIcon-peach AppIcon-night AppIcon-cream AppIcon-birthday
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         INFOPLIST_KEY_CFBundleDisplayName: 布布时光机
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
