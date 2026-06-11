@@ -182,6 +182,8 @@ struct ExportView: View {
             }.value
             exportedURL = zip
             showShare = true
+            // 记录导出时间戳，供「备份健康度卡」判断是否过期。
+            UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "bubu.lastExportAt")
         } catch {
             errorText = "导出失败：\(error.localizedDescription)"
         }

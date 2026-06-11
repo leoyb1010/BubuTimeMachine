@@ -1,16 +1,13 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - 设置
-/// 布布档案、家庭成员、主题、服务器同步、AI 服务、成长之声、全量导出、提醒。
+// MARK: - 设置（Wave L §5.1 重构）
+/// 信息架构按使用频率重排：个人化在前、资料中间、机房（服务器/AI Key）收进「高级 · 自托管」二级页。
+/// 自绘卡片组取代系统 Form 平铺；同步状态压成一颗徽章。
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Query private var members: [FamilyMember]
-    @State private var testing = false
-    @State private var testResult: String?
-    @State private var testingAI = false
-    @State private var aiTestResult: String?
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
@@ -18,181 +15,172 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var config = env.config
-        Form {
-            // 当前身份
-            Section {
-                NavigationLink {
-                    MembersView()
-                } label: {
-                    HStack(spacing: 14) {
-                        Text(currentMember?.avatarEmoji ?? "🙂")
-                            .font(.system(size: 30))
-                            .frame(width: 50, height: 50)
-                            .background(Color(hex: currentMember?.themeColorHex ?? "#F28C9E").opacity(0.18), in: Circle())
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(currentMember?.name ?? "未设置").font(BubuTheme.Font.headline)
-                            Text("当前身份 · 点这里管理成员").font(BubuTheme.Font.caption)
-                                .foregroundStyle(BubuTheme.Color.secondaryText)
-                        }
+        ScrollView {
+            VStack(spacing: 18) {
+                identityCard
+                group("布布") {
+                    row("布布的档案", icon: "figure.child", tint: env.theme.theme.primary) { ChildProfileView() }
+                    row("成长之声", icon: "waveform.badge.mic", tint: BubuTheme.Color.info) { VoiceArchiveView() }
+                    row("健康记录", icon: "heart.text.square", tint: BubuTheme.Color.success) { HealthHomeView() }
+                }
+                group("这个家") {
+                    row("家庭成员", icon: "person.2.fill", tint: env.theme.theme.secondary) { MembersView() }
+                }
+                group("外观") {
+                    row("主题与外观", icon: "paintpalette.fill", tint: env.theme.theme.primary) { ThemeSettingsView() }
+                }
+                reminderCard(config: config)
+                dataCard
+                group("高级 · 自托管") {
+                    NavigationLink { AdvancedSettingsView() } label: {
+                        settingRowLabel("服务器与 AI 配置", icon: "lock.shield.fill",
+                                        tint: BubuTheme.Color.secondaryText,
+                                        subtitle: "给装服务器的那个人")
                     }
+                    .buttonStyle(.plain)
                 }
+                footer
             }
-
-            Section("布布") {
-                NavigationLink { ChildProfileView() } label: {
-                    Label("布布的档案", systemImage: "figure.child")
-                }
-                NavigationLink { VoiceArchiveView() } label: {
-                    Label("成长之声", systemImage: "waveform.badge.mic")
-                }
-            }
-
-            Section("外观") {
-                NavigationLink { ThemeSettingsView() } label: {
-                    Label("主题与外观", systemImage: "paintpalette")
-                }
-            }
-
-            // 服务器（同步）
-            Section {
-                TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                TextField("家庭账户邮箱", text: $config.accountEmail)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
-                SecureField("账户密码", text: $config.accountPassword)
-                Button {
-                    Task { await testConnection() }
-                } label: {
-                    HStack {
-                        Text("连接测试并保存")
-                        Spacer()
-                        if testing { ProgressView() }
-                        else if let testResult { Text(testResult).foregroundStyle(BubuTheme.Color.secondaryText) }
-                    }
-                }
-                .disabled(!config.isConfigured || testing)
-            } header: {
-                Text("家里的服务器（多设备同步）")
-            } footer: {
-                Text("填好后，爸爸妈妈姥姥三台手机的记录会自动汇到一起。没配也没关系——离线全功能可用。")
-            }
-
-            // AI 服务
-            Section {
-                Toggle("启用真实 AI", isOn: $config.aiEnabled)
-                if config.aiEnabled {
-                    TextField(ServerConfig.aiBaseURLPlaceholder, text: $config.aiBaseURLString)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    SecureField("AI 访问密钥（服务端 AI_API_KEY）", text: $config.aiAPIKey)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button {
-                        Task { await testAIConnection() }
-                    } label: {
-                        HStack {
-                            Text("测试 AI 服务")
-                            Spacer()
-                            if testingAI { ProgressView() }
-                            else if let aiTestResult { Text(aiTestResult).foregroundStyle(BubuTheme.Color.secondaryText) }
-                        }
-                    }
-                    .disabled(config.aiBaseURLString.isEmpty || testingAI)
-                }
-            } header: {
-                Text("AI 服务（工坊）")
-            } footer: {
-                Text("关闭时，AI 工坊用本地模拟。开启并填好地址和密钥后，改写、旁白、转写走你自托管的服务。密钥与服务器 .env 里的 AI_API_KEY 一致。")
-            }
-
-            // 提醒
-            Section {
-                Toggle("那年今日 · 每日回忆提醒", isOn: $config.dailyReminderEnabled)
-                    .onChange(of: config.dailyReminderEnabled) { _, on in
-                        Task { await ReminderScheduler.shared.update(enabled: on, context: context) }
-                    }
-            } footer: {
-                Text("每天提醒一次：往年的今天，布布在做什么。")
-            }
-
-            // 全量导出
-            Section {
-                NavigationLink { ExportView() } label: {
-                    Label("导出布布的全量档案", systemImage: "square.and.arrow.up.on.square")
-                }
-            } footer: {
-                Text("把一切打包成一个能直接打开的网页 + 媒体包。即使将来 App 不在了，硬盘里仍是布布完整的一生。")
-            }
-
-            // 同步状态
-            Section("同步状态") {
-                LabeledContent("当前状态", value: connectionText)
-                LabeledContent("待同步", value: env.syncEngine.pendingCount == 0 ? "没有待同步内容" : "\(env.syncEngine.pendingCount) 项")
-                if let last = env.syncEngine.lastSyncedAt {
-                    LabeledContent("上次同步", value: BubuDateFormat.shortTime(last))
-                }
-                if let progress = env.syncEngine.syncProgress,
-                   env.syncEngine.pendingCount > 0 || env.syncEngine.connectionState == .connecting {
-                    ProgressView(value: progress) {
-                        Text(env.syncEngine.currentSyncLabel ?? "正在同步")
-                    }
-                    .tint(env.theme.theme.primary)
-                }
-                if let notice = env.syncEngine.lastLargeFileNotice {
-                    Text(notice)
-                        .font(BubuTheme.Font.caption)
-                        .foregroundStyle(env.theme.theme.primary)
-                }
-                if let failure = env.syncEngine.lastFailureReason {
-                    Text(failure)
-                        .font(BubuTheme.Font.caption)
-                        .foregroundStyle(BubuTheme.Color.danger)
-                }
-                Button("立即同步") { env.syncEngine.syncNow() }
-                    .disabled(!config.isConfigured)
-            }
+            .padding()
         }
         .navigationTitle("设置")
-        .scrollContentBackground(.hidden)
-        .background(BubuTheme.Color.background)
+        .background(BubuTheme.Color.background.ignoresSafeArea())
     }
 
-    private var connectionText: String {
+    // MARK: 顶卡 · 当前身份
+
+    private var identityCard: some View {
+        NavigationLink { MembersView() } label: {
+            HStack(spacing: 14) {
+                Text(currentMember?.avatarEmoji ?? "🙂")
+                    .font(.system(size: 36))
+                    .frame(width: 60, height: 60)
+                    .background(Color(hex: currentMember?.themeColorHex ?? "#F28C9E").opacity(0.18), in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(currentMember?.name ?? "未设置").font(BubuTheme.Font.title)
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("点我换人").font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                Spacer()
+                syncBadge
+            }
+            .padding(16)
+            .background(env.themedCard, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .bubuCardShadow()
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 同步状态徽章：状态正常时不抢注意力，点开进诊断页。
+    private var syncBadge: some View {
+        NavigationLink { AdvancedSettingsView() } label: {
+            HStack(spacing: 5) {
+                Circle().fill(syncColor).frame(width: 9, height: 9)
+                Text(syncText).font(BubuTheme.Font.caption.weight(.medium))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(env.themedSoftFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var syncColor: Color {
         switch env.syncEngine.connectionState {
-        case .offline:    return "离线（本地可用）"
-        case .connecting: return "连接中…"
-        case .online:     return "已连接"
+        case .online: return BubuTheme.Color.success
+        case .connecting: return BubuTheme.Color.warning
+        case .offline: return BubuTheme.Color.secondaryText
+        }
+    }
+    private var syncText: String {
+        switch env.syncEngine.connectionState {
+        case .online: return env.syncEngine.pendingCount == 0 ? "已同步" : "同步中"
+        case .connecting: return "连接中"
+        case .offline: return "离线"
         }
     }
 
-    private func testConnection() async {
-        testing = true
-        testResult = nil
-        defer { testing = false }
-        guard env.config.isConfigured else {
-            testResult = "先填账号密码"
-            return
-        }
-        // 保存配置 → 重建客户端 → ping
-        env.reloadServices(context: context)
-        let ok = (try? await env.apiClient.ping()) ?? false
-        guard ok else {
-            testResult = "连不上"
-            return
-        }
-        do {
-            _ = try await env.apiClient.authenticate(role: env.config.currentRole.rawValue)
-            testResult = "账号可用 ✓"
-            env.syncEngine.syncNow()
-        } catch {
-            testResult = "账号不对"
+    // MARK: 提醒卡
+
+    private func reminderCard(config: ServerConfig) -> some View {
+        group("提醒") {
+            Toggle(isOn: Binding(get: { config.dailyReminderEnabled },
+                                 set: { config.dailyReminderEnabled = $0 })) {
+                settingRowLabel("那年今日 · 每日回忆", icon: "bell.badge.fill",
+                                tint: BubuTheme.Color.warning, subtitle: "每天提醒：往年的今天")
+            }
+            .onChange(of: config.dailyReminderEnabled) { _, on in
+                Task { await ReminderScheduler.shared.update(enabled: on, context: context) }
+            }
+            .tint(env.theme.theme.primary)
         }
     }
 
-    private func testAIConnection() async {
-        testingAI = true
-        aiTestResult = nil
-        defer { testingAI = false }
-        env.reloadServices(context: context)
-        let ok = (try? await env.aiService.ping()) ?? false
-        aiTestResult = ok ? "通啦 ✓" : "连不上"
+    // MARK: 数据卡
+
+    private var dataCard: some View {
+        group("数据") {
+            BackupHealthCard()
+            row("导出布布的全量档案", icon: "square.and.arrow.up.on.square.fill",
+                tint: env.theme.theme.secondary) { ExportView() }
+        }
+    }
+
+    private var footer: some View {
+        VStack(spacing: 4) {
+            Text("布布时光机").font(BubuTheme.Font.caption.weight(.semibold))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+            Text("为布布而做，2025 ❤️").font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+        }
+        .padding(.top, 8)
+    }
+
+    // MARK: 卡组与行构件
+
+    @ViewBuilder
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(BubuTheme.Font.caption.weight(.semibold))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+                .padding(.leading, 6)
+            VStack(spacing: 0) { content() }
+                .padding(.vertical, 4)
+                .background(env.themedCard, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+                .bubuCardShadow()
+        }
+    }
+
+    private func row<Destination: View>(_ title: String, icon: String, tint: Color,
+                                        @ViewBuilder destination: () -> Destination) -> some View {
+        NavigationLink { destination() } label: {
+            settingRowLabel(title, icon: icon, tint: tint, subtitle: nil)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func settingRowLabel(_ title: String, icon: String, tint: Color, subtitle: String?) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(tint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(BubuTheme.Font.body)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                if let subtitle {
+                    Text(subtitle).font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.6))
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
     }
 }
