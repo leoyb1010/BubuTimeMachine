@@ -39,7 +39,7 @@ struct RootTabView: View {
             .tabItem { Label("时间胶囊", systemImage: "envelope.fill") }
             .tag(4)
         }
-        .tint(env.theme.theme.primary)
+        .tint(env.theme.theme.tabTint)
         .onAppear {
             #if DEBUG
             if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),

@@ -69,6 +69,16 @@ nonisolated enum BubuTheme {
             light: UIColor(red: 0.86, green: 0.23, blue: 0.28, alpha: 1),
             dark: UIColor(red: 1.0, green: 0.42, blue: 0.48, alpha: 1)
         )
+        /// 暖橙（同步重试中 / 需要注意，如备份过期）。禁止页面裸写 .orange。
+        static let warning = dynamic(
+            light: UIColor(red: 0.93, green: 0.62, blue: 0.23, alpha: 1),
+            dark: UIColor(red: 0.98, green: 0.72, blue: 0.36, alpha: 1)
+        )
+        /// 柔蓝（AI 处理中 / 信息提示）。禁止页面裸写 .blue。
+        static let info = dynamic(
+            light: UIColor(red: 0.36, green: 0.55, blue: 0.80, alpha: 1),
+            dark: UIColor(red: 0.50, green: 0.68, blue: 0.92, alpha: 1)
+        )
     }
 
     // MARK: 字号阶梯（偏大，适老）

@@ -51,4 +51,20 @@ extension AppEnvironment {
     var cardColor: Color {
         isDarkTheme ? Color(hex: "#33324A") : .white
     }
+
+    // MARK: 主题渗透表面色（Wave J §2.1）
+    /// 卡片底：在基础卡片色上向主题 surfaceTint 偏移 ~6%，让每套主题「套色彻底」。
+    var themedCard: Color {
+        BubuTheme.Color.card.mix(with: theme.theme.surfaceTint, by: isDarkTheme ? 0.05 : 0.06)
+    }
+    /// 轻填充（未选中 chip / 文本框）：偏移 ~8%。
+    var themedSoftFill: Color {
+        BubuTheme.Color.softFill.mix(with: theme.theme.surfaceTint, by: 0.08)
+    }
+    /// 发丝线：偏移 ~8%。
+    var themedHairline: Color {
+        BubuTheme.Color.hairline.mix(with: theme.theme.surfaceTint, by: 0.08)
+    }
+    /// 主按钮/进度环强调渐变。
+    var accentGradient: LinearGradient { theme.theme.accentGradient }
 }

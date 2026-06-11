@@ -125,7 +125,12 @@ struct CaptureHomeView: View {
                                startPoint: .top, endPoint: .bottom)
             }
         } else {
-            BubuThemedBackground()
+            // 主题模式：MeshGradient 呼吸背景（§2.2）。星夜深色面板单独走暗渐变保证对比度。
+            if env.isDarkTheme {
+                BubuThemedBackground()
+            } else {
+                BubuMeshHero(colors: theme.meshColors)
+            }
         }
     }
 
