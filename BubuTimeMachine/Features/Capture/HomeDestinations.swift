@@ -31,7 +31,7 @@ struct PhotoWallView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
                     ForEach(items, id: \.media.id) { item in
                         NavigationLink(value: item.entry) {
-                            MediaThumbnail(media: item.media, mediaStore: env.mediaStore, cornerRadius: 6)
+                            MediaThumbnail(media: item.media, mediaStore: env.mediaStore, cornerRadius: 6, size: .grid)
                                 .aspectRatio(1, contentMode: .fit)
                                 .clipped()
                         }

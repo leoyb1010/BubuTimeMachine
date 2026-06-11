@@ -1,13 +1,17 @@
 import SwiftUI
 
 // MARK: - 媒体缩略图
-/// 从沙盒加载缩略图（优先）或原图，异步解码，失败时显示占位。
+/// 经 `ThumbnailProvider` 统一加载：内存缓存命中即返回、原图按显示档位降采样、缺缩略图后台落盘补齐。
+/// 远端媒体由 SyncEngine 落地后走同一本地管线；未落地时显示呼吸占位。
 struct MediaThumbnail: View {
     let media: Media
     let mediaStore: MediaStore
     var cornerRadius: CGFloat = BubuTheme.Radius.small
+    var size: ThumbnailProvider.SizeClass = .card
 
+    @Environment(AppEnvironment.self) private var env
     @State private var image: UIImage?
+    @State private var pulse = false
 
     var body: some View {
         ZStack {
@@ -15,13 +19,6 @@ struct MediaThumbnail: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-            } else if let remote = media.remoteURL, let url = URL(string: remote), media.type == .photo {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    default: placeholder
-                    }
-                }
             } else {
                 placeholder
             }
@@ -54,6 +51,16 @@ struct MediaThumbnail: View {
                     .font(.system(size: 28))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
+            // 远端尚未落地：呼吸闪烁提示「正在取」。
+            .opacity(isAwaitingRemote ? (pulse ? 0.55 : 1.0) : 1.0)
+            .animation(isAwaitingRemote ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
+                       value: pulse)
+            .onAppear { if isAwaitingRemote { pulse = true } }
+    }
+
+    /// 本地无文件但有远端 URL：等 SyncEngine 下载落地。
+    private var isAwaitingRemote: Bool {
+        media.localFileName == nil && media.remoteURL != nil
     }
 
     private var placeholderSymbol: String {
@@ -65,22 +72,12 @@ struct MediaThumbnail: View {
     }
 
     private func load() async {
-        let store = mediaStore
-        let thumbName = media.thumbnailFileName
-        let mediaName = media.localFileName
-        let loaded: UIImage? = await Task.detached(priority: .userInitiated) {
-            if let thumbName,
-               let data = try? Data(contentsOf: store.thumbnailURL(for: thumbName)),
-               let img = UIImage(data: data) {
-                return img
-            }
-            if let mediaName,
-               let data = store.data(forMedia: mediaName),
-               let img = UIImage(data: data) {
-                return img
-            }
-            return nil
-        }.value
-        await MainActor.run { self.image = loaded }
+        image = await env.thumbnails.image(
+            mediaId: media.id,
+            thumbnailFileName: media.thumbnailFileName,
+            localFileName: media.localFileName,
+            isPhoto: media.type == .photo,
+            size: size
+        )
     }
 }

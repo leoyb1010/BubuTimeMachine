@@ -16,6 +16,7 @@ struct TimelineView: View {
     @Query private var profiles: [ChildProfile]
     @State private var showFamilyFeed = false
     @State private var entryPendingDelete: Entry?
+    @State private var sections: [TimelineSection] = []
     @Namespace private var zoomNS
 
     var body: some View {
@@ -29,6 +30,8 @@ struct TimelineView: View {
             }
         }
         .navigationTitle("时光轴")
+        .onAppear { rebuildSectionsIfNeeded() }
+        .onChange(of: entries) { _, _ in rebuildSections() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -55,15 +58,15 @@ struct TimelineView: View {
     private var timeline: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: BubuTheme.Spacing.section, pinnedViews: [.sectionHeaders]) {
-                ForEach(Array(groupedSections.enumerated()), id: \.element.key) { sectionIndex, section in
+                ForEach(Array(sections.enumerated()), id: \.element.key) { sectionIndex, section in
                     Section {
-                        ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
+                        ForEach(section.entries) { entry in
                             NavigationLink(value: entry) {
                                 TimelineEntryCard(entry: entry, mediaStore: env.mediaStore)
                             }
                             .buttonStyle(.plain)
                             .matchedTransitionSource(id: entry.id, in: zoomNS)
-                            .entranceEffect(index: sectionIndex == 0 ? index : 6)
+                            .entranceEffect(index: entranceIndex(sectionIndex: sectionIndex, entryId: entry.id))
                             .contextMenu {
                                 Button(role: .destructive) {
                                     entryPendingDelete = entry
@@ -130,13 +133,27 @@ struct TimelineView: View {
         let entries: [Entry]
     }
 
-    /// 按「YYYY年M月」分组，保持倒序。
-    private var groupedSections: [TimelineSection] {
+    /// 仅首屏 section 的前 6 张做错峰入场动画，其余直接呈现。
+    /// 用首屏首个 section 的 id 集合判断，避免每个 cell O(n) 查找。
+    private func entranceIndex(sectionIndex: Int, entryId: UUID) -> Int {
+        guard sectionIndex == 0, let first = sections.first else { return 6 }
+        if let idx = first.entries.prefix(6).firstIndex(where: { $0.id == entryId }) {
+            return idx
+        }
+        return 6
+    }
+
+    private func rebuildSectionsIfNeeded() {
+        if sections.isEmpty { rebuildSections() }
+    }
+
+    /// 重新分组：仅在 entries 变化时调用，避免每次 body 求值 O(n) 重分组。
+    private func rebuildSections() {
         let calendar = Calendar.current
         let groups = Dictionary(grouping: entries) { entry -> DateComponents in
             calendar.dateComponents([.year, .month], from: entry.happenedAt)
         }
-        return groups
+        sections = groups
             .map { (comps, items) in
                 TimelineSection(key: monthTitle(comps), entries: items)
             }

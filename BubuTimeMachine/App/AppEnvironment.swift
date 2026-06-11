@@ -12,6 +12,7 @@ final class AppEnvironment {
     private(set) var apiClient: APIClient
     private(set) var aiService: AIService
     let mediaStore: MediaStore
+    let thumbnails: ThumbnailProvider
     let syncEngine: SyncEngine
     let uploadQueue: UploadQueue
     let crypto: CapsuleCrypto
@@ -46,6 +47,7 @@ final class AppEnvironment {
         self.apiClient = api
         self.aiService = Self.makeAIService(config: config)
         self.mediaStore = media
+        self.thumbnails = ThumbnailProvider(store: media)
         self.syncEngine = SyncEngine(apiClient: api, config: config, mediaStore: media)
         self.uploadQueue = UploadQueue(apiClient: api)
         let crypto = CapsuleCrypto()
@@ -76,6 +78,21 @@ final class AppEnvironment {
         syncEngine.attach(context: context)
         syncEngine.start()
         ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)
+        installThumbnailBackfill(context: context)
+    }
+
+    /// 订阅后台缩略图补齐：把生成的缩略图文件名回填进 SwiftData 的 `Media.thumbnailFileName`，
+    /// 下次加载直接命中落盘缩略图，不再降采样原图。
+    private func installThumbnailBackfill(context: ModelContext) {
+        let handler: (UUID, String) -> Void = { mediaId, fileName in
+            let descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.id == mediaId })
+            guard let media = try? context.fetch(descriptor).first,
+                  media.thumbnailFileName == nil else { return }
+            media.thumbnailFileName = fileName
+            try? context.save()
+        }
+        ThumbnailBackfillBus.shared.drain(handler)
+        ThumbnailBackfillBus.shared.onRecord = handler
     }
 
     private func seedMilestonePresetsIfNeeded(context: ModelContext) {
