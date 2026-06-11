@@ -66,7 +66,6 @@ struct CaptureHomeView: View {
         }
         .onChange(of: model?.lastSavedEntryID) { _, newID in
             if let id = newID {
-                env.syncEngine.syncNow()
                 Task { await detectFirstTime(entryID: id) }
             }
         }
@@ -204,14 +203,15 @@ struct CaptureHomeView: View {
                 Text(notice)
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(theme.primary)
-            } else if let failure = env.syncEngine.lastFailureReason {
-                Text(failure)
-                    .font(.system(size: 11, weight: .regular, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.danger)
             } else if let soft = env.syncEngine.softNotice {
                 Text(soft)
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
+            } else if let failure = env.syncEngine.lastFailureReason,
+                      env.syncEngine.pendingCount > 0 {
+                Text(failure)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.danger)
             }
         }
         .padding(12)

@@ -154,7 +154,7 @@ struct ExportView: View {
         let healthSnapshots = healthRecords.map { record in
             ArchiveExporter.HealthRecordSnapshot(kind: record.kind.title, title: record.title,
                                                  detail: record.detail, recordedAt: record.recordedAt,
-                                                 amountText: record.amountText, reaction: record.reaction)
+                                                 amountText: healthAmountText(record), reaction: record.reaction)
         }
         let firstTimeSnapshots = firstTimes.map { item in
             ArchiveExporter.FirstTimeSnapshot(what: item.what, happenedAt: item.happenedAt,
@@ -187,6 +187,20 @@ struct ExportView: View {
         } catch {
             errorText = "导出失败：\(error.localizedDescription)"
         }
+    }
+
+    private func healthAmountText(_ record: HealthRecord) -> String? {
+        if let amount = record.amountText, !amount.isEmpty { return amount }
+        if record.kind == .sleep, let start = record.startAt, let end = record.endAt, end > start {
+            return HealthRecordDraft.durationText(from: start, to: end)
+        }
+        if let value = record.amountValue, let unit = record.amountUnit {
+            return "\(HealthRecordDraft.cleanAmount(value))\(unit)"
+        }
+        if let temp = record.temperatureCelsius {
+            return String(format: "%.1f℃", temp)
+        }
+        return nil
     }
 
     /// 用系统 ditto 压缩文件夹为 zip（在沙盒可用）。

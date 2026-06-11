@@ -3,7 +3,6 @@ import UIKit
 
 // MARK: - 仪式动画
 /// 里程碑 / 人生第一次完成时的温暖仪式感。轻量、温柔，不喧宾夺主。
-/// 入场伴随成功触觉反馈；尊重「减弱动态效果」（直接定格，不放粒子）。
 struct CeremonyAnimation: View {
     let title: String
     let subtitle: String?
@@ -12,40 +11,60 @@ struct CeremonyAnimation: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appear = false
     @State private var sparkle = false
-    @State private var secondWave = false
 
     var body: some View {
         ZStack {
-            BubuTheme.Color.warmBrown.opacity(0.35)
+            celebrationBackground
                 .ignoresSafeArea()
                 .onTapGesture { onDismiss() }
 
-            VStack(spacing: 20) {
+            VStack(spacing: 18) {
                 ZStack {
                     if !reduceMotion {
-                        sparkleRing(count: 8, size: 18, near: -40, far: -70, fired: sparkle)
-                        sparkleRing(count: 6, size: 12, near: -30, far: -92, fired: secondWave)
-                            .rotationEffect(.degrees(22))
+                        sparkleRing
                     }
-                    // 自家 IP 比系统图标更有庆祝感
-                    BubuMascotBadge(size: 96, expression: .yeah)
-                        .scaleEffect(appear ? 1 : 0.4)
+
+                    BubuMascotBadge(size: 104, expression: .yeah)
+                        .scaleEffect(appear ? 1 : 0.64)
                 }
 
-                Text(title)
+                Text(title.replacingOccurrences(of: "🎉 ", with: ""))
                     .font(BubuTheme.Font.title)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
                     .multilineTextAlignment(.center)
 
                 if let subtitle {
                     Text(subtitle)
                         .font(BubuTheme.Font.body)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .multilineTextAlignment(.center)
                 }
+
+                Button {
+                    onDismiss()
+                } label: {
+                    Text("收好这一刻")
+                        .font(BubuTheme.Font.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 26)
+                        .padding(.vertical, 12)
+                        .background(BubuTheme.Color.primary, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             }
-            .padding(40)
-            .scaleEffect(appear ? 1 : 0.8)
+            .padding(.horizontal, 26)
+            .padding(.vertical, 30)
+            .frame(maxWidth: 340)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .stroke(.white.opacity(0.46), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
+            .scaleEffect(appear ? 1 : 0.86)
             .opacity(appear ? 1 : 0)
+            .padding(24)
         }
         .onAppear {
             BubuHaptics.success()
@@ -53,20 +72,42 @@ struct CeremonyAnimation: View {
                 appear = true
                 return
             }
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) { appear = true }
-            withAnimation(.easeOut(duration: 1.1).delay(0.2)) { sparkle = true }
-            withAnimation(.easeOut(duration: 1.3).delay(0.45)) { secondWave = true }
+            withAnimation(.spring(response: 0.48, dampingFraction: 0.72)) { appear = true }
+            withAnimation(.easeOut(duration: 1.1).delay(0.18)) { sparkle = true }
         }
     }
 
-    private func sparkleRing(count: Int, size: CGFloat, near: CGFloat, far: CGFloat, fired: Bool) -> some View {
-        ForEach(0..<count, id: \.self) { i in
-            Image(systemName: "sparkle")
-                .font(.system(size: size))
-                .foregroundStyle(BubuTheme.Color.primary)
-                .offset(y: fired ? far : near)
-                .rotationEffect(.degrees(Double(i) / Double(count) * 360))
-                .opacity(fired ? 0 : 1)
+    private var celebrationBackground: some View {
+        ZStack {
+            LinearGradient(colors: [
+                BubuTheme.Color.background,
+                BubuTheme.Color.primary.opacity(0.16),
+                BubuTheme.Color.card
+            ], startPoint: .topLeading, endPoint: .bottomTrailing)
+
+            VStack(spacing: 22) {
+                ForEach(0..<8, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 0)
+                        .fill(index.isMultiple(of: 2) ? .white.opacity(0.12) : BubuTheme.Color.primary.opacity(0.06))
+                        .frame(height: 18)
+                        .rotationEffect(.degrees(-8))
+                }
+            }
+            .offset(y: -20)
+
+            Rectangle()
+                .fill(.white.opacity(0.20))
+        }
+    }
+
+    private var sparkleRing: some View {
+        ForEach(0..<10, id: \.self) { index in
+            Image(systemName: index.isMultiple(of: 2) ? "sparkle" : "star.fill")
+                .font(.system(size: index.isMultiple(of: 2) ? 15 : 10, weight: .semibold))
+                .foregroundStyle(BubuTheme.Color.primary.opacity(0.82))
+                .offset(y: sparkle ? -78 : -38)
+                .rotationEffect(.degrees(Double(index) / 10 * 360))
+                .opacity(sparkle ? 0 : 1)
         }
     }
 }

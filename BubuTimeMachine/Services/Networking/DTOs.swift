@@ -96,6 +96,13 @@ struct HealthRecordDTO: Codable, Sendable {
     var recordedAt: Date
     var amountText: String?
     var reaction: String?
+    var amountValue: Double?
+    var amountUnit: String?
+    var startAt: Date?
+    var endAt: Date?
+    var severity: String?
+    var temperatureCelsius: Double?
+    var tags: [String]
     var createdAt: Date
 }
 

@@ -36,7 +36,6 @@ struct GrowthMovieView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("年度成长电影")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarLeading) { Text("← 右滑返回").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) } }
         .fullScreenCover(isPresented: $showPlayer) {
             if let draft {
                 GrowthMoviePlayer(draft: draft, mediaStore: env.mediaStore, tint: theme) {

@@ -40,7 +40,6 @@ struct FamilyEnsembleView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("家人合奏")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarLeading) { Text("← 右滑返回").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) } }
     }
 
     @ViewBuilder

@@ -23,6 +23,8 @@ final class CaptureModel {
     var note: String = ""
     var mood: Mood?
     var includeLocation = false
+    var currentLocation: CapturedLocation?
+    var locationError: String?
     var savedFlash = false
 
     /// 录好的语音（待随本次记录一起保存）。
@@ -51,6 +53,8 @@ final class CaptureModel {
         note = prefillNote
         mood = nil
         includeLocation = false
+        currentLocation = nil
+        locationError = nil
         pickedItems = []
         cameraPhotos = []
         cameraVideos = []
@@ -149,6 +153,13 @@ final class CaptureModel {
 
         // 应用分析结果
         if let capture = earliestCapture { entry.happenedAt = capture }
+        if includeLocation,
+           locationName == nil,
+           coordinate == nil,
+           let currentLocation {
+            locationName = currentLocation.name
+            coordinate = (currentLocation.latitude, currentLocation.longitude)
+        }
         if includeLocation, let loc = locationName { entry.locationName = loc }
         if includeLocation, let (lat, lon) = coordinate { entry.latitude = lat; entry.longitude = lon }
 

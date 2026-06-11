@@ -140,9 +140,10 @@ final class SyncEngine {
         guard ok else {
             connectionState = .offline
             currentSyncLabel = nil
-            softNotice = nil
+            currentUploadProgress = nil
             recordFailure(APIError.network("连不上家里的服务器"), item: "连接")
             refreshPendingCount()
+            finalizeRun()
             return
         }
         do {
@@ -150,9 +151,10 @@ final class SyncEngine {
         } catch {
             connectionState = .offline
             currentSyncLabel = nil
-            softNotice = nil
+            currentUploadProgress = nil
             recordFailure(error, item: "账号")
             refreshPendingCount()
+            finalizeRun()
             return
         }
         connectionState = .online
@@ -243,8 +245,65 @@ final class SyncEngine {
     }
 
     private func recordFailure(_ error: Error, item: String) {
-        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        lastFailureReason = "\(item)：\(message)"
+        if Self.isUserRecoverableTransient(error) {
+            softFailureThisRun = true
+            return
+        }
+
+        lastFailureReason = "\(item)：\(Self.safeUserMessage(for: error))"
+    }
+
+    private static func isUserRecoverableTransient(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut,
+                 .cannotConnectToHost,
+                 .cannotFindHost,
+                 .dnsLookupFailed,
+                 .networkConnectionLost,
+                 .notConnectedToInternet,
+                 .resourceUnavailable,
+                 .badServerResponse,
+                 .secureConnectionFailed:
+                return true
+            default:
+                return false
+            }
+        }
+
+        if case APIError.server(let code, _) = error {
+            return code == 408 || code == 429 || (500...599).contains(code)
+        }
+
+        if case APIError.network(let message) = error {
+            let hardLocalKeywords = ["本地文件", "文件名为空", "找不到这条媒体", "文件不见了"]
+            return !hardLocalKeywords.contains { message.contains($0) }
+        }
+
+        return false
+    }
+
+    private static func safeUserMessage(for error: Error) -> String {
+        switch error {
+        case APIError.fileTooLarge(_, let limit):
+            return "文件太大，建议压缩到 \(max(1, limit / 1_048_576))MB 以内后再传。"
+        case APIError.unauthorized:
+            return "账号状态需要重新确认，请到设置里重新连接服务器。"
+        case APIError.notConfigured:
+            return "还没有连接家里的服务器。"
+        case APIError.server(let code, _):
+            if code == 400 || code == 403 || code == 404 {
+                return "服务器拒绝了这次同步，请到设置里查看连接配置。"
+            }
+            return "服务器暂时没响应，App 会继续自动补传。"
+        case APIError.network(let message):
+            if message.contains("本地文件") || message.contains("文件不见了") {
+                return "本地文件缺失，这一项需要重新选择后再同步。"
+            }
+            return "网络暂时不稳定，App 会继续自动补传。"
+        default:
+            return "同步遇到问题，App 会保留本地内容并继续重试。"
+        }
     }
 
     /// 用 fetchCount（SQL COUNT）代替全表取回内存过滤——数据量大也不卡。
@@ -853,12 +912,16 @@ final class SyncEngine {
     private static func makeDTO(_ item: HealthRecord) -> HealthRecordDTO {
         HealthRecordDTO(id: item.remoteId, localId: item.id.uuidString, kind: item.kindRaw, title: item.title,
                         detail: item.detail, recordedAt: item.recordedAt, amountText: item.amountText,
-                        reaction: item.reaction, createdAt: item.createdAt)
+                        reaction: item.reaction, amountValue: item.amountValue, amountUnit: item.amountUnit,
+                        startAt: item.startAt, endAt: item.endAt, severity: item.severityRaw,
+                        temperatureCelsius: item.temperatureCelsius, tags: item.tags, createdAt: item.createdAt)
     }
 
     private static func apply(_ dto: HealthRecordDTO, to item: HealthRecord) {
         item.kindRaw = dto.kind; item.title = dto.title; item.detail = dto.detail; item.recordedAt = dto.recordedAt
-        item.amountText = dto.amountText; item.reaction = dto.reaction
+        item.amountText = dto.amountText; item.reaction = dto.reaction; item.amountValue = dto.amountValue
+        item.amountUnit = dto.amountUnit; item.startAt = dto.startAt; item.endAt = dto.endAt
+        item.severityRaw = dto.severity; item.temperatureCelsius = dto.temperatureCelsius; item.tags = dto.tags
     }
 
     private static func makeDTO(_ item: Comment) -> CommentDTO {

@@ -48,10 +48,10 @@ enum APIError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured: return "还没有连接到家里的服务器"
-        case .unauthorized:  return "身份过期了，请重新进入"
-        case .network(let m): return "网络不太通：\(m)"
-        case .server(let code, let m): return "服务器开小差了（\(code)）：\(m)"
+        case .notConfigured: return "还没有连接家里的服务器。"
+        case .unauthorized:  return "账号状态需要重新确认，请到设置里重新连接服务器。"
+        case .network: return "网络暂时不稳定，App 会保留本地内容并继续重试。"
+        case .server(let code, _): return "服务器暂时没响应（\(code)），App 会继续自动补传。"
         case .fileTooLarge(let bytes, let limit):
             return "这个文件有 \(Self.megabytes(bytes))MB，公网建议压到 \(Self.megabytes(limit))MB 以内"
         }

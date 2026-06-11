@@ -29,7 +29,6 @@ struct GrowthReportView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("成长报告")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarLeading) { Text("← 右滑返回").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) } }
     }
 
     private var archiveSummary: some View {

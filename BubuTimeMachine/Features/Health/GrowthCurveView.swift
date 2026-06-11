@@ -54,8 +54,12 @@ struct GrowthCurveView: View {
 
     /// 从记录里抽数值：匹配指标关键字，取 amountText/title/detail 里的第一个数字。
     private func parseValue(from record: HealthRecord) -> Double? {
-        let haystack = [record.title, record.amountText, record.detail].compactMap { $0 }.joined(separator: " ")
+        let haystack = ([record.title, record.amountText, record.detail].compactMap { $0 } + record.tags).joined(separator: " ")
         guard metric.keywords.contains(where: { haystack.contains($0) }) else { return nil }
+        if let value = record.amountValue,
+           record.amountUnit == metric.unit {
+            return value
+        }
         // 抽第一个浮点数
         let pattern = #"(\d+\.?\d*)"#
         guard let regex = try? NSRegularExpression(pattern: pattern),

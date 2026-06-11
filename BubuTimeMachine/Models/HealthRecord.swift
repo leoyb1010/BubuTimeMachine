@@ -12,6 +12,13 @@ final class HealthRecord {
     var recordedAt: Date
     var amountText: String?
     var reaction: String?
+    var amountValue: Double?
+    var amountUnit: String?
+    var startAt: Date?
+    var endAt: Date?
+    var severityRaw: String?
+    var temperatureCelsius: Double?
+    var tags: [String] = []
     var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
 

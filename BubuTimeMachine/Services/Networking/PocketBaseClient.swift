@@ -248,9 +248,10 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let token = try await ensureToken()
-                    let remoteId = try await self.multipartUpload(file, token: token) { progress in
-                        continuation.yield(.progress(progress))
+                    let remoteId = try await self.withAuthRetry { token in
+                        try await self.multipartUpload(file, token: token) { progress in
+                            continuation.yield(.progress(progress))
+                        }
                     }
                     let urlStr = self.baseURL
                         .appendingPathComponent("api/files/media/\(remoteId)/\(file.fileName)")
@@ -409,12 +410,16 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let token = try await ensureToken()
-                    let remoteId = try await self.multipartUpload(collection: collection, localId: localId,
-                                                                  fields: fields, fileField: fileField,
-                                                                  fileURL: fileURL, fileName: fileName,
-                                                                  token: token) { progress in
-                        continuation.yield(.progress(progress))
+                    let remoteId = try await self.withAuthRetry { token in
+                        try await self.multipartUpload(collection: collection,
+                                                       localId: localId,
+                                                       fields: fields,
+                                                       fileField: fileField,
+                                                       fileURL: fileURL,
+                                                       fileName: fileName,
+                                                       token: token) { progress in
+                            continuation.yield(.progress(progress))
+                        }
                     }
                     let urlStr = self.baseURL
                         .appendingPathComponent("api/files/\(collection)/\(remoteId)/\(fileName)")
@@ -702,6 +707,13 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         if let v = dto.detail { body["detail"] = v }
         if let v = dto.amountText { body["amountText"] = v }
         if let v = dto.reaction { body["reaction"] = v }
+        if let v = dto.amountValue { body["amountValue"] = v }
+        if let v = dto.amountUnit { body["amountUnit"] = v }
+        if let v = dto.startAt { body["startAt"] = iso.string(from: v) }
+        if let v = dto.endAt { body["endAt"] = iso.string(from: v) }
+        if let v = dto.severity { body["severity"] = v }
+        if let v = dto.temperatureCelsius { body["temperatureCelsius"] = v }
+        body["tags"] = dto.tags
         addSyncTimestamp(to: &body)
         return body
     }
@@ -717,6 +729,13 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                                recordedAt: date("recordedAt") ?? fallback?.recordedAt ?? .now,
                                amountText: obj["amountText"] as? String ?? fallback?.amountText,
                                reaction: obj["reaction"] as? String ?? fallback?.reaction,
+                               amountValue: obj["amountValue"] as? Double ?? fallback?.amountValue,
+                               amountUnit: obj["amountUnit"] as? String ?? fallback?.amountUnit,
+                               startAt: date("startAt") ?? fallback?.startAt,
+                               endAt: date("endAt") ?? fallback?.endAt,
+                               severity: obj["severity"] as? String ?? fallback?.severity,
+                               temperatureCelsius: obj["temperatureCelsius"] as? Double ?? fallback?.temperatureCelsius,
+                               tags: obj["tags"] as? [String] ?? fallback?.tags ?? [],
                                createdAt: date("created") ?? fallback?.createdAt ?? .now)
     }
 

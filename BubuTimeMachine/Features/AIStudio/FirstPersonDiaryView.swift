@@ -30,7 +30,6 @@ struct FirstPersonDiaryView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("第一人称日记")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarLeading) { Text("← 右滑返回").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) } }
     }
 
     @ViewBuilder

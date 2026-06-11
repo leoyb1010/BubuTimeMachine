@@ -145,7 +145,8 @@ struct QuickCaptureSheet: View {
     }
 
     private func primaryActions(proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 10) {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
+        return LazyVGrid(columns: columns, spacing: 10) {
             Button { Task { await requestCamera(video: false) } } label: {
                 actionCard("拍照", expression: .yeah, subtitle: "拍下此刻")
             }
@@ -153,7 +154,7 @@ struct QuickCaptureSheet: View {
             .disabled(requestingCamera)
 
             Button { Task { await requestCamera(video: true) } } label: {
-                actionCard("录像", expression: .playing, subtitle: "录一段(≤60秒)")
+                actionCard("录像", expression: .playing, subtitle: "录一段")
             }
             .buttonStyle(.plain)
             .disabled(requestingCamera)
@@ -225,22 +226,63 @@ struct QuickCaptureSheet: View {
         }
     }
 
+    private var includeLocationBinding: Binding<Bool> {
+        Binding(
+            get: { model.includeLocation },
+            set: { newValue in
+                if newValue {
+                    Task { await enableLocation() }
+                } else {
+                    model.includeLocation = false
+                    model.currentLocation = nil
+                    model.locationError = nil
+                }
+            }
+        )
+    }
+
     private var locationPrivacyCard: some View {
-        Toggle(isOn: $model.includeLocation) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("记录地点")
-                    .font(BubuTheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text("关闭时只保留照片和时间，不保存 GPS 或地点名。")
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: includeLocationBinding) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("记录地点")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("打开后会请求一次定位；有照片自带地点时优先使用照片地点。")
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(theme)
+
+            if let location = model.currentLocation {
+                Text(location.name.map { "将记录：\($0)" } ?? "将记录当前位置")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(theme)
+            }
+
+            if let error = model.locationError {
+                Text(error)
+                    .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .tint(theme)
         .padding()
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
+    }
+
+    private func enableLocation() async {
+        guard let location = await env.locationService.currentPlacemark() else {
+            model.includeLocation = false
+            model.currentLocation = nil
+            model.locationError = "没有拿到定位权限，已关闭地点记录。"
+            return
+        }
+        model.currentLocation = location
+        model.includeLocation = true
+        model.locationError = nil
     }
 
     private var selectedPreviewGrid: some View {

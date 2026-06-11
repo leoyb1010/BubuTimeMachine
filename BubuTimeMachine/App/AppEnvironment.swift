@@ -19,6 +19,7 @@ final class AppEnvironment {
     let vault: CapsuleVault
     let theme: ThemeManager
     let photoAnalyzer: PhotoAnalyzer
+    let locationService: LocationService
 
     /// 当前身份（成员 id）。nil 表示尚未选择/未完成首启引导。
     var currentMemberId: UUID? {
@@ -55,6 +56,7 @@ final class AppEnvironment {
         self.vault = CapsuleVault(crypto: crypto, mediaStore: media)
         self.theme = ThemeManager()
         self.photoAnalyzer = PhotoAnalyzer()
+        self.locationService = LocationService()
 
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Self.onboardedKey)
         self.currentMemberId = UserDefaults.standard.string(forKey: Self.memberKey)

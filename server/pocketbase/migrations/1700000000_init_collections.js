@@ -185,6 +185,13 @@ migrate((app) => {
       { name: 'recordedAt', type: 'date', required: true },
       { name: 'amountText', type: 'text' },
       { name: 'reaction', type: 'text' },
+      { name: 'amountValue', type: 'number' },
+      { name: 'amountUnit', type: 'text' },
+      { name: 'startAt', type: 'date' },
+      { name: 'endAt', type: 'date' },
+      { name: 'severity', type: 'text' },
+      { name: 'temperatureCelsius', type: 'number' },
+      { name: 'tags', type: 'json' },
     ]),
   })
   app.save(healthrecords)

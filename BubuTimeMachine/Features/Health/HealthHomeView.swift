@@ -131,10 +131,22 @@ struct HealthHomeView: View {
                 HStack(spacing: 8) {
                     Text(record.kind.title)
                     Text(BubuDateFormat.shortTime(record.recordedAt))
-                    if let amount = record.amountText, !amount.isEmpty { Text(amount) }
+                    if let amount = amountSummary(record) { Text(amount) }
                 }
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
+                if !record.tags.isEmpty {
+                    FlowLayout(spacing: 6) {
+                        ForEach(record.tags.prefix(5), id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(theme)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(theme.opacity(0.10), in: Capsule())
+                        }
+                    }
+                }
                 if let detail = record.detail, !detail.isEmpty {
                     Text(detail).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 }
@@ -146,6 +158,20 @@ struct HealthHomeView: View {
         }
         .padding(12)
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+    }
+
+    private func amountSummary(_ record: HealthRecord) -> String? {
+        if let amount = record.amountText, !amount.isEmpty { return amount }
+        if record.kind == .sleep, let start = record.startAt, let end = record.endAt, end > start {
+            return HealthRecordDraft.durationText(from: start, to: end)
+        }
+        if let value = record.amountValue, let unit = record.amountUnit {
+            return "\(HealthRecordDraft.cleanAmount(value))\(unit)"
+        }
+        if let temp = record.temperatureCelsius {
+            return String(format: "%.1f℃", temp)
+        }
+        return nil
     }
 
     private var disclaimer: some View {

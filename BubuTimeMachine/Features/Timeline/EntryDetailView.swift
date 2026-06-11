@@ -14,12 +14,15 @@ struct EntryDetailView: View {
     @State private var editing = false
     @State private var appendPick: [PhotosPickerItem] = []
     @State private var showCommentSheet = false
-    @State private var viewingMedia: Media?
+    @State private var viewingMediaID: UUID?
     @State private var showDeleteConfirm = false
     @State private var appendMediaStatus: String?
     @State private var showReactionPicker = false
 
     private var profile: ChildProfile? { profiles.first }
+    private var sortedMedia: [Media] {
+        entry.media.sorted { $0.createdAt < $1.createdAt }
+    }
     private var theme: Color { env.theme.theme.primary }
     private var timePerspectivePrefix: String {
         let months = Calendar.current.dateComponents([.month], from: entry.happenedAt, to: .now).month ?? 0
@@ -60,11 +63,6 @@ struct EntryDetailView: View {
         .navigationTitle(BubuDateFormat.shortDate(entry.happenedAt))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Text("← 右滑或点系统返回")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(editing ? "完成" : "编辑") {
                     if editing {
@@ -89,8 +87,17 @@ struct EntryDetailView: View {
         .sheet(isPresented: $showCommentSheet) {
             CommentComposeSheet(entry: entry)
         }
-        .sheet(item: $viewingMedia) { media in
-            MediaViewer(media: media, mediaStore: env.mediaStore)
+        .fullScreenCover(isPresented: Binding(
+            get: { viewingMediaID != nil },
+            set: { if !$0 { viewingMediaID = nil } }
+        )) {
+            if let id = viewingMediaID {
+                MediaGalleryViewer(mediaItems: sortedMedia,
+                                   initialMediaID: id,
+                                   mediaStore: env.mediaStore) {
+                    viewingMediaID = nil
+                }
+            }
         }
         .alert("删除这条记录？", isPresented: $showDeleteConfirm) {
             Button("删除", role: .destructive) { deleteEntry() }
@@ -123,10 +130,10 @@ struct EntryDetailView: View {
         if !entry.media.isEmpty {
             let columns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(entry.media) { media in
+                ForEach(sortedMedia) { media in
                     ZStack(alignment: .topTrailing) {
                         Button {
-                            if !editing { viewingMedia = media }
+                            if !editing { viewingMediaID = media.id }
                         } label: {
                             MediaThumbnail(media: media, mediaStore: env.mediaStore,
                                            cornerRadius: BubuTheme.Radius.card)
@@ -486,7 +493,7 @@ struct EntryDetailView: View {
     private func deleteEntry() {
         entry.isArchived = true
         markEntryDirty()
-        context.insert(FeedEvent(kind: .entryCreated,
+        context.insert(FeedEvent(kind: .entryArchived,
                                  actorRole: env.config.currentRole.rawValue,
                                  summary: "删除了一条时光轴记录",
                                  targetLocalId: entry.id.uuidString))
