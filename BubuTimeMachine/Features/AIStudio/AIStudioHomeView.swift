@@ -15,25 +15,25 @@ struct AIStudioHomeView: View {
                 capabilityCard(
                     icon: "text.book.closed.fill",
                     title: "第一人称日记",
-                    subtitle: "把父母视角，改写成布布自己的话",
+                    subtitle: "改写成布布的话",
                     destination: AnyView(FirstPersonDiaryView()))
 
                 capabilityCard(
                     icon: "film.stack.fill",
                     title: "年度成长电影",
-                    subtitle: "每一岁的精选，自动剪成一部小电影",
+                    subtitle: "精选照片成短片",
                     destination: AnyView(GrowthMovieView()))
 
                 capabilityCard(
                     icon: "person.3.sequence.fill",
                     title: "家人合奏",
-                    subtitle: "把三个人的补充，合成完整的故事",
+                    subtitle: "合成完整故事",
                     destination: AnyView(FamilyEnsembleView()))
 
                 capabilityCard(
                     icon: "chart.line.uptrend.xyaxis",
                     title: "成长报告",
-                    subtitle: "这段时间，布布有哪些悄悄的变化",
+                    subtitle: "整理成长变化",
                     destination: AnyView(GrowthReportView()))
 
                 Spacer(minLength: 30)
@@ -55,8 +55,10 @@ struct AIStudioHomeView: View {
                 BubuMascotBadge(size: 58, expression: .drawing)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("布布的故事").font(BubuTheme.Font.title)
-                    Text("把零散的瞬间，变成有温度的作品。")
-                        .font(BubuTheme.Font.body)
+                    Text("把瞬间变成故事")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
             }
             .foregroundStyle(.white)
@@ -81,8 +83,11 @@ struct AIStudioHomeView: View {
                     .background(theme.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.88)
                     Text(subtitle).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.86)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").foregroundStyle(BubuTheme.Color.secondaryText)

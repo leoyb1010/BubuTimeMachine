@@ -151,7 +151,7 @@ struct BackupHealthCard: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
             }
-            checkLine("上次同步", value: env.syncEngine.lastSyncedAt.map { BubuDateFormat.shortTime($0) } ?? "还没同步过",
+            checkLine("上次同步", value: env.syncEngine.lastSyncedAt.map { BubuDateFormat.shortTime($0) } ?? "未同步",
                       warn: env.syncEngine.lastSyncedAt == nil)
             checkLine("还在等网络", value: env.syncEngine.pendingCount == 0 ? "都好啦" : "\(env.syncEngine.pendingCount) 条",
                       warn: env.syncEngine.pendingCount > 0)
@@ -161,8 +161,8 @@ struct BackupHealthCard: View {
     }
 
     private var exportText: String {
-        guard let d = daysSinceExport else { return "从没导出过——给布布的档案存个底吧" }
-        if d == 0 { return "今天刚存过 ✓" }
+        guard let d = daysSinceExport else { return "未存档" }
+        if d == 0 { return "今天" }
         return "\(d) 天前"
     }
 
@@ -173,6 +173,10 @@ struct BackupHealthCard: View {
             Spacer()
             Text(value).font(BubuTheme.Font.caption.weight(.medium))
                 .foregroundStyle(warn ? BubuTheme.Color.warning : BubuTheme.Color.warmBrown)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 128, alignment: .trailing)
         }
         .padding(.leading, 42)
     }
