@@ -33,6 +33,7 @@ struct CaptureHomeView: View {
                     onThisDaySection
                     healthEntryCard
                     recordButton
+                    dailyQuestionCard
                     recentStrip
                     Spacer(minLength: 30)
                 }
@@ -331,6 +332,40 @@ struct CaptureHomeView: View {
     private func yearsAgoText(_ date: Date) -> String {
         let years = Calendar.current.dateComponents([.year], from: date, to: .now).year ?? 0
         return years <= 0 ? "今年" : "\(years)年前的今天"
+    }
+
+    // MARK: 每日一问
+
+    private var dailyQuestionCard: some View {
+        let question = DailyQuestion.todays(birthday: profile?.birthday ?? .now)
+        return Button {
+            model?.startQuickCapture(prefillNote: "【今日一问】\(question)\n")
+        } label: {
+            HStack(spacing: 14) {
+                BubuMascotBadge(size: 46, expression: .surprised)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("今日一问")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(theme.primary)
+                    Text(question)
+                        .font(BubuTheme.Font.body.weight(.medium))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Text("答一句")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(theme.primary, in: Capsule())
+            }
+            .padding()
+            .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
+            .bubuCardShadow()
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: 布布健康入口

@@ -46,8 +46,8 @@ final class CaptureModel {
         self.role = role
     }
 
-    func startQuickCapture() {
-        note = ""
+    func startQuickCapture(prefillNote: String = "") {
+        note = prefillNote
         mood = nil
         includeLocation = false
         pickedItems = []
