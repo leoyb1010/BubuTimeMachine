@@ -277,9 +277,18 @@ struct CaptureHomeView: View {
         let memories = onThisDayEntries
         if !memories.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Label("那年今日", systemImage: "calendar.badge.clock")
-                    .font(BubuTheme.Font.headline)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                NavigationLink { OnThisDayView() } label: {
+                    HStack(spacing: 6) {
+                        Label("那年今日", systemImage: "calendar.badge.clock")
+                            .font(BubuTheme.Font.headline)
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(memories) { entry in

@@ -24,4 +24,8 @@ nonisolated enum BubuDateFormat {
     static func yearMonthDay(_ date: Date) -> String {
         date.formatted(Date.FormatStyle.dateTime.year().month().day().locale(zhCN))
     }
+
+    static func monthDay(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle.dateTime.month().day().locale(zhCN))
+    }
 }
