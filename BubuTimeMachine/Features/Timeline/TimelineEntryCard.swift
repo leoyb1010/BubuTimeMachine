@@ -92,22 +92,25 @@ struct TimelineEntryCard: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
+        let reactionSummary = ReactionSummary.from(entry.comments, myRole: "")
+        let realComments = entry.comments.filter { !Reaction.isReaction($0) }.count
+        return HStack(spacing: 12) {
             HStack(spacing: 6) {
-                Image(systemName: syncSymbol).font(.system(size: 12))
+                Image(systemName: syncSymbol).font(.system(size: 11))
                 Text(entry.syncState.friendlyText).font(BubuTheme.Font.caption)
             }
+            ReactionRow(summary: reactionSummary)
             Spacer()
             if !entry.voiceNotes.isEmpty {
                 Label("\(entry.voiceNotes.count)", systemImage: "waveform")
                     .font(.system(size: 12))
             }
-            if !entry.comments.isEmpty {
-                Label("\(entry.comments.count)", systemImage: "person.2.fill")
+            if realComments > 0 {
+                Label("\(realComments)", systemImage: "person.2.fill")
                     .font(.system(size: 12))
             }
         }
-        .foregroundStyle(BubuTheme.Color.secondaryText)
+        .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.85))
     }
 
     private var syncSymbol: String {

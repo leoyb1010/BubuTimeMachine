@@ -17,6 +17,7 @@ struct TimelineView: View {
     @State private var showFamilyFeed = false
     @State private var entryPendingDelete: Entry?
     @State private var sections: [TimelineSection] = []
+    @State private var searchText = ""
     @Namespace private var zoomNS
 
     var body: some View {
@@ -25,11 +26,15 @@ struct TimelineView: View {
 
             if entries.isEmpty {
                 emptyState
+            } else if sections.isEmpty {
+                searchEmptyState
             } else {
                 timeline
             }
         }
         .navigationTitle("时光轴")
+        .searchable(text: $searchText, prompt: "找找布布的记录")
+        .onChange(of: searchText) { _, _ in rebuildSections() }
         .onAppear { rebuildSectionsIfNeeded() }
         .onChange(of: entries) { _, _ in rebuildSections() }
         .toolbar {
@@ -126,6 +131,17 @@ struct TimelineView: View {
         .padding(40)
     }
 
+    private var searchEmptyState: some View {
+        VStack(spacing: 16) {
+            BubuMascotBadge(size: 72, expression: .surprised)
+            Text("没找到「\(searchText)」相关的记录")
+                .font(BubuTheme.Font.body)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+                .multilineTextAlignment(.center)
+        }
+        .padding(40)
+    }
+
     // MARK: 分段
 
     private struct TimelineSection {
@@ -147,10 +163,11 @@ struct TimelineView: View {
         if sections.isEmpty { rebuildSections() }
     }
 
-    /// 重新分组：仅在 entries 变化时调用，避免每次 body 求值 O(n) 重分组。
+    /// 重新分组：仅在 entries / 搜索词变化时调用，避免每次 body 求值 O(n) 重分组。
     private func rebuildSections() {
         let calendar = Calendar.current
-        let groups = Dictionary(grouping: entries) { entry -> DateComponents in
+        let filtered = matchingEntries
+        let groups = Dictionary(grouping: filtered) { entry -> DateComponents in
             calendar.dateComponents([.year, .month], from: entry.happenedAt)
         }
         sections = groups
@@ -161,6 +178,19 @@ struct TimelineView: View {
                 (lhs.entries.first?.happenedAt ?? .distantPast) >
                 (rhs.entries.first?.happenedAt ?? .distantPast)
             }
+    }
+
+    /// 搜索命中范围：正文 / 第一人称 / 标题 / 地点 / 作者 / 心情 / 「第一次」名称。
+    private var matchingEntries: [Entry] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return entries }
+        let lower = q.lowercased()
+        return entries.filter { e in
+            func hit(_ s: String?) -> Bool { s?.lowercased().contains(lower) ?? false }
+            return hit(e.note) || hit(e.firstPersonNote) || hit(e.title)
+                || hit(e.locationName) || hit(e.authorRole)
+                || hit(e.mood?.rawValue) || hit(e.firstTime?.what)
+        }
     }
 
     private func monthTitle(_ comps: DateComponents) -> String {

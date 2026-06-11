@@ -17,6 +17,7 @@ struct EntryDetailView: View {
     @State private var viewingMedia: Media?
     @State private var showDeleteConfirm = false
     @State private var appendMediaStatus: String?
+    @State private var showReactionPicker = false
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -44,6 +45,7 @@ struct EntryDetailView: View {
                 ageBadge
                 if let appendMediaStatus { mediaStatusRow(appendMediaStatus) }
                 mediaSection
+                reactionSection
                 appendPhotoButton
                 metaSection
                 if entry.note != nil || editing { noteSection }
@@ -175,7 +177,63 @@ struct EntryDetailView: View {
             .background(theme.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
 
-    // MARK: 元信息（时间/地点/心情/作者）
+    // MARK: 亲一下（反应）
+
+    private var reactionSummary: ReactionSummary {
+        ReactionSummary.from(entry.comments, myRole: env.config.currentRole.rawValue)
+    }
+
+    private var reactionSection: some View {
+        let summary = reactionSummary
+        return HStack(spacing: 12) {
+            Button {
+                withAnimation(BubuMotion.quick) { showReactionPicker.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: summary.mine == nil ? "heart" : "heart.fill")
+                        .foregroundStyle(summary.mine == nil ? BubuTheme.Color.secondaryText : theme)
+                    Text(summary.mine?.label ?? "亲一下")
+                        .font(BubuTheme.Font.caption.weight(.medium))
+                        .foregroundStyle(summary.mine == nil ? BubuTheme.Color.secondaryText : theme)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(theme.opacity(summary.mine == nil ? 0.06 : 0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showReactionPicker, attachmentAnchor: .point(.top),
+                     arrowEdge: .bottom) {
+                ReactionPicker(current: summary.mine) { r in
+                    toggleReaction(r)
+                    showReactionPicker = false
+                }
+                .presentationCompactAdaptation(.popover)
+                .padding(8)
+            }
+            ReactionRow(summary: summary)
+            Spacer()
+        }
+    }
+
+    /// 切换反应：同一人只保留一条；点已选的反应=取消。
+    private func toggleReaction(_ r: Reaction) {
+        let myRole = env.config.currentRole.rawValue
+        let existing = entry.comments.filter { $0.authorRole == myRole && Reaction.isReaction($0) }
+        let already = ReactionSummary.from(entry.comments, myRole: myRole).mine == r
+        for c in existing { context.delete(c) }
+        if !already {
+            let comment = Comment(authorRole: myRole, text: r.encodedText)
+            comment.entry = entry
+            context.insert(comment)
+            context.insert(FeedEvent(kind: .commentAdded, actorRole: myRole,
+                                     summary: "\(myRole) \(r.label)了这一刻 \(r.rawValue)",
+                                     targetLocalId: entry.id.uuidString))
+            BubuHaptics.selection()
+        }
+        try? context.save()
+        env.syncEngine.syncNow()
+    }
+
+
 
     private var metaSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -338,12 +396,12 @@ struct EntryDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
-            if entry.comments.isEmpty {
+            if entry.comments.filter({ !Reaction.isReaction($0) }).isEmpty {
                 Text("还没有人补充。点 + 号，说说你的视角。")
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             } else {
-                ForEach(entry.comments.sorted { $0.createdAt < $1.createdAt }) { comment in
+                ForEach(entry.comments.filter { !Reaction.isReaction($0) }.sorted { $0.createdAt < $1.createdAt }) { comment in
                     commentRow(comment)
                 }
             }
