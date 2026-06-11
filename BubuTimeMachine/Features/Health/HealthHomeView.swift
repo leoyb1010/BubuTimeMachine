@@ -14,6 +14,7 @@ struct HealthHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 header
+                insightLinks
                 quickActions
                 todaySection
                 recentSection
@@ -40,6 +41,36 @@ struct HealthHomeView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuCardShadow()
+    }
+
+    /// 成长曲线 / 疫苗接种入口（从流水账升级到可视化）。
+    private var insightLinks: some View {
+        HStack(spacing: 10) {
+            NavigationLink { GrowthCurveView() } label: {
+                insightTile(icon: "chart.xyaxis.line", title: "成长曲线", subtitle: "身高·体重·头围")
+            }
+            .buttonStyle(.plain)
+            NavigationLink { VaccineView() } label: {
+                insightTile(icon: "syringe.fill", title: "疫苗接种", subtitle: "按月龄排期打卡")
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func insightTile(icon: String, title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(theme)
+            Text(title).font(BubuTheme.Font.body.weight(.semibold))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+            Text(subtitle).font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
     }
