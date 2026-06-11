@@ -131,6 +131,7 @@ struct CaptureHomeView: View {
                 BubuThemedBackground()
             } else {
                 BubuMeshHero(colors: theme.meshColors)
+                    .bubuPaperTexture(theme.paperTexture, isDark: false)
             }
         }
     }

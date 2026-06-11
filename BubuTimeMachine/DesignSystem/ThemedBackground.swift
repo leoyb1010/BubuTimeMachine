@@ -32,6 +32,7 @@ struct BubuThemedBackground: View {
                 }
             }
         }
+        .bubuPaperTexture(env.theme.theme.paperTexture, isDark: scheme == .dark || env.isDarkTheme)
     }
 }
 
