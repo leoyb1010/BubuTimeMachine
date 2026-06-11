@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Query private var members: [FamilyMember]
+    @State private var soundOn = BubuSound.isEnabled
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
@@ -28,6 +29,12 @@ struct SettingsView: View {
                 }
                 group("外观") {
                     row("主题与外观", icon: "paintpalette.fill", tint: env.theme.theme.primary) { ThemeSettingsView() }
+                    Toggle(isOn: Binding(get: { soundOn }, set: { soundOn = $0; BubuSound.isEnabled = $0 })) {
+                        settingRowLabel("声音反馈", icon: "speaker.wave.2.fill",
+                                        tint: BubuTheme.Color.info, subtitle: "保存、封存、开启时的轻声音效")
+                    }
+                    .onChange(of: soundOn) { _, on in if on { BubuSound.play(.save) } }
+                    .tint(env.theme.theme.primary)
                 }
                 reminderCard(config: config)
                 dataCard

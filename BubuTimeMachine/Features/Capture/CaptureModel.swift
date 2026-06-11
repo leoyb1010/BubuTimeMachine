@@ -312,6 +312,7 @@ final class CaptureModel {
 
     private func flashSaved() {
         BubuHaptics.success()
+        BubuSound.play(.save)
         withAnimation(BubuMotion.gentle) { savedFlash = true }
         Task {
             try? await Task.sleep(for: .seconds(1.8))

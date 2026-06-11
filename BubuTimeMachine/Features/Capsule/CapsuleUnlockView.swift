@@ -216,6 +216,7 @@ struct CapsuleUnlockView: View {
 
     private func finishReveal() {
         BubuHaptics.success()
+        BubuSound.play(.unlock)
         withAnimation(BubuMotion.ceremony) { phase = .revealed }
     }
 

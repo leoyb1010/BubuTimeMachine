@@ -188,6 +188,7 @@ struct MilestoneEditSheet: View {
                 m.ageDescription = AgeCalculator.ageDescription(birthday: profile.birthday, at: happenedAt)
             }
             if wasNewlyAchieved {
+                BubuSound.play(.milestone)
                 context.insert(FeedEvent(kind: .milestoneLit, actorRole: env.config.currentRole.rawValue,
                                          summary: "点亮了「\(m.title)」"))
             }
