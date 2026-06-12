@@ -1,67 +1,10 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - 照片墙
-/// 首页「张照片」统计卡的落地页：照片/视频三列网格，点开直接进全屏查看器（不再绕进记录详情）。
-struct PhotoWallView: View {
-    @Environment(AppEnvironment.self) private var env
-    @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
-    private var entries: [Entry]
+// 注：原「照片墙 PhotoWallView」已退役——首页照片入口改为相册（AlbumHomeView）后它再无任何入口，
+// 「全部照片」系统相册完整覆盖其功能（AlbumDetailView 同为三列网格直开查看器）。
 
-    @State private var viewerRoute: MediaViewerRoute?
-
-    private var items: [(media: Media, entry: Entry)] {
-        entries.flatMap { entry in
-            entry.media
-                .filter { $0.type == .photo || $0.type == .video }
-                .sorted { $0.createdAt < $1.createdAt }
-                .map { (media: $0, entry: entry) }
-        }
-    }
-
-    private var galleryMedia: [Media] { items.map(\.media) }
-
-    var body: some View {
-        ScrollView {
-            if items.isEmpty {
-                VStack(spacing: 16) {
-                    BubuMascotBadge(size: 84, expression: .surprised)
-                    Text("还没有照片\n回首页点「记录此刻」拍下第一张吧")
-                        .font(BubuTheme.Font.body)
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.top, 120)
-            } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
-                    ForEach(items, id: \.media.id) { item in
-                        Button {
-                            viewerRoute = MediaViewerRoute(initialMediaID: item.media.id)
-                        } label: {
-                            MediaThumbnail(media: item.media, mediaStore: env.mediaStore, cornerRadius: 6, size: .grid)
-                                .aspectRatio(1, contentMode: .fit)
-                                .clipped()
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(8)
-            }
-        }
-        .fullScreenCover(item: $viewerRoute) { route in
-            MediaGalleryViewer(mediaItems: galleryMedia,
-                               initialMediaID: route.initialMediaID,
-                               mediaStore: env.mediaStore) {
-                viewerRoute = nil
-            }
-        }
-        .background(BubuTheme.Color.background.ignoresSafeArea())
-        .navigationTitle("布布的照片")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// 全屏查看器路由（照片墙/相册共用）。
+/// 全屏查看器路由（相册体系共用）。
 struct MediaViewerRoute: Identifiable {
     let initialMediaID: UUID
     var id: UUID { initialMediaID }

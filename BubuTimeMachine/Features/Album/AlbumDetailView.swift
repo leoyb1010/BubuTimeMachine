@@ -8,6 +8,8 @@ struct AlbumDetailView: View {
 
     @Environment(AppEnvironment.self) private var env
     @State private var viewerRoute: MediaViewerRoute?
+    /// 分批渲染：大相册（上千张）首屏只挂 90 个缩略图，滚到底自动追加。
+    @State private var visibleCount = 90
 
     private var galleryMedia: [Media] { items.map(\.media) }
 
@@ -18,7 +20,7 @@ struct AlbumDetailView: View {
                     .padding(.top, 80)
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
-                    ForEach(items) { item in
+                    ForEach(items.prefix(visibleCount)) { item in
                         Button {
                             viewerRoute = MediaViewerRoute(initialMediaID: item.media.id)
                         } label: {
@@ -31,6 +33,12 @@ struct AlbumDetailView: View {
                     }
                 }
                 .padding(8)
+
+                if visibleCount < items.count {
+                    ProgressView()
+                        .padding(.vertical, 16)
+                        .onAppear { visibleCount += 90 }
+                }
             }
         }
         .fullScreenCover(item: $viewerRoute) { route in

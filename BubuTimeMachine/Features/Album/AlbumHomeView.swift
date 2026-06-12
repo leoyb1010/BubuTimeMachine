@@ -11,33 +11,34 @@ struct AlbumHomeView: View {
 
     private var theme: Color { env.theme.theme.primary }
 
-    private var allItems: [AlbumMediaItem] {
-        entries.flatMap { entry in
-            entry.media
-                .filter { $0.type == .photo || $0.type == .video }
-                .sorted { $0.createdAt < $1.createdAt }
-                .map { AlbumMediaItem(media: $0, entry: entry) }
-        }
+    // 相册分组缓存：媒体没变就不重算（千张照片时 body 反复求值不再卡顿）。
+    @State private var featured: [SystemAlbum] = []
+    @State private var monthly: [SystemAlbum] = []
+    @State private var byAge: [SystemAlbum] = []
+    @State private var totalCount = 0
+    @State private var built = false
+
+    /// 轻量指纹：一遍整型累加，不构建数组；变化即触发重建。
+    private var fingerprint: String {
+        var mediaCount = 0
+        for entry in entries { mediaCount += entry.media.count }
+        let birthday = profiles.first?.birthday.timeIntervalSince1970 ?? 0
+        return "\(entries.count)-\(mediaCount)-\(Int(birthday))"
     }
 
     var body: some View {
-        let items = allItems
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 headerCard
 
-                if items.isEmpty {
+                if built && totalCount == 0 {
                     emptyState
                 } else {
-                    let featured = SystemAlbumFactory.featured(from: items)
                     featuredRow(featured)
 
-                    let monthly = SystemAlbumFactory.monthly(from: items)
                     if !monthly.isEmpty {
                         albumSection(title: "按月份", albums: monthly)
                     }
-
-                    let byAge = SystemAlbumFactory.byAgeMonth(from: items, birthday: profiles.first?.birthday)
                     if !byAge.isEmpty {
                         albumSection(title: "按月龄", albums: byAge)
                     }
@@ -48,6 +49,23 @@ struct AlbumHomeView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("布布的相册")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: fingerprint, initial: true) { _, _ in
+            rebuildAlbums()
+        }
+    }
+
+    private func rebuildAlbums() {
+        let items = entries.flatMap { entry in
+            entry.media
+                .filter { $0.type == .photo || $0.type == .video }
+                .sorted { $0.createdAt < $1.createdAt }
+                .map { AlbumMediaItem(media: $0, entry: entry) }
+        }
+        totalCount = items.count
+        featured = SystemAlbumFactory.featured(from: items)
+        monthly = SystemAlbumFactory.monthly(from: items)
+        byAge = SystemAlbumFactory.byAgeMonth(from: items, birthday: profiles.first?.birthday)
+        built = true
     }
 
     private var headerCard: some View {

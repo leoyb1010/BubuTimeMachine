@@ -42,15 +42,14 @@ struct GrowthCurveView: View {
         WHOGrowthStandard.bands(metric: metric, gender: profile?.gender)
     }
 
-    /// 布布的实测点：(月龄, 数值)。
-    /// 优先读结构化 GrowthMeasurement（AI/手动录入）；旧 HealthRecord 文本解析作兼容数据源。
+    /// 布布的实测点：(月龄, 数值)，每个月龄唯一——图表点 id 不再重复。
+    /// 结构化 GrowthMeasurement 优先（同月取最新一条）；旧 HealthRecord 文本解析只补结构化缺失的月份。
     private var measurements: [(month: Int, value: Double)] {
         guard let profile else { return [] }
         let cal = Calendar.current
 
-        var structuredMonths = Set<Int>()
-        var points: [(month: Int, value: Double)] = []
-
+        var merged: [Int: Double] = [:]
+        // structuredMeasurements 按 measuredAt 升序：后写覆盖前写 = 同月取最新
         for measurement in structuredMeasurements {
             let value: Double?
             switch metric {
@@ -61,18 +60,20 @@ struct GrowthCurveView: View {
             guard let value else { continue }
             let month = cal.dateComponents([.month], from: profile.birthday, to: measurement.measuredAt).month ?? 0
             guard month >= 0, month <= 60 else { continue }
-            structuredMonths.insert(month)
-            points.append((month, value))
+            merged[month] = value
         }
 
+        let structuredMonths = Set(merged.keys)
         for record in records {
             guard let value = parseValue(from: record) else { continue }
             let month = cal.dateComponents([.month], from: profile.birthday, to: record.recordedAt).month ?? 0
-            guard month >= 0, month <= 60, !structuredMonths.contains(month) else { continue }
-            points.append((month, value))
+            guard month >= 0, month <= 60,
+                  !structuredMonths.contains(month),
+                  merged[month] == nil else { continue }
+            merged[month] = value
         }
 
-        return points.sorted { $0.month < $1.month }
+        return merged.keys.sorted().map { ($0, merged[$0]!) }
     }
 
     /// 从记录里抽数值：匹配指标关键字，取 amountText/title/detail 里的第一个数字。
