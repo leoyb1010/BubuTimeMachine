@@ -222,14 +222,16 @@ class NaturalParseReq(BaseModel):
 
 
 class ParsedNaturalItem(BaseModel):
+    # 注意：与全文件保持 Optional[...] 写法（不要用 `str | None`）——
+    # pydantic 需要在运行时求值注解，PEP 604 联合类型在 Python 3.9 服务器上会直接崩。
     domain: Literal[
         "vaccine", "growth", "meal", "snack", "supplement", "water", "sleep",
         "symptom", "checkup", "timeline", "milestone", "first_time", "unknown"
     ]
     action: Literal["create", "update", "complete"] = "create"
     title: str
-    note: str | None = None
-    date: datetime | None = None
+    note: Optional[str] = None
+    date: Optional[datetime] = None
     fields: dict[str, Any] = {}
     tags: list[str] = []
     confidence: float = 0.0
@@ -250,8 +252,17 @@ _ALLOWED_DOMAINS = {
 _SENSITIVE_DOMAINS = {"vaccine", "symptom", "supplement"}
 
 
+def _safe_confidence(value: Any) -> float:
+    """置信度容错：解析不了一律归 0——客户端对低置信强制人工确认，比丢整条记录更安全。"""
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _sanitize_parse_result(data: dict, original_text: str) -> NaturalParseResp:
-    """LLM 输出不可信：逐条清洗，坏字段降级、坏条目丢弃，绝不让 ValidationError 变 500。"""
+    """LLM 输出不可信：逐条清洗。原则是能抢救就抢救（坏字段降级/置空），
+    实在构造不出来才丢弃该条，绝不让 ValidationError 变 500。"""
     warnings = [w for w in data.get("warnings", []) if isinstance(w, str)]
     items: list[ParsedNaturalItem] = []
     for raw in data.get("items", []):
@@ -261,30 +272,33 @@ def _sanitize_parse_result(data: dict, original_text: str) -> NaturalParseResp:
         if domain not in _ALLOWED_DOMAINS:
             domain = "unknown"
             warnings.append("domain_coerced_unknown")
+        kwargs = dict(
+            domain=domain,
+            action=raw.get("action") if raw.get("action") in ("create", "update", "complete") else "create",
+            title=str(raw.get("title") or "")[:60] or "未命名记录",
+            note=raw.get("note") if isinstance(raw.get("note"), str) else None,
+            date=raw.get("date"),
+            fields=raw.get("fields") if isinstance(raw.get("fields"), dict) else {},
+            tags=[t for t in (raw.get("tags") or []) if isinstance(t, str)][:8],
+            confidence=_safe_confidence(raw.get("confidence")),
+            needs_confirmation=bool(raw.get("needs_confirmation", True)),
+            source_text=str(raw.get("source_text") or original_text)[:200],
+        )
         try:
-            item = ParsedNaturalItem(
-                domain=domain,
-                action=raw.get("action") if raw.get("action") in ("create", "update", "complete") else "create",
-                title=str(raw.get("title") or "")[:60] or "未命名记录",
-                note=raw.get("note") if isinstance(raw.get("note"), str) else None,
-                date=raw.get("date"),
-                fields=raw.get("fields") if isinstance(raw.get("fields"), dict) else {},
-                tags=[t for t in (raw.get("tags") or []) if isinstance(t, str)][:8],
-                confidence=float(raw.get("confidence") or 0.0),
-                needs_confirmation=bool(raw.get("needs_confirmation", True)),
-                source_text=str(raw.get("source_text") or original_text)[:200],
-            )
-        except Exception:  # noqa: BLE001  单条解析失败丢弃该条，不拖垮整个响应
-            warnings.append("item_dropped_invalid")
-            continue
+            item = ParsedNaturalItem(**kwargs)
+        except Exception:  # noqa: BLE001  多半是日期格式不合法：置空重试，保住记录本体
+            kwargs["date"] = None
+            try:
+                item = ParsedNaturalItem(**kwargs)
+                warnings.append("item_date_dropped")
+            except Exception:  # noqa: BLE001
+                warnings.append("item_dropped_invalid")
+                continue
         if item.domain in _SENSITIVE_DOMAINS:
             item.needs_confirmation = True  # 服务端兜底：敏感内容永远要确认
         items.append(item)
-    try:
-        overall = float(data.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        overall = 0.0
-    return NaturalParseResp(confidence=overall, items=items, warnings=warnings)
+    return NaturalParseResp(confidence=_safe_confidence(data.get("confidence")),
+                            items=items, warnings=warnings)
 
 
 @app.post("/parse-natural-capture", response_model=NaturalParseResp,
