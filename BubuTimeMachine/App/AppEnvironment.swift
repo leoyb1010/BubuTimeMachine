@@ -14,7 +14,6 @@ final class AppEnvironment {
     let mediaStore: MediaStore
     let thumbnails: ThumbnailProvider
     let syncEngine: SyncEngine
-    let uploadQueue: UploadQueue
     let crypto: CapsuleCrypto
     let vault: CapsuleVault
     let theme: ThemeManager
@@ -50,7 +49,6 @@ final class AppEnvironment {
         self.mediaStore = media
         self.thumbnails = ThumbnailProvider(store: media)
         self.syncEngine = SyncEngine(apiClient: api, config: config, mediaStore: media)
-        self.uploadQueue = UploadQueue(apiClient: api)
         let crypto = CapsuleCrypto()
         self.crypto = crypto
         self.vault = CapsuleVault(crypto: crypto, mediaStore: media)

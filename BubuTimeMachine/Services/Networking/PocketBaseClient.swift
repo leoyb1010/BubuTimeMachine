@@ -309,9 +309,11 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                 continuation.yield(.connected)
                 var since = Date().addingTimeInterval(-1)
                 while !Task.isCancelled {
+                    // 游标取「发起请求前」的时间：长请求期间产生的变更下一轮仍能拉到，不再漏事件
+                    let fetchStart = Date()
                     if let entries = try? await self.fetchEntries(since: since) {
                         for e in entries { continuation.yield(.entryChanged(e)) }
-                        since = Date()
+                        since = fetchStart
                     }
                     try? await Task.sleep(for: .seconds(8))
                 }
@@ -325,7 +327,9 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     func ping() async throws -> Bool {
         let url = baseURL.appendingPathComponent("api/health")
-        let (data, resp) = try await URLSession.shared.data(from: url)
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10   // 连接测试不该等默认 60s
+        let (data, resp) = try await URLSession.shared.data(for: req)
         try Self.check(resp, data)
         return true
     }

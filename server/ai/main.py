@@ -52,6 +52,10 @@ def _check_rate(client_ip: str) -> None:
         if len(bucket) >= _RATE_LIMIT:
             raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试。")
         bucket.append(now)
+        # 防止 IP 维度字典无上限增长（公网长期运行）：顺手清掉已空的桶
+        if len(_rate_buckets) > 1024:
+            for ip in [ip for ip, b in _rate_buckets.items() if not b]:
+                del _rate_buckets[ip]
 
 
 def require_api_key(request: Request,
