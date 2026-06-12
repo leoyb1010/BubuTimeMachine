@@ -188,6 +188,8 @@ final class SyncEngine {
 
     private func pushLocal() async {
         guard let context = modelContext else { return }
+        // 先消费删除队列：删除意图优先于数据推送，避免「先推后删」竞态
+        await processPendingDeletions(context)
         // 取所有未同步（local/failed）的 Entry
         let descriptor = FetchDescriptor<Entry>(
             predicate: #Predicate {
@@ -221,6 +223,40 @@ final class SyncEngine {
     private func saveAndRefresh(_ context: ModelContext) {
         try? context.save()
         refreshPendingCount()
+    }
+
+    // MARK: - 删除队列消费
+
+    private func processPendingDeletions(_ context: ModelContext) async {
+        let deletions = (try? context.fetch(FetchDescriptor<PendingDeletion>(
+            sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+        for deletion in deletions {
+            beginItem("同步删除")
+            do {
+                try await performRemoteDeletion(deletion)
+                context.delete(deletion)
+            } catch {
+                if case APIError.server(let code, _) = error, code == 404 {
+                    context.delete(deletion)   // 远端本就不存在，视作完成
+                } else {
+                    recordFailure(error, item: "删除")   // 瞬时失败留队，下轮重试
+                }
+            }
+            finishItem()
+            saveAndRefresh(context)
+        }
+    }
+
+    private func performRemoteDeletion(_ deletion: PendingDeletion) async throws {
+        switch deletion.collection {
+        case "vaccinerecords":
+            try await apiClient.deleteVaccineRecord(remoteId: deletion.remoteId)
+        default:
+            // 未知集合：直接吞掉避免卡死队列（新增集合时这里要补 case）
+            #if DEBUG
+            print("[SyncEngine] 未知删除集合：", deletion.collection)
+            #endif
+        }
     }
 
     private func beginSyncRun() {
@@ -325,7 +361,8 @@ final class SyncEngine {
             count(context, #Predicate<Comment> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<VoiceNote> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<VoiceMemo> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
-            count(context, #Predicate<TimeCapsule> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
+            count(context, #Predicate<TimeCapsule> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<PendingDeletion> { _ in true })
     }
 
     private func count<T: PersistentModel>(_ context: ModelContext, _ predicate: Predicate<T>) -> Int {
@@ -819,6 +856,12 @@ final class SyncEngine {
 
     private func mergeRemoteVaccine(_ dto: VaccineRecordDTO) async {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+        // 防复活：该远端记录已在本地删除队列中（删除尚未推到服务器）时，不重新合并
+        if let remoteId = dto.id {
+            let pendings = (try? context.fetch(FetchDescriptor<PendingDeletion>(
+                predicate: #Predicate { $0.collection == "vaccinerecords" }))) ?? []
+            if pendings.contains(where: { $0.remoteId == remoteId }) { return }
+        }
         let descriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }

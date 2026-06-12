@@ -2,14 +2,16 @@ import SwiftUI
 import SwiftData
 
 // MARK: - 疫苗接种表（国家免疫规划一类苗）
-/// 按布布月龄自动排期 + 完成打卡。
-/// 数据源已从 @AppStorage 升级为结构化 VaccineRecord（SwiftData）：
-/// 可记录日期、可家庭同步、可被 AI 一句话自动归档；旧打卡由启动迁移自动转换。
+/// 数据源：结构化 VaccineRecord（SwiftData，可同步、可被 AI 归档、旧打卡自动迁移）。
+/// 交互：点剂次 → 补录/修改详情 sheet；长按未完成剂次 → 一键快速完成；
+/// 取消打卡走 PendingDeletion 删除队列，离线也不会在下轮拉取时复活。
 struct VaccineView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Query private var profiles: [ChildProfile]
     @Query(sort: \VaccineRecord.injectedAt) private var records: [VaccineRecord]
+
+    @State private var logTarget: VaccineLogTarget?
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -25,6 +27,7 @@ struct VaccineView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 summaryCard
+                hintRow
                 ForEach(groupedByYear, id: \.0) { yearLabel, doses in
                     sectionHeader(yearLabel)
                     ForEach(doses) { dose in doseRow(dose) }
@@ -40,6 +43,11 @@ struct VaccineView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("疫苗接种")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $logTarget) { target in
+            VaccineQuickLogSheet(dose: target.dose,
+                                 record: target.record,
+                                 birthday: profile?.birthday)
+        }
     }
 
     /// 不在国家排期内（AI 归档的自费苗等）的记录。
@@ -73,11 +81,18 @@ struct VaccineView: View {
         .bubuCardShadow()
     }
 
+    private var hintRow: some View {
+        Text("点剂次补录日期/医院/反应 · 长按未完成的快速打卡")
+            .font(.system(size: 11))
+            .foregroundStyle(BubuTheme.Color.secondaryText)
+            .padding(.leading, 6)
+    }
+
     private var nextDue: VaccineDose? {
         VaccineDose.schedule.filter { recordByDose[$0.id] == nil }.min { $0.monthDue < $1.monthDue }
     }
 
-    /// 未完成：到期提示；已完成：显示接种日期（不再出现「建议尽快补种」）。
+    /// 未完成：到期提示；已完成：显示接种日期。
     private func dueText(_ dose: VaccineDose) -> String {
         if let record = recordByDose[dose.id] {
             return BubuDateFormat.shortDate(record.injectedAt)
@@ -105,34 +120,55 @@ struct VaccineView: View {
             .padding(.top, 8).padding(.leading, 6)
     }
 
+    /// 旧版打卡迁移、接种日期尚未被家长确认。
+    private func needsDateConfirm(_ record: VaccineRecord) -> Bool {
+        record.sourceRaw == "migration" && (record.note?.contains("待确认") ?? false)
+    }
+
     private func doseRow(_ dose: VaccineDose) -> some View {
-        let isDone = recordByDose[dose.id] != nil
-        return Button {
-            toggle(dose)
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 24))
-                    .foregroundStyle(isDone ? BubuTheme.Color.success : BubuTheme.Color.secondaryText.opacity(0.5))
-                VStack(alignment: .leading, spacing: 2) {
+        let record = recordByDose[dose.id]
+        let isDone = record != nil
+        return HStack(spacing: 12) {
+            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 24))
+                .foregroundStyle(isDone ? BubuTheme.Color.success : BubuTheme.Color.secondaryText.opacity(0.5))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
                     Text("\(dose.shortName) · \(dose.doseLabel)")
                         .font(BubuTheme.Font.body.weight(.medium))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                         .strikethrough(isDone, color: BubuTheme.Color.secondaryText)
-                    Text("\(dose.vaccine) · 预防\(dose.prevents)")
-                        .font(BubuTheme.Font.caption)
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(1)
+                    if let record, needsDateConfirm(record) {
+                        Text("日期待确认")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundStyle(theme)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(theme.opacity(0.12), in: Capsule())
+                    }
                 }
-                Spacer()
-                Text(dueText(dose))
-                    .font(.system(size: 11))
-                    .foregroundStyle(isDone ? BubuTheme.Color.secondaryText : theme)
+                Text("\(dose.vaccine) · 预防\(dose.prevents)")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(1)
             }
-            .padding(12)
-            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+            Spacer()
+            Text(dueText(dose))
+                .font(.system(size: 11))
+                .foregroundStyle(isDone ? BubuTheme.Color.secondaryText : theme)
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            logTarget = VaccineLogTarget(dose: dose, record: record)
+        }
+        .onLongPressGesture {
+            guard record == nil else { return }
+            instantComplete(dose)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(dose.shortName) \(dose.doseLabel)，\(isDone ? "已完成，点按修改" : "未完成，点按补录，长按快速完成")")
     }
 
     private func extraRow(_ record: VaccineRecord) -> some View {
@@ -144,8 +180,8 @@ struct VaccineView: View {
                 Text(record.vaccineName)
                     .font(BubuTheme.Font.body.weight(.medium))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
-                if let note = record.note {
-                    Text(note)
+                if let detail = record.hospital ?? record.note {
+                    Text(detail)
                         .font(BubuTheme.Font.caption)
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(1)
@@ -158,31 +194,41 @@ struct VaccineView: View {
         }
         .padding(12)
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            logTarget = VaccineLogTarget(dose: nil, record: record)
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                deleteRecord(record)
+            } label: {
+                Label("删除这条记录", systemImage: "trash")
+            }
+        }
     }
 
-    private func toggle(_ dose: VaccineDose) {
-        if let record = recordByDose[dose.id] {
-            // 取消打卡：本地删除；已上云的远端也删，避免下轮拉取复活
-            let remoteId = record.remoteId
-            context.delete(record)
-            try? context.save()
-            if let remoteId {
-                let client = env.apiClient
-                Task { try? await client.deleteVaccineRecord(remoteId: remoteId) }
-            }
-        } else {
-            let due = profile.map { dose.dueDate(birthday: $0.birthday) } ?? .now
-            let record = VaccineRecord(vaccineName: dose.vaccine,
-                                       injectedAt: min(due, .now),
-                                       source: "manual")
-            record.doseId = dose.id
-            record.doseLabel = dose.doseLabel
-            record.syncState = .local
-            context.insert(record)
-            try? context.save()
-            BubuHaptics.success()
-            env.syncEngine.syncNow()
+    /// 长按一键完成：接种日取「排期日与今天的较早者」，细节可此后点开补录。
+    private func instantComplete(_ dose: VaccineDose) {
+        let due = profile.map { dose.dueDate(birthday: $0.birthday) } ?? .now
+        let record = VaccineRecord(vaccineName: dose.vaccine,
+                                   injectedAt: min(due, .now),
+                                   source: "manual")
+        record.doseId = dose.id
+        record.doseLabel = dose.doseLabel
+        record.syncState = .local
+        context.insert(record)
+        try? context.save()
+        BubuHaptics.success()
+        env.syncEngine.syncNow()
+    }
+
+    private func deleteRecord(_ record: VaccineRecord) {
+        if let remoteId = record.remoteId {
+            context.insert(PendingDeletion(collection: "vaccinerecords", remoteId: remoteId))
         }
+        context.delete(record)
+        try? context.save()
+        env.syncEngine.syncNow()
     }
 
     private var disclaimer: some View {
@@ -191,4 +237,11 @@ struct VaccineView: View {
             .foregroundStyle(BubuTheme.Color.secondaryText)
             .padding(.top, 4)
     }
+}
+
+/// 补录/编辑 sheet 的路由载体。
+struct VaccineLogTarget: Identifiable {
+    let dose: VaccineDose?
+    let record: VaccineRecord?
+    var id: String { dose?.id ?? record?.id.uuidString ?? UUID().uuidString }
 }
