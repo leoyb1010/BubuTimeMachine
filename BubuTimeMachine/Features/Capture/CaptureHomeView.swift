@@ -135,24 +135,20 @@ struct CaptureHomeView: View {
         }
     }
 
-    // MARK: 年龄头部
+    // MARK: 年龄头部（布布个人身份卡）
 
     @ViewBuilder
     private var ageHeader: some View {
         if let profile {
-            VStack(spacing: 8) {
-                BubuMascotBadge(size: 64, expression: .happy)
-                Text(profile.name)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(theme.primary)
-                Text("来到世界第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            NavigationLink {
+                ChildProfileView()
+            } label: {
+                BubuIdentityCard(profile: profile,
+                                 theme: theme,
+                                 mediaStore: env.mediaStore)
             }
-            .padding(.top, 8)
+            .buttonStyle(.plain)
+            .padding(.top, 6)
         } else {
             VStack(spacing: 12) {
                 Image("BubuLogo")
@@ -240,7 +236,7 @@ struct CaptureHomeView: View {
             }
             .buttonStyle(.plain)
 
-            NavigationLink { PhotoWallView() } label: {
+            NavigationLink { AlbumHomeView() } label: {
                 statCard(value: "\(totalPhotos)", label: "张照片", icon: "photo.stack")
             }
             .buttonStyle(.plain)

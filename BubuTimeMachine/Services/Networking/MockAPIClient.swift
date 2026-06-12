@@ -31,6 +31,7 @@ final class MockAPIClient: APIClient {
     func fetchFamilyMembers(since: Date?) async throws -> [FamilyMemberDTO] { [] }
     func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchChildProfiles(since: Date?) async throws -> [ChildProfileDTO] { [] }
+    func uploadChildAvatar(profileLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> { mockUpload(id: profileLocalId, fileName: fileName) }
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO] { [] }
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }

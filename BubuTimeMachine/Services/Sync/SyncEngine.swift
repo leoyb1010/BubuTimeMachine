@@ -358,7 +358,25 @@ final class SyncEngine {
         let localProfiles = (try? context.fetch(FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localProfiles {
             beginItem("同步布布档案")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertChildProfile(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            do {
+                item.syncState = .uploading
+                saveAndRefresh(context)
+                let saved = try await apiClient.upsertChildProfile(Self.makeDTO(item))
+                // 头像变更后 avatarRemoteURL 被置空 → 补传到 childprofile.avatar
+                if let fileName = item.avatarMediaFileName, item.avatarRemoteURL == nil {
+                    let url = mediaStore.mediaURL(for: fileName)
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        for try await event in apiClient.uploadChildAvatar(profileLocalId: item.id, fileURL: url, fileName: fileName) {
+                            switch event {
+                            case .progress(let p): currentUploadProgress = p
+                            case .completed(_, let remoteURL): item.avatarRemoteURL = remoteURL
+                            }
+                        }
+                    }
+                }
+                item.remoteId = saved.id
+                item.syncState = .synced
+            }
             catch { item.syncState = .failed; recordFailure(error, item: "布布档案") }
             finishItem()
             saveAndRefresh(context)
@@ -649,6 +667,17 @@ final class SyncEngine {
             }
             try? context.save()
         }
+
+        let profiles = (try? context.fetch(FetchDescriptor<ChildProfile>(
+            predicate: #Predicate { $0.avatarMediaFileName == nil && $0.avatarRemoteURL != nil }))) ?? []
+        for profile in profiles.prefix(2) {
+            guard let remoteURL = profile.avatarRemoteURL else { continue }
+            currentSyncLabel = "下载布布头像"
+            if let data = try? await apiClient.downloadFile(from: remoteURL) {
+                profile.avatarMediaFileName = try? mediaStore.savePhoto(data)
+            }
+            try? context.save()
+        }
     }
 
     /// 把远端 Entry 合并进本地（按 localId 去重；远端较新则更新）。
@@ -902,11 +931,17 @@ final class SyncEngine {
 
     private static func makeDTO(_ item: ChildProfile) -> ChildProfileDTO {
         ChildProfileDTO(id: item.remoteId, localId: item.id.uuidString, name: item.name, birthday: item.birthday,
-                        gender: item.gender, birthPlace: item.birthPlace, createdAt: item.createdAt)
+                        gender: item.gender, birthPlace: item.birthPlace,
+                        avatarRemoteURL: item.avatarRemoteURL, createdAt: item.createdAt)
     }
 
     private static func apply(_ dto: ChildProfileDTO, to item: ChildProfile) {
         item.name = dto.name; item.birthday = dto.birthday; item.gender = dto.gender; item.birthPlace = dto.birthPlace
+        // 远端头像变更：更新 URL 并清掉本地文件名，下一轮 downloadMissingFiles 重新落地
+        if let remote = dto.avatarRemoteURL, remote != item.avatarRemoteURL {
+            item.avatarRemoteURL = remote
+            item.avatarMediaFileName = nil
+        }
     }
 
     private static func makeDTO(_ item: HealthRecord) -> HealthRecordDTO {

@@ -123,6 +123,7 @@ struct ChildProfileView: View {
               let profile else { return }
         if let name = try? env.mediaStore.savePhoto(data) {
             profile.avatarMediaFileName = name
+            profile.avatarRemoteURL = nil   // 置空触发下一轮同步补传新头像
             profile.syncState = .local
             try? context.save()
         }

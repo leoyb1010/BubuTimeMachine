@@ -15,6 +15,8 @@ protocol APIClient: Sendable {
     func fetchFamilyMembers(since: Date?) async throws -> [FamilyMemberDTO]
     func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO
     func fetchChildProfiles(since: Date?) async throws -> [ChildProfileDTO]
+    /// 布布头像上传（childprofile.avatar file 字段），身份卡跨设备同步。
+    func uploadChildAvatar(profileLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO]
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO

@@ -84,6 +84,7 @@ struct ChildProfileDTO: Codable, Sendable {
     var birthday: Date
     var gender: String?
     var birthPlace: String?
+    var avatarRemoteURL: String?   // 由服务端 avatar file 字段派生，身份卡跨设备显示头像
     var createdAt: Date
 }
 

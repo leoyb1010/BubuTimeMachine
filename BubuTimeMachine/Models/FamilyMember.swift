@@ -42,6 +42,7 @@ final class ChildProfile {
     var birthday: Date
     var gender: String?               // 可选
     var avatarMediaFileName: String?  // 布布头像（沙盒文件名）
+    var avatarRemoteURL: String?      // 头像远端 URL（PocketBase childprofile.avatar；跨设备同步用）
     var heroBackgroundFileName: String? // 首页背景（布布的照片）
     var bloodType: String?
     var birthPlace: String?

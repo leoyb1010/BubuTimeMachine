@@ -150,11 +150,16 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO {
         let obj = try await upsert(collection: "childprofile", localId: dto.localId, body: Self.childProfileBody(dto))
-        return Self.childProfileDTO(from: obj, fallback: dto)
+        return self.childProfileDTO(from: obj, fallback: dto)
     }
 
     func fetchChildProfiles(since: Date?) async throws -> [ChildProfileDTO] {
-        return try await fetchRecords(collection: "childprofile", since: since).map { Self.childProfileDTO(from: $0, fallback: nil) }
+        return try await fetchRecords(collection: "childprofile", since: since).map { self.childProfileDTO(from: $0, fallback: nil) }
+    }
+
+    func uploadChildAvatar(profileLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
+        uploadGenericFile(collection: "childprofile", localId: profileLocalId.uuidString,
+                          fields: [:], fileField: "avatar", fileURL: fileURL, fileName: fileName)
     }
 
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO {
@@ -701,15 +706,18 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return body
     }
 
-    private static func childProfileDTO(from obj: [String: Any], fallback: ChildProfileDTO?) -> ChildProfileDTO {
+    private func childProfileDTO(from obj: [String: Any], fallback: ChildProfileDTO?) -> ChildProfileDTO {
         let iso = ISO8601DateFormatter()
-        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } }
+        let avatarFile = (obj["avatar"] as? String) ?? ""
+        let avatarRemoteURL = remoteFileURL(collection: "childprofile", recordId: obj["id"] as? String, fileName: avatarFile)
         return ChildProfileDTO(id: obj["id"] as? String ?? fallback?.id,
                                localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
                                name: obj["name"] as? String ?? fallback?.name ?? "布布",
                                birthday: date("birthday") ?? fallback?.birthday ?? .now,
                                gender: obj["gender"] as? String ?? fallback?.gender,
                                birthPlace: obj["birthPlace"] as? String ?? fallback?.birthPlace,
+                               avatarRemoteURL: avatarRemoteURL ?? fallback?.avatarRemoteURL,
                                createdAt: fallback?.createdAt ?? .now)
     }
 
