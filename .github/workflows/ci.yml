@@ -1,0 +1,69 @@
+# BubuTimeMachine CI：iOS 构建+测试、AI 服务端测试
+# 注意：iOS 工程 deploymentTarget 为 iOS 26，需要带 Xcode 26 的 macos-26 镜像；
+# 若仓库所在账号暂无该 runner 镜像，可临时把 ios job 的 runs-on 调整为可用版本并 pin Xcode。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ios:
+    name: iOS build & test (Xcode 26)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; fi
+          xcodebuild -version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          data = json.load(sys.stdin)
+          devices = [d for devs in data['devices'].values() for d in devs if 'iPhone' in d['name']]
+          print(devices[-1]['udid'] if devices else '')")
+          if [ -z "$UDID" ]; then echo '没有可用 iPhone 模拟器'; exit 1; fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build & test
+        run: |
+          set -o pipefail
+          xcodebuild -project BubuTimeMachine.xcodeproj \
+            -scheme BubuTimeMachine \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            test | tail -120
+
+  server:
+    name: AI server tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]   # 3.9 = 兼容下限（Pydantic 注解求值），3.12 = 现代版本
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install deps
+        working-directory: server/ai
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        working-directory: server/ai
+        run: pytest tests -q

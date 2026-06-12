@@ -18,9 +18,10 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from datetime import datetime
 from threading import Lock
 from typing import Any, Literal, Optional
@@ -30,9 +31,27 @@ from pydantic import BaseModel
 
 from llm import LLMClient, LLMError
 
-app = FastAPI(title="布布时光机 AI 服务", version="1.1.0")
+app = FastAPI(title="布布时光机 AI 服务", version="1.2.0")
 
 llm = LLMClient()
+
+logger = logging.getLogger("bubu.ai")
+
+# /parse-natural-capture 质量观测：warnings 计数（含 llm_output_unparseable 率），
+# 进程内累计，带鉴权的 /health 返回快照——LLM 输出漂移早发现。
+_parse_stats_lock = Lock()
+_parse_stats: Counter = Counter()
+
+
+def _record_parse_stats(resp: "NaturalParseResp") -> None:
+    with _parse_stats_lock:
+        _parse_stats["requests"] += 1
+        _parse_stats["items"] += len(resp.items)
+        for w in resp.warnings:
+            _parse_stats[f"warn:{w}"] += 1
+    if resp.warnings:
+        logger.info("parse-natural-capture warnings=%s items=%d",
+                    ",".join(resp.warnings), len(resp.items))
 
 # ---------- 鉴权 + 限流（公网暴露时的最低防线）----------
 # 客户端是原生 App，无需 CORS；浏览器跨域一律不放行（不挂 CORSMiddleware 即默认拒绝）。
@@ -124,8 +143,10 @@ class MovieResp(BaseModel):
 def health(x_api_key: Optional[str] = Header(default=None)):
     # 连通性检查无需鉴权，但只有带正确 key 才返回服务详情。
     if _API_KEY and x_api_key == _API_KEY:
+        with _parse_stats_lock:
+            stats = dict(_parse_stats)
         return {"ok": True, "model": llm.model, "configured": llm.is_configured,
-                "auth": True}
+                "auth": True, "parse_stats": stats}
     return {"ok": True, "auth": False}
 
 
@@ -305,7 +326,9 @@ def _sanitize_parse_result(data: dict, original_text: str) -> NaturalParseResp:
           dependencies=[Depends(require_api_key)])
 def parse_natural_capture(req: NaturalParseReq):
     if not req.text.strip():
-        return NaturalParseResp(confidence=0.0, items=[], warnings=["empty_text"])
+        resp = NaturalParseResp(confidence=0.0, items=[], warnings=["empty_text"])
+        _record_parse_stats(resp)
+        return resp
 
     sys = f"""
 你是一个家庭成长记录 App 的结构化解析器。孩子名叫「{req.childName}」。
@@ -379,8 +402,11 @@ input: {req.text}
         raise HTTPException(status_code=502, detail=str(e))
     if not data:
         # _extract_json 兜底返回空 dict：优雅降级，让 App 提示换个说法而不是 500
-        return NaturalParseResp(confidence=0.0, items=[], warnings=["llm_output_unparseable"])
-    return _sanitize_parse_result(data, req.text)
+        resp = NaturalParseResp(confidence=0.0, items=[], warnings=["llm_output_unparseable"])
+    else:
+        resp = _sanitize_parse_result(data, req.text)
+    _record_parse_stats(resp)
+    return resp
 
 
 @app.post("/transcribe", dependencies=[Depends(require_api_key)])
