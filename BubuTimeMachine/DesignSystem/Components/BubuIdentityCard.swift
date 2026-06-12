@@ -80,7 +80,7 @@ struct BubuIdentityCard: View {
                                 .foregroundStyle(theme.primary.opacity(0.72))
 
                             Text(profile.name)
-                                .font(.system(size: 30, weight: .black, design: .rounded))
+                                .font(.system(size: 27, weight: .black, design: .rounded))
                                 .foregroundStyle(BubuTheme.Color.warmBrown)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.6)
@@ -113,7 +113,7 @@ struct BubuIdentityCard: View {
                     .padding(.top, 2)
                 }
             }
-            .padding(16)
+            .padding(13)
         }
     }
 
@@ -202,7 +202,7 @@ struct BubuIdentityCard: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, 12)
+        .padding(.top, 9)
     }
 
     @ViewBuilder
@@ -216,14 +216,14 @@ struct BubuIdentityCard: View {
                         .resizable()
                         .scaledToFill()
                 } else {
-                    BubuMascotBadge(size: 88, expression: .happy)
+                    BubuMascotBadge(size: 80, expression: .happy)
                 }
             }
-            .frame(width: 92, height: 110)
-            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .frame(width: 84, height: 100)
+            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(.white.opacity(0.65), lineWidth: 1)
             }
 
@@ -263,7 +263,7 @@ struct BubuIdentityCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 

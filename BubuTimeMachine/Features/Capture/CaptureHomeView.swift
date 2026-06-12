@@ -26,17 +26,19 @@ struct CaptureHomeView: View {
             heroBackground.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 20) {
+                // 布局原则：主操作「记录此刻」必须首屏完整露出——紧跟输入条；
+                // 同步状态条属于次要信息，下移到统计行之后；行距 14 紧凑但不拥挤。
+                VStack(spacing: 14) {
                     ageHeader
                     NaturalCaptureBar()
-                    saveHealthStrip
+                    recordButton
                     statRow
+                    saveHealthStrip
                     onThisDaySection
                     healthEntryCard
-                    recordButton
                     dailyQuestionCard
                     recentStrip
-                    Spacer(minLength: 30)
+                    Spacer(minLength: 24)
                 }
                 .padding()
             }
@@ -262,7 +264,7 @@ struct CaptureHomeView: View {
             Text(label).font(.system(size: 12)).foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
         .bubuCardShadow()
@@ -436,7 +438,7 @@ struct CaptureHomeView: View {
                         .font(.system(size: 32, weight: .semibold))
                         .foregroundStyle(theme.primary)
                 }
-                .padding(.vertical, 18)
+                .padding(.vertical, 16)
                 .padding(.leading, 20)
                 .padding(.trailing, 18)
                 .background(BubuTheme.Color.card.opacity(0.66), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
