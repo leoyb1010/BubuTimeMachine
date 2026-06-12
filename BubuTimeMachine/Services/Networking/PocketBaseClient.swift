@@ -497,8 +497,8 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         try Self.check(resp, data)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = obj["id"] as? String else { throw APIError.server(500, "上传响应异常") }
-        let storedFileName = (obj[fileField] as? String) ?? fileName
-        return UploadedFileResult(recordId: id, storedFileName: storedFileName)
+        return UploadedFileResult(recordId: id,
+                                  storedFileName: Self.storedFileName(in: obj, fileField: fileField, fallback: fileName))
     }
 
     private func multipartUpload(_ file: MediaUploadRequest, token: String,
@@ -539,8 +539,8 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
               let id = obj["id"] as? String else {
             throw APIError.server(500, "上传响应异常")
         }
-        let storedFileName = (obj["file"] as? String) ?? file.fileName
-        return UploadedFileResult(recordId: id, storedFileName: storedFileName)
+        return UploadedFileResult(recordId: id,
+                                  storedFileName: Self.storedFileName(in: obj, fileField: "file", fallback: file.fileName))
     }
 
     private func multipartBodyFile(boundary: String, fields: [String: String], fileField: String,
@@ -589,6 +589,14 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     static func addSyncTimestamp(to fields: inout [String: String], date: Date = .now) {
         fields["clientUpdatedAt"] = syncTimestampString(date)
+    }
+
+    /// 上传响应里的真实落盘文件名（PocketBase 会清洗并追加随机后缀改名）。
+    /// 兼容 file 字段被配置为多文件（返回数组）的情况；解析不到回退本地名。
+    static func storedFileName(in obj: [String: Any], fileField: String, fallback: String) -> String {
+        if let name = obj[fileField] as? String, !name.isEmpty { return name }
+        if let names = obj[fileField] as? [String], let first = names.first, !first.isEmpty { return first }
+        return fallback
     }
 
     private static func entryBody(_ dto: EntryDTO) -> [String: Any] {
