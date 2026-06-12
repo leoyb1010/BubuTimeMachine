@@ -19,6 +19,12 @@ protocol APIClient: Sendable {
     func uploadChildAvatar(profileLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO]
+    func upsertVaccineRecord(_ dto: VaccineRecordDTO) async throws -> VaccineRecordDTO
+    func fetchVaccineRecords(since: Date?) async throws -> [VaccineRecordDTO]
+    /// 取消打卡/误录删除：远端删掉，避免下轮拉取复活。
+    func deleteVaccineRecord(remoteId: String) async throws
+    func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO
+    func fetchGrowthMeasurements(since: Date?) async throws -> [GrowthMeasurementDTO]
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO
     func fetchComments(since: Date?) async throws -> [CommentDTO]
     func uploadCommentVoice(commentId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>

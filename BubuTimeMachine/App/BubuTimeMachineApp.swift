@@ -18,7 +18,7 @@ struct BubuTimeMachineApp: App {
             Entry.self, Media.self, Milestone.self, FirstTime.self,
             TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self,
             FamilyMember.self, ChildProfile.self, VoiceNote.self, HealthRecord.self,
-            FeedEvent.self
+            FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {

@@ -107,6 +107,33 @@ struct HealthRecordDTO: Codable, Sendable {
     var createdAt: Date
 }
 
+struct VaccineRecordDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var doseId: String?
+    var vaccineName: String
+    var doseLabel: String?
+    var injectedAt: Date
+    var hospital: String?
+    var injectionSite: String?
+    var reaction: String?
+    var note: String?
+    var source: String
+    var createdAt: Date
+}
+
+struct GrowthMeasurementDTO: Codable, Sendable {
+    var id: String?
+    var localId: String
+    var measuredAt: Date
+    var heightCm: Double?
+    var weightKg: Double?
+    var headCircumferenceCm: Double?
+    var note: String?
+    var source: String
+    var createdAt: Date
+}
+
 struct CommentDTO: Codable, Sendable {
     var id: String?
     var localId: String

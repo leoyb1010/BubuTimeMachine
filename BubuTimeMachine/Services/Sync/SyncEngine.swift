@@ -320,6 +320,8 @@ final class SyncEngine {
             count(context, #Predicate<FamilyMember> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<ChildProfile> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<HealthRecord> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<VaccineRecord> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
+            count(context, #Predicate<GrowthMeasurement> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<Comment> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<VoiceNote> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
             count(context, #Predicate<VoiceMemo> { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }) +
@@ -386,6 +388,22 @@ final class SyncEngine {
             beginItem("同步健康记录")
             do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
             catch { item.syncState = .failed; recordFailure(error, item: "健康记录") }
+            finishItem()
+            saveAndRefresh(context)
+        }
+        let localVaccines = (try? context.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        for item in localVaccines {
+            beginItem("同步疫苗记录")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertVaccineRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "疫苗记录") }
+            finishItem()
+            saveAndRefresh(context)
+        }
+        let localGrowth = (try? context.fetch(FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        for item in localGrowth {
+            beginItem("同步成长测量")
+            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertGrowthMeasurement(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            catch { item.syncState = .failed; recordFailure(error, item: "成长测量") }
             finishItem()
             saveAndRefresh(context)
         }
@@ -584,6 +602,10 @@ final class SyncEngine {
             merge: { await self.mergeRemoteChildProfile($0) }
         await pull("healthrecords") { try await self.apiClient.fetchHealthRecords(since: $0) }
             merge: { await self.mergeRemoteHealth($0) }
+        await pull("vaccinerecords") { try await self.apiClient.fetchVaccineRecords(since: $0) }
+            merge: { await self.mergeRemoteVaccine($0) }
+        await pull("growthmeasurements") { try await self.apiClient.fetchGrowthMeasurements(since: $0) }
+            merge: { await self.mergeRemoteGrowth($0) }
         await pull("comments") { try await self.apiClient.fetchComments(since: $0) }
             merge: { await self.mergeRemoteComment($0) }
         await pull("voicenotes") { try await self.apiClient.fetchVoiceNotes(since: $0) }
@@ -795,6 +817,32 @@ final class SyncEngine {
         try? context.save()
     }
 
+    private func mergeRemoteVaccine(_ dto: VaccineRecordDTO) async {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+        let descriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == localId })
+        if let existing = try? context.fetch(descriptor).first {
+            if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+        } else {
+            let item = VaccineRecord(vaccineName: dto.vaccineName, injectedAt: dto.injectedAt, source: dto.source)
+            item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
+            context.insert(item)
+        }
+        try? context.save()
+    }
+
+    private func mergeRemoteGrowth(_ dto: GrowthMeasurementDTO) async {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+        let descriptor = FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.id == localId })
+        if let existing = try? context.fetch(descriptor).first {
+            if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+        } else {
+            let item = GrowthMeasurement(measuredAt: dto.measuredAt, source: dto.source)
+            item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
+            context.insert(item)
+        }
+        try? context.save()
+    }
+
     private func mergeRemoteComment(_ dto: CommentDTO) async {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return }
         let descriptor = FetchDescriptor<Comment>(predicate: #Predicate { $0.id == localId })
@@ -957,6 +1005,33 @@ final class SyncEngine {
         item.amountText = dto.amountText; item.reaction = dto.reaction; item.amountValue = dto.amountValue
         item.amountUnit = dto.amountUnit; item.startAt = dto.startAt; item.endAt = dto.endAt
         item.severityRaw = dto.severity; item.temperatureCelsius = dto.temperatureCelsius; item.tags = dto.tags
+    }
+
+    private static func makeDTO(_ item: VaccineRecord) -> VaccineRecordDTO {
+        VaccineRecordDTO(id: item.remoteId, localId: item.id.uuidString, doseId: item.doseId,
+                         vaccineName: item.vaccineName, doseLabel: item.doseLabel, injectedAt: item.injectedAt,
+                         hospital: item.hospital, injectionSite: item.injectionSite, reaction: item.reaction,
+                         note: item.note, source: item.sourceRaw, createdAt: item.createdAt)
+    }
+
+    private static func apply(_ dto: VaccineRecordDTO, to item: VaccineRecord) {
+        item.doseId = dto.doseId; item.vaccineName = dto.vaccineName; item.doseLabel = dto.doseLabel
+        item.injectedAt = dto.injectedAt; item.hospital = dto.hospital; item.injectionSite = dto.injectionSite
+        item.reaction = dto.reaction; item.note = dto.note; item.sourceRaw = dto.source
+        item.updatedAt = .now
+    }
+
+    private static func makeDTO(_ item: GrowthMeasurement) -> GrowthMeasurementDTO {
+        GrowthMeasurementDTO(id: item.remoteId, localId: item.id.uuidString, measuredAt: item.measuredAt,
+                             heightCm: item.heightCm, weightKg: item.weightKg,
+                             headCircumferenceCm: item.headCircumferenceCm, note: item.note,
+                             source: item.sourceRaw, createdAt: item.createdAt)
+    }
+
+    private static func apply(_ dto: GrowthMeasurementDTO, to item: GrowthMeasurement) {
+        item.measuredAt = dto.measuredAt; item.heightCm = dto.heightCm; item.weightKg = dto.weightKg
+        item.headCircumferenceCm = dto.headCircumferenceCm; item.note = dto.note; item.sourceRaw = dto.source
+        item.updatedAt = .now
     }
 
     private static func makeDTO(_ item: Comment) -> CommentDTO {

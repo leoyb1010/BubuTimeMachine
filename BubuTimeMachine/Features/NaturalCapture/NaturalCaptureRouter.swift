@@ -88,63 +88,52 @@ struct NaturalCaptureRouter {
                                  summary: "智能记录了\(kind.title)：\(record.title)"))
     }
 
-    // MARK: 疫苗（Phase 3 暂存体检护理 + 强确认；Phase 4 切 VaccineRecord）
+    // MARK: 疫苗（结构化 VaccineRecord，自动匹配国家排期剂次）
 
     private func saveVaccine(_ item: NaturalCaptureItem) {
         let name = item.fields.string("vaccine_name") ?? item.title
-        let record = HealthRecord(kind: .checkup,
-                                  title: "疫苗接种：\(name)",
-                                  recordedAt: item.date ?? .now)
-        var detailParts: [String] = []
-        if let v = item.fields.string("dose_label") { detailParts.append(v) }
-        if let v = item.fields.string("hospital") { detailParts.append(v) }
-        if let v = item.fields.string("reaction") { detailParts.append("反应：\(v)") }
-        if let note = item.note { detailParts.append(note) }
-        record.detail = detailParts.isEmpty ? nil : detailParts.joined(separator: " · ")
-        record.tags = ["疫苗", name] + item.tags
+        let record = VaccineRecord(vaccineName: name,
+                                   injectedAt: item.date ?? .now,
+                                   source: "ai")
+        record.doseLabel = item.fields.string("dose_label")
+        record.hospital = item.fields.string("hospital")
+        record.injectionSite = item.fields.string("injection_site")
+        record.reaction = item.fields.string("reaction")
+        record.note = item.note
         record.syncState = .local
+        if let dose = matchDose(named: name) {
+            record.doseId = dose.id
+            if record.doseLabel == nil { record.doseLabel = dose.doseLabel }
+        }
         context.insert(record)
         context.insert(FeedEvent(kind: .healthRecorded,
                                  actorRole: env.config.currentRole.rawValue,
                                  summary: "智能记录了疫苗接种：\(name)"))
     }
 
-    // MARK: 成长测量（Phase 3 暂存体检护理；Phase 4 切 GrowthMeasurement）
+    /// 名称模糊匹配国家排期：取尚未打卡、名称互相包含的第一个剂次；匹配不到就作为自由疫苗记录。
+    private func matchDose(named name: String) -> VaccineDose? {
+        let recorded = Set(((try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []).compactMap(\.doseId))
+        return VaccineDose.schedule.first { dose in
+            !recorded.contains(dose.id) &&
+            (name.contains(dose.shortName) || name.contains(dose.vaccine) || dose.vaccine.contains(name))
+        }
+    }
+
+    // MARK: 成长测量（结构化 GrowthMeasurement，成长曲线直接读数值）
 
     private func saveGrowth(_ item: NaturalCaptureItem) {
-        let date = item.date ?? .now
-        var saved = false
-        if let height = item.fields.double("height_cm") {
-            let record = HealthRecord(kind: .checkup, title: "身高 \(trimNumber(height)) cm", recordedAt: date)
-            record.amountValue = height
-            record.amountUnit = "cm"
-            record.tags = ["身高"]
-            record.syncState = .local
-            context.insert(record)
-            saved = true
-        }
-        if let weight = item.fields.double("weight_kg") {
-            let record = HealthRecord(kind: .checkup, title: "体重 \(trimNumber(weight)) kg", recordedAt: date)
-            record.amountValue = weight
-            record.amountUnit = "kg"
-            record.tags = ["体重"]
-            record.syncState = .local
-            context.insert(record)
-            saved = true
-        }
-        if let head = item.fields.double("head_circumference_cm") {
-            let record = HealthRecord(kind: .checkup, title: "头围 \(trimNumber(head)) cm", recordedAt: date)
-            record.amountValue = head
-            record.amountUnit = "cm"
-            record.tags = ["头围"]
-            record.syncState = .local
-            context.insert(record)
-            saved = true
-        }
-        guard saved else {
+        let measurement = GrowthMeasurement(measuredAt: item.date ?? .now, source: "ai")
+        measurement.heightCm = item.fields.double("height_cm")
+        measurement.weightKg = item.fields.double("weight_kg")
+        measurement.headCircumferenceCm = item.fields.double("head_circumference_cm")
+        measurement.note = item.note
+        measurement.syncState = .local
+        guard measurement.heightCm != nil || measurement.weightKg != nil || measurement.headCircumferenceCm != nil else {
             saveHealth(item, kind: .checkup)
             return
         }
+        context.insert(measurement)
         context.insert(FeedEvent(kind: .healthRecorded,
                                  actorRole: env.config.currentRole.rawValue,
                                  summary: "智能记录了成长测量：\(item.title)"))
@@ -193,9 +182,5 @@ struct NaturalCaptureRouter {
                                  actorRole: env.config.currentRole.rawValue,
                                  summary: "智能记录了一条时光：\(item.title)",
                                  targetLocalId: entry.id.uuidString))
-    }
-
-    private func trimNumber(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 }

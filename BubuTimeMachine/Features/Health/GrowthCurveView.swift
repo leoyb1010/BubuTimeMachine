@@ -7,6 +7,7 @@ struct GrowthCurveView: View {
     @Environment(AppEnvironment.self) private var env
     @Query private var profiles: [ChildProfile]
     @Query(sort: \HealthRecord.recordedAt) private var records: [HealthRecord]
+    @Query(sort: \GrowthMeasurement.measuredAt) private var structuredMeasurements: [GrowthMeasurement]
 
     @State private var metric: WHOGrowthStandard.Metric = .height
 
@@ -42,14 +43,36 @@ struct GrowthCurveView: View {
     }
 
     /// 布布的实测点：(月龄, 数值)。
+    /// 优先读结构化 GrowthMeasurement（AI/手动录入）；旧 HealthRecord 文本解析作兼容数据源。
     private var measurements: [(month: Int, value: Double)] {
         guard let profile else { return [] }
-        return records.compactMap { record -> (Int, Double)? in
-            guard let value = parseValue(from: record) else { return nil }
-            let month = Calendar.current.dateComponents([.month], from: profile.birthday, to: record.recordedAt).month ?? 0
-            guard month >= 0, month <= 60 else { return nil }
-            return (month, value)
+        let cal = Calendar.current
+
+        var structuredMonths = Set<Int>()
+        var points: [(month: Int, value: Double)] = []
+
+        for measurement in structuredMeasurements {
+            let value: Double?
+            switch metric {
+            case .height: value = measurement.heightCm
+            case .weight: value = measurement.weightKg
+            case .head: value = measurement.headCircumferenceCm
+            }
+            guard let value else { continue }
+            let month = cal.dateComponents([.month], from: profile.birthday, to: measurement.measuredAt).month ?? 0
+            guard month >= 0, month <= 60 else { continue }
+            structuredMonths.insert(month)
+            points.append((month, value))
         }
+
+        for record in records {
+            guard let value = parseValue(from: record) else { continue }
+            let month = cal.dateComponents([.month], from: profile.birthday, to: record.recordedAt).month ?? 0
+            guard month >= 0, month <= 60, !structuredMonths.contains(month) else { continue }
+            points.append((month, value))
+        }
+
+        return points.sorted { $0.month < $1.month }
     }
 
     /// 从记录里抽数值：匹配指标关键字，取 amountText/title/detail 里的第一个数字。

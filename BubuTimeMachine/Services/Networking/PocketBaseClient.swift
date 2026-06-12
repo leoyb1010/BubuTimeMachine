@@ -171,6 +171,28 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return try await fetchRecords(collection: "healthrecords", since: since).map { Self.healthDTO(from: $0, fallback: nil) }
     }
 
+    func upsertVaccineRecord(_ dto: VaccineRecordDTO) async throws -> VaccineRecordDTO {
+        let obj = try await upsert(collection: "vaccinerecords", localId: dto.localId, body: Self.vaccineBody(dto))
+        return Self.vaccineDTO(from: obj, fallback: dto)
+    }
+
+    func fetchVaccineRecords(since: Date?) async throws -> [VaccineRecordDTO] {
+        return try await fetchRecords(collection: "vaccinerecords", since: since).map { Self.vaccineDTO(from: $0, fallback: nil) }
+    }
+
+    func deleteVaccineRecord(remoteId: String) async throws {
+        try await delete(collection: "vaccinerecords", id: remoteId)
+    }
+
+    func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO {
+        let obj = try await upsert(collection: "growthmeasurements", localId: dto.localId, body: Self.growthBody(dto))
+        return Self.growthDTO(from: obj, fallback: dto)
+    }
+
+    func fetchGrowthMeasurements(since: Date?) async throws -> [GrowthMeasurementDTO] {
+        return try await fetchRecords(collection: "growthmeasurements", since: since).map { Self.growthDTO(from: $0, fallback: nil) }
+    }
+
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO {
         let obj = try await upsert(collection: "comments", localId: dto.localId, body: Self.commentBody(dto))
         return self.commentDTO(from: obj, fallback: dto)
@@ -719,6 +741,63 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                                birthPlace: obj["birthPlace"] as? String ?? fallback?.birthPlace,
                                avatarRemoteURL: avatarRemoteURL ?? fallback?.avatarRemoteURL,
                                createdAt: fallback?.createdAt ?? .now)
+    }
+
+    private static func vaccineBody(_ dto: VaccineRecordDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId, "vaccineName": dto.vaccineName,
+                                   "injectedAt": iso.string(from: dto.injectedAt), "sourceRaw": dto.source]
+        if let v = dto.doseId { body["doseId"] = v }
+        if let v = dto.doseLabel { body["doseLabel"] = v }
+        if let v = dto.hospital { body["hospital"] = v }
+        if let v = dto.injectionSite { body["injectionSite"] = v }
+        if let v = dto.reaction { body["reaction"] = v }
+        if let v = dto.note { body["note"] = v }
+        addSyncTimestamp(to: &body)
+        return body
+    }
+
+    private static func vaccineDTO(from obj: [String: Any], fallback: VaccineRecordDTO?) -> VaccineRecordDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        return VaccineRecordDTO(id: obj["id"] as? String ?? fallback?.id,
+                                localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                                doseId: obj["doseId"] as? String ?? fallback?.doseId,
+                                vaccineName: obj["vaccineName"] as? String ?? fallback?.vaccineName ?? "",
+                                doseLabel: obj["doseLabel"] as? String ?? fallback?.doseLabel,
+                                injectedAt: date("injectedAt") ?? fallback?.injectedAt ?? .now,
+                                hospital: obj["hospital"] as? String ?? fallback?.hospital,
+                                injectionSite: obj["injectionSite"] as? String ?? fallback?.injectionSite,
+                                reaction: obj["reaction"] as? String ?? fallback?.reaction,
+                                note: obj["note"] as? String ?? fallback?.note,
+                                source: obj["sourceRaw"] as? String ?? fallback?.source ?? "manual",
+                                createdAt: date("created") ?? fallback?.createdAt ?? .now)
+    }
+
+    private static func growthBody(_ dto: GrowthMeasurementDTO) -> [String: Any] {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = ["localId": dto.localId,
+                                   "measuredAt": iso.string(from: dto.measuredAt), "sourceRaw": dto.source]
+        if let v = dto.heightCm { body["heightCm"] = v }
+        if let v = dto.weightKg { body["weightKg"] = v }
+        if let v = dto.headCircumferenceCm { body["headCircumferenceCm"] = v }
+        if let v = dto.note { body["note"] = v }
+        addSyncTimestamp(to: &body)
+        return body
+    }
+
+    private static func growthDTO(from obj: [String: Any], fallback: GrowthMeasurementDTO?) -> GrowthMeasurementDTO {
+        let iso = ISO8601DateFormatter()
+        func date(_ key: String) -> Date? { (obj[key] as? String).flatMap { iso.date(from: $0) ?? flexibleDate($0) } }
+        return GrowthMeasurementDTO(id: obj["id"] as? String ?? fallback?.id,
+                                    localId: obj["localId"] as? String ?? fallback?.localId ?? UUID().uuidString,
+                                    measuredAt: date("measuredAt") ?? fallback?.measuredAt ?? .now,
+                                    heightCm: obj["heightCm"] as? Double ?? fallback?.heightCm,
+                                    weightKg: obj["weightKg"] as? Double ?? fallback?.weightKg,
+                                    headCircumferenceCm: obj["headCircumferenceCm"] as? Double ?? fallback?.headCircumferenceCm,
+                                    note: obj["note"] as? String ?? fallback?.note,
+                                    source: obj["sourceRaw"] as? String ?? fallback?.source ?? "manual",
+                                    createdAt: date("created") ?? fallback?.createdAt ?? .now)
     }
 
     private static func healthBody(_ dto: HealthRecordDTO) -> [String: Any] {

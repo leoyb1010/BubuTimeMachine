@@ -2,21 +2,23 @@ import SwiftUI
 import SwiftData
 
 // MARK: - 疫苗接种表（国家免疫规划一类苗）
-/// 按布布月龄自动排期 + 完成打卡（本地 UserDefaults，零同步迁移风险）。
+/// 按布布月龄自动排期 + 完成打卡。
+/// 数据源已从 @AppStorage 升级为结构化 VaccineRecord（SwiftData）：
+/// 可记录日期、可家庭同步、可被 AI 一句话自动归档；旧打卡由启动迁移自动转换。
 struct VaccineView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.modelContext) private var context
     @Query private var profiles: [ChildProfile]
-
-    /// 已完成的剂次 id 集合，存 UserDefaults（JSON 字符串数组）。
-    @AppStorage("bubu.vaccine.done") private var doneRaw: String = "[]"
+    @Query(sort: \VaccineRecord.injectedAt) private var records: [VaccineRecord]
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
 
-    private var doneSet: Set<String> {
-        guard let data = doneRaw.data(using: .utf8),
-              let arr = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return Set(arr)
+    /// 已完成的排期剂次（doseId → 记录），自由疫苗记录不参与排期打卡。
+    private var recordByDose: [String: VaccineRecord] {
+        Dictionary(records.compactMap { record in
+            record.doseId.map { ($0, record) }
+        }, uniquingKeysWith: { first, _ in first })
     }
 
     var body: some View {
@@ -27,6 +29,10 @@ struct VaccineView: View {
                     sectionHeader(yearLabel)
                     ForEach(doses) { dose in doseRow(dose) }
                 }
+                if !extraRecords.isEmpty {
+                    sectionHeader("其他疫苗记录")
+                    ForEach(extraRecords) { record in extraRow(record) }
+                }
                 disclaimer
             }
             .padding()
@@ -36,11 +42,14 @@ struct VaccineView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var done: Set<String> { doneSet }
+    /// 不在国家排期内（AI 归档的自费苗等）的记录。
+    private var extraRecords: [VaccineRecord] {
+        records.filter { $0.doseId == nil }
+    }
 
     private var summaryCard: some View {
         let total = VaccineDose.schedule.count
-        let completed = done.count
+        let completed = recordByDose.count
         return HStack(spacing: 14) {
             BubuMascotBadge(size: 48, expression: .cheer)
             VStack(alignment: .leading, spacing: 4) {
@@ -65,10 +74,14 @@ struct VaccineView: View {
     }
 
     private var nextDue: VaccineDose? {
-        VaccineDose.schedule.filter { !done.contains($0.id) }.min { $0.monthDue < $1.monthDue }
+        VaccineDose.schedule.filter { recordByDose[$0.id] == nil }.min { $0.monthDue < $1.monthDue }
     }
 
+    /// 未完成：到期提示；已完成：显示接种日期（不再出现「建议尽快补种」）。
     private func dueText(_ dose: VaccineDose) -> String {
+        if let record = recordByDose[dose.id] {
+            return BubuDateFormat.shortDate(record.injectedAt)
+        }
         guard let profile else { return "\(dose.monthDue) 月龄" }
         let date = dose.dueDate(birthday: profile.birthday)
         if date < .now { return "建议尽快补种" }
@@ -93,7 +106,7 @@ struct VaccineView: View {
     }
 
     private func doseRow(_ dose: VaccineDose) -> some View {
-        let isDone = done.contains(dose.id)
+        let isDone = recordByDose[dose.id] != nil
         return Button {
             toggle(dose)
         } label: {
@@ -122,13 +135,53 @@ struct VaccineView: View {
         .buttonStyle(.plain)
     }
 
+    private func extraRow(_ record: VaccineRecord) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "syringe")
+                .font(.system(size: 20))
+                .foregroundStyle(theme)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(record.vaccineName)
+                    .font(BubuTheme.Font.body.weight(.medium))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                if let note = record.note {
+                    Text(note)
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Text(BubuDateFormat.shortDate(record.injectedAt))
+                .font(.system(size: 11))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+        }
+        .padding(12)
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+    }
+
     private func toggle(_ dose: VaccineDose) {
-        var set = done
-        if set.contains(dose.id) { set.remove(dose.id) }
-        else { set.insert(dose.id); BubuHaptics.success() }
-        if let data = try? JSONEncoder().encode(Array(set).sorted()),
-           let str = String(data: data, encoding: .utf8) {
-            doneRaw = str
+        if let record = recordByDose[dose.id] {
+            // 取消打卡：本地删除；已上云的远端也删，避免下轮拉取复活
+            let remoteId = record.remoteId
+            context.delete(record)
+            try? context.save()
+            if let remoteId {
+                let client = env.apiClient
+                Task { try? await client.deleteVaccineRecord(remoteId: remoteId) }
+            }
+        } else {
+            let due = profile.map { dose.dueDate(birthday: $0.birthday) } ?? .now
+            let record = VaccineRecord(vaccineName: dose.vaccine,
+                                       injectedAt: min(due, .now),
+                                       source: "manual")
+            record.doseId = dose.id
+            record.doseLabel = dose.doseLabel
+            record.syncState = .local
+            context.insert(record)
+            try? context.save()
+            BubuHaptics.success()
+            env.syncEngine.syncNow()
         }
     }
 

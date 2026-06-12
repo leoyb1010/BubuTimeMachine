@@ -34,6 +34,11 @@ final class MockAPIClient: APIClient {
     func uploadChildAvatar(profileLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> { mockUpload(id: profileLocalId, fileName: fileName) }
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO] { [] }
+    func upsertVaccineRecord(_ dto: VaccineRecordDTO) async throws -> VaccineRecordDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
+    func fetchVaccineRecords(since: Date?) async throws -> [VaccineRecordDTO] { [] }
+    func deleteVaccineRecord(remoteId: String) async throws {}
+    func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
+    func fetchGrowthMeasurements(since: Date?) async throws -> [GrowthMeasurementDTO] { [] }
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchComments(since: Date?) async throws -> [CommentDTO] { [] }
     func uploadCommentVoice(commentId: UUID, entryLocalId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> { mockUpload(id: commentId, fileName: fileName) }

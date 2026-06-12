@@ -77,6 +77,7 @@ final class AppEnvironment {
     /// App 启动后调用：注入上下文、启动同步层（离线时无副作用）。
     func bootstrap(context: ModelContext) {
         seedMilestonePresetsIfNeeded(context: context)
+        migrateVaccineDoneIfNeeded(context: context)
         syncEngine.attach(context: context)
         syncEngine.start()
         ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)
@@ -105,6 +106,36 @@ final class AppEnvironment {
             let milestone = Milestone(title: tpl.title, category: tpl.category, emoji: tpl.emoji)
             milestone.syncState = .local
             context.insert(milestone)
+        }
+        try? context.save()
+    }
+
+    /// 旧版疫苗打卡（@AppStorage("bubu.vaccine.done") JSON 数组）一次性迁移为结构化 VaccineRecord。
+    /// 幂等：migrated 标记防重入；保留旧键以便回滚。接种日取排期 dueDate（不晚于今天），并在 note 注明待确认。
+    private func migrateVaccineDoneIfNeeded(context: ModelContext) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: "bubu.vaccine.migrated") else { return }
+        defer { defaults.set(true, forKey: "bubu.vaccine.migrated") }
+
+        guard let raw = defaults.string(forKey: "bubu.vaccine.done"),
+              let data = raw.data(using: .utf8),
+              let doseIds = try? JSONDecoder().decode([String].self, from: data),
+              !doseIds.isEmpty else { return }
+
+        let existing = (try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []
+        let existingDoseIds = Set(existing.compactMap(\.doseId))
+        let birthday = ((try? context.fetch(FetchDescriptor<ChildProfile>())) ?? []).first?.birthday
+
+        for doseId in doseIds where !existingDoseIds.contains(doseId) {
+            guard let dose = VaccineDose.schedule.first(where: { $0.id == doseId }) else { continue }
+            let due = birthday.map { dose.dueDate(birthday: $0) } ?? .now
+            let record = VaccineRecord(vaccineName: dose.vaccine,
+                                       injectedAt: min(due, .now),
+                                       source: "migration")
+            record.doseId = dose.id
+            record.doseLabel = dose.doseLabel
+            record.note = "从旧版打卡迁移，具体接种日期请家长确认"
+            context.insert(record)
         }
         try? context.save()
     }
