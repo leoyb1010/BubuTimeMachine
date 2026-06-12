@@ -28,6 +28,7 @@ struct CaptureHomeView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     ageHeader
+                    NaturalCaptureBar()
                     saveHealthStrip
                     statRow
                     onThisDaySection

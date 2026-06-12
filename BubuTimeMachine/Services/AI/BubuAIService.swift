@@ -40,12 +40,6 @@ final class BubuAIService: AIService, @unchecked Sendable {
         return (obj["first_person"] as? String) ?? ""
     }
 
-    func classify(entryId: UUID) async throws -> AIClassification {
-        // entryId 不直接用于云端（隐私）；归类由调用方传文字/标签的扩展接口完成。
-        // 这里给一个基于空输入的安全返回，真正归类走 classifyContent。
-        return AIClassification(suggestedTitle: nil, eventCluster: nil, placeName: nil, visualTags: [])
-    }
-
     /// 富归类：传文字 + 标签 + 地点。
     func classifyContent(note: String?, tags: [String], locationName: String?) async throws -> AIClassification {
         let body: [String: Any] = [
@@ -103,6 +97,28 @@ final class BubuAIService: AIService, @unchecked Sendable {
             "year": year, "child_name": childName, "highlights": highlights,
         ])
         return obj["narration"] as? String ?? ""
+    }
+
+    /// 一句话自然语言 → 结构化记录（服务端 /parse-natural-capture）。
+    func parseNaturalCapture(_ request: NaturalCaptureRequest) async throws -> NaturalCaptureResult {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let bodyData = try encoder.encode(request)
+
+        let url = baseURL.appendingPathComponent("parse-natural-capture")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&req)
+        req.timeoutInterval = 90
+        req.httpBody = bodyData
+
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(NaturalCaptureResult.self, from: data)
     }
 
     // MARK: - 私有

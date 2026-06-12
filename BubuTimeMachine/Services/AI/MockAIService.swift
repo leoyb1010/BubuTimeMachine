@@ -7,14 +7,46 @@ final class MockAIService: AIService {
 
     func ping() async throws -> Bool { true }
 
-    func classify(entryId: UUID) async throws -> AIClassification {
+    func classifyContent(note: String?, tags: [String], locationName: String?) async throws -> AIClassification {
         try? await Task.sleep(for: .milliseconds(400))
         return AIClassification(
             suggestedTitle: "在家的午后",
             eventCluster: "日常",
-            placeName: "家",
-            visualTags: ["宝宝", "微笑", "室内"]
+            placeName: locationName ?? "家",
+            visualTags: tags.isEmpty ? ["宝宝", "微笑", "室内"] : tags
         )
+    }
+
+    /// 关键词假解析：离线/预览时让自然语言入口完整可玩。
+    func parseNaturalCapture(_ request: NaturalCaptureRequest) async throws -> NaturalCaptureResult {
+        try? await Task.sleep(for: .milliseconds(500))
+        let text = request.text
+        var items: [NaturalCaptureItem] = []
+        if text.contains("疫苗") {
+            items.append(NaturalCaptureItem(
+                domain: .vaccine, action: .create, title: "疫苗接种", note: nil, date: .now,
+                fields: ["vaccine_name": .string("示例疫苗")], tags: ["疫苗"],
+                confidence: 0.9, needsConfirmation: true, sourceText: text))
+        }
+        if text.contains("喝水") {
+            items.append(NaturalCaptureItem(
+                domain: .water, action: .create, title: "喝水", note: nil, date: .now,
+                fields: ["amount_ml": .number(120)], tags: [],
+                confidence: 0.9, needsConfirmation: false, sourceText: text))
+        }
+        if text.contains("身高") || text.contains("体重") {
+            items.append(NaturalCaptureItem(
+                domain: .growth, action: .create, title: "身高体重", note: nil, date: .now,
+                fields: ["height_cm": .number(82), "weight_kg": .number(10.6)], tags: [],
+                confidence: 0.88, needsConfirmation: false, sourceText: text))
+        }
+        if items.isEmpty {
+            items.append(NaturalCaptureItem(
+                domain: .timeline, action: .create, title: String(text.prefix(12)), note: text,
+                date: .now, fields: [:], tags: [],
+                confidence: 0.7, needsConfirmation: false, sourceText: text))
+        }
+        return NaturalCaptureResult(confidence: 0.85, items: items, warnings: [])
     }
 
     func detectFirstTime(media: [Media]) async throws -> FirstTimeSuggestion? {

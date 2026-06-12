@@ -11,6 +11,7 @@
   POST /detect-first-time      依据标签判断"是否人生第一次"
   POST /movie-narration        年度成长电影旁白稿
   POST /transcribe             语音转写（Whisper，可选；未装则降级提示）
+  POST /parse-natural-capture  一句话自然语言 → 多条结构化记录（疫苗/成长/餐食/睡眠…）
   GET  /health                 健康检查
 
 默认接 DeepSeek（OpenAI 兼容协议）。环境变量见 .env.example。
@@ -20,8 +21,9 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict, deque
+from datetime import datetime
 from threading import Lock
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel
@@ -204,6 +206,163 @@ def movie_narration(req: MovieReq):
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return MovieResp(narration=text.strip())
+
+
+# ---------- 一句话自然语言 → 结构化记录 ----------
+
+class NaturalParseReq(BaseModel):
+    text: str
+    childName: str = "布布"
+    timezone: str = "Asia/Shanghai"
+    referenceDate: datetime
+
+
+class ParsedNaturalItem(BaseModel):
+    domain: Literal[
+        "vaccine", "growth", "meal", "snack", "supplement", "water", "sleep",
+        "symptom", "checkup", "timeline", "milestone", "first_time", "unknown"
+    ]
+    action: Literal["create", "update", "complete"] = "create"
+    title: str
+    note: str | None = None
+    date: datetime | None = None
+    fields: dict[str, Any] = {}
+    tags: list[str] = []
+    confidence: float = 0.0
+    needs_confirmation: bool = True
+    source_text: str
+
+
+class NaturalParseResp(BaseModel):
+    confidence: float = 0.0
+    items: list[ParsedNaturalItem] = []
+    warnings: list[str] = []
+
+
+_ALLOWED_DOMAINS = {
+    "vaccine", "growth", "meal", "snack", "supplement", "water", "sleep",
+    "symptom", "checkup", "timeline", "milestone", "first_time", "unknown",
+}
+_SENSITIVE_DOMAINS = {"vaccine", "symptom", "supplement"}
+
+
+def _sanitize_parse_result(data: dict, original_text: str) -> NaturalParseResp:
+    """LLM 输出不可信：逐条清洗，坏字段降级、坏条目丢弃，绝不让 ValidationError 变 500。"""
+    warnings = [w for w in data.get("warnings", []) if isinstance(w, str)]
+    items: list[ParsedNaturalItem] = []
+    for raw in data.get("items", []):
+        if not isinstance(raw, dict):
+            continue
+        domain = raw.get("domain")
+        if domain not in _ALLOWED_DOMAINS:
+            domain = "unknown"
+            warnings.append("domain_coerced_unknown")
+        try:
+            item = ParsedNaturalItem(
+                domain=domain,
+                action=raw.get("action") if raw.get("action") in ("create", "update", "complete") else "create",
+                title=str(raw.get("title") or "")[:60] or "未命名记录",
+                note=raw.get("note") if isinstance(raw.get("note"), str) else None,
+                date=raw.get("date"),
+                fields=raw.get("fields") if isinstance(raw.get("fields"), dict) else {},
+                tags=[t for t in (raw.get("tags") or []) if isinstance(t, str)][:8],
+                confidence=float(raw.get("confidence") or 0.0),
+                needs_confirmation=bool(raw.get("needs_confirmation", True)),
+                source_text=str(raw.get("source_text") or original_text)[:200],
+            )
+        except Exception:  # noqa: BLE001  单条解析失败丢弃该条，不拖垮整个响应
+            warnings.append("item_dropped_invalid")
+            continue
+        if item.domain in _SENSITIVE_DOMAINS:
+            item.needs_confirmation = True  # 服务端兜底：敏感内容永远要确认
+        items.append(item)
+    try:
+        overall = float(data.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        overall = 0.0
+    return NaturalParseResp(confidence=overall, items=items, warnings=warnings)
+
+
+@app.post("/parse-natural-capture", response_model=NaturalParseResp,
+          dependencies=[Depends(require_api_key)])
+def parse_natural_capture(req: NaturalParseReq):
+    if not req.text.strip():
+        return NaturalParseResp(confidence=0.0, items=[], warnings=["empty_text"])
+
+    sys = f"""
+你是一个家庭成长记录 App 的结构化解析器。孩子名叫「{req.childName}」。
+你的任务：把父母输入的一句话拆成可保存的结构化记录。
+
+必须遵守：
+1. 只记录输入中明确出现的事实，不要编造疫苗名、剂次、药名、剂量、症状、时间。
+2. 日期必须结合 referenceDate 和 timezone 解析；无法确定年份时，使用 referenceDate 所在年份，并在 warnings 加 date_inferred。
+3. 一句话可以拆成多条 items，例如「今天吃了南瓜米糊，喝水120ml，体重10.6kg」拆三条。
+4. 疫苗、症状、药物、过敏、体温异常相关内容，needs_confirmation 必须为 true。
+5. 普通餐食/喝水/睡眠，如果字段完整且 confidence >= 0.82，可以 needs_confirmation=false。
+6. 不提供诊断，不推荐治疗，只做事实归档。
+7. 只输出 JSON，不要输出 Markdown，不要解释。
+
+允许的 domain：
+- vaccine: 疫苗接种
+- growth: 身高、体重、头围等成长测量
+- meal: 正餐/辅食
+- snack: 零食
+- supplement: 营养补充
+- water: 喝水
+- sleep: 睡眠
+- symptom: 不舒服/症状/体温
+- checkup: 体检/护理
+- timeline: 普通时光记录
+- milestone: 里程碑
+- first_time: 第一次
+- unknown: 无法判断
+
+字段建议：
+- vaccine: vaccine_name, dose_label, injection_site, hospital, reaction
+- growth: height_cm, weight_kg, head_circumference_cm
+- meal/snack: food_items, amount_text, reaction
+- supplement: supplement_name, amount_text
+- water: amount_ml
+- sleep: start_at, end_at, duration_minutes, quality（start_at/end_at 用 ISO8601 字符串）
+- symptom: symptoms, temperature_celsius, severity
+- checkup: height_cm, weight_kg, note
+- timeline/milestone/first_time: event, people, place
+"""
+
+    user = f"""
+referenceDate: {req.referenceDate.isoformat()}
+timezone: {req.timezone}
+input: {req.text}
+
+输出 JSON schema:
+{{
+  "confidence": 0.0,
+  "items": [
+    {{
+      "domain": "meal",
+      "action": "create",
+      "title": "南瓜米糊",
+      "note": null,
+      "date": "2026-06-12T12:00:00+08:00",
+      "fields": {{"food_items": ["南瓜米糊"], "amount_text": "半碗"}},
+      "tags": ["辅食"],
+      "confidence": 0.9,
+      "needs_confirmation": false,
+      "source_text": "中午吃了南瓜米糊半碗"
+    }}
+  ],
+  "warnings": []
+}}
+"""
+
+    try:
+        data = llm.complete_json(sys, user, max_tokens=1200)
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if not data:
+        # _extract_json 兜底返回空 dict：优雅降级，让 App 提示换个说法而不是 500
+        return NaturalParseResp(confidence=0.0, items=[], warnings=["llm_output_unparseable"])
+    return _sanitize_parse_result(data, req.text)
 
 
 @app.post("/transcribe", dependencies=[Depends(require_api_key)])
