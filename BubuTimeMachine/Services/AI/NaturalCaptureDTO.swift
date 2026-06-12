@@ -173,10 +173,34 @@ extension Dictionary where Key == String, Value == JSONValue {
 
     func isoDate(_ key: String) -> Date? {
         guard let raw = string(key) else { return nil }
+        return NaturalCaptureCoding.parseDate(raw)
+    }
+}
+
+// MARK: - 容错编解码
+enum NaturalCaptureCoding {
+    /// ISO8601 容错解析：先标准互联网时间，再带小数秒重试。
+    /// 服务端 pydantic 序列化偶发带微秒时，客户端不再整包解析失败。
+    static func parseDate(_ raw: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         if let date = formatter.date(from: raw) { return date }
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: raw)
+    }
+
+    /// /parse-natural-capture 响应解码器（日期容错）。
+    static func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { dec in
+            let container = try dec.singleValueContainer()
+            let raw = try container.decode(String.self)
+            guard let date = parseDate(raw) else {
+                throw DecodingError.dataCorruptedError(in: container,
+                                                       debugDescription: "无法解析日期：\(raw)")
+            }
+            return date
+        }
+        return decoder
     }
 }

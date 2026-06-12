@@ -18,15 +18,29 @@ final class MockAIService: AIService {
     }
 
     /// 关键词假解析：离线/预览时让自然语言入口完整可玩。
+    /// 覆盖 6 个验收场景：疫苗、身高体重、餐食+喝水拆分、睡眠、不舒服、第一次；其余落普通时光。
     func parseNaturalCapture(_ request: NaturalCaptureRequest) async throws -> NaturalCaptureResult {
         try? await Task.sleep(for: .milliseconds(500))
         let text = request.text
         var items: [NaturalCaptureItem] = []
+
         if text.contains("疫苗") {
             items.append(NaturalCaptureItem(
                 domain: .vaccine, action: .create, title: "疫苗接种", note: nil, date: .now,
                 fields: ["vaccine_name": .string("示例疫苗")], tags: ["疫苗"],
                 confidence: 0.9, needsConfirmation: true, sourceText: text))
+        }
+        if text.contains("身高") || text.contains("体重") {
+            items.append(NaturalCaptureItem(
+                domain: .growth, action: .create, title: "身高体重", note: nil, date: .now,
+                fields: ["height_cm": .number(82), "weight_kg": .number(10.6)], tags: [],
+                confidence: 0.88, needsConfirmation: false, sourceText: text))
+        }
+        if text.contains("吃") {
+            items.append(NaturalCaptureItem(
+                domain: .meal, action: .create, title: "辅食餐", note: nil, date: .now,
+                fields: ["food_items": .array([.string("南瓜米糊")]), "amount_text": .string("半碗")],
+                tags: ["辅食"], confidence: 0.9, needsConfirmation: false, sourceText: text))
         }
         if text.contains("喝水") {
             items.append(NaturalCaptureItem(
@@ -34,11 +48,28 @@ final class MockAIService: AIService {
                 fields: ["amount_ml": .number(120)], tags: [],
                 confidence: 0.9, needsConfirmation: false, sourceText: text))
         }
-        if text.contains("身高") || text.contains("体重") {
+        if text.contains("睡") {
+            let cal = Calendar.current
+            let start = cal.date(byAdding: .hour, value: -10, to: .now) ?? .now
+            let end = Date.now
+            let iso = ISO8601DateFormatter()
             items.append(NaturalCaptureItem(
-                domain: .growth, action: .create, title: "身高体重", note: nil, date: .now,
-                fields: ["height_cm": .number(82), "weight_kg": .number(10.6)], tags: [],
-                confidence: 0.88, needsConfirmation: false, sourceText: text))
+                domain: .sleep, action: .create, title: "睡眠", note: "中间醒了一次", date: end,
+                fields: ["start_at": .string(iso.string(from: start)),
+                         "end_at": .string(iso.string(from: end))],
+                tags: [], confidence: 0.86, needsConfirmation: false, sourceText: text))
+        }
+        if text.contains("咳嗽") || text.contains("发烧") || text.contains("不舒服") || text.contains("体温") {
+            items.append(NaturalCaptureItem(
+                domain: .symptom, action: .create, title: "有点不舒服", note: nil, date: .now,
+                fields: ["symptoms": .array([.string("咳嗽")]), "temperature_celsius": .number(37.8)],
+                tags: [], confidence: 0.85, needsConfirmation: true, sourceText: text))
+        }
+        if text.contains("第一次") {
+            items.append(NaturalCaptureItem(
+                domain: .firstTime, action: .create, title: String(text.prefix(16)), note: text,
+                date: .now, fields: [:], tags: [],
+                confidence: 0.84, needsConfirmation: false, sourceText: text))
         }
         if items.isEmpty {
             items.append(NaturalCaptureItem(

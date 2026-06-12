@@ -7,7 +7,8 @@ import SwiftData
 @MainActor
 struct NaturalCaptureRouter {
     let context: ModelContext
-    let env: AppEnvironment
+    /// 解耦 AppEnvironment：只需要作者角色字符串，单测可用内存容器直建。
+    let authorRole: String
 
     func save(_ item: NaturalCaptureItem) {
         switch item.domain {
@@ -84,7 +85,7 @@ struct NaturalCaptureRouter {
 
         context.insert(record)
         context.insert(FeedEvent(kind: .healthRecorded,
-                                 actorRole: env.config.currentRole.rawValue,
+                                 actorRole: authorRole,
                                  summary: "智能记录了\(kind.title)：\(record.title)"))
     }
 
@@ -107,7 +108,7 @@ struct NaturalCaptureRouter {
         }
         context.insert(record)
         context.insert(FeedEvent(kind: .healthRecorded,
-                                 actorRole: env.config.currentRole.rawValue,
+                                 actorRole: authorRole,
                                  summary: "智能记录了疫苗接种：\(name)"))
     }
 
@@ -135,7 +136,7 @@ struct NaturalCaptureRouter {
         }
         context.insert(measurement)
         context.insert(FeedEvent(kind: .healthRecorded,
-                                 actorRole: env.config.currentRole.rawValue,
+                                 actorRole: authorRole,
                                  summary: "智能记录了成长测量：\(item.title)"))
     }
 
@@ -152,7 +153,7 @@ struct NaturalCaptureRouter {
         milestone.syncState = .local
         context.insert(milestone)
         context.insert(FeedEvent(kind: .milestoneLit,
-                                 actorRole: env.config.currentRole.rawValue,
+                                 actorRole: authorRole,
                                  summary: "智能点亮了里程碑：\(item.title)"))
     }
 
@@ -167,19 +168,19 @@ struct NaturalCaptureRouter {
         first.syncState = .local
         context.insert(first)
         context.insert(FeedEvent(kind: .firstTimeConfirmed,
-                                 actorRole: env.config.currentRole.rawValue,
+                                 actorRole: authorRole,
                                  summary: "智能记下了「\(item.title)」"))
     }
 
     private func saveEntry(_ item: NaturalCaptureItem) {
         let entry = Entry(happenedAt: item.date ?? .now,
-                          authorRole: env.config.currentRole.rawValue,
+                          authorRole: authorRole,
                           note: item.note ?? item.sourceText)
         entry.title = item.title
         entry.syncState = .local
         context.insert(entry)
         context.insert(FeedEvent(kind: .entryCreated,
-                                 actorRole: env.config.currentRole.rawValue,
+                                 actorRole: authorRole,
                                  summary: "智能记录了一条时光：\(item.title)",
                                  targetLocalId: entry.id.uuidString))
     }

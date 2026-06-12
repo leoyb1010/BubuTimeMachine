@@ -11,6 +11,7 @@ struct NaturalCaptureBar: View {
     @State private var text = ""
     @State private var isParsing = false
     @State private var errorText: String?
+    @State private var slowHint: String?
     @State private var reviewPayload: ReviewPayload?
 
     @State private var recorder = AudioRecorder()
@@ -80,6 +81,14 @@ struct NaturalCaptureBar: View {
             .background(BubuTheme.Color.card.opacity(0.72), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .bubuGlassSurface(cornerRadius: 22, tint: theme, interactive: true)
 
+            if let slowHint, isParsing {
+                Text(slowHint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+
             if let errorText {
                 HStack(spacing: 10) {
                     Text(errorText)
@@ -102,6 +111,12 @@ struct NaturalCaptureBar: View {
         .sheet(item: $reviewPayload) { payload in
             NaturalCaptureReviewSheet(result: payload.result, originalText: payload.originalText) {
                 text = ""
+            }
+        }
+        // 离开页面（切 Tab/返回）时若仍在录音，静默收尾，不留悬挂的音频会话
+        .onDisappear {
+            if recorder.state == .recording {
+                recorder.cancel()
             }
         }
     }
@@ -172,11 +187,23 @@ struct NaturalCaptureBar: View {
     @MainActor
     private func parseText() async {
         let input = text.bubuTrimmed
-        guard !input.isEmpty, !isParsing else { return }
+        // 防重复提交：解析中 / 确认页已弹出时一律忽略
+        guard !input.isEmpty, !isParsing, reviewPayload == nil else { return }
 
         isParsing = true
         errorText = nil
-        defer { isParsing = false }
+        // 超过 8 秒还没结果：给一句安抚，避免用户以为卡死
+        let hintTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            if !Task.isCancelled, isParsing {
+                slowHint = "布布还在仔细听这句话…再等几秒"
+            }
+        }
+        defer {
+            hintTask.cancel()
+            slowHint = nil
+            isParsing = false
+        }
 
         do {
             let request = NaturalCaptureRequest(

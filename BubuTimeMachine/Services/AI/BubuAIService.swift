@@ -115,10 +115,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
 
         let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(NaturalCaptureResult.self, from: data)
+        return try NaturalCaptureCoding.decoder().decode(NaturalCaptureResult.self, from: data)
     }
 
     // MARK: - 私有
