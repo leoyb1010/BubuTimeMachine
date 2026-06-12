@@ -95,9 +95,8 @@ private struct MediaPageView: View {
            let image = UIImage(data: data) {
             ZoomableImageView(image: image)
                 .ignoresSafeArea()
-        } else if let remote = media.remoteURL,
-                  let url = URL(string: remote) {
-            RemoteZoomableImage(url: url)
+        } else if let remote = media.remoteURL {
+            RemoteZoomableImage(remoteURL: remote)
                 .ignoresSafeArea()
         } else {
             missing("本地照片文件找不到了")
@@ -160,46 +159,64 @@ private struct MediaPageView: View {
     }
 }
 
+/// 远端图片：必须走 APIClient.downloadFile（带 PocketBase 鉴权 + 401 重登重试），
+/// 文件 collection 配了 viewRule 时裸 URLSession 会 403。失败态提供重试。
 private struct RemoteZoomableImage: View {
-    let url: URL
+    @Environment(AppEnvironment.self) private var env
+
+    let remoteURL: String
     @State private var image: UIImage?
-    @State private var failed = false
+    @State private var isLoading = false
+    @State private var errorText: String?
 
     var body: some View {
         Group {
             if let image {
                 ZoomableImageView(image: image)
-            } else if failed {
+            } else if isLoading {
+                ProgressView()
+                    .tint(.white)
+            } else {
                 VStack(spacing: 12) {
                     Image(systemName: "icloud.slash")
                         .font(.system(size: 42))
-                    Text("照片还没下载好")
+                    Text(errorText ?? "照片还没下载好")
                         .font(BubuTheme.Font.body)
+                    Button("重试") {
+                        Task { await load() }
+                    }
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.16), in: Capsule())
                 }
-                .foregroundStyle(.white.opacity(0.85))
-            } else {
-                ProgressView()
-                    .tint(.white)
+                .foregroundStyle(.white.opacity(0.9))
             }
         }
-        .task(id: url) {
+        .task(id: remoteURL) {
             await load()
         }
     }
 
     @MainActor
     private func load() async {
-        failed = false
-        image = nil
+        guard !remoteURL.isEmpty, image == nil, !isLoading else { return }
+        isLoading = true
+        errorText = nil
+        defer { isLoading = false }
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let data = try await env.apiClient.downloadFile(from: remoteURL)
             guard let decoded = UIImage(data: data) else {
-                failed = true
+                errorText = "照片文件无法解码"
                 return
             }
             image = decoded
         } catch {
-            failed = true
+            errorText = "照片下载失败，请稍后重试"
+            #if DEBUG
+            print("[MediaViewer] remote image failed:", remoteURL, error)
+            #endif
         }
     }
 }
@@ -207,110 +224,106 @@ private struct RemoteZoomableImage: View {
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+    func makeUIView(context: Context) -> ZoomingImageScrollView {
+        let view = ZoomingImageScrollView()
+        view.setImage(image)
+        return view
     }
 
-    func makeUIView(context: Context) -> UIScrollView {
-        let scrollView = UIScrollView()
-        scrollView.delegate = context.coordinator
-        scrollView.minimumZoomScale = 1
-        scrollView.maximumZoomScale = 5
-        scrollView.bouncesZoom = true
-        scrollView.showsHorizontalScrollIndicator = false
-        scrollView.showsVerticalScrollIndicator = false
-        scrollView.backgroundColor = .clear
-        scrollView.decelerationRate = .fast
+    func updateUIView(_ uiView: ZoomingImageScrollView, context: Context) {
+        uiView.setImage(image)
+    }
+}
 
-        let imageView = context.coordinator.imageView
+/// 布局收敛到 layoutSubviews：首帧 bounds 为 0、旋转、分屏都会自动重排，黑屏根因消除。
+final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
+    private let imageView = UIImageView()
+    private var lastImage: UIImage?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delegate = self
+        backgroundColor = .clear
+        minimumZoomScale = 1
+        maximumZoomScale = 5
+        bouncesZoom = true
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        contentInsetAdjustmentBehavior = .never
+        decelerationRate = .fast
+
         imageView.contentMode = .scaleAspectFit
         imageView.isUserInteractionEnabled = true
-        scrollView.addSubview(imageView)
-        context.coordinator.scrollView = scrollView
+        addSubview(imageView)
 
-        let doubleTap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleDoubleTap(_:))
-        )
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
-        scrollView.addGestureRecognizer(doubleTap)
-
-        return scrollView
+        addGestureRecognizer(doubleTap)
     }
 
-    func updateUIView(_ scrollView: UIScrollView, context: Context) {
-        context.coordinator.set(image: image, in: scrollView)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
-    final class Coordinator: NSObject, UIScrollViewDelegate {
-        let imageView = UIImageView()
-        weak var scrollView: UIScrollView?
-        private var currentImage: UIImage?
-
-        func set(image: UIImage, in scrollView: UIScrollView) {
-            if currentImage !== image {
-                currentImage = image
-                imageView.image = image
-                scrollView.zoomScale = 1
-            }
-            layoutImage(in: scrollView)
+    func setImage(_ image: UIImage) {
+        guard lastImage !== image else {
+            setNeedsLayout()
+            return
         }
+        lastImage = image
+        imageView.image = image
+        zoomScale = 1
+        setNeedsLayout()
+    }
 
-        private func layoutImage(in scrollView: UIScrollView) {
-            guard let image = imageView.image,
-                  scrollView.bounds.width > 0,
-                  scrollView.bounds.height > 0 else { return }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutImageIfNeeded()
+    }
 
-            let imageSize = image.size
-            guard imageSize.width > 0, imageSize.height > 0 else { return }
+    private func layoutImageIfNeeded() {
+        guard let image = imageView.image,
+              bounds.width > 0, bounds.height > 0,
+              image.size.width > 0, image.size.height > 0 else { return }
 
-            let widthScale = scrollView.bounds.width / imageSize.width
-            let heightScale = scrollView.bounds.height / imageSize.height
-            let fitScale = min(widthScale, heightScale)
-            let fittedSize = CGSize(width: imageSize.width * fitScale,
-                                    height: imageSize.height * fitScale)
+        let fitScale = min(bounds.width / image.size.width,
+                           bounds.height / image.size.height)
+        let fittedSize = CGSize(width: image.size.width * fitScale,
+                                height: image.size.height * fitScale)
 
-            if scrollView.zoomScale == 1 {
-                imageView.frame = CGRect(origin: .zero, size: fittedSize)
-                scrollView.contentSize = fittedSize
-            }
-            centerContent(in: scrollView)
+        if zoomScale <= minimumZoomScale + 0.001 {
+            imageView.frame = CGRect(origin: .zero, size: fittedSize)
+            contentSize = fittedSize
         }
+        centerImage()
+    }
 
-        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-            imageView
+    private func centerImage() {
+        let horizontal = max((bounds.width - contentSize.width) / 2, 0)
+        let vertical = max((bounds.height - contentSize.height) / 2, 0)
+        contentInset = UIEdgeInsets(top: vertical, left: horizontal,
+                                    bottom: vertical, right: horizontal)
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerImage()
+    }
+
+    @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if zoomScale > 1.01 {
+            setZoomScale(1, animated: true)
+            return
         }
-
-        func scrollViewDidZoom(_ scrollView: UIScrollView) {
-            centerContent(in: scrollView)
-        }
-
-        private func centerContent(in scrollView: UIScrollView) {
-            let horizontalInset = max((scrollView.bounds.width - scrollView.contentSize.width) / 2, 0)
-            let verticalInset = max((scrollView.bounds.height - scrollView.contentSize.height) / 2, 0)
-            scrollView.contentInset = UIEdgeInsets(top: verticalInset,
-                                                   left: horizontalInset,
-                                                   bottom: verticalInset,
-                                                   right: horizontalInset)
-        }
-
-        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-            guard let scrollView else { return }
-
-            if scrollView.zoomScale > 1.01 {
-                scrollView.setZoomScale(1, animated: true)
-                return
-            }
-
-            let targetScale = min(2.6, scrollView.maximumZoomScale)
-            let point = gesture.location(in: imageView)
-            let width = scrollView.bounds.width / targetScale
-            let height = scrollView.bounds.height / targetScale
-            let rect = CGRect(x: point.x - width / 2,
-                              y: point.y - height / 2,
-                              width: width,
-                              height: height)
-            scrollView.zoom(to: rect, animated: true)
-        }
+        let point = gesture.location(in: imageView)
+        let targetScale = min(2.8, maximumZoomScale)
+        let rect = CGRect(x: point.x - bounds.width / targetScale / 2,
+                          y: point.y - bounds.height / targetScale / 2,
+                          width: bounds.width / targetScale,
+                          height: bounds.height / targetScale)
+        zoom(to: rect, animated: true)
     }
 }

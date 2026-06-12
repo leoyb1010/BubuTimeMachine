@@ -272,7 +272,9 @@ struct CaptureHomeView: View {
     }
 
     private var totalPhotos: Int {
-        entries.reduce(0) { $0 + $1.media.count }
+        entries.reduce(0) { total, entry in
+            total + entry.media.filter { $0.type == .photo }.count
+        }
     }
 
     // MARK: 那年今日

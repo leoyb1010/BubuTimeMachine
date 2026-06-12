@@ -244,19 +244,25 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     // MARK: 媒体上传（multipart + 进度）
 
+    /// 上传结果：PocketBase 会清洗并追加随机后缀改写文件名，远端 URL 必须用响应里的真实文件名拼。
+    private struct UploadedFileResult: Sendable {
+        let recordId: String
+        let storedFileName: String
+    }
+
     func uploadMedia(_ file: MediaUploadRequest) -> AsyncThrowingStream<UploadEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let remoteId = try await self.withAuthRetry { token in
+                    let result = try await self.withAuthRetry { token in
                         try await self.multipartUpload(file, token: token) { progress in
                             continuation.yield(.progress(progress))
                         }
                     }
                     let urlStr = self.baseURL
-                        .appendingPathComponent("api/files/media/\(remoteId)/\(file.fileName)")
+                        .appendingPathComponent("api/files/media/\(result.recordId)/\(result.storedFileName)")
                         .absoluteString
-                    continuation.yield(.completed(remoteId: remoteId, url: urlStr))
+                    continuation.yield(.completed(remoteId: result.recordId, url: urlStr))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -410,7 +416,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let remoteId = try await self.withAuthRetry { token in
+                    let result = try await self.withAuthRetry { token in
                         try await self.multipartUpload(collection: collection,
                                                        localId: localId,
                                                        fields: fields,
@@ -422,9 +428,9 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                         }
                     }
                     let urlStr = self.baseURL
-                        .appendingPathComponent("api/files/\(collection)/\(remoteId)/\(fileName)")
+                        .appendingPathComponent("api/files/\(collection)/\(result.recordId)/\(result.storedFileName)")
                         .absoluteString
-                    continuation.yield(.completed(remoteId: remoteId, url: urlStr))
+                    continuation.yield(.completed(remoteId: result.recordId, url: urlStr))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -436,7 +442,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private func multipartUpload(collection: String, localId: String, fields: [String: String], fileField: String,
                                  fileURL: URL, fileName: String, token: String,
-                                 onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
+                                 onProgress: @escaping @Sendable (Double) -> Void) async throws -> UploadedFileResult {
         let existingId = try await findRecord(collection: collection, localId: localId)
         let url = existingId.map {
             baseURL.appendingPathComponent("api/collections/\(collection)/records/\($0)")
@@ -454,15 +460,18 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: bodyURL) }
         let delegate = UploadProgressDelegate(onProgress: onProgress)
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        // URLSession 强持有 delegate，不 invalidate 会逐次泄漏 session + delegate
+        defer { session.finishTasksAndInvalidate() }
         let (data, resp) = try await session.upload(for: req, fromFile: bodyURL)
         try Self.check(resp, data)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = obj["id"] as? String else { throw APIError.server(500, "上传响应异常") }
-        return id
+        let storedFileName = (obj[fileField] as? String) ?? fileName
+        return UploadedFileResult(recordId: id, storedFileName: storedFileName)
     }
 
     private func multipartUpload(_ file: MediaUploadRequest, token: String,
-                                 onProgress: @escaping @Sendable (Double) -> Void) async throws -> String {
+                                 onProgress: @escaping @Sendable (Double) -> Void) async throws -> UploadedFileResult {
         let existingId = try await findRecord(collection: "media", localId: file.mediaId.uuidString)
         let url = existingId.map {
             baseURL.appendingPathComponent("api/collections/media/records/\($0)")
@@ -491,13 +500,16 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         // 用 delegate 捕获上传进度
         let delegate = UploadProgressDelegate(onProgress: onProgress)
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        // URLSession 强持有 delegate，不 invalidate 会逐次泄漏 session + delegate
+        defer { session.finishTasksAndInvalidate() }
         let (data, resp) = try await session.upload(for: req, fromFile: bodyURL)
         try Self.check(resp, data)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let id = obj["id"] as? String else {
             throw APIError.server(500, "上传响应异常")
         }
-        return id
+        let storedFileName = (obj["file"] as? String) ?? file.fileName
+        return UploadedFileResult(recordId: id, storedFileName: storedFileName)
     }
 
     private func multipartBodyFile(boundary: String, fields: [String: String], fileField: String,

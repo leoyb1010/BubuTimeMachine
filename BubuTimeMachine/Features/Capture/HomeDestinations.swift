@@ -2,19 +2,24 @@ import SwiftUI
 import SwiftData
 
 // MARK: - 照片墙
-/// 首页「张照片」统计卡的落地页：全部媒体三列网格，点开进对应记录详情。
+/// 首页「张照片」统计卡的落地页：照片/视频三列网格，点开直接进全屏查看器（不再绕进记录详情）。
 struct PhotoWallView: View {
     @Environment(AppEnvironment.self) private var env
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
 
+    @State private var viewerRoute: MediaViewerRoute?
+
     private var items: [(media: Media, entry: Entry)] {
         entries.flatMap { entry in
             entry.media
+                .filter { $0.type == .photo || $0.type == .video }
                 .sorted { $0.createdAt < $1.createdAt }
                 .map { (media: $0, entry: entry) }
         }
     }
+
+    private var galleryMedia: [Media] { items.map(\.media) }
 
     var body: some View {
         ScrollView {
@@ -30,7 +35,9 @@ struct PhotoWallView: View {
             } else {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
                     ForEach(items, id: \.media.id) { item in
-                        NavigationLink(value: item.entry) {
+                        Button {
+                            viewerRoute = MediaViewerRoute(initialMediaID: item.media.id)
+                        } label: {
                             MediaThumbnail(media: item.media, mediaStore: env.mediaStore, cornerRadius: 6, size: .grid)
                                 .aspectRatio(1, contentMode: .fit)
                                 .clipped()
@@ -41,10 +48,23 @@ struct PhotoWallView: View {
                 .padding(8)
             }
         }
+        .fullScreenCover(item: $viewerRoute) { route in
+            MediaGalleryViewer(mediaItems: galleryMedia,
+                               initialMediaID: route.initialMediaID,
+                               mediaStore: env.mediaStore) {
+                viewerRoute = nil
+            }
+        }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("布布的照片")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
+
+/// 全屏查看器路由（照片墙/相册共用）。
+struct MediaViewerRoute: Identifiable {
+    let initialMediaID: UUID
+    var id: UUID { initialMediaID }
 }
 
 // MARK: - 生日倒计时
