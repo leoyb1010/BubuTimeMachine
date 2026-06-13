@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "布布时光机主模块",
+  "main": "",
+  "author": "bubu",
+  "license": "MIT",
+  "dependencies": {}
+}

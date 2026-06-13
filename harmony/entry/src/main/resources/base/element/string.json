@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "perm_mic", "value": "记录布布的声音和家人想对她说的话" },
+    { "name": "perm_camera", "value": "随手拍下布布此刻的样子" },
+    { "name": "perm_photos", "value": "把布布的照片和视频保存进时光轴" },
+    { "name": "perm_location", "value": "自动标注每个瞬间发生的地方" }
+  ]
+}

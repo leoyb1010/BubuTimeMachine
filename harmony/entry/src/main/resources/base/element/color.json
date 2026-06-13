@@ -1,0 +1,9 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#FCF6EC" },
+    { "name": "bubu_primary", "value": "#F28C9E" },
+    { "name": "bubu_warm_brown", "value": "#5C473D" },
+    { "name": "bubu_cream", "value": "#FCF6EC" },
+    { "name": "bubu_secondary_text", "value": "#8C8078" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "modelVersion": "6.0.0",
+  "name": "bubutimemachine",
+  "version": "1.0.0",
+  "description": "布布时光机 · 鸿蒙端（HarmonyOS NEXT / ArkTS）",
+  "main": "",
+  "author": "bubu",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

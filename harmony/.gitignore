@@ -1,0 +1,14 @@
+# DevEco / hvigor 构建产物与缓存
+/build
+/*/build
+/.hvigor
+/.cxx
+/oh_modules
+/*/oh_modules
+.clangd
+.clang-format
+local.properties
+# 复制进来的 hvigor wrapper（每台机器从 DevEco 生成，不入库）
+/hvigorw
+/hvigorw.js
+/hvigor/hvigor-wrapper.js
