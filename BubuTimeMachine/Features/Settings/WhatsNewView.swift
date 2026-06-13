@@ -7,30 +7,31 @@ import SwiftUI
 
 // MARK: 升级弹窗判定
 enum WhatsNewGate {
-    private static let key = "bubu.whatsnew.lastSeenVersion"
+    /// 判定基准 = 最新一条更新记录的 version（与 App 营销版本解耦）。
+    /// 这样即便 App 版本号没动，只要 Changelog 顶部加了新版本，就会再弹一次；
+    /// 想强制重弹也只需在 Changelog 顶部加条目，不用改这里。
+    private static var currentTag: String { Changelog.latest?.version ?? AppVersion.marketing }
+
+    /// 用新 key（v2）——历史上早期版本曾把脏值写进旧 key，换 key 让那段历史失效，
+    /// 保证本次升级能正常弹一次。
+    private static let key = "bubu.whatsnew.lastSeenTag.v2"
 
     /// 是否该弹更新弹窗。
-    /// - 已看过当前版本：不弹。
-    /// - 看过别的版本（确属升级）：弹。
-    /// - 从没记录过：区分两种人——
-    ///   · 全新安装（还没建档/没完成引导）：不弹，别打扰第一次。
-    ///   · 老用户首次升级到带本功能的版本（已完成引导）：弹一次。
-    /// - Parameter isReturningUser: 是否老用户（一般传 hasCompletedOnboarding）。
+    /// - 已看过当前更新条目：不弹。
+    /// - 没看过（升级/首次见到新条目）：弹。
+    /// - 真·全新安装且还没完成引导：不弹，别打扰第一次。
     static func shouldPresent(isReturningUser: Bool) -> Bool {
         let seen = UserDefaults.standard.string(forKey: key)
-        guard let seen else {
-            if isReturningUser {
-                return true            // 老用户首次升级 → 弹
-            } else {
-                markSeen()             // 全新安装 → 记下当前版本，不弹
-                return false
-            }
+        if seen == currentTag { return false }   // 已看过这条
+        if seen == nil && !isReturningUser {
+            markSeen()                           // 全新安装：记下、不弹
+            return false
         }
-        return seen != AppVersion.marketing
+        return true                              // 升级 / 新条目 → 弹
     }
 
     static func markSeen() {
-        UserDefaults.standard.set(AppVersion.marketing, forKey: key)
+        UserDefaults.standard.set(currentTag, forKey: key)
     }
 }
 
