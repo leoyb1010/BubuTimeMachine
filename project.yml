@@ -27,13 +27,50 @@ targets:
       - path: BubuTimeMachine
         excludes:
           - "Info.plist"
+          - "BubuTimeMachine.entitlements"
+    entitlements:
+      path: BubuTimeMachine/BubuTimeMachine.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: BubuTimeMachine/Info.plist
+        CODE_SIGN_ENTITLEMENTS: BubuTimeMachine/BubuTimeMachine.entitlements
         TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: BubuWidgetsExtension
+        embed: true
+
+  BubuWidgetsExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      # Widget 自身代码
+      - path: BubuWidgets
+        excludes:
+          - "BubuWidgets.entitlements"
+          - "Info.plist"
+      # 复用主 App 的共享层（均为 Foundation/SwiftData/AppIntents，extension 安全）
+      - path: BubuTimeMachine/Models
+      - path: BubuTimeMachine/App/BubuStorage.swift
+      - path: BubuTimeMachine/App/SharedModelContainer.swift
+      - path: BubuTimeMachine/App/SharedDefaults.swift
+      - path: BubuTimeMachine/App/BubuAppIntents.swift
+      - path: BubuTimeMachine/App/BubuActivityAttributes.swift
+      - path: BubuTimeMachine/Services/EntryWriter.swift
+    entitlements:
+      path: BubuWidgets/BubuWidgets.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.widgets
+        CODE_SIGN_ENTITLEMENTS: BubuWidgets/BubuWidgets.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: BubuWidgets/Info.plist
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
 
   BubuTimeMachineTests:
     type: bundle.unit-test

@@ -261,6 +261,8 @@ struct BubuIdentityCard: View {
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
+                // 年龄/天数每日跳变时数字像里程表滚动（AGE/DAY chip），其余文本无副作用。
+                .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)

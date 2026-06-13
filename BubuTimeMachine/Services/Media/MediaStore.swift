@@ -9,21 +9,13 @@ import AVFoundation
 nonisolated struct MediaStore: Sendable {
     static let publicUploadSoftLimitBytes: Int64 = 96 * 1_048_576
 
+    // 媒体目录改读 App Group 共享容器（BubuStorage），让 Widget/extension 也能显示照片缩略图。
+    // App Group 未就绪时 BubuStorage 自动回退到私有 Documents，与旧行为一致、不崩。
     private var mediaDir: URL {
-        directory(named: "Media")
+        BubuStorage.mediaDirectory
     }
     private var thumbnailDir: URL {
-        directory(named: "Thumbnails")
-    }
-
-    private func directory(named name: String) -> URL {
-        let fm = FileManager.default
-        let base = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent(name, isDirectory: true)
-        if !fm.fileExists(atPath: dir.path) {
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir
+        BubuStorage.thumbnailDirectory
     }
 
     // MARK: 写入

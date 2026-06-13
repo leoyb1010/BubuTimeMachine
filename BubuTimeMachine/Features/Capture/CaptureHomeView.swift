@@ -62,6 +62,8 @@ struct CaptureHomeView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        // 保存成功时的成功触觉，与「已经收好啦」贴纸同步，强化「完成感」。
+        .sensoryFeedback(.success, trigger: model?.savedFlash)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
