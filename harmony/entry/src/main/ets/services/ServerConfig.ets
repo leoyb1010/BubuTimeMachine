@@ -6,24 +6,36 @@ import { FamilyRole } from '../models/Enums';
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
 export class ServerConfig {
   static readonly shared = new ServerConfig();
+  static readonly versionName: string = '1.2.0';
+  static readonly versionCode: string = '2026061312';
+  static readonly defaultBaseURL: string = 'https://bubu-api.leoyuan.top';
+  static readonly defaultAIBaseURL: string = 'https://bubu-ai.leoyuan.top';
+  static readonly baseURLPlaceholder: string = 'https://你的服务器地址:8090';
+  static readonly aiBaseURLPlaceholder: string = 'https://你的AI服务地址:8000';
   private store: preferences.Preferences | null = null;
 
-  // 默认值（与 iOS 对齐，用户在设置页改）
-  baseURLString: string = '';
+  // 默认值与 iOS 1.2.0 对齐：家庭内测版首装即可指向固定自托管服务。
+  baseURLString: string = ServerConfig.defaultBaseURL;
   accountEmail: string = '';
   accountPassword: string = '';
   currentRoleRaw: string = FamilyRole.mama;
   childName: string = '布布';
+  aiBaseURLString: string = ServerConfig.defaultAIBaseURL;
+  aiAPIKey: string = '';
+  aiEnabled: boolean = true;
 
   private constructor() {}
 
   async load(context: common.UIAbilityContext): Promise<void> {
     this.store = await preferences.getPreferences(context, 'bubu_server_config');
-    this.baseURLString = await this.getStr('baseURL', '');
+    this.baseURLString = await this.getStr('baseURL', ServerConfig.defaultBaseURL);
     this.accountEmail = await this.getStr('email', '');
     this.accountPassword = await this.getStr('password', '');
     this.currentRoleRaw = await this.getStr('role', FamilyRole.mama);
     this.childName = await this.getStr('childName', '布布');
+    this.aiBaseURLString = await this.getStr('aiBaseURL', ServerConfig.defaultAIBaseURL);
+    this.aiAPIKey = await this.getStr('aiAPIKey', '');
+    this.aiEnabled = await this.getBool('aiEnabled', true);
   }
 
   get currentRole(): FamilyRole {
@@ -31,7 +43,11 @@ export class ServerConfig {
   }
 
   get isConfigured(): boolean {
-    return this.baseURLString.length > 0 && this.accountEmail.length > 0;
+    return this.baseURLString.length > 0 && this.accountEmail.length > 0 && this.accountPassword.length > 0;
+  }
+
+  get isAIConfigured(): boolean {
+    return this.aiEnabled && this.aiBaseURLString.length > 0;
   }
 
   async setRole(role: FamilyRole): Promise<void> {
@@ -49,6 +65,15 @@ export class ServerConfig {
     await this.put('baseURL', this.baseURLString);
     await this.put('email', this.accountEmail);
     await this.put('password', this.accountPassword);
+    await this.put('aiBaseURL', this.aiBaseURLString);
+    await this.put('aiAPIKey', this.aiAPIKey);
+    await this.putBool('aiEnabled', this.aiEnabled);
+  }
+
+  async logout(): Promise<void> {
+    this.accountEmail = '';
+    this.accountPassword = '';
+    await this.persistServer();
   }
 
   private async getStr(key: string, def: string): Promise<string> {
@@ -56,7 +81,18 @@ export class ServerConfig {
     return (await this.store.get(key, def)) as string;
   }
 
+  private async getBool(key: string, def: boolean): Promise<boolean> {
+    if (!this.store) return def;
+    return (await this.store.get(key, def)) as boolean;
+  }
+
   private async put(key: string, value: string): Promise<void> {
+    if (!this.store) return;
+    await this.store.put(key, value);
+    await this.store.flush();
+  }
+
+  private async putBool(key: string, value: boolean): Promise<void> {
     if (!this.store) return;
     await this.store.put(key, value);
     await this.store.flush();

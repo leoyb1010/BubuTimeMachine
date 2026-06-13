@@ -51,7 +51,7 @@ export class AppDatabase {
       syncState TEXT NOT NULL, createdAt INTEGER NOT NULL, entryId TEXT)`);
     // TimeCapsule
     await s.executeSql(`CREATE TABLE IF NOT EXISTS time_capsule (
-      id TEXT PRIMARY KEY, remoteId TEXT, title TEXT NOT NULL, fromRole TEXT NOT NULL,
+      id TEXT PRIMARY KEY, remoteId TEXT, title TEXT NOT NULL, letterText TEXT, fromRole TEXT NOT NULL,
       unlockAt INTEGER NOT NULL, isLocked INTEGER NOT NULL DEFAULT 1, encryptedBlobFileName TEXT,
       coverEmoji TEXT, syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
     // HealthRecord
@@ -81,6 +81,15 @@ export class AppDatabase {
     await s.executeSql(`CREATE TABLE IF NOT EXISTS vaccine_record (
       id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, doseLabel TEXT, scheduledAt INTEGER,
       administeredAt INTEGER, note TEXT, syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+    await this.addColumnIfMissing('time_capsule', 'letterText', 'TEXT');
+  }
+
+  private async addColumnIfMissing(table: string, column: string, type: string): Promise<void> {
+    try {
+      await this.store!.executeSql(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch (e) {
+      // Column already exists on fresh installs or after a previous migration.
+    }
   }
 
   // —— GrowthMeasurement ——
@@ -439,7 +448,7 @@ export class AppDatabase {
   // —— TimeCapsule ——
   async insertCapsule(c: TimeCapsule): Promise<void> {
     const v: relationalStore.ValuesBucket = {
-      id: c.id, remoteId: c.remoteId ?? null, title: c.title, fromRole: c.fromRole,
+      id: c.id, remoteId: c.remoteId ?? null, title: c.title, letterText: c.letterText ?? null, fromRole: c.fromRole,
       unlockAt: c.unlockAt, isLocked: c.isLocked ? 1 : 0, encryptedBlobFileName: c.encryptedBlobFileName ?? null,
       coverEmoji: c.coverEmoji ?? null, syncState: c.syncState, createdAt: c.createdAt
     };
@@ -456,6 +465,7 @@ export class AppDatabase {
         id: rs.getString(rs.getColumnIndex('id')),
         remoteId: AppDatabase.optStr(rs, 'remoteId'),
         title: rs.getString(rs.getColumnIndex('title')),
+        letterText: AppDatabase.optStr(rs, 'letterText'),
         fromRole: rs.getString(rs.getColumnIndex('fromRole')),
         unlockAt: rs.getLong(rs.getColumnIndex('unlockAt')),
         isLocked: rs.getLong(rs.getColumnIndex('isLocked')) === 1,

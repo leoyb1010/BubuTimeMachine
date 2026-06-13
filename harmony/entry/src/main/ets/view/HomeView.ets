@@ -1,5 +1,5 @@
 import { ChildProfile, Entry } from '../models/Models';
-import { Mood } from '../models/Enums';
+import { Mood, SyncState, moodEmoji } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
 import { ServerConfig } from '../services/ServerConfig';
 import { EntryWriter } from '../services/EntryWriter';
@@ -10,6 +10,8 @@ import { ChildProfileView } from './ChildProfileView';
 import { HealthHomeView } from './HealthHomeView';
 import { SettingsView } from './SettingsView';
 import { AlbumView } from './AlbumView';
+import { TimelineView } from './TimelineView';
+import { EntryDetailView } from './EntryDetailView';
 import { MediaStore } from '../services/MediaStore';
 import { AudioRecorder } from '../services/AudioRecorder';
 import { AIService } from '../services/AIService';
@@ -29,8 +31,14 @@ export struct HomeView {
   @State showHealth: boolean = false;
   @State showSettings: boolean = false;
   @State showAlbum: boolean = false;
+  @State showTimeline: boolean = false;
+  @State showBirthday: boolean = false;
+  @State selectedEntry: Entry | null = null;
   @State pickedPhotoName: string | null = null;   // 已选并落盘的照片文件名
   @State photoCount: number = 0;
+  @State healthCount: number = 0;
+  @State milestoneDoneCount: number = 0;
+  @State pendingSyncCount: number = 0;
   @State recording: boolean = false;
   @State recordedVoice: string | null = null;
   @State recordedDur: number = 0;
@@ -44,7 +52,18 @@ export struct HomeView {
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.entries = await AppDatabase.shared.fetchEntries(false) ?? [];
-    this.photoCount = (await AppDatabase.shared.fetchAllPhotos() ?? []).length;
+    const photos = await AppDatabase.shared.fetchAllPhotos() ?? [];
+    const health = await AppDatabase.shared.fetchHealth() ?? [];
+    const milestones = await AppDatabase.shared.fetchMilestones() ?? [];
+    const capsules = await AppDatabase.shared.fetchCapsules() ?? [];
+    this.photoCount = photos.length;
+    this.healthCount = health.length;
+    this.milestoneDoneCount = milestones.filter(m => m.happenedAt !== undefined).length;
+    this.pendingSyncCount =
+      this.entries.filter(e => e.syncState !== SyncState.synced).length +
+      health.filter(h => h.syncState !== SyncState.synced).length +
+      milestones.filter(m => m.syncState !== SyncState.synced).length +
+      capsules.filter(c => c.syncState !== SyncState.synced).length;
   }
 
   private entryList(): Entry[] {
@@ -54,7 +73,10 @@ export struct HomeView {
   // 一句话记录：有 AI 则先解析规整，无 AI/失败则直接存原文（离线优先）
   private async quickCapture(): Promise<void> {
     const text = this.quickText.trim();
-    if (text.length === 0) return;
+    if (text.length === 0) {
+      promptAction.showToast({ message: '先写一句再记录' });
+      return;
+    }
     this.parsing = true;
     let note = text;
     let mood: Mood | undefined = undefined;
@@ -128,6 +150,19 @@ export struct HomeView {
   build() {
     if (this.showRecord) {
       this.recordPanel()
+    } else if (this.selectedEntry) {
+      Column() {
+        this.panelHeader('记录详情')
+        EntryDetailView({
+          entry: this.selectedEntry!,
+          onDismiss: () => {
+            this.selectedEntry = null;
+            this.reload();
+          }
+        })
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.showProfile) {
       Column() {
         this.panelHeader('布布资料')
@@ -143,9 +178,17 @@ export struct HomeView {
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.showSettings) {
+      SettingsView({
+        onClose: () => {
+          this.showSettings = false;
+          this.reload();
+        }
+      })
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.showTimeline) {
       Column() {
-        this.panelHeader('设置')
-        SettingsView()
+        this.panelHeader('时光')
+        TimelineView()
           .layoutWeight(1)
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
@@ -156,6 +199,8 @@ export struct HomeView {
           .layoutWeight(1)
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.showBirthday) {
+      this.birthdayPanel()
     } else {
       this.homePage()
     }
@@ -189,56 +234,75 @@ export struct HomeView {
           }.margin({ top: 24 })
         }
 
-        // 大记录按钮
+        // 自然语言一句话记录（对照 iOS NaturalCaptureBar）
+        Row({ space: 10 }) {
+          Text('✨')
+            .fontSize(18)
+            .width(36)
+            .height(36)
+            .textAlign(TextAlign.Center)
+            .backgroundColor('#FFF0F4')
+            .borderRadius(18)
+          TextInput({ text: $$this.quickText, placeholder: '写一句或说一句：布布今天……' })
+            .layoutWeight(1)
+            .backgroundColor('#FFFFFF')
+            .borderRadius(12)
+            .height(44)
+          Button(this.parsing ? '…' : '↑')
+            .width(44)
+            .height(44)
+            .backgroundColor(this.quickText.trim().length === 0 ? '#E3DDD8' : BubuColor.primary)
+            .enabled(!this.parsing)
+            .onClick(() => { this.quickCapture(); })
+          Button(this.recording ? '■' : '🎙')
+            .width(44)
+            .height(44)
+            .backgroundColor(this.recording ? BubuColor.primary : '#F3F3F3')
+            .fontColor(this.recording ? Color.White : BubuColor.warmBrown)
+            .onClick(() => { this.toggleRecord(); })
+        }
+        .width('100%')
+        .padding(12)
+        .backgroundColor('#FFFFFFF2')
+        .borderRadius(22)
+        .shadow({ radius: 10, color: '#1A000000', offsetY: 4 })
+
+        // 大记录按钮（对照 iOS recordButton）
         Button() {
           Row() {
-            Text('🍼').fontSize(40)
+            Text('🍼').fontSize(46)
             Column() {
-              Text('记录此刻').fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-              Text('写一句、拍张照、说给布布听').fontSize(12).fontColor(BubuColor.secondaryText)
-            }.alignItems(HorizontalAlign.Start).margin({ left: 12 })
+              Text('记录此刻').fontSize(24).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+              Text('拍照、写一句、说给布布听').fontSize(13).fontColor(BubuColor.secondaryText)
+            }.alignItems(HorizontalAlign.Start).margin({ left: 14 })
             Blank()
-          }.width('100%').padding(16)
+            Text('💗').fontSize(30).fontColor(BubuColor.primary)
+          }.width('100%').padding(18)
         }
         .backgroundColor(BubuColor.card)
-        .borderRadius(24)
+        .borderRadius(30)
         .width('100%')
         .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.95 })
         .onClick(() => { this.showRecord = true; })
 
-        // 自然语言一句话记录（对照 iOS NaturalCaptureBar）
-        Row({ space: 8 }) {
-          TextInput({ text: $$this.quickText, placeholder: '一句话记录，如「布布今天会自己走路了」' })
-            .layoutWeight(1).backgroundColor('#F3F3F3').borderRadius(12).height(44)
-          Button(this.parsing ? '…' : '记')
-            .width(48).backgroundColor(BubuColor.primary)
-            .enabled(!this.parsing)
-            .onClick(() => { this.quickCapture(); })
-        }
-        .width('100%').padding(8)
-        .backgroundColor(BubuColor.card).borderRadius(16)
-
-        // 统计行（照片卡可点进相册）
+        // 统计行：瞬间 / 照片 / 生日均可点
         Row({ space: 12 }) {
-          this.statCard(`${this.entryList().length}`, '个瞬间')
-          Column({ space: 6 }) {
-            Text(`${this.photoCount}`).fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-            Text('张照片').fontSize(12).fontColor(BubuColor.secondaryText)
-          }
-          .layoutWeight(1).padding({ top: 12, bottom: 12 })
-          .backgroundColor(BubuColor.card).borderRadius(16)
-          .onClick(() => { this.showAlbum = true; })
+          this.statCard(`${this.entryList().length}`, '个瞬间', '✨', () => { this.showTimeline = true; })
+          this.statCard(`${this.photoCount}`, '张照片', '🖼️', () => { this.showAlbum = true; })
           if (this.profile) {
-            this.statCard(`${AgeCalculator.daysUntilNextBirthday(this.profile!.birthday)}`, '天后生日')
+            this.statCard(`${AgeCalculator.daysUntilNextBirthday(this.profile!.birthday)}`, '天后生日', '🎁', () => { this.showBirthday = true; })
           }
         }.width('100%')
+
+        this.syncHealthStrip()
+        this.onThisDaySection()
 
         // 布布健康入口（对照 iOS healthEntryCard）
         Row({ space: 14 }) {
           Text('🩺').fontSize(34)
           Column() {
             Text('布布健康').fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-            Text('餐食、零食、营养、睡眠、不舒服都记在这里').fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2)
+            Text('餐食、零食、营养补充、睡眠和不舒服都记在这里').fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2)
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Text('›').fontSize(22).fontColor(BubuColor.secondaryText)
         }
@@ -246,6 +310,9 @@ export struct HomeView {
         .backgroundColor(BubuColor.card).borderRadius(20)
         .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
         .onClick(() => { this.showHealth = true; })
+
+        this.dailyQuestionCard()
+        this.recentStrip()
       }
       .padding(16)
       .width('100%')
@@ -279,17 +346,277 @@ export struct HomeView {
     this.showHealth = false;
     this.showSettings = false;
     this.showAlbum = false;
+    this.showTimeline = false;
+    this.showBirthday = false;
+    this.selectedEntry = null;
     this.reload();
   }
 
   @Builder
-  statCard(value: string, label: string) {
+  statCard(value: string, label: string, icon: string, action: () => void) {
     Column({ space: 6 }) {
+      Text(icon).fontSize(20).fontColor(BubuColor.primary)
       Text(value).fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       Text(label).fontSize(12).fontColor(BubuColor.secondaryText)
     }
     .layoutWeight(1).padding({ top: 12, bottom: 12 })
     .backgroundColor(BubuColor.card).borderRadius(16)
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
+    .onClick(action)
+  }
+
+  @Builder
+  syncHealthStrip() {
+    Column({ space: 8 }) {
+      Row({ space: 10 }) {
+        Text(this.pendingSyncCount === 0 ? '☁️' : '🔄')
+          .fontSize(22)
+          .fontColor(this.pendingSyncCount === 0 ? BubuColor.success : BubuColor.primary)
+        Column({ space: 2 }) {
+          Text('本地已保存')
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(BubuColor.warmBrown)
+          Text(this.syncSummary())
+            .fontSize(11)
+            .fontColor(BubuColor.secondaryText)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Text('查看')
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.primary)
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(12)
+    .backgroundColor('#FFFFFFCC')
+    .borderRadius(14)
+    .onClick(() => { this.showSettings = true; })
+  }
+
+  @Builder
+  onThisDaySection() {
+    if (this.onThisDayEntries().length > 0) {
+      Column({ space: 10 }) {
+        Row({ space: 6 }) {
+          Text('📅').fontSize(18)
+          Text('那年今日')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(BubuColor.warmBrown)
+          Text('›').fontSize(16).fontColor(BubuColor.secondaryText)
+          Blank()
+        }
+        .width('100%')
+
+        Scroll() {
+          Row({ space: 12 }) {
+            ForEach(this.onThisDayEntries().slice(0, 8), (e: Entry) => {
+              this.memoryCard(e)
+            }, (e: Entry) => e.id)
+          }
+          .padding({ right: 4 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor(BubuColor.card)
+      .borderRadius(20)
+    }
+  }
+
+  @Builder
+  memoryCard(e: Entry) {
+    Column({ space: 6 }) {
+      Text(moodEmoji(e.moodRaw as Mood | undefined))
+        .fontSize(38)
+        .width(96)
+        .height(96)
+        .textAlign(TextAlign.Center)
+        .backgroundColor('#FFF0F4')
+        .borderRadius(14)
+      if (this.profile) {
+        Text(AgeCalculator.compactAge(this.profile!.birthday, e.happenedAt))
+          .fontSize(12)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.primary)
+      }
+      Text(this.yearsAgoText(e.happenedAt))
+        .fontSize(10)
+        .fontColor(BubuColor.secondaryText)
+    }
+    .width(108)
+    .onClick(() => { this.selectedEntry = e; })
+  }
+
+  @Builder
+  dailyQuestionCard() {
+    Row({ space: 14 }) {
+      Text('🤔').fontSize(38)
+      Column({ space: 4 }) {
+        Text('今日一问')
+          .fontSize(13)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.primary)
+        Text(this.todayQuestion())
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(BubuColor.warmBrown)
+          .maxLines(2)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      Text('答一句')
+        .fontSize(12)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+        .backgroundColor(BubuColor.primary)
+        .borderRadius(16)
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor(BubuColor.card)
+    .borderRadius(20)
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
+    .onClick(() => {
+      this.quickText = `【今日一问】${this.todayQuestion()}\n`;
+      promptAction.showToast({ message: '已放到上方记录框' });
+    })
+  }
+
+  @Builder
+  recentStrip() {
+    if (this.entryList().length > 0) {
+      Column({ space: 10 }) {
+        Row({ space: 6 }) {
+          Text('🕐').fontSize(18)
+          Text('最近的瞬间')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(BubuColor.warmBrown)
+          Blank()
+        }
+        .width('100%')
+
+        Scroll() {
+          Row({ space: 10 }) {
+            ForEach(this.entryList().slice(0, 8), (e: Entry) => {
+              this.recentCard(e)
+            }, (e: Entry) => e.id)
+          }
+          .padding({ right: 4 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder
+  recentCard(e: Entry) {
+    Column({ space: 6 }) {
+      Text(moodEmoji(e.moodRaw as Mood | undefined))
+        .fontSize(32)
+        .width(96)
+        .height(72)
+        .textAlign(TextAlign.Center)
+        .backgroundColor(BubuColor.card)
+        .borderRadius(16)
+      Text(e.note && e.note.length > 0 ? e.note : '一条布布瞬间')
+        .fontSize(11)
+        .fontColor(BubuColor.secondaryText)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width(108)
+    .onClick(() => { this.selectedEntry = e; })
+  }
+
+  @Builder
+  birthdayPanel() {
+    Column({ space: 16 }) {
+      this.panelHeader('生日倒计时')
+      Text('🎁')
+        .fontSize(64)
+      Text(this.profile ? `${AgeCalculator.daysUntilNextBirthday(this.profile!.birthday)} 天后生日` : '先建立布布档案')
+        .fontSize(26)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.warmBrown)
+      if (this.profile) {
+        Text(`布布已经来到世界第 ${AgeCalculator.daysSinceBirth(this.profile!.birthday)} 天`)
+          .fontSize(14)
+          .fontColor(BubuColor.secondaryText)
+      }
+    }
+    .padding(20)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(BubuColor.cream)
+  }
+
+  private syncSummary(): string {
+    if (!ServerConfig.shared.isConfigured) {
+      return this.pendingSyncCount === 0 ? '离线也可用，暂无待同步' : `离线可用，${this.pendingSyncCount} 项等服务器`;
+    }
+    return this.pendingSyncCount === 0 ? '已和家里服务器同步' : `${this.pendingSyncCount} 项正在等待同步`;
+  }
+
+  private onThisDayEntries(): Entry[] {
+    const now = new Date();
+    return this.entryList().filter(e => {
+      const d = new Date(e.happenedAt);
+      return d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate() &&
+        !this.isSameDay(e.happenedAt, Date.now());
+    });
+  }
+
+  private isSameDay(a: number, b: number): boolean {
+    const da = new Date(a);
+    const db = new Date(b);
+    return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+  }
+
+  private yearsAgoText(ms: number): string {
+    const years = new Date().getFullYear() - new Date(ms).getFullYear();
+    return years <= 0 ? '今年' : `${years}年前的今天`;
+  }
+
+  private todayQuestion(): string {
+    const infant: string[] = [
+      '今天布布最像哪种小动物？',
+      '她今天发出的最可爱的声音是什么？',
+      '今天她盯着什么看了好久？',
+      '今天她第一次尝了什么味道？'
+    ];
+    const toddler: string[] = [
+      '她今天发明了什么新词？',
+      '今天她最得意的一件事是什么？',
+      '她今天说的哪句话把你逗乐了？',
+      '今天她最舍不得放下的玩具是哪个？'
+    ];
+    const child: string[] = [
+      '她今天问了什么让你答不上来的问题？',
+      '今天她最骄傲的作品是什么？',
+      '今天她说了什么暖心的话？',
+      '她今天学会了什么新本领？'
+    ];
+    let bank = toddler;
+    if (this.profile) {
+      const now = new Date();
+      const bd = new Date(this.profile!.birthday);
+      const months = (now.getFullYear() - bd.getFullYear()) * 12 + (now.getMonth() - bd.getMonth());
+      bank = months < 13 ? infant : (months < 37 ? toddler : child);
+    }
+    const daySeed = Math.floor(Date.now() / 86400000);
+    return bank[Math.abs(daySeed) % bank.length];
   }
 
   @Builder

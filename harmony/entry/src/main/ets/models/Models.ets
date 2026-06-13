@@ -87,6 +87,7 @@ export interface TimeCapsule {
   id: string;
   remoteId?: string;
   title: string;
+  letterText?: string;
   fromRole: string;
   unlockAt: number;
   isLocked: boolean;

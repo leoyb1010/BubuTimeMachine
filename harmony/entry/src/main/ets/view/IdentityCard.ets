@@ -16,14 +16,24 @@ export struct IdentityCard {
     });
   }
 
-  private get ageText(): string {
-    return AgeCalculator.ageDescription(this.profile.birthday, Date.now());
+  private birthdayMs(): number {
+    const raw = this.profile.birthday;
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return Date.now();
+    }
+    return raw;
   }
-  private get daysText(): string {
-    return `第 ${AgeCalculator.daysSinceBirth(this.profile.birthday)} 天`;
+
+  private ageText(): string {
+    return AgeCalculator.ageDescription(this.birthdayMs(), Date.now());
   }
-  private get birthdayText(): string {
-    const d = new Date(this.profile.birthday);
+
+  private daysText(): string {
+    return `第 ${AgeCalculator.daysSinceBirth(this.birthdayMs())} 天`;
+  }
+
+  private birthdayText(): string {
+    const d = new Date(this.birthdayMs());
     return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
   }
 
@@ -68,12 +78,12 @@ export struct IdentityCard {
         .margin({ top: 6 }).alignSelf(ItemAlign.Start)
 
       Row({ space: 8 }) {
-        this.chip('AGE', this.ageText)
-        this.chip('DAY', this.daysText)
+        this.chip('AGE', this.ageText())
+        this.chip('DAY', this.daysText())
       }.width('100%').margin({ top: 12 })
 
       Row({ space: 8 }) {
-        this.chip('BIRTH', this.birthdayText)
+        this.chip('BIRTH', this.birthdayText())
         this.chip('FROM', this.profile.birthPlace && this.profile.birthPlace.length > 0 ? this.profile.birthPlace! : '地球小站')
       }.width('100%').margin({ top: 8 })
 
@@ -117,13 +127,24 @@ export struct IdentityCard {
 
   @Builder
   chip(title: string, value: string) {
-    Column() {
-      Text(title).fontSize(9).fontWeight(FontWeight.Bold).fontColor(BubuColor.primary)
-      Text(value).fontSize(13).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown)
-        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+    Row({ space: 8 }) {
+      Text(title)
+        .fontSize(9)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.primary)
+        .width(42)
+        .maxLines(1)
+      Text(value.length > 0 ? value : '未填写')
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(BubuColor.warmBrown)
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .alignItems(HorizontalAlign.Start)
+    .alignItems(VerticalAlign.Center)
     .layoutWeight(1)
+    .height(42)
     .padding({ left: 10, right: 10, top: 6, bottom: 6 })
     .backgroundColor('#61FFFFFF')
     .borderRadius(12)

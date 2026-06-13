@@ -15,6 +15,7 @@ export struct CapsuleView {
   @State draftTitle: string = '';
   @State draftLetter: string = '';
   @State unlockMs: number = Date.now() + 365 * 86400000; // 默认一年后
+  @State selectedCapsule: TimeCapsule | null = null;
 
   aboutToAppear(): void { this.reload(); }
 
@@ -27,7 +28,9 @@ export struct CapsuleView {
   }
 
   build() {
-    if (this.showCompose) {
+    if (this.selectedCapsule !== null) {
+      this.detailPanel()
+    } else if (this.showCompose) {
       this.composePanel()
     } else {
       this.mainPage()
@@ -83,11 +86,15 @@ export struct CapsuleView {
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       if (!this.isLocked(c)) {
         Text('开启 ▶').fontSize(13).fontColor(BubuColor.primary)
+      } else {
+        Text('未到期').fontSize(12).fontColor(BubuColor.secondaryText)
       }
     }
     .width('100%').padding(14)
     .backgroundColor(BubuColor.card).borderRadius(16)
     .opacity(this.isLocked(c) ? 0.9 : 1)
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
+    .onClick(() => { this.openCapsule(c); })
   }
 
   @Builder
@@ -126,15 +133,81 @@ export struct CapsuleView {
     .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
   }
 
+  @Builder
+  detailPanel() {
+    Column({ space: 14 }) {
+      Row({ space: 12 }) {
+        Button('返回')
+          .backgroundColor('#F3F3F3')
+          .fontColor(BubuColor.warmBrown)
+          .onClick(() => { this.selectedCapsule = null; })
+        Text(this.selectedCapsule ? this.selectedCapsule!.title : '时间胶囊')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.warmBrown)
+        Blank()
+      }.width('100%')
+
+      Text(this.selectedCapsule ? this.selectedCapsule!.coverEmoji ?? '💌' : '💌')
+        .fontSize(56)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+
+      Text(this.selectedCapsule ? this.selectedCapsule!.title : '')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.warmBrown)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+
+      Text(this.selectedCapsule ? `来自${this.selectedCapsule!.fromRole} · ${this.dateText(this.selectedCapsule!.unlockAt)} 解锁` : '')
+        .fontSize(12)
+        .fontColor(BubuColor.secondaryText)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+
+      Text(this.selectedCapsule && this.selectedCapsule!.letterText && this.selectedCapsule!.letterText!.length > 0
+        ? this.selectedCapsule!.letterText!
+        : '这封时间胶囊没有正文。')
+        .fontSize(16)
+        .fontColor(BubuColor.warmBrown)
+        .lineHeight(28)
+        .width('100%')
+        .padding(18)
+        .backgroundColor(BubuColor.card)
+        .borderRadius(18)
+    }
+    .padding(20)
+    .width('100%').height('100%').backgroundColor(BubuColor.cream)
+  }
+
+  private openCapsule(c: TimeCapsule): void {
+    if (this.isLocked(c)) {
+      promptAction.showDialog({
+        title: '还没到解锁日',
+        message: `${this.daysLeft(c.unlockAt)} 天后再打开，时间胶囊会先替布布保管好。`,
+        buttons: [{ text: '知道了', color: BubuColor.primary }]
+      });
+      return;
+    }
+    this.selectedCapsule = c;
+  }
+
   private async save(): Promise<void> {
     const title = this.draftTitle.trim().length === 0 ? '给未来布布的信' : this.draftTitle.trim();
+    const letter = this.draftLetter.trim();
+    if (letter.length === 0) {
+      promptAction.showToast({ message: '先写一点想对布布说的话' });
+      return;
+    }
     const now = Date.now();
     const c: TimeCapsule = {
       id: util.generateRandomUUID(true),
       title: title,
+      letterText: letter,
       fromRole: ServerConfig.shared.currentRole,
       unlockAt: this.unlockMs,
-      isLocked: true,
+      isLocked: this.unlockMs > now,
       coverEmoji: '💌',
       syncState: SyncState.local,
       createdAt: now

@@ -15,3 +15,6 @@ build/
 # 本地媒体/沙盒（不应进仓库）
 *.mov
 *.mp4
+
+# 本地 Claude/Codex worktree 缓存（不入产品仓库）
+.claude/

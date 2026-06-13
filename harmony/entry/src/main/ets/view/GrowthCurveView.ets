@@ -135,6 +135,10 @@ export struct GrowthCurveView {
   private async save(): Promise<void> {
     const h = parseFloat(this.heightStr);
     const w = parseFloat(this.weightStr);
+    if (isNaN(h) && isNaN(w)) {
+      promptAction.showToast({ message: '先填身高或体重' });
+      return;
+    }
     const now = Date.now();
     const g: GrowthMeasurement = {
       id: util.generateRandomUUID(true),

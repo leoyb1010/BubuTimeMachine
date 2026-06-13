@@ -14,12 +14,11 @@ export class AIService {
   private constructor() {}
 
   private get baseURL(): string {
-    // iOS 用单独的 AI 地址；这里复用服务器地址 + /ai 前缀，可在设置里改。
-    return ServerConfig.shared.baseURLString.replace(/\/+$/, '');
+    return ServerConfig.shared.aiBaseURLString.replace(/\/+$/, '');
   }
 
   get isConfigured(): boolean {
-    return this.baseURL.length > 0;
+    return ServerConfig.shared.isAIConfigured;
   }
 
   // 一句话解析。失败抛错，UI 层降级为「直接存原文」。
@@ -27,9 +26,13 @@ export class AIService {
     const req = http.createHttp();
     try {
       const body = JSON.stringify({ text: text, child_name: ServerConfig.shared.childName });
+      const header: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (ServerConfig.shared.aiAPIKey.length > 0) {
+        header['Authorization'] = `Bearer ${ServerConfig.shared.aiAPIKey}`;
+      }
       const resp = await req.request(this.baseURL + '/parse-natural-capture', {
         method: http.RequestMethod.POST,
-        header: { 'Content-Type': 'application/json' } as Record<string, string>,
+        header: header,
         extraData: body,
         connectTimeout: 30000,
         readTimeout: 90000
