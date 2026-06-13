@@ -735,6 +735,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         let iso = ISO8601DateFormatter()
         var body: [String: Any] = ["localId": dto.localId, "name": dto.name, "birthday": iso.string(from: dto.birthday)]
         if let v = dto.gender { body["gender"] = v }
+        if let v = dto.bloodType { body["bloodType"] = v }
         if let v = dto.birthPlace { body["birthPlace"] = v }
         addSyncTimestamp(to: &body)
         return body
@@ -750,6 +751,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                                name: obj["name"] as? String ?? fallback?.name ?? "布布",
                                birthday: date("birthday") ?? fallback?.birthday ?? .now,
                                gender: obj["gender"] as? String ?? fallback?.gender,
+                               bloodType: obj["bloodType"] as? String ?? fallback?.bloodType,
                                birthPlace: obj["birthPlace"] as? String ?? fallback?.birthPlace,
                                avatarRemoteURL: avatarRemoteURL ?? fallback?.avatarRemoteURL,
                                createdAt: fallback?.createdAt ?? .now)

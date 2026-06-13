@@ -56,7 +56,8 @@ struct BubuIdentityCard: View {
     }
 
     private func flip() {
-        withAnimation(.spring(duration: 0.55)) {
+        // 统一用 BubuMotion.ceremony（可打断 spring，典礼感节奏）——翻面途中可随时再点反向翻回。
+        withAnimation(BubuMotion.ceremony) {
             isFlipped.toggle()
         }
     }

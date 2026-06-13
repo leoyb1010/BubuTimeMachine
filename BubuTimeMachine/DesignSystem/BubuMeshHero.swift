@@ -1,26 +1,23 @@
 import SwiftUI
 
-// MARK: - 首页 Hero 呼吸背景（Wave J §2.2）
+// MARK: - 首页 Hero 静态网格背景（Wave J §2.2 / 性能修订）
 /// 用 iOS 18+ 原生 `MeshGradient` 取代平直双色渐变：3×3 控制点取当前主题 `meshPalette`，
-/// 做极慢漂移（单循环 ~16s，位移 ≤ 0.06），肉眼像「光在纸上流动」，而非动画。
+/// 渲染成一张静态、带自然不对称感的柔和渐变。
 ///
-/// 性能纪律（§3.4）：
-/// - 只放 hero 一处，**不进滚动区**；用 `TimelineView(.animation)` 以 ~20fps 驱动，不追 120fps；
-/// - `reduceMotion` 时静止（控制点取静态相位）；
-/// - 不叠加额外 blur/阴影，零每帧布局成本。
+/// 性能纪律（修订）：
+/// - **静态渲染**：原先 `TimelineView(.animation)` 以 ~20fps 持续驱动会让屏幕永不 idle，
+///   并强迫上层所有玻璃/材质卡片每帧重新采样背景——这是首页不丝滑的主因之一。
+///   「光在纸上流动」的微动收益远小于持续重绘的成本，故改为一次性静态渲染。
+/// - 取一个固定的非零相位，让控制点保持自然偏移，避免死板的正交网格观感；
+/// - 不叠加额外 blur/阴影，零每帧成本。
 struct BubuMeshHero: View {
     let colors: [Color]
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 固定相位：让 3×3 控制点有自然的不对称漂移，但不随时间变化。
+    private static let staticPhase: Double = 1.7
 
     var body: some View {
-        if reduceMotion {
-            mesh(phase: 0)
-        } else {
-            SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: false)) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                mesh(phase: t)
-            }
-        }
+        mesh(phase: Self.staticPhase)
     }
 
     /// 3×3 网格：四角与四边固定，中心点与边中点随相位做小幅正弦漂移。

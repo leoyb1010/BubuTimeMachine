@@ -18,6 +18,9 @@ struct CaptureHomeView: View {
     @State private var firstTimeSuggestion: String?
     @State private var firstTimeEntryID: UUID?
 
+    /// 缩略图 → 详情页的 iOS 18+ 缩放共享元素转场（与 TimelineView 同一套做法）。
+    @Namespace private var zoomNS
+
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
 
@@ -41,6 +44,11 @@ struct CaptureHomeView: View {
                     Spacer(minLength: 24)
                 }
                 .padding()
+            }
+            // 详情页转场移到此处（而非 RootTabView），以便与本页 zoomNS 配对实现缩放共享元素转场。
+            .navigationDestination(for: Entry.self) { entry in
+                EntryDetailView(entry: entry)
+                    .navigationTransition(.zoom(sourceID: entry.id, in: zoomNS))
             }
 
             if let model {
@@ -121,12 +129,20 @@ struct CaptureHomeView: View {
            let name = profile?.heroBackgroundFileName,
            let data = env.mediaStore.data(forMedia: name),
            let ui = UIImage(data: data) {
-            ZStack {
-                Image(uiImage: ui).resizable().scaledToFill()
-                Rectangle().fill(.ultraThinMaterial)
-                LinearGradient(colors: [theme.primary.opacity(0.25), .clear, theme.primary.opacity(0.15)],
-                               startPoint: .top, endPoint: .bottom)
-            }
+            // 关键：用 Color.clear 接住父级提议的尺寸（满屏），照片以 overlay 填充再裁切。
+            // 若直接给 Image .scaledToFill() 而不锁定 frame，它会把整页撑到照片原生尺寸（撑爆布局 bug）。
+            Color.clear
+                .overlay {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .scaledToFill()
+                }
+                .clipped()
+                .overlay {
+                    Rectangle().fill(.ultraThinMaterial)
+                    LinearGradient(colors: [theme.primary.opacity(0.25), .clear, theme.primary.opacity(0.15)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
         } else {
             // 主题模式：MeshGradient 呼吸背景（§2.2）。星夜深色面板单独走暗渐变保证对比度。
             if env.isDarkTheme {
@@ -266,8 +282,8 @@ struct CaptureHomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
         .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        // iOS 26 glassEffect 自带景深，去掉冗余的额外阴影（既省合成又更贴近原生质感）。
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
-        .bubuCardShadow()
     }
 
     private var totalPhotos: Int {
@@ -302,6 +318,7 @@ struct CaptureHomeView: View {
                                 onThisDayCard(entry)
                             }
                             .buttonStyle(.plain)
+                            .matchedTransitionSource(id: entry.id, in: zoomNS)
                         }
                     }
                 }
@@ -378,7 +395,6 @@ struct CaptureHomeView: View {
             .padding()
             .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
-            .bubuCardShadow()
         }
         .buttonStyle(.plain)
     }
@@ -408,7 +424,6 @@ struct CaptureHomeView: View {
             .padding()
             .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
-            .bubuCardShadow()
         }
         .buttonStyle(.plain)
     }
@@ -479,6 +494,7 @@ struct CaptureHomeView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .matchedTransitionSource(id: entry.id, in: zoomNS)
                         }
                     }
                 }

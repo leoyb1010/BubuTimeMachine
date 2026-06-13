@@ -9,8 +9,9 @@ struct RootTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack {
+                // Entry 详情的 navigationDestination 已下沉到 CaptureHomeView，
+                // 以便与该页的 zoomNS 配对实现缩放共享元素转场。
                 CaptureHomeView(openTimeline: { selection = 1 })
-                    .navigationDestination(for: Entry.self) { EntryDetailView(entry: $0) }
             }
             .tabItem { Label("记录此刻", systemImage: "heart.circle.fill") }
             .tag(0)

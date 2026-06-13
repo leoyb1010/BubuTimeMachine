@@ -1022,12 +1022,13 @@ final class SyncEngine {
 
     private static func makeDTO(_ item: ChildProfile) -> ChildProfileDTO {
         ChildProfileDTO(id: item.remoteId, localId: item.id.uuidString, name: item.name, birthday: item.birthday,
-                        gender: item.gender, birthPlace: item.birthPlace,
+                        gender: item.gender, bloodType: item.bloodType, birthPlace: item.birthPlace,
                         avatarRemoteURL: item.avatarRemoteURL, createdAt: item.createdAt)
     }
 
     private static func apply(_ dto: ChildProfileDTO, to item: ChildProfile) {
-        item.name = dto.name; item.birthday = dto.birthday; item.gender = dto.gender; item.birthPlace = dto.birthPlace
+        item.name = dto.name; item.birthday = dto.birthday; item.gender = dto.gender
+        item.bloodType = dto.bloodType; item.birthPlace = dto.birthPlace
         // 远端头像变更：更新 URL 并清掉本地文件名，下一轮 downloadMissingFiles 重新落地
         if let remote = dto.avatarRemoteURL, remote != item.avatarRemoteURL {
             item.avatarRemoteURL = remote

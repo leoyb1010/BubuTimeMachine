@@ -86,7 +86,38 @@ struct ChildProfileView: View {
                     set: { profile.birthPlace = $0.isEmpty ? nil : $0; profile.syncState = .local; try? context.save() }))
                     .multilineTextAlignment(.trailing)
             }
+            // 性别 / 血型：身份卡背面会展示这两项，此前缺少输入入口，导致永远「未填写」。
+            Picker("性别", selection: optionalStringBinding(\.gender, on: profile)) {
+                Text("未填写").tag(Self.unset)
+                ForEach(Self.genderOptions, id: \.self) { Text($0).tag($0) }
+            }
+            Picker("血型", selection: optionalStringBinding(\.bloodType, on: profile)) {
+                Text("未填写").tag(Self.unset)
+                ForEach(Self.bloodTypeOptions, id: \.self) { Text($0).tag($0) }
+            }
         }
+    }
+
+    // MARK: 可选字符串字段的输入选项
+
+    /// Picker 的「未填写」占位标签：映射回 model 的 nil。
+    private static let unset = ""
+    private static let genderOptions = ["男", "女", "其他"]
+    private static let bloodTypeOptions = ["A", "B", "O", "AB"]
+
+    /// 把 `String?` 字段桥接成 Picker 可用的非可选 `String` 绑定（空串 = nil = 未填写）。
+    private func optionalStringBinding(
+        _ keyPath: ReferenceWritableKeyPath<ChildProfile, String?>,
+        on profile: ChildProfile
+    ) -> Binding<String> {
+        Binding(
+            get: { profile[keyPath: keyPath] ?? Self.unset },
+            set: {
+                profile[keyPath: keyPath] = $0.isEmpty ? nil : $0
+                profile.syncState = .local
+                try? context.save()
+            }
+        )
     }
 
     private func heroSection(_ profile: ChildProfile) -> some View {
