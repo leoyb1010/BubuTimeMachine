@@ -71,12 +71,25 @@ struct ChildProfileView: View {
                 Spacer()
                 TextField("布布", text: Binding(
                     get: { profile.name },
-                    set: { profile.name = $0; profile.syncState = .local; env.config.childName = $0; try? context.save(); WidgetRefresher.reload() }))
+                    set: {
+                        profile.name = $0
+                        profile.syncState = .local
+                        env.config.childName = $0
+                        try? context.save()
+                        env.refreshWidgetSnapshot(context: context)
+                        WidgetRefresher.reload()
+                    }))
                     .multilineTextAlignment(.trailing)
             }
             DatePicker("生日", selection: Binding(
                 get: { profile.birthday },
-                set: { profile.birthday = $0; profile.syncState = .local; try? context.save(); WidgetRefresher.reload() }),
+                set: {
+                    profile.birthday = $0
+                    profile.syncState = .local
+                    try? context.save()
+                    env.refreshWidgetSnapshot(context: context)
+                    WidgetRefresher.reload()
+                }),
                 in: ...Date.now, displayedComponents: .date)
             HStack {
                 Text("出生地")
@@ -157,6 +170,7 @@ struct ChildProfileView: View {
             profile.avatarRemoteURL = nil   // 置空触发下一轮同步补传新头像
             profile.syncState = .local
             try? context.save()
+            env.refreshWidgetSnapshot(context: context)
             WidgetRefresher.reload()        // 头像变了，刷新桌面小组件
         }
     }

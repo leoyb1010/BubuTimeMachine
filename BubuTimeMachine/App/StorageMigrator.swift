@@ -14,7 +14,7 @@ import SQLite3
 /// - **store 三件套**：SQLite 的 `.store` / `.store-wal` / `.store-shm` 一并搬。
 enum StorageMigrator {
     private static let log = Logger(subsystem: "com.bubu.timemachine", category: "StorageMigrator")
-    private static let doneKey = "bubu.storage.migratedToAppGroup.v2"
+    private static let doneKey = "bubu.storage.migratedToAppGroup.v3"
     private static let storeSuffixes = ["", "-wal", "-shm"]
 
     private struct StoreCandidate {
@@ -64,11 +64,6 @@ enum StorageMigrator {
         var allOK = true
         let destination = makeCandidate(label: "App Group", url: destinationStore, fm: fm)
 
-        // v2 已完成且目标 store 仍存在：不用重复扫旧库，避免每次启动做 SQLite 统计。
-        if defaults.bool(forKey: doneKey), destination != nil {
-            return
-        }
-
         // 1) SwiftData store 三件套
         // 真实旧库曾经落在 SwiftData 默认路径 default.store；后续 0A 迁移又引入了
         // Documents/BubuTimeMachine.store。这里按业务表数量选“更完整”的库，避免把 300+ 里程碑
@@ -82,7 +77,25 @@ enum StorageMigrator {
                           fm: fm)
         ].compactMap { $0 }
 
-        if let bestSource = legacyStores.max(by: { $0.stats.score < $1.stats.score }) {
+        let bestSource = legacyStores.max(by: { $0.stats.score < $1.stats.score })
+        let storeNeedsRepair: Bool = {
+            guard let bestSource else { return false }
+            guard let destination else { return true }
+            return bestSource.stats.score > destination.stats.score
+        }()
+        let mediaNeedsRepair = ["Media", "Thumbnails"].contains { dirName in
+            directoryNeedsCopy(
+                srcDir: legacyRoot.appendingPathComponent(dirName, isDirectory: true),
+                dstDir: container.appendingPathComponent(dirName, isDirectory: true),
+                fm: fm
+            )
+        }
+
+        if defaults.bool(forKey: doneKey), destination != nil, !storeNeedsRepair, !mediaNeedsRepair {
+            return
+        }
+
+        if let bestSource, storeNeedsRepair {
             if let destination {
                 if bestSource.stats.score > destination.stats.score {
                     log.notice("App Group store 较旧，备份后用 \(bestSource.label, privacy: .public) 替换")
@@ -206,6 +219,17 @@ enum StorageMigrator {
         } catch {
             log.error("迁移文件失败 \(src.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return false
+        }
+    }
+
+    private static func directoryNeedsCopy(srcDir: URL, dstDir: URL, fm: FileManager) -> Bool {
+        guard fm.fileExists(atPath: srcDir.path),
+              let srcItems = try? fm.contentsOfDirectory(at: srcDir, includingPropertiesForKeys: nil),
+              !srcItems.isEmpty else { return false }
+        let dstItems = (try? fm.contentsOfDirectory(at: dstDir, includingPropertiesForKeys: nil)) ?? []
+        if dstItems.count < srcItems.count { return true }
+        return srcItems.contains { src in
+            !fm.fileExists(atPath: dstDir.appendingPathComponent(src.lastPathComponent).path)
         }
     }
 

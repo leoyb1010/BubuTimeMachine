@@ -42,13 +42,18 @@ struct BubuTimeMachineApp: App {
                     seedForUITestingIfNeeded()
                     #endif
                     env.bootstrap(context: modelContainer.mainContext)
+                    env.refreshWidgetSnapshot(context: modelContainer.mainContext)
+                    WidgetRefresher.reload()
                 }
         }
         .modelContainer(modelContainer)
         .onChange(of: scenePhase) { _, phase in
             // 进后台停轮询省电；回前台立刻补一轮同步
             switch phase {
-            case .active: env.syncEngine.start()
+            case .active:
+                env.syncEngine.start()
+                env.refreshWidgetSnapshot(context: modelContainer.mainContext)
+                WidgetRefresher.reload()
             case .background: env.syncEngine.stopPolling()
             default: break
             }

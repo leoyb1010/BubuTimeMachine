@@ -1,6 +1,8 @@
 import WidgetKit
 import SwiftUI
 import AppIntents
+import UIKit
+import ImageIO
 
 // MARK: - 时间线
 struct BubuEntry: TimelineEntry {
@@ -14,28 +16,27 @@ struct BubuProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (BubuEntry) -> Void) {
-        Task { @MainActor in
-            completion(BubuEntry(date: .now, snapshot: BubuWidgetData.loadSnapshot()))
-        }
+        completion(BubuEntry(date: .now, snapshot: BubuWidgetData.loadSnapshot()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<BubuEntry>) -> Void) {
-        Task { @MainActor in
-            let snapshot = BubuWidgetData.loadSnapshot()
-            let entry = BubuEntry(date: .now, snapshot: snapshot)
-            // 按天刷新：年龄/天数/倒计时是日粒度，明天零点后刷新一次足矣（不耗电）。
-            let nextMidnight = Calendar.current.nextDate(
-                after: .now, matching: DateComponents(hour: 0, minute: 5),
-                matchingPolicy: .nextTime
-            ) ?? Date.now.addingTimeInterval(3600)
-            completion(Timeline(entries: [entry], policy: .after(nextMidnight)))
-        }
+        let snapshot = BubuWidgetData.loadSnapshot()
+        let entry = BubuEntry(date: .now, snapshot: snapshot)
+        // 按天刷新：年龄/天数/倒计时是日粒度，明天零点后刷新一次足矣（不耗电）。
+        let nextMidnight = Calendar.current.nextDate(
+            after: .now, matching: DateComponents(hour: 0, minute: 5),
+            matchingPolicy: .nextTime
+        ) ?? Date.now.addingTimeInterval(3600)
+        completion(Timeline(entries: [entry], policy: .after(nextMidnight)))
     }
 }
 
 // MARK: - 配色（与主 App 同源暖色，不引入 App 的 BubuTheme 以保持 widget 轻量）
 private enum WidgetPalette {
     static let primary = Color(red: 0.95, green: 0.55, blue: 0.62)     // 珊瑚粉
+    static let roseDeep = Color(red: 0.73, green: 0.29, blue: 0.39)
+    static let honey = Color(red: 0.96, green: 0.62, blue: 0.20)
+    static let mint = Color(red: 0.37, green: 0.66, blue: 0.58)
     static let warmBrown = Color(red: 0.36, green: 0.28, blue: 0.24)
     static let cream = Color(red: 0.99, green: 0.96, blue: 0.92)
     static let secondary = Color(red: 0.55, green: 0.50, blue: 0.47)
@@ -43,24 +44,47 @@ private enum WidgetPalette {
 
 // MARK: - 布布圆形头像（无头像时回退到吉祥物表情）
 struct BubuAvatar: View {
-    let fileName: String?
+    let imageData: Data?
     var size: CGFloat
     var body: some View {
-        Group {
-            if let data = BubuWidgetData.photoData(fileName: fileName),
-               let ui = UIImage(data: data) {
-                Image(uiImage: ui).resizable().scaledToFill()
+        ZStack {
+            if let image = Self.downsampledImage(from: imageData, maxPixel: size * 3) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
             } else {
-                ZStack {
-                    WidgetPalette.primary.opacity(0.18)
-                    Text("👶").font(.system(size: size * 0.5))
-                }
+                LinearGradient(
+                    colors: [WidgetPalette.primary.opacity(0.34), WidgetPalette.honey.opacity(0.22)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Text("布")
+                    .font(.system(size: size * 0.44, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
             }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
         .shadow(color: WidgetPalette.primary.opacity(0.25), radius: 4, y: 2)
+    }
+
+    static func downsampledImage(from data: Data?, maxPixel: CGFloat) -> UIImage? {
+        guard let data else { return nil }
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return UIImage(data: data)
+        }
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(96, Int(maxPixel))
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cgImage)
     }
 }
 
@@ -78,27 +102,137 @@ private extension View {
     }
 }
 
+private struct BubuInfoChip: View {
+    let title: String
+    let value: String
+    var tint: Color = WidgetPalette.primary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundColor(WidgetPalette.secondary)
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .foregroundColor(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct BubuBirthdayBadge: View {
+    let snapshot: BubuSnapshot
+    var compact = false
+
+    var body: some View {
+        VStack(spacing: compact ? 0 : 2) {
+            Text(snapshot.hasProfile ? "\(snapshot.daysUntilBirthday)" : "--")
+                .font(.system(size: compact ? 20 : 28, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+            Text(snapshot.hasProfile ? "天后生日" : "待补档案")
+                .font(.system(size: compact ? 8 : 10, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+        }
+        .frame(width: compact ? 58 : 70, height: compact ? 46 : 58)
+        .background(
+            LinearGradient(colors: [WidgetPalette.primary, WidgetPalette.honey],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .shadow(color: WidgetPalette.primary.opacity(0.22), radius: 8, y: 4)
+    }
+}
+
+private struct BubuRecentPhotoCard: View {
+    let snapshot: BubuSnapshot
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                if let image = BubuAvatar.downsampledImage(from: snapshot.recentPhotoImageData, maxPixel: 180) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    LinearGradient(
+                        colors: [WidgetPalette.mint.opacity(0.30), WidgetPalette.primary.opacity(0.18)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(WidgetPalette.mint)
+                }
+            }
+            .frame(width: 54, height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(snapshot.recentPhotoFileName == nil ? "最近照片" : "最近照片已同步")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundColor(WidgetPalette.warmBrown)
+                    .lineLimit(1)
+                Text(snapshot.recentPhotoFileName == nil ? "记录一张照片后会出现在这里" : "桌面也能陪你回看成长瞬间")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(WidgetPalette.secondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 // MARK: - Small：头像 + 名字 + 年龄
 struct BubuSmallView: View {
     let snapshot: BubuSnapshot
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                BubuAvatar(fileName: snapshot.avatarFileName, size: 38)
-                Text(snapshot.name)
-                    .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundStyle(WidgetPalette.warmBrown)
-                    .lineLimit(1).minimumScaleFactor(0.7)
+                BubuAvatar(imageData: snapshot.avatarImageData, size: 42)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(snapshot.name)
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Text("BUBU TIME")
+                        .font(.system(size: 8, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.primary.opacity(0.72))
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Text(snapshot.ageText)
-                .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(WidgetPalette.warmBrown)
-                .minimumScaleFactor(0.6).lineLimit(2)
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundColor(WidgetPalette.warmBrown)
+                .minimumScaleFactor(0.58)
+                .lineLimit(2)
             if snapshot.hasProfile {
-                Text("来到世界第 \(snapshot.daysSinceBirth) 天")
+                HStack(spacing: 5) {
+                    Text("第 \(snapshot.daysSinceBirth) 天")
+                    Text("生日 \(snapshot.daysUntilBirthday) 天")
+                }
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(WidgetPalette.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.58)
+            } else {
+                Text("打开 App 刷新")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(WidgetPalette.secondary)
+                    .foregroundColor(WidgetPalette.secondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -109,45 +243,36 @@ struct BubuSmallView: View {
 struct BubuMediumView: View {
     let snapshot: BubuSnapshot
     var body: some View {
-        HStack(spacing: 14) {
-            BubuAvatar(fileName: snapshot.avatarFileName, size: 64)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(snapshot.name)
-                    .font(.system(size: 20, weight: .black, design: .rounded))
-                    .foregroundStyle(WidgetPalette.warmBrown)
-                Text(snapshot.ageText)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(WidgetPalette.primary)
-                if snapshot.hasProfile {
-                    Text("第 \(snapshot.daysSinceBirth) 天")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(WidgetPalette.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                BubuAvatar(imageData: snapshot.avatarImageData, size: 62)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(snapshot.name)
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(snapshot.ageText)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(WidgetPalette.roseDeep)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Text(snapshot.hasProfile ? "来到世界第 \(snapshot.daysSinceBirth) 天" : "打开 App 后自动同步到桌面")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(WidgetPalette.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
                 }
+                Spacer(minLength: 0)
+                BubuBirthdayBadge(snapshot: snapshot, compact: true)
             }
-            Spacer()
-            if snapshot.hasProfile {
-                VStack(spacing: 2) {
-                    Text("\(snapshot.daysUntilBirthday)")
-                        .font(.system(size: 32, weight: .black, design: .rounded))
-                        .foregroundStyle(WidgetPalette.primary)
-                        .contentTransition(.numericText())
-                    Text("天后生日 🎂")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(WidgetPalette.secondary)
-                }
-            } else {
-                recordButton
+
+            HStack(spacing: 8) {
+                BubuInfoChip(title: "成长天数", value: snapshot.hasProfile ? "\(snapshot.daysSinceBirth) 天" : "待记录", tint: WidgetPalette.mint)
+                BubuInfoChip(title: "照片状态", value: snapshot.recentPhotoFileName == nil ? "未同步" : "已同步", tint: WidgetPalette.honey)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-
-    private var recordButton: some View {
-        Button(intent: RecordMomentIntent()) {
-            Label("记一笔", systemImage: "plus.circle.fill")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-        }
-        .tint(WidgetPalette.primary)
     }
 }
 
@@ -155,46 +280,64 @@ struct BubuMediumView: View {
 struct BubuLargeView: View {
     let snapshot: BubuSnapshot
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             HStack {
                 Text("BUBU IDENTITY")
                     .font(.system(size: 11, weight: .black, design: .rounded))
                     .tracking(1.5)
-                    .foregroundStyle(WidgetPalette.primary.opacity(0.7))
+                    .foregroundColor(WidgetPalette.primary.opacity(0.7))
                 Spacer()
                 if snapshot.hasProfile {
                     Text("ACTIVE")
                         .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundColor(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(WidgetPalette.primary, in: Capsule())
                 }
             }
-            BubuAvatar(fileName: snapshot.avatarFileName, size: 96)
-            Text(snapshot.name)
-                .font(.system(size: 24, weight: .black, design: .rounded))
-                .foregroundStyle(WidgetPalette.warmBrown)
-            Text(snapshot.ageText)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(WidgetPalette.primary)
-            if snapshot.hasProfile {
-                HStack(spacing: 18) {
-                    stat("\(snapshot.daysSinceBirth)", "来到第N天")
-                    stat("\(snapshot.daysUntilBirthday)", "天后生日")
+
+            HStack(spacing: 14) {
+                BubuAvatar(imageData: snapshot.avatarImageData, size: 82)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(snapshot.name)
+                        .font(.system(size: 25, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Text(snapshot.ageText)
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.roseDeep)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Text(birthDateText)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(WidgetPalette.secondary)
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 0)
+                BubuBirthdayBadge(snapshot: snapshot)
             }
+
+            if snapshot.hasProfile {
+                HStack(spacing: 8) {
+                    BubuInfoChip(title: "成长天数", value: "\(snapshot.daysSinceBirth) 天", tint: WidgetPalette.mint)
+                    BubuInfoChip(title: "生日倒计时", value: "\(snapshot.daysUntilBirthday) 天", tint: WidgetPalette.primary)
+                    BubuInfoChip(title: "桌面内容", value: snapshot.recentPhotoFileName == nil ? "档案" : "档案+照片", tint: WidgetPalette.honey)
+                }
+            } else {
+                Text("打开 App 后自动同步")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(WidgetPalette.secondary)
+            }
+            BubuRecentPhotoCard(snapshot: snapshot)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.system(size: 22, weight: .black, design: .rounded))
-                .foregroundStyle(WidgetPalette.warmBrown)
-            Text(label).font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(WidgetPalette.secondary)
-        }
+    private var birthDateText: String {
+        guard let birthday = snapshot.birthday else { return "生日待补全" }
+        return "生日 " + birthday.formatted(.dateTime.year().month().day())
     }
 }
 
@@ -240,17 +383,17 @@ struct BubuWidgetEntryView: View {
     var body: some View {
         switch family {
         case .systemSmall:
-            BubuSmallView(snapshot: entry.snapshot).bubuWidgetBackground()
+            BubuSmallView(snapshot: entry.snapshot).padding(14).bubuWidgetBackground()
         case .systemMedium:
-            BubuMediumView(snapshot: entry.snapshot).bubuWidgetBackground()
+            BubuMediumView(snapshot: entry.snapshot).padding(16).bubuWidgetBackground()
         case .systemLarge:
-            BubuLargeView(snapshot: entry.snapshot).bubuWidgetBackground()
+            BubuLargeView(snapshot: entry.snapshot).padding(18).bubuWidgetBackground()
         case .accessoryCircular:
             BubuCircularView(snapshot: entry.snapshot)
         case .accessoryRectangular:
             BubuRectangularView(snapshot: entry.snapshot)
         default:
-            BubuSmallView(snapshot: entry.snapshot).bubuWidgetBackground()
+            BubuSmallView(snapshot: entry.snapshot).padding(14).bubuWidgetBackground()
         }
     }
 }
@@ -265,6 +408,8 @@ struct BubuWidget: Widget {
         .configurationDisplayName("布布时光机")
         .description("随时看到布布长大：年龄、来到世界第几天、生日倒计时。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular])
+        .contentMarginsDisabled()
+        .containerBackgroundRemovable(false)
     }
 }
 

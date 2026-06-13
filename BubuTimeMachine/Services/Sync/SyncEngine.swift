@@ -225,6 +225,34 @@ final class SyncEngine {
         refreshPendingCount()
     }
 
+    private func refreshWidgetSnapshot(_ context: ModelContext) {
+        guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return }
+        var recentPhoto: String?
+        var descriptor = FetchDescriptor<Entry>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\.happenedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 12
+        if let entries = try? context.fetch(descriptor) {
+            outer: for entry in entries {
+                for media in entry.media where media.type == .photo {
+                    if let fileName = media.localFileName {
+                        recentPhoto = fileName
+                        break outer
+                    }
+                }
+            }
+        }
+        SharedDefaults.saveWidgetSnapshot(SharedWidgetSnapshot(
+            name: profile.name,
+            birthday: profile.birthday,
+            recentPhotoFileName: recentPhoto,
+            avatarFileName: profile.avatarMediaFileName,
+            updatedAt: .now
+        ))
+        WidgetRefresher.reload()
+    }
+
     // MARK: - 删除队列消费
 
     private func processPendingDeletions(_ context: ModelContext) async {
@@ -419,6 +447,7 @@ final class SyncEngine {
             catch { item.syncState = .failed; recordFailure(error, item: "布布档案") }
             finishItem()
             saveAndRefresh(context)
+            refreshWidgetSnapshot(context)
         }
         let localHealth = (try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localHealth {
@@ -736,6 +765,7 @@ final class SyncEngine {
                 profile.avatarMediaFileName = try? mediaStore.savePhoto(data)
             }
             try? context.save()
+            refreshWidgetSnapshot(context)
         }
     }
 
@@ -761,6 +791,7 @@ final class SyncEngine {
             context.insert(entry)
         }
         try? context.save()
+        refreshWidgetSnapshot(context)
     }
 
     private func mergeRemoteMedia(_ dto: MediaDTO) async {
@@ -796,6 +827,7 @@ final class SyncEngine {
             context.insert(item)
         }
         try? context.save()
+        refreshWidgetSnapshot(context)
     }
 
     private func mergeRemoteFirstTime(_ dto: FirstTimeDTO) async {
@@ -839,6 +871,7 @@ final class SyncEngine {
             context.insert(item)
         }
         try? context.save()
+        refreshWidgetSnapshot(context)
     }
 
     private func mergeRemoteHealth(_ dto: HealthRecordDTO) async {

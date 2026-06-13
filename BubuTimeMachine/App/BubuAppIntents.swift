@@ -26,7 +26,9 @@ struct RecordMomentIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let context = SharedModelContainer.shared.mainContext
+        guard let context = SharedModelContainer.sharedIfAvailable?.mainContext else {
+            return .result(dialog: "暂时还读不到共享数据，请先打开 App 一次。")
+        }
         let role = SharedDefaults.currentRole
         do {
             try EntryWriter.quickTextEntry(note: note, role: role, in: context)
@@ -61,7 +63,9 @@ struct BubuAgeIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let context = SharedModelContainer.shared.mainContext
+        guard let context = SharedModelContainer.sharedIfAvailable?.mainContext else {
+            return .result(dialog: "暂时还读不到布布档案，请先打开 App 一次。")
+        }
         guard let profile = EntryWriter.currentChildProfile(in: context) else {
             return .result(dialog: "还没有布布的档案哦，先在 App 里建一个吧。")
         }

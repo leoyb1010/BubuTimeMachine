@@ -6,6 +6,7 @@ import WidgetKit
 /// 否则桌面小组件只会按系统的低频节奏更新，看起来「没反应」。
 enum WidgetRefresher {
     static func reload() {
+        WidgetCenter.shared.reloadTimelines(ofKind: "BubuWidget")
         WidgetCenter.shared.reloadAllTimelines()
     }
 }
