@@ -10,14 +10,19 @@ iOS 端的鸿蒙原生重写。与 iOS **共用同一套自托管后端**（Pock
 用本机 DevEco 工具链实测通过：
 
 ```
-hvigor 6.26.1 + HarmonyOS SDK API 26 + JBR 21
+hvigor 6.26.1 + HarmonyOS SDK + JBR 21
 $ ./hvigorw assembleHap --mode module -p product=default
 > BUILD SUCCESSFUL
-产物：entry/build/default/outputs/default/entry-default-unsigned.hap (~272KB)
+产物：entry/build/default/outputs/default/entry-default-unsigned.hap (~319KB)
 ArkTS 编译 0 error。
 ```
 
-> 本机无华为开发者证书/真机，**未签名、未上真机**。真机运行需在 DevEco 配签名。
+当前工程目标已对齐本机 DevEco 模拟器 `Pura X Max 6.1.1(24)`：
+
+- `build-profile.json5`: `compatibleSdkVersion/targetSdkVersion = 6.1.1(24)`
+- `AppScope/app.json5`: `minAPIVersion/targetAPIVersion = 24`
+
+> DevEco 绿色 Run 若报 `00401019`，通常是 DevEco 当前编译 SDK 的 releaseType 与模拟器 releaseType 预检不一致。底层 `hdc install` 可正常安装启动；也可以在 DevEco SDK Manager 安装与模拟器匹配的 HarmonyOS 6.1.1(API 24) Release 编译 SDK。
 
 ---
 
@@ -75,6 +80,21 @@ export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
 export JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home
 export PATH="$NODE_HOME/bin:$JAVA_HOME/bin:$PATH"
 ./hvigorw assembleHap --mode module -p product=default --no-daemon
+```
+
+## 一键安装到当前鸿蒙模拟器
+
+先在 DevEco 启动模拟器，确认 `hdc list targets` 能看到目标，然后：
+
+```bash
+cd harmony
+./scripts/run-on-harmony-device.sh
+```
+
+如有多个设备，可指定目标：
+
+```bash
+./scripts/run-on-harmony-device.sh 127.0.0.1:5555
 ```
 
 > `hvigorw` / `hvigorw.js` / `hvigor/hvigor-wrapper.js` / `local.properties` 已 gitignore，

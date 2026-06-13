@@ -6,6 +6,7 @@ import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor } from '../theme/BubuTheme';
 import { IdentityCard } from './IdentityCard';
 import { ChildProfileView } from './ChildProfileView';
+import { HealthHomeView } from './HealthHomeView';
 import { promptAction } from '@kit.ArkUI';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS CaptureHomeView）
@@ -17,6 +18,7 @@ export struct HomeView {
   @State noteDraft: string = '';
   @State showRecord: boolean = false;
   @State showProfile: boolean = false;
+  @State showHealth: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
@@ -66,6 +68,19 @@ export struct HomeView {
             this.statCard(`${AgeCalculator.daysUntilNextBirthday(this.profile!.birthday)}`, '天后生日')
           }
         }.width('100%')
+
+        // 布布健康入口（对照 iOS healthEntryCard）
+        Row({ space: 14 }) {
+          Text('🩺').fontSize(34)
+          Column() {
+            Text('布布健康').fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+            Text('餐食、零食、营养、睡眠、不舒服都记在这里').fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('›').fontSize(22).fontColor(BubuColor.secondaryText)
+        }
+        .width('100%').padding(16)
+        .backgroundColor(BubuColor.card).borderRadius(20)
+        .onClick(() => { this.showHealth = true; })
       }
       .padding(16)
       .width('100%')
@@ -74,11 +89,17 @@ export struct HomeView {
     .width('100%').height('100%')
     .bindSheet($$this.showRecord, this.recordSheet(), { height: 320 })
     .bindSheet($$this.showProfile, this.profileSheet(), { height: '80%' })
+    .bindSheet($$this.showHealth, this.healthSheet(), { height: '90%' })
   }
 
   @Builder
   profileSheet() {
     ChildProfileView()
+  }
+
+  @Builder
+  healthSheet() {
+    HealthHomeView()
   }
 
   @Builder

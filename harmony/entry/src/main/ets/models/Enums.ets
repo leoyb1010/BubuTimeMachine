@@ -56,6 +56,50 @@ export enum Mood {
   focused = '认真'
 }
 
+// 健康记录类型（对照 iOS HealthRecordKind）
+export enum HealthRecordKind {
+  meal = 'meal',
+  snack = 'snack',
+  supplement = 'supplement',
+  water = 'water',
+  sleep = 'sleep',
+  symptom = 'symptom',
+  checkup = 'checkup'
+}
+
+export const ALL_HEALTH_KINDS: HealthRecordKind[] = [
+  HealthRecordKind.meal, HealthRecordKind.snack, HealthRecordKind.supplement,
+  HealthRecordKind.water, HealthRecordKind.sleep, HealthRecordKind.symptom, HealthRecordKind.checkup
+];
+
+export interface HealthKindMeta {
+  title: string;
+  emoji: string;
+  placeholder: string;
+  heroSubtitle: string;
+}
+
+export function healthKindMeta(k: HealthRecordKind): HealthKindMeta {
+  switch (k) {
+    case HealthRecordKind.meal:
+      return { title: '餐食', emoji: '🍚', placeholder: '如：早餐小米粥 + 鸡蛋羹', heroSubtitle: '记录正餐、主食、蛋白质和吃完反应。' };
+    case HealthRecordKind.snack:
+      return { title: '零食', emoji: '🍓', placeholder: '如：苹果块、酸奶', heroSubtitle: '记录水果、酸奶、磨牙棒和尝新反应。' };
+    case HealthRecordKind.supplement:
+      return { title: '营养补充', emoji: '💊', placeholder: '如：维D、钙、益生菌', heroSubtitle: '维 D、钙、益生菌等，适合连续记录。' };
+    case HealthRecordKind.water:
+      return { title: '喝水', emoji: '💧', placeholder: '如：温水', heroSubtitle: '快速点一下，记录今天喝了多少水。' };
+    case HealthRecordKind.sleep:
+      return { title: '睡眠', emoji: '🌙', placeholder: '如：午睡', heroSubtitle: '记录入睡、醒来、午睡和夜醒。' };
+    case HealthRecordKind.symptom:
+      return { title: '不舒服', emoji: '🌡️', placeholder: '如：流鼻涕、咳嗽、肚子不舒服', heroSubtitle: '记录症状、体温、严重程度。' };
+    case HealthRecordKind.checkup:
+      return { title: '体检护理', emoji: '🩺', placeholder: '如：身高体重、疫苗、牙齿护理', heroSubtitle: '记录身高、体重、疫苗、牙齿和医生建议。' };
+    default:
+      return { title: '记录', emoji: '📝', placeholder: '', heroSubtitle: '' };
+  }
+}
+
 export function moodEmoji(m: Mood | undefined): string {
   switch (m) {
     case Mood.happy: return '😄';

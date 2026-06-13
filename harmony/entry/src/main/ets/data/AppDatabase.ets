@@ -142,6 +142,120 @@ export class AppDatabase {
     return p;
   }
 
+  // —— HealthRecord ——
+  async insertHealth(h: HealthRecord): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: h.id, remoteId: h.remoteId ?? null, kind: h.kind, title: h.title, detail: h.detail ?? null,
+      recordedAt: h.recordedAt, amountText: h.amountText ?? null, reaction: h.reaction ?? null,
+      amountValue: h.amountValue ?? null, amountUnit: h.amountUnit ?? null,
+      startAt: h.startAt ?? null, endAt: h.endAt ?? null, severity: h.severity ?? null,
+      temperatureCelsius: h.temperatureCelsius ?? null, tags: JSON.stringify(h.tags),
+      syncState: h.syncState, createdAt: h.createdAt
+    };
+    await this.store!.insert('health_record', v);
+  }
+
+  async fetchHealth(): Promise<HealthRecord[]> {
+    const pred = new relationalStore.RdbPredicates('health_record');
+    pred.orderByDesc('recordedAt');
+    const rs = await this.store!.query(pred);
+    const out: HealthRecord[] = [];
+    while (rs.goToNextRow()) {
+      const tagsStr = AppDatabase.optStr(rs, 'tags');
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        kind: rs.getString(rs.getColumnIndex('kind')),
+        title: rs.getString(rs.getColumnIndex('title')),
+        detail: AppDatabase.optStr(rs, 'detail'),
+        recordedAt: rs.getLong(rs.getColumnIndex('recordedAt')),
+        amountText: AppDatabase.optStr(rs, 'amountText'),
+        reaction: AppDatabase.optStr(rs, 'reaction'),
+        amountValue: AppDatabase.optNum(rs, 'amountValue'),
+        amountUnit: AppDatabase.optStr(rs, 'amountUnit'),
+        startAt: AppDatabase.optNum(rs, 'startAt'),
+        endAt: AppDatabase.optNum(rs, 'endAt'),
+        severity: AppDatabase.optStr(rs, 'severity'),
+        temperatureCelsius: AppDatabase.optNum(rs, 'temperatureCelsius'),
+        tags: tagsStr ? JSON.parse(tagsStr) as string[] : [],
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— Milestone ——
+  async upsertMilestone(m: Milestone): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: m.id, remoteId: m.remoteId ?? null, title: m.title, category: m.category, emoji: m.emoji,
+      detail: m.detail ?? null, happenedAt: m.happenedAt ?? null, ageDescription: m.ageDescription ?? null,
+      isCustom: m.isCustom ? 1 : 0, ceremonyPlayed: m.ceremonyPlayed ? 1 : 0,
+      syncState: m.syncState, createdAt: m.createdAt, entryId: m.entryId ?? null
+    };
+    await this.store!.insert('milestone', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+  }
+
+  async fetchMilestones(): Promise<Milestone[]> {
+    const pred = new relationalStore.RdbPredicates('milestone');
+    pred.orderByDesc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: Milestone[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        title: rs.getString(rs.getColumnIndex('title')),
+        category: rs.getString(rs.getColumnIndex('category')),
+        emoji: rs.getString(rs.getColumnIndex('emoji')),
+        detail: AppDatabase.optStr(rs, 'detail'),
+        happenedAt: AppDatabase.optNum(rs, 'happenedAt'),
+        ageDescription: AppDatabase.optStr(rs, 'ageDescription'),
+        isCustom: rs.getLong(rs.getColumnIndex('isCustom')) === 1,
+        ceremonyPlayed: rs.getLong(rs.getColumnIndex('ceremonyPlayed')) === 1,
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt')),
+        entryId: AppDatabase.optStr(rs, 'entryId')
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— TimeCapsule ——
+  async insertCapsule(c: TimeCapsule): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: c.id, remoteId: c.remoteId ?? null, title: c.title, fromRole: c.fromRole,
+      unlockAt: c.unlockAt, isLocked: c.isLocked ? 1 : 0, encryptedBlobFileName: c.encryptedBlobFileName ?? null,
+      coverEmoji: c.coverEmoji ?? null, syncState: c.syncState, createdAt: c.createdAt
+    };
+    await this.store!.insert('time_capsule', v);
+  }
+
+  async fetchCapsules(): Promise<TimeCapsule[]> {
+    const pred = new relationalStore.RdbPredicates('time_capsule');
+    pred.orderByAsc('unlockAt');
+    const rs = await this.store!.query(pred);
+    const out: TimeCapsule[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        title: rs.getString(rs.getColumnIndex('title')),
+        fromRole: rs.getString(rs.getColumnIndex('fromRole')),
+        unlockAt: rs.getLong(rs.getColumnIndex('unlockAt')),
+        isLocked: rs.getLong(rs.getColumnIndex('isLocked')) === 1,
+        encryptedBlobFileName: AppDatabase.optStr(rs, 'encryptedBlobFileName'),
+        coverEmoji: AppDatabase.optStr(rs, 'coverEmoji'),
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
   get raw(): relationalStore.RdbStore | null {
     return this.store;
   }
