@@ -1,5 +1,19 @@
 # 布布时光机 · iOS 系统级集成 + 动效/UI 升级评估（v2）
 
+> ## ✅ 落地状态（全量已实现并通过编译/测试/模拟器运行验证）
+> 阶段 0A→5 全部落地，分阶段提交在 `worktree-perf-and-fixes`：
+> - 0A 共享存储 `214c909` · 0B App Intents 底座 `7e4ac8d` · 1 小组件 `56b8ff0`
+> - 2 灵动岛/Live Activities `3630091` · 3 Controls `e6b4b8d` · 4 Spotlight/Siri `b78ad28`
+> - 5 动效第二轮 `9fdf458`
+>
+> **验证**：xcodebuild 0 error；WaveNTests 通过；widget extension 打进包；模拟器安装+启动正常。
+> **仍需你做**：① Xcode 配 Team 签名（App Group/extension 真机/TestFlight 必需）；
+> ② 真机验证灵动岛/Action Button/Siri/120Hz；③ PocketBase 跑迁移（含血型列）。
+> **后续可选增量**：胶囊倒计时触发调度、深度 Spotlight 实体索引、App Clip（见文末）。
+
+---
+
+
 > 评估文档（**只评估，不动代码**）。读完决定是否进化、从哪开始。
 > 基线：`worktree-perf-and-fixes` 分支（已含 120Hz/背景/性别血型/缩放转场修复）。
 > 目标：iOS 26 · Swift 6 严格并发 · SwiftData · 自托管 PocketBase。

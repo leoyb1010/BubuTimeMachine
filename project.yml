@@ -50,6 +50,7 @@ targets:
       - path: BubuWidgets
         excludes:
           - "BubuWidgets.entitlements"
+          - "Info.plist"
       # 复用主 App 的共享层（均为 Foundation/SwiftData/AppIntents，extension 安全）
       - path: BubuTimeMachine/Models
       - path: BubuTimeMachine/App/BubuStorage.swift
@@ -65,7 +66,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.widgets
         CODE_SIGN_ENTITLEMENTS: BubuWidgets/BubuWidgets.entitlements
         TARGETED_DEVICE_FAMILY: "1"
-        INFOPLIST_KEY_CFBundleDisplayName: 布布时光机
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: BubuWidgets/Info.plist
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
