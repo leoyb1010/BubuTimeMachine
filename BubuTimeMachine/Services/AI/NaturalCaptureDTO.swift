@@ -181,7 +181,7 @@ extension Dictionary where Key == String, Value == JSONValue {
 enum NaturalCaptureCoding {
     /// ISO8601 容错解析：先标准互联网时间，再带小数秒重试。
     /// 服务端 pydantic 序列化偶发带微秒时，客户端不再整包解析失败。
-    static func parseDate(_ raw: String) -> Date? {
+    nonisolated static func parseDate(_ raw: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         if let date = formatter.date(from: raw) { return date }
@@ -190,7 +190,7 @@ enum NaturalCaptureCoding {
     }
 
     /// /parse-natural-capture 响应解码器（日期容错）。
-    static func decoder() -> JSONDecoder {
+    nonisolated static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { dec in
             let container = try dec.singleValueContainer()
