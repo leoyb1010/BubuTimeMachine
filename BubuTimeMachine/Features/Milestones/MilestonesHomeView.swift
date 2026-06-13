@@ -132,6 +132,8 @@ struct MilestonesHomeView: View {
     private var achievedWall: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("已点亮", systemImage: "star.fill").font(BubuTheme.Font.headline).foregroundStyle(theme)
+                // 点亮新里程碑时星标弹跳一下（交互/数据驱动，非持续动画）。
+                .symbolEffect(.bounce, value: achieved.count)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                 ForEach(achieved) { milestone in
                     medallion(milestone, lit: true)
