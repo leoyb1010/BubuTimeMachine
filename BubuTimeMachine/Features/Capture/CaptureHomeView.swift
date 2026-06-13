@@ -23,6 +23,9 @@ struct CaptureHomeView: View {
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
+    private var homeSurface: Color {
+        env.themedCard.opacity(env.isDarkTheme ? 0.88 : 0.94)
+    }
 
     var body: some View {
         ZStack {
@@ -127,32 +130,31 @@ struct CaptureHomeView: View {
 
     @ViewBuilder
     private var heroBackground: some View {
-        if env.theme.heroMode == .photo,
-           let name = profile?.heroBackgroundFileName,
-           let data = env.mediaStore.data(forMedia: name),
-           let ui = UIImage(data: data) {
-            // 关键：用 Color.clear 接住父级提议的尺寸（满屏），照片以 overlay 填充再裁切。
-            // 若直接给 Image .scaledToFill() 而不锁定 frame，它会把整页撑到照片原生尺寸（撑爆布局 bug）。
-            Color.clear
-                .overlay {
+        ZStack {
+            BubuThemedBackground()
+
+            if env.theme.heroMode == .photo,
+               let name = profile?.heroBackgroundFileName,
+               let data = env.mediaStore.data(forMedia: name),
+               let ui = UIImage(data: data) {
+                // 首页和其它页面保持同一主题底色；照片只做低透明度质感，避免文字压在照片高亮处。
+                Color.clear
+                    .overlay {
                     Image(uiImage: ui)
                         .resizable()
                         .scaledToFill()
-                }
-                .clipped()
-                .overlay {
-                    Rectangle().fill(.ultraThinMaterial)
-                    LinearGradient(colors: [theme.primary.opacity(0.25), .clear, theme.primary.opacity(0.15)],
-                                   startPoint: .top, endPoint: .bottom)
-                }
-        } else {
-            // 主题模式：MeshGradient 呼吸背景（§2.2）。星夜深色面板单独走暗渐变保证对比度。
-            if env.isDarkTheme {
-                BubuThemedBackground()
-            } else {
-                BubuMeshHero(colors: theme.meshColors)
-                    .bubuPaperTexture(theme.paperTexture, isDark: false)
+                    }
+                    .opacity(env.isDarkTheme ? 0.10 : 0.14)
+                    .saturation(0.75)
+                    .clipped()
             }
+
+            LinearGradient(colors: [
+                BubuTheme.Color.background.opacity(env.isDarkTheme ? 0.20 : 0.34),
+                .clear,
+                BubuTheme.Color.background.opacity(env.isDarkTheme ? 0.36 : 0.58)
+            ], startPoint: .top, endPoint: .bottom)
+            .allowsHitTesting(false)
         }
     }
 
@@ -232,7 +234,7 @@ struct CaptureHomeView: View {
             }
         }
         .padding(12)
-        .background(BubuTheme.Color.card.opacity(0.58), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme.primary)
     }
 
@@ -283,7 +285,7 @@ struct CaptureHomeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         // iOS 26 glassEffect 自带景深，去掉冗余的额外阴影（既省合成又更贴近原生质感）。
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
     }
@@ -326,7 +328,7 @@ struct CaptureHomeView: View {
                 }
             }
             .padding()
-            .background(BubuTheme.Color.card.opacity(0.7), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         }
     }
 
@@ -395,7 +397,7 @@ struct CaptureHomeView: View {
                     .background(theme.primary, in: Capsule())
             }
             .padding()
-            .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
         }
         .buttonStyle(.plain)
@@ -424,7 +426,7 @@ struct CaptureHomeView: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding()
-            .background(BubuTheme.Color.card.opacity(0.68), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
         }
         .buttonStyle(.plain)
@@ -458,11 +460,11 @@ struct CaptureHomeView: View {
                 .padding(.vertical, 16)
                 .padding(.leading, 20)
                 .padding(.trailing, 18)
-                .background(BubuTheme.Color.card.opacity(0.66), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
                 .bubuGlassSurface(cornerRadius: 30, tint: theme.primary, interactive: true)
                 .overlay(alignment: .leading) {
                     BubuSpeechTail()
-                        .fill(BubuTheme.Color.card.opacity(0.66))
+                        .fill(homeSurface)
                         .frame(width: 18, height: 26)
                         .offset(x: -10)
                 }
