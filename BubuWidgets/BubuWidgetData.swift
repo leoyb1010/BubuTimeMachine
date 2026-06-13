@@ -13,19 +13,21 @@ struct BubuSnapshot: Sendable {
     var hasProfile: Bool
     /// 最近一张照片的本地文件名（成长墙/那年今日用），可空。
     var recentPhotoFileName: String?
+    /// 布布头像本地文件名（小组件圆形头像），可空。
+    var avatarFileName: String?
 
     /// 无档案时的占位。
     static let placeholder = BubuSnapshot(
         name: "布布", birthday: nil, ageText: "等你记录",
         daysSinceBirth: 0, daysUntilBirthday: 0, hasProfile: false,
-        recentPhotoFileName: nil
+        recentPhotoFileName: nil, avatarFileName: nil
     )
 
     /// 预览/骨架用的样例。
     static let sample = BubuSnapshot(
         name: "布布", birthday: Calendar.current.date(byAdding: .month, value: -23, to: .now),
         ageText: "1岁11个月", daysSinceBirth: 709, daysUntilBirthday: 23,
-        hasProfile: true, recentPhotoFileName: nil
+        hasProfile: true, recentPhotoFileName: nil, avatarFileName: nil
     )
 }
 
@@ -63,7 +65,8 @@ enum BubuWidgetData {
             daysSinceBirth: AgeCalculator.daysSinceBirth(birthday: profile.birthday, at: now),
             daysUntilBirthday: AgeCalculator.daysUntilNextBirthday(birthday: profile.birthday, from: now),
             hasProfile: true,
-            recentPhotoFileName: recentPhoto
+            recentPhotoFileName: recentPhoto,
+            avatarFileName: profile.avatarMediaFileName
         )
     }
 

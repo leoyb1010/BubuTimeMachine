@@ -41,24 +41,60 @@ private enum WidgetPalette {
     static let secondary = Color(red: 0.55, green: 0.50, blue: 0.47)
 }
 
-// MARK: - Small：身份卡
+// MARK: - 布布圆形头像（无头像时回退到吉祥物表情）
+struct BubuAvatar: View {
+    let fileName: String?
+    var size: CGFloat
+    var body: some View {
+        Group {
+            if let data = BubuWidgetData.photoData(fileName: fileName),
+               let ui = UIImage(data: data) {
+                Image(uiImage: ui).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    WidgetPalette.primary.opacity(0.18)
+                    Text("👶").font(.system(size: size * 0.5))
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
+        .shadow(color: WidgetPalette.primary.opacity(0.25), radius: 4, y: 2)
+    }
+}
+
+// MARK: - 暖色卡片渐变背景（统一各 family）
+private extension View {
+    func bubuWidgetBackground() -> some View {
+        self.containerBackground(for: .widget) {
+            LinearGradient(
+                colors: [Color(red: 1.0, green: 0.98, blue: 0.96),
+                         Color(red: 1.0, green: 0.94, blue: 0.95),
+                         Color(red: 0.99, green: 0.91, blue: 0.93)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        }
+    }
+}
+
+// MARK: - Small：头像 + 名字 + 年龄
 struct BubuSmallView: View {
     let snapshot: BubuSnapshot
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Image(systemName: "heart.circle.fill").foregroundStyle(WidgetPalette.primary)
+            HStack(spacing: 8) {
+                BubuAvatar(fileName: snapshot.avatarFileName, size: 38)
                 Text(snapshot.name)
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .foregroundStyle(WidgetPalette.warmBrown)
-                    .lineLimit(1)
+                    .lineLimit(1).minimumScaleFactor(0.7)
             }
             Spacer()
             Text(snapshot.ageText)
                 .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundStyle(WidgetPalette.warmBrown)
-                .minimumScaleFactor(0.6)
-                .lineLimit(2)
+                .minimumScaleFactor(0.6).lineLimit(2)
             if snapshot.hasProfile {
                 Text("来到世界第 \(snapshot.daysSinceBirth) 天")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -69,12 +105,13 @@ struct BubuSmallView: View {
     }
 }
 
-// MARK: - Medium：身份 + 生日倒计时
+// MARK: - Medium：头像 + 身份 + 生日倒计时
 struct BubuMediumView: View {
     let snapshot: BubuSnapshot
     var body: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 14) {
+            BubuAvatar(fileName: snapshot.avatarFileName, size: 64)
+            VStack(alignment: .leading, spacing: 5) {
                 Text(snapshot.name)
                     .font(.system(size: 20, weight: .black, design: .rounded))
                     .foregroundStyle(WidgetPalette.warmBrown)
@@ -91,7 +128,7 @@ struct BubuMediumView: View {
             if snapshot.hasProfile {
                 VStack(spacing: 2) {
                     Text("\(snapshot.daysUntilBirthday)")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .font(.system(size: 32, weight: .black, design: .rounded))
                         .foregroundStyle(WidgetPalette.primary)
                         .contentTransition(.numericText())
                     Text("天后生日 🎂")
@@ -106,12 +143,58 @@ struct BubuMediumView: View {
     }
 
     private var recordButton: some View {
-        // 交互按钮直接触发 App Intents 底座的 RecordMomentIntent。
         Button(intent: RecordMomentIntent()) {
             Label("记一笔", systemImage: "plus.circle.fill")
                 .font(.system(size: 13, weight: .bold, design: .rounded))
         }
         .tint(WidgetPalette.primary)
+    }
+}
+
+// MARK: - Large：大头像身份卡（最接近 App 内身份卡的高级感）
+struct BubuLargeView: View {
+    let snapshot: BubuSnapshot
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack {
+                Text("BUBU IDENTITY")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(1.5)
+                    .foregroundStyle(WidgetPalette.primary.opacity(0.7))
+                Spacer()
+                if snapshot.hasProfile {
+                    Text("ACTIVE")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(WidgetPalette.primary, in: Capsule())
+                }
+            }
+            BubuAvatar(fileName: snapshot.avatarFileName, size: 96)
+            Text(snapshot.name)
+                .font(.system(size: 24, weight: .black, design: .rounded))
+                .foregroundStyle(WidgetPalette.warmBrown)
+            Text(snapshot.ageText)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(WidgetPalette.primary)
+            if snapshot.hasProfile {
+                HStack(spacing: 18) {
+                    stat("\(snapshot.daysSinceBirth)", "来到第N天")
+                    stat("\(snapshot.daysUntilBirthday)", "天后生日")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func stat(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.system(size: 22, weight: .black, design: .rounded))
+                .foregroundStyle(WidgetPalette.warmBrown)
+            Text(label).font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(WidgetPalette.secondary)
+        }
     }
 }
 
@@ -157,18 +240,17 @@ struct BubuWidgetEntryView: View {
     var body: some View {
         switch family {
         case .systemSmall:
-            BubuSmallView(snapshot: entry.snapshot)
-                .containerBackground(WidgetPalette.cream.gradient, for: .widget)
+            BubuSmallView(snapshot: entry.snapshot).bubuWidgetBackground()
         case .systemMedium:
-            BubuMediumView(snapshot: entry.snapshot)
-                .containerBackground(WidgetPalette.cream.gradient, for: .widget)
+            BubuMediumView(snapshot: entry.snapshot).bubuWidgetBackground()
+        case .systemLarge:
+            BubuLargeView(snapshot: entry.snapshot).bubuWidgetBackground()
         case .accessoryCircular:
             BubuCircularView(snapshot: entry.snapshot)
         case .accessoryRectangular:
             BubuRectangularView(snapshot: entry.snapshot)
         default:
-            BubuSmallView(snapshot: entry.snapshot)
-                .containerBackground(WidgetPalette.cream.gradient, for: .widget)
+            BubuSmallView(snapshot: entry.snapshot).bubuWidgetBackground()
         }
     }
 }
@@ -182,7 +264,7 @@ struct BubuWidget: Widget {
         }
         .configurationDisplayName("布布时光机")
         .description("随时看到布布长大：年龄、来到世界第几天、生日倒计时。")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular])
     }
 }
 

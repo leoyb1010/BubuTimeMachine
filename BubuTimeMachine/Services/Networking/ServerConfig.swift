@@ -113,7 +113,13 @@ final class ServerConfig {
     static let aiBaseURLPlaceholder = "https://你的AI服务地址:8000"
 
     init() {
+        // 发布版：服务器地址固定为家庭自托管地址，忽略历史/手填值，保证装上即连；
+        // Debug 版：保留可改，便于本地联调。
+        #if DEBUG
         self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
+        #else
+        self.baseURLString = Self.defaultBaseURL
+        #endif
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
         self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""

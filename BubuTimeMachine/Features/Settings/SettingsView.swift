@@ -25,6 +25,8 @@ struct SettingsView: View {
                     row("健康记录", icon: "heart.text.square", tint: BubuTheme.Color.success) { HealthHomeView() }
                 }
                 group("这个家") {
+                    row("家人登录", icon: "person.crop.circle.badge.checkmark",
+                        tint: env.theme.theme.primary) { AccountView() }
                     row("家庭成员", icon: "person.2.fill", tint: env.theme.theme.secondary) { MembersView() }
                 }
                 group("外观") {
@@ -45,6 +47,9 @@ struct SettingsView: View {
                                         subtitle: "给装服务器的那个人")
                     }
                     .buttonStyle(.plain)
+                }
+                group("关于") {
+                    row("更新记录", icon: "sparkles", tint: env.theme.theme.primary) { WhatsNewListView() }
                 }
                 footer
             }
@@ -142,6 +147,9 @@ struct SettingsView: View {
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             Text("为布布而做，2025 ❤️").font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
+            Text(AppVersion.displayFull).font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+                .padding(.top, 2)
         }
         .padding(.top, 8)
     }

@@ -31,8 +31,13 @@ struct AdvancedSettingsView: View {
             }
 
             Section {
+                // 服务器已内置固定（家庭自托管），普通用户无需也无法改地址；仅 Debug 下可临时修改兜底。
+                #if DEBUG
                 TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                #else
+                LabeledContent("服务器", value: "已内置 ✓")
+                #endif
                 TextField("家庭账户邮箱", text: $config.accountEmail)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
                 SecureField("账户密码", text: $config.accountPassword)

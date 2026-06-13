@@ -204,10 +204,21 @@ struct BubuTimeMachineApp: App {
 // MARK: - 根视图：首启引导 or 主界面
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
+    @State private var showWhatsNew = false
 
     var body: some View {
         if env.hasCompletedOnboarding {
-            content.transition(.opacity)
+            content
+                .transition(.opacity)
+                // 升级后首次启动：弹出本版更新内容（全新安装不弹）。
+                .onAppear {
+                    if WhatsNewGate.shouldPresent { showWhatsNew = true }
+                }
+                .sheet(isPresented: $showWhatsNew) {
+                    if let note = Changelog.latest {
+                        WhatsNewSheet(note: note) { showWhatsNew = false }
+                    }
+                }
         } else {
             OnboardingView().transition(.opacity)
         }
