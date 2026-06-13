@@ -191,5 +191,6 @@ struct BubuWidget: Widget {
 struct BubuWidgetsBundle: WidgetBundle {
     var body: some Widget {
         BubuWidget()
+        BubuLiveActivity()
     }
 }

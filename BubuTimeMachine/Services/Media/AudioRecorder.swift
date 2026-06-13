@@ -54,6 +54,8 @@ final class AudioRecorder: NSObject {
             self.elapsed = 0
             self.levels = []
             startTimer()
+            // 录音中 Live Activity（灵动岛/锁屏可见时长）；未授权时安静 no-op。
+            BubuActivityController.startVoiceRecording(childName: SharedDefaults.childName)
             return true
         } catch {
             return false
@@ -72,6 +74,7 @@ final class AudioRecorder: NSObject {
         let waveform = downsample(levels, to: 40)
         self.recorder = nil
         try? AVAudioSession.sharedInstance().setActive(false)
+        BubuActivityController.endVoiceRecording(elapsedText: Self.timeText(duration))
         return (url, duration, waveform)
     }
 
@@ -83,6 +86,13 @@ final class AudioRecorder: NSObject {
         state = .idle
         elapsed = 0
         levels = []
+        BubuActivityController.endVoiceRecording(elapsedText: "0:00")
+    }
+
+    /// 秒数 → "m:ss"。
+    nonisolated static func timeText(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private func startTimer() {

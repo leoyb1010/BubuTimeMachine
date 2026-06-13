@@ -56,6 +56,7 @@ targets:
       - path: BubuTimeMachine/App/SharedModelContainer.swift
       - path: BubuTimeMachine/App/SharedDefaults.swift
       - path: BubuTimeMachine/App/BubuAppIntents.swift
+      - path: BubuTimeMachine/App/BubuActivityAttributes.swift
       - path: BubuTimeMachine/Services/EntryWriter.swift
     entitlements:
       path: BubuWidgets/BubuWidgets.entitlements
