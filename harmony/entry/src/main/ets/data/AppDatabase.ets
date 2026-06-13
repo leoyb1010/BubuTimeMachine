@@ -107,6 +107,60 @@ export class AppDatabase {
     return out;
   }
 
+  // —— Media ——
+  async insertMedia(m: Media): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: m.id, remoteId: m.remoteId ?? null, entryId: m.entryId, typeRaw: m.typeRaw,
+      localFileName: m.localFileName ?? null, remoteURL: m.remoteURL ?? null,
+      thumbnailFileName: m.thumbnailFileName ?? null, aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
+    };
+    await this.store!.insert('media', v);
+  }
+
+  async fetchMediaForEntry(entryId: string): Promise<Media[]> {
+    const pred = new relationalStore.RdbPredicates('media');
+    pred.equalTo('entryId', entryId);
+    const rs = await this.store!.query(pred);
+    const out: Media[] = [];
+    while (rs.goToNextRow()) {
+      const tagsStr = AppDatabase.optStr(rs, 'aiTags');
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        entryId: rs.getString(rs.getColumnIndex('entryId')),
+        typeRaw: rs.getString(rs.getColumnIndex('typeRaw')),
+        localFileName: AppDatabase.optStr(rs, 'localFileName'),
+        remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
+        thumbnailFileName: AppDatabase.optStr(rs, 'thumbnailFileName'),
+        aiTags: tagsStr ? JSON.parse(tagsStr) as string[] : [],
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // 取所有照片（相册用）
+  async fetchAllPhotos(): Promise<Media[]> {
+    const pred = new relationalStore.RdbPredicates('media');
+    pred.equalTo('typeRaw', 'photo');
+    pred.orderByDesc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: Media[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        entryId: rs.getString(rs.getColumnIndex('entryId')),
+        typeRaw: rs.getString(rs.getColumnIndex('typeRaw')),
+        localFileName: AppDatabase.optStr(rs, 'localFileName'),
+        aiTags: [],
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
   // —— ChildProfile ——
   async upsertChildProfile(p: ChildProfile): Promise<void> {
     const v: relationalStore.ValuesBucket = {

@@ -7,7 +7,11 @@ import { BubuColor } from '../theme/BubuTheme';
 import { IdentityCard } from './IdentityCard';
 import { ChildProfileView } from './ChildProfileView';
 import { HealthHomeView } from './HealthHomeView';
+import { SettingsView } from './SettingsView';
+import { AlbumView } from './AlbumView';
+import { MediaStore } from '../services/MediaStore';
 import { promptAction } from '@kit.ArkUI';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS CaptureHomeView）
 // 身份卡 + 统计 + 大记录按钮。记录走 EntryWriter（与意图/小组件同一写入层）。
@@ -19,6 +23,10 @@ export struct HomeView {
   @State showRecord: boolean = false;
   @State showProfile: boolean = false;
   @State showHealth: boolean = false;
+  @State showSettings: boolean = false;
+  @State showAlbum: boolean = false;
+  @State pickedPhotoName: string | null = null;   // 已选并落盘的照片文件名
+  @State photoCount: number = 0;
 
   aboutToAppear(): void {
     this.reload();
@@ -27,11 +35,42 @@ export struct HomeView {
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.entries = await AppDatabase.shared.fetchEntries(false);
+    this.photoCount = (await AppDatabase.shared.fetchAllPhotos()).length;
+  }
+
+  // 系统相册选一张照片 → 拷进沙盒，记下文件名
+  private async pickPhoto(): Promise<void> {
+    try {
+      const picker = new photoAccessHelper.PhotoViewPicker();
+      const opt = new photoAccessHelper.PhotoSelectOptions();
+      opt.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      opt.maxSelectNumber = 1;
+      const res = await picker.select(opt);
+      if (res.photoUris && res.photoUris.length > 0) {
+        const uri = res.photoUris[0];
+        const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+        const name = MediaStore.shared.copyIntoStore(uri, ext);
+        if (name) {
+          this.pickedPhotoName = name;
+        } else {
+          promptAction.showToast({ message: '照片读取失败' });
+        }
+      }
+    } catch (e) {
+      promptAction.showToast({ message: '已取消' });
+    }
   }
 
   build() {
     Scroll() {
       Column({ space: 14 }) {
+        // 顶部：标题 + 设置入口
+        Row() {
+          Text('布布时光机').fontSize(15).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+          Blank()
+          Text('⚙️').fontSize(22).onClick(() => { this.showSettings = true; })
+        }.width('100%').padding({ top: 8 })
+
         if (this.profile) {
           IdentityCard({ profile: this.profile! })
             .onClick(() => { this.showProfile = true; })
@@ -61,9 +100,16 @@ export struct HomeView {
         .width('100%')
         .onClick(() => { this.showRecord = true; })
 
-        // 统计行
+        // 统计行（照片卡可点进相册）
         Row({ space: 12 }) {
           this.statCard(`${this.entries.length}`, '个瞬间')
+          Column({ space: 6 }) {
+            Text(`${this.photoCount}`).fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+            Text('张照片').fontSize(12).fontColor(BubuColor.secondaryText)
+          }
+          .layoutWeight(1).padding({ top: 12, bottom: 12 })
+          .backgroundColor(BubuColor.card).borderRadius(16)
+          .onClick(() => { this.showAlbum = true; })
           if (this.profile) {
             this.statCard(`${AgeCalculator.daysUntilNextBirthday(this.profile!.birthday)}`, '天后生日')
           }
@@ -90,6 +136,8 @@ export struct HomeView {
     .bindSheet($$this.showRecord, this.recordSheet(), { height: 320 })
     .bindSheet($$this.showProfile, this.profileSheet(), { height: '80%' })
     .bindSheet($$this.showHealth, this.healthSheet(), { height: '90%' })
+    .bindSheet($$this.showSettings, this.settingsSheet(), { height: '90%' })
+    .bindSheet($$this.showAlbum, this.albumSheet(), { height: '90%' })
   }
 
   @Builder
@@ -100,6 +148,16 @@ export struct HomeView {
   @Builder
   healthSheet() {
     HealthHomeView()
+  }
+
+  @Builder
+  settingsSheet() {
+    SettingsView()
+  }
+
+  @Builder
+  albumSheet() {
+    AlbumView()
   }
 
   @Builder
@@ -114,18 +172,32 @@ export struct HomeView {
 
   @Builder
   recordSheet() {
-    Column({ space: 16 }) {
+    Column({ space: 14 }) {
       Text('记录布布此刻').fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       TextArea({ placeholder: '写一句关于布布的瞬间…', text: $$this.noteDraft })
-        .height(120).borderRadius(12).backgroundColor('#F3F3F3')
+        .height(100).borderRadius(12).backgroundColor('#F3F3F3')
+
+      // 加照片
+      Row({ space: 10 }) {
+        Button(this.pickedPhotoName ? '✅ 已选 1 张照片' : '📷 加张照片')
+          .backgroundColor(this.pickedPhotoName ? BubuColor.success : '#F3F3F3')
+          .fontColor(this.pickedPhotoName ? Color.White : BubuColor.warmBrown)
+          .layoutWeight(1)
+          .onClick(() => { this.pickPhoto(); })
+      }.width('100%')
+
       Button('保存')
         .width('100%').backgroundColor(BubuColor.primary)
         .onClick(async () => {
           const text = this.noteDraft.trim();
-          if (text.length === 0) return;
+          if (text.length === 0 && !this.pickedPhotoName) {
+            promptAction.showToast({ message: '写一句话，或加一张照片' });
+            return;
+          }
           try {
-            await EntryWriter.quickTextEntry(text, ServerConfig.shared.currentRole);
+            await EntryWriter.entryWithPhoto(text, this.pickedPhotoName, ServerConfig.shared.currentRole);
             this.noteDraft = '';
+            this.pickedPhotoName = null;
             this.showRecord = false;
             await this.reload();
             promptAction.showToast({ message: '已经收好啦 🌟' });

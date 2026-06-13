@@ -3,6 +3,8 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { AppDatabase } from '../data/AppDatabase';
 import { SyncEngine } from '../sync/SyncEngine';
+import { MediaStore } from '../services/MediaStore';
+import { ServerConfig } from '../services/ServerConfig';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -21,8 +23,10 @@ export default class EntryAbility extends UIAbility {
     // 初始化本地数据库（RelationalStore 建表），相当于 iOS 装配 ModelContainer。
     try {
       await AppDatabase.shared.initialize(this.context);
+      MediaStore.shared.initialize(this.context);
+      await ServerConfig.shared.load(this.context);
     } catch (e) {
-      hilog.error(DOMAIN, 'Bubu', `数据库初始化失败: ${JSON.stringify(e)}`);
+      hilog.error(DOMAIN, 'Bubu', `初始化失败: ${JSON.stringify(e)}`);
     }
 
     windowStage.loadContent('pages/RootPage', (err) => {

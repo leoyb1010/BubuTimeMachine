@@ -1,5 +1,6 @@
-import { Entry, ChildProfile } from '../models/Models';
+import { Entry, ChildProfile, Media } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
+import { MediaStore } from '../services/MediaStore';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { moodEmoji, Mood, syncStateFriendlyText, SyncState } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
@@ -10,6 +11,8 @@ import { BubuColor } from '../theme/BubuTheme';
 export struct TimelineView {
   @State entries: Entry[] = [];
   @State profile: ChildProfile | null = null;
+  // entryId → 首张照片沙盒绝对路径
+  @State photoMap: Map<string, string> = new Map();
 
   aboutToAppear(): void {
     this.reload();
@@ -18,6 +21,15 @@ export struct TimelineView {
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.entries = await AppDatabase.shared.fetchEntries(false);
+    const map = new Map<string, string>();
+    for (const e of this.entries) {
+      const media = await AppDatabase.shared.fetchMediaForEntry(e.id);
+      const photo = media.find(m => m.typeRaw === 'photo' && m.localFileName);
+      if (photo && photo.localFileName) {
+        map.set(e.id, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
+      }
+    }
+    this.photoMap = map;
   }
 
   build() {
@@ -63,6 +75,11 @@ export struct TimelineView {
         Blank()
         Text(e.authorRole).fontSize(11).fontColor(BubuColor.secondaryText)
       }.width('100%')
+
+      if (this.photoMap.has(e.id)) {
+        Image(this.photoMap.get(e.id))
+          .width('100%').height(180).borderRadius(12).objectFit(ImageFit.Cover)
+      }
 
       if (e.note && e.note.length > 0) {
         Text(e.note).fontSize(15).fontColor(BubuColor.warmBrown)

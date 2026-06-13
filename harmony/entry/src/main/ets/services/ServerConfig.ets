@@ -21,6 +21,7 @@ export class ServerConfig {
     this.store = await preferences.getPreferences(context, 'bubu_server_config');
     this.baseURLString = await this.getStr('baseURL', '');
     this.accountEmail = await this.getStr('email', '');
+    this.accountPassword = await this.getStr('password', '');
     this.currentRoleRaw = await this.getStr('role', FamilyRole.mama);
     this.childName = await this.getStr('childName', '布布');
   }
@@ -41,6 +42,13 @@ export class ServerConfig {
   async setChildName(name: string): Promise<void> {
     this.childName = name;
     await this.put('childName', name);
+  }
+
+  // 持久化服务器配置（地址/账号/密码）。
+  async persistServer(): Promise<void> {
+    await this.put('baseURL', this.baseURLString);
+    await this.put('email', this.accountEmail);
+    await this.put('password', this.accountPassword);
   }
 
   private async getStr(key: string, def: string): Promise<string> {
