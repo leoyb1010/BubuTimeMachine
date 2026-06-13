@@ -55,9 +55,14 @@ export struct IdentityCard {
     }
     .padding(16)
     .width('100%')
-    .backgroundColor(BubuColor.card)
+    .linearGradient({
+      angle: 135,
+      colors: [['#FFFFFF', 0.0], ['#FFF1F3', 0.55], ['#FDE8EC', 1.0]]
+    })
     .borderRadius(28)
-    .shadow({ radius: 12, color: '#1A000000', offsetY: 4 })
+    .border({ width: 1, color: '#33FFFFFF' })
+    .shadow({ radius: 14, color: '#1F000000', offsetY: 5 })
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.98 })
   }
 
   @Builder

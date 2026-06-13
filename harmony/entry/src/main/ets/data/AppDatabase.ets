@@ -161,6 +161,13 @@ export class AppDatabase {
     return out;
   }
 
+  // 软删除（归档）一条记录
+  async archiveEntry(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('entry');
+    pred.equalTo('id', id);
+    await this.store!.update({ isArchived: 1, syncState: SyncState.local }, pred);
+  }
+
   // —— ChildProfile ——
   async upsertChildProfile(p: ChildProfile): Promise<void> {
     const v: relationalStore.ValuesBucket = {

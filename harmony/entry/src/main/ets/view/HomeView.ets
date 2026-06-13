@@ -98,6 +98,7 @@ export struct HomeView {
         .backgroundColor(BubuColor.card)
         .borderRadius(24)
         .width('100%')
+        .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.95 })
         .onClick(() => { this.showRecord = true; })
 
         // 统计行（照片卡可点进相册）
@@ -126,6 +127,7 @@ export struct HomeView {
         }
         .width('100%').padding(16)
         .backgroundColor(BubuColor.card).borderRadius(20)
+        .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
         .onClick(() => { this.showHealth = true; })
       }
       .padding(16)

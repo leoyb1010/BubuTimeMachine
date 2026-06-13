@@ -108,6 +108,7 @@ export struct MilestonesView {
     }
     .width('100%').height(98).justifyContent(FlexAlign.Center)
     .backgroundColor(lit ? '#FFF3F0' : BubuColor.card).borderRadius(14)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
     .onClick(() => {
       if (!lit) { this.lightUp(m); }
     })

@@ -4,6 +4,7 @@ import { MediaStore } from '../services/MediaStore';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { moodEmoji, Mood, syncStateFriendlyText, SyncState } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
+import { EntryDetailView } from './EntryDetailView';
 
 // MARK: - 时光轴（对照 iOS TimelineView）
 // 所有未归档瞬间按时间倒序；每条显示心情/原文/当时年龄/同步状态。
@@ -13,6 +14,8 @@ export struct TimelineView {
   @State profile: ChildProfile | null = null;
   // entryId → 首张照片沙盒绝对路径
   @State photoMap: Map<string, string> = new Map();
+  @State detailEntry: Entry | null = null;
+  @State showDetail: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
@@ -51,6 +54,12 @@ export struct TimelineView {
             ListItem() {
               this.entryCard(e)
             }
+            .onClick(() => {
+              this.detailEntry = e;
+              this.showDetail = true;
+            })
+            // 入场动画：列表项渐显 + 轻微上移
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
           }, (e: Entry) => e.id)
         }
         .layoutWeight(1).padding({ left: 16, right: 16 })
@@ -58,6 +67,20 @@ export struct TimelineView {
       }
     }
     .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    .bindSheet($$this.showDetail, this.detailSheet(), {
+      height: '90%',
+      onDisappear: () => { this.reload(); }
+    })
+  }
+
+  @Builder
+  detailSheet() {
+    if (this.detailEntry) {
+      EntryDetailView({
+        entry: this.detailEntry!,
+        onDismiss: () => { this.showDetail = false; }
+      })
+    }
   }
 
   @Builder

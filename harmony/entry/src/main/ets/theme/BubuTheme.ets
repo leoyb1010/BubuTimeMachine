@@ -12,3 +12,12 @@ export class BubuRadius {
   static readonly card = 20;
   static readonly small = 14;
 }
+
+// 统一卡片阴影（对照 iOS bubuCardShadow）。按压反馈交给各组件的 clickEffect。
+@Extend(Column)
+export function bubuCardCol() {
+  .backgroundColor(BubuColor.card)
+  .borderRadius(BubuRadius.card)
+  .shadow({ radius: 10, color: '#14000000', offsetY: 3 })
+  .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
+}
