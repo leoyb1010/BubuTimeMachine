@@ -9,10 +9,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "54UB8X9C5F"
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "2026061301"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -30,6 +30,9 @@ targets:
           - "BubuTimeMachine.entitlements"
     entitlements:
       path: BubuTimeMachine/BubuTimeMachine.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.bubu.timemachine
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine
@@ -61,6 +64,9 @@ targets:
       - path: BubuTimeMachine/Services/EntryWriter.swift
     entitlements:
       path: BubuWidgets/BubuWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.bubu.timemachine
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.widgets
