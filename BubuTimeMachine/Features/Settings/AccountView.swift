@@ -8,7 +8,7 @@ struct AccountView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var isRegister = false
-    @State private var email = ""
+    @State private var username = ""
     @State private var password = ""
     @State private var familyCode = ""
     @State private var roleIndex = 1     // 默认妈妈
@@ -26,7 +26,7 @@ struct AccountView: View {
                 segmented
 
                 VStack(spacing: 12) {
-                    field("邮箱", text: $email, keyboard: .emailAddress, secure: false)
+                    field("用户名（如 yuanbo）", text: $username, keyboard: .default, secure: false)
                     field("密码（至少 6 位）", text: $password, keyboard: .default, secure: true)
                     if isRegister {
                         field("家庭码", text: $familyCode, keyboard: .default, secure: false)
@@ -132,10 +132,10 @@ struct AccountView: View {
         let role = roles[roleIndex]
         do {
             if isRegister {
-                try await service.register(email: email, password: password,
+                try await service.register(username: username, password: password,
                                            familyCode: familyCode, role: role, config: env.config)
             } else {
-                try await service.login(email: email, password: password, role: role, config: env.config)
+                try await service.login(username: username, password: password, role: role, config: env.config)
             }
             busy = false
             dismiss()

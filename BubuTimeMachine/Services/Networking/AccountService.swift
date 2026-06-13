@@ -12,7 +12,17 @@ import Foundation
 @MainActor
 final class AccountService {
     /// 家庭码（只有家人知道）。如需更换，改这里发新版即可。
-    static let familyCode = "BUBU-HOME"
+    static let familyCode = "YUANCHENXI"
+
+    /// 用户名 → 固定家庭邮箱域。用户只感知「用户名」，避免邮箱难记/填错导致注册登录不一致。
+    /// 例：用户名 yuanbo → 实际账号 yuanbo@bubu.family。注册和登录都用同一拼接结果，绝不会对不上。
+    private static let emailDomain = "bubu.family"
+
+    static func emailFor(username: String) -> String {
+        let u = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // 用户若直接填了完整邮箱也兼容。
+        return u.contains("@") ? u : "\(u)@\(emailDomain)"
+    }
 
     enum AccountError: LocalizedError {
         case wrongFamilyCode
@@ -22,7 +32,7 @@ final class AccountService {
         var errorDescription: String? {
             switch self {
             case .wrongFamilyCode: return "家庭码不对，问问家里人正确的家庭码"
-            case .emptyField: return "请把邮箱和密码填完整"
+            case .emptyField: return "用户名至少 1 位、密码至少 6 位"
             case .server(let m): return m
             }
         }
@@ -30,21 +40,24 @@ final class AccountService {
 
     private var baseURL: URL { URL(string: ServerConfig.defaultBaseURL)! }
 
-    /// 登录：校验邮箱密码，成功后把凭据写入 config 供同步层使用。
-    func login(email: String, password: String, role: FamilyRole, config: ServerConfig) async throws {
-        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !e.isEmpty, !password.isEmpty else { throw AccountError.emptyField }
+    /// 登录：用户名 → 拼邮箱 → 校验密码，成功后写入凭据供同步层使用。
+    func login(username: String, password: String, role: FamilyRole, config: ServerConfig) async throws {
+        let e = Self.emailFor(username: username)
+        guard !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !password.isEmpty else {
+            throw AccountError.emptyField
+        }
         _ = try await authWithPassword(identity: e, password: password)
         persist(email: e, password: password, role: role, config: config)
     }
 
-    /// 注册：校验家庭码 → 在 PocketBase 建 users 记录 → 自动登录 → 写入凭据。
-    func register(email: String, password: String, familyCode: String,
+    /// 注册：校验家庭码 → 用用户名拼邮箱建 users 记录 → 自动登录 → 写入凭据。
+    func register(username: String, password: String, familyCode: String,
                   role: FamilyRole, config: ServerConfig) async throws {
         guard familyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                 == Self.familyCode else { throw AccountError.wrongFamilyCode }
-        let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !e.isEmpty, password.count >= 6 else { throw AccountError.emptyField }
+        let u = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !u.isEmpty, password.count >= 6 else { throw AccountError.emptyField }
+        let e = Self.emailFor(username: u)
 
         // PocketBase users 创建：email + password + passwordConfirm。
         let url = baseURL.appendingPathComponent("api/collections/users/records")
@@ -56,7 +69,20 @@ final class AccountService {
             "name": role.displayName
         ])
         let (data, resp) = try await URLSession.shared.data(for: req)
-        try Self.check(resp, data, context: "注册")
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200..<300).contains(code) {
+            // 创建失败，最常见是「该用户名已注册」。这时如果密码也对，就直接当登录成功——
+            // 家人重复注册同一用户名不该报错，应该顺势进去。
+            if (try? await authWithPassword(identity: e, password: password)) != nil {
+                persist(email: e, password: password, role: role, config: config)
+                return
+            }
+            // 用户名占用但密码不对：明确提示。
+            if code == 400 {
+                throw AccountError.server("这个用户名已被注册，但密码不对。换个用户名，或用正确密码去「登录」。")
+            }
+            try Self.check(resp, data, context: "注册")
+        }
 
         // 注册成功后立即登录拿 token 校验，并写入凭据。
         _ = try await authWithPassword(identity: e, password: password)

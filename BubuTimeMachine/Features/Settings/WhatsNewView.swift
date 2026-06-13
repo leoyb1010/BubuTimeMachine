@@ -9,13 +9,22 @@ import SwiftUI
 enum WhatsNewGate {
     private static let key = "bubu.whatsnew.lastSeenVersion"
 
-    /// 当前版本是否还没给用户看过更新弹窗。全新安装（从未记录过）不弹，避免打扰。
-    static var shouldPresent: Bool {
+    /// 是否该弹更新弹窗。
+    /// - 已看过当前版本：不弹。
+    /// - 看过别的版本（确属升级）：弹。
+    /// - 从没记录过：区分两种人——
+    ///   · 全新安装（还没建档/没完成引导）：不弹，别打扰第一次。
+    ///   · 老用户首次升级到带本功能的版本（已完成引导）：弹一次。
+    /// - Parameter isReturningUser: 是否老用户（一般传 hasCompletedOnboarding）。
+    static func shouldPresent(isReturningUser: Bool) -> Bool {
         let seen = UserDefaults.standard.string(forKey: key)
-        // 全新安装：记下当前版本，不弹（首次进来不该被更新弹窗打扰）。
         guard let seen else {
-            markSeen()
-            return false
+            if isReturningUser {
+                return true            // 老用户首次升级 → 弹
+            } else {
+                markSeen()             // 全新安装 → 记下当前版本，不弹
+                return false
+            }
         }
         return seen != AppVersion.marketing
     }

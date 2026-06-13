@@ -210,9 +210,13 @@ struct RootView: View {
         if env.hasCompletedOnboarding {
             content
                 .transition(.opacity)
-                // 升级后首次启动：弹出本版更新内容（全新安装不弹）。
-                .onAppear {
-                    if WhatsNewGate.shouldPresent { showWhatsNew = true }
+                // 升级后首次启动：弹出本版更新内容（全新安装不弹；老用户升级会弹）。
+                .task {
+                    if WhatsNewGate.shouldPresent(isReturningUser: env.hasCompletedOnboarding) {
+                        // 略等 UI 稳定再弹，避免与首页加载抢呈现。
+                        try? await Task.sleep(for: .milliseconds(600))
+                        showWhatsNew = true
+                    }
                 }
                 .sheet(isPresented: $showWhatsNew) {
                     if let note = Changelog.latest {
