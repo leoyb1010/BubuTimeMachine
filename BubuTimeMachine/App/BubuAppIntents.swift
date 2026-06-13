@@ -95,5 +95,14 @@ struct BubuAppShortcuts: AppShortcutsProvider {
             shortTitle: "布布多大了",
             systemImageName: "birthday.cake.fill"
         )
+        AppShortcut(
+            intent: OpenRecordIntent(),
+            phrases: [
+                "打开\(.applicationName)记录",
+                "\(.applicationName)记录布布此刻"
+            ],
+            shortTitle: "打开记录",
+            systemImageName: "plus.circle.fill"
+        )
     }
 }
