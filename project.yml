@@ -27,12 +27,16 @@ targets:
       - path: BubuTimeMachine
         excludes:
           - "Info.plist"
+          - "BubuTimeMachine.entitlements"
+    entitlements:
+      path: BubuTimeMachine/BubuTimeMachine.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: BubuTimeMachine/Info.plist
+        CODE_SIGN_ENTITLEMENTS: BubuTimeMachine/BubuTimeMachine.entitlements
         TARGETED_DEVICE_FAMILY: "1"
 
   BubuTimeMachineTests:

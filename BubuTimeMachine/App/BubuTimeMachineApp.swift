@@ -21,7 +21,10 @@ struct BubuTimeMachineApp: App {
             FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self,
             PendingDeletion.self
         ])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // App Group：先把旧私有沙盒的 store/媒体一次性迁到共享容器（幂等、失败不删源），
+        // 再让 ModelConfiguration 指向共享容器里的 store —— Widget/灵动岛等 extension 才能读到同一份数据。
+        StorageMigrator.migrateIfNeeded()
+        let config = ModelConfiguration(schema: schema, url: BubuStorage.storeURL)
         do {
             modelContainer = try ModelContainer(for: schema, configurations: [config])
         } catch {
