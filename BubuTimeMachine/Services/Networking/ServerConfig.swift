@@ -13,7 +13,11 @@ final class ServerConfig {
 
     /// 当前家庭身份（爸爸/妈妈/姥姥），用于署名与多视角。
     var currentRoleRaw: String {
-        didSet { UserDefaults.standard.set(currentRoleRaw, forKey: Self.roleKey) }
+        didSet {
+            UserDefaults.standard.set(currentRoleRaw, forKey: Self.roleKey)
+            // 镜像到 App Group，供 Intent/Widget 读取当前署名身份。
+            SharedDefaults.currentRole = FamilyRole(rawValue: currentRoleRaw) ?? .mama
+        }
     }
 
     var currentRole: FamilyRole {
@@ -23,7 +27,10 @@ final class ServerConfig {
 
     /// 孩子的名字，用于 AI 第一人称改写等场景。
     var childName: String {
-        didSet { UserDefaults.standard.set(childName, forKey: Self.childNameKey) }
+        didSet {
+            UserDefaults.standard.set(childName, forKey: Self.childNameKey)
+            SharedDefaults.childName = childName
+        }
     }
 
     /// 家庭共享登录账户（PocketBase users）。
@@ -126,5 +133,7 @@ final class ServerConfig {
         // 家庭内测默认启用真实 AI；如果用户手动关闭过，则尊重用户设置。
         self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? true
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
+        // didSet 不在 init 内触发，显式把身份/名字镜像到 App Group，供 Intent/Widget 首次即可读。
+        SharedDefaults.mirror(role: FamilyRole(rawValue: currentRoleRaw) ?? .mama, childName: childName)
     }
 }
