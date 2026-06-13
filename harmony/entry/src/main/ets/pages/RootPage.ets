@@ -1,4 +1,5 @@
 import { HomeView } from '../view/HomeView';
+import { TimelineView } from '../view/TimelineView';
 import { BubuColor } from '../theme/BubuTheme';
 
 // MARK: - 根导航（对照 iOS RootTabView）
@@ -16,7 +17,7 @@ struct RootPage {
       }.tabBar(this.bar('记录此刻', '🏠', 0))
 
       TabContent() {
-        this.comingSoon('时光轴', '所有瞬间会在这里按时间流动')
+        TimelineView()
       }.tabBar(this.bar('时光', '🕐', 1))
 
       TabContent() {

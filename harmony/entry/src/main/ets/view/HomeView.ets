@@ -5,6 +5,7 @@ import { EntryWriter } from '../services/EntryWriter';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor } from '../theme/BubuTheme';
 import { IdentityCard } from './IdentityCard';
+import { ChildProfileView } from './ChildProfileView';
 import { promptAction } from '@kit.ArkUI';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS CaptureHomeView）
@@ -15,6 +16,7 @@ export struct HomeView {
   @State entries: Entry[] = [];
   @State noteDraft: string = '';
   @State showRecord: boolean = false;
+  @State showProfile: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
@@ -30,10 +32,15 @@ export struct HomeView {
       Column({ space: 14 }) {
         if (this.profile) {
           IdentityCard({ profile: this.profile! })
+            .onClick(() => { this.showProfile = true; })
         } else {
-          Text('布布时光机')
-            .fontSize(28).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
-            .margin({ top: 24 })
+          Column({ space: 10 }) {
+            Text('布布时光机')
+              .fontSize(28).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+            Button('建立布布的档案')
+              .backgroundColor(BubuColor.primary)
+              .onClick(() => { this.showProfile = true; })
+          }.margin({ top: 24 })
         }
 
         // 大记录按钮
@@ -66,6 +73,12 @@ export struct HomeView {
     .backgroundColor(BubuColor.cream)
     .width('100%').height('100%')
     .bindSheet($$this.showRecord, this.recordSheet(), { height: 320 })
+    .bindSheet($$this.showProfile, this.profileSheet(), { height: '80%' })
+  }
+
+  @Builder
+  profileSheet() {
+    ChildProfileView()
   }
 
   @Builder
