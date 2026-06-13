@@ -21,10 +21,23 @@ export struct MembersView {
   aboutToAppear(): void { this.reload(); }
 
   private async reload(): Promise<void> {
-    this.members = await AppDatabase.shared.fetchMembers();
+    this.members = await AppDatabase.shared.fetchMembers() ?? [];
+  }
+
+  private memberList(): FamilyMember[] {
+    return this.members ?? [];
   }
 
   build() {
+    if (this.showAdd) {
+      this.addPanel()
+    } else {
+      this.mainPage()
+    }
+  }
+
+  @Builder
+  mainPage() {
     Scroll() {
       Column({ space: 12 }) {
         Row() {
@@ -39,11 +52,11 @@ export struct MembersView {
             })
         }.width('100%')
 
-        if (this.members.length === 0) {
+        if (this.memberList().length === 0) {
           Text('把家人都请进来，一起记录布布的成长')
             .fontSize(13).fontColor(BubuColor.secondaryText).margin({ top: 30 })
         } else {
-          ForEach(this.members, (m: FamilyMember) => {
+          ForEach(this.memberList(), (m: FamilyMember) => {
             Row({ space: 12 }) {
               Text(m.avatarEmoji).fontSize(30)
               Column() {
@@ -60,12 +73,22 @@ export struct MembersView {
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
-    .bindSheet($$this.showAdd, this.addSheet(), { height: 360 })
   }
 
   @Builder
-  addSheet() {
+  addPanel() {
     Column({ space: 14 }) {
+      Row({ space: 12 }) {
+        Button('返回')
+          .backgroundColor('#F3F3F3')
+          .fontColor(BubuColor.warmBrown)
+          .onClick(() => { this.showAdd = false; })
+        Text('添加家庭成员')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.warmBrown)
+        Blank()
+      }.width('100%')
       Text('添加家庭成员').fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       TextInput({ text: $$this.newName, placeholder: '名字，如「王芳」或「妈妈」' })
         .height(48).backgroundColor('#F3F3F3').borderRadius(10)
@@ -87,7 +110,7 @@ export struct MembersView {
       Button('保存').width('100%').backgroundColor(BubuColor.primary)
         .onClick(() => { this.save(); })
     }
-    .padding(20).width('100%')
+    .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
   }
 
   private async save(): Promise<void> {
@@ -98,7 +121,7 @@ export struct MembersView {
       relation: this.relations[this.relationIndex],
       avatarEmoji: this.emojis[this.emojiIndex],
       themeColorHex: '#F28C9E',
-      isPrimary: this.members.length === 0,
+      isPrimary: this.memberList().length === 0,
       syncState: SyncState.local,
       createdAt: now
     };

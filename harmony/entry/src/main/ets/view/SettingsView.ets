@@ -20,6 +20,7 @@ export struct SettingsView {
   @State childName: string = '布布';
   @State roleIndex: number = 1; // 默认妈妈
   @State showMembers: boolean = false;
+  @State statusText: string = '';
 
   aboutToAppear(): void {
     const c = ServerConfig.shared;
@@ -31,6 +32,32 @@ export struct SettingsView {
   }
 
   build() {
+    if (this.showMembers) {
+      Column() {
+        Row({ space: 12 }) {
+          Button('返回')
+            .backgroundColor('#F3F3F3')
+            .fontColor(BubuColor.warmBrown)
+            .onClick(() => { this.showMembers = false; })
+          Text('家庭成员')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(BubuColor.warmBrown)
+          Blank()
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+        MembersView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else {
+      this.mainPage()
+    }
+  }
+
+  @Builder
+  mainPage() {
     Scroll() {
       Column({ space: 14 }) {
         Text('设置').fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown).width('100%')
@@ -80,18 +107,20 @@ export struct SettingsView {
           .width('100%').backgroundColor(BubuColor.primary).margin({ top: 12 })
           .onClick(() => { this.saveAndSync(); })
 
+        if (this.statusText.length > 0) {
+          Text(this.statusText)
+            .fontSize(12)
+            .fontColor(BubuColor.primary)
+            .width('100%')
+            .textAlign(TextAlign.Center)
+        }
+
         Text('离线也能用：所有记录先存手机，连上服务器后自动同步给全家。')
           .fontSize(11).fontColor(BubuColor.secondaryText).margin({ top: 8 })
       }
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
-    .bindSheet($$this.showMembers, this.membersSheet(), { height: '85%' })
-  }
-
-  @Builder
-  membersSheet() {
-    MembersView()
   }
 
   private async saveAndSync(): Promise<void> {
@@ -103,6 +132,7 @@ export struct SettingsView {
     await c.setChildName(this.childName.trim().length === 0 ? '布布' : this.childName.trim());
     await c.persistServer();
     SyncEngine.shared.start();
+    this.statusText = '已保存，正在同步';
     promptAction.showToast({ message: '已保存，正在同步…' });
   }
 }

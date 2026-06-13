@@ -8,15 +8,15 @@ interface StudioEntry {
   subtitle: string;
 }
 
+const STUDIO_ITEMS: StudioEntry[] = [
+  { emoji: '🎬', title: '成长电影', subtitle: '把这一年的瞬间拼成一部小电影' },
+  { emoji: '📖', title: '第一人称日记', subtitle: 'AI 用布布的口吻，把你的记录改写成日记' },
+  { emoji: '📊', title: '成长报告', subtitle: '阶段性回顾布布的点滴变化' },
+  { emoji: '👨‍👩‍👧', title: '家庭合奏', subtitle: '把全家的多视角补充汇成一段故事' }
+];
+
 @Component
 export struct AIStudioView {
-  private items: StudioEntry[] = [
-    { emoji: '🎬', title: '成长电影', subtitle: '把这一年的瞬间拼成一部小电影' },
-    { emoji: '📖', title: '第一人称日记', subtitle: 'AI 用布布的口吻，把你的记录改写成日记' },
-    { emoji: '📊', title: '成长报告', subtitle: '阶段性回顾布布的点滴变化' },
-    { emoji: '👨‍👩‍👧', title: '家庭合奏', subtitle: '把全家的多视角补充汇成一段故事' }
-  ];
-
   build() {
     Scroll() {
       Column({ space: 16 }) {
@@ -25,7 +25,7 @@ export struct AIStudioView {
         Text('由 AI 把布布的点滴，讲成值得收藏的故事')
           .fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
 
-        ForEach(this.items, (it: StudioEntry) => {
+        ForEach(STUDIO_ITEMS, (it: StudioEntry) => {
           Row({ space: 14 }) {
             Text(it.emoji).fontSize(34)
             Column() {

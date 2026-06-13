@@ -19,16 +19,36 @@ export struct HealthHomeView {
   aboutToAppear(): void { this.reload(); }
 
   private async reload(): Promise<void> {
-    this.records = await AppDatabase.shared.fetchHealth();
+    this.records = await AppDatabase.shared.fetchHealth() ?? [];
   }
 
-  private get todayRecords(): HealthRecord[] {
+  private recordList(): HealthRecord[] {
+    return this.records ?? [];
+  }
+
+  private todayRecordList(): HealthRecord[] {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    return this.records.filter(r => r.recordedAt >= start.getTime());
+    return this.recordList().filter(r => r.recordedAt >= start.getTime());
   }
 
   build() {
+    if (this.showGrowth) {
+      Column() {
+        this.panelHeader('成长曲线')
+        GrowthCurveView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.composingKind !== null) {
+      this.recordPanel()
+    } else {
+      this.mainPage()
+    }
+  }
+
+  @Builder
+  mainPage() {
     Scroll() {
       Column({ space: 16 }) {
         Row() {
@@ -52,18 +72,18 @@ export struct HealthHomeView {
         .height(360)
 
         // 今日
-        if (this.todayRecords.length > 0) {
+        if (this.todayRecordList().length > 0) {
           Text('今天').fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown).width('100%')
-          ForEach(this.todayRecords, (r: HealthRecord) => {
+          ForEach(this.todayRecordList(), (r: HealthRecord) => {
             this.recordRow(r)
           }, (r: HealthRecord) => r.id)
         }
 
         // 最近
-        if (this.records.length > 0) {
+        if (this.recordList().length > 0) {
           Text('最近').fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
             .width('100%').margin({ top: 8 })
-          ForEach(this.records.slice(0, 20), (r: HealthRecord) => {
+          ForEach(this.recordList().slice(0, 20), (r: HealthRecord) => {
             this.recordRow(r)
           }, (r: HealthRecord) => r.id + '_recent')
         } else {
@@ -74,16 +94,26 @@ export struct HealthHomeView {
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
-    .bindSheet(this.composingKind !== null, this.recordSheet(), {
-      height: 360,
-      onDisappear: () => { this.composingKind = null; }
-    })
-    .bindSheet($$this.showGrowth, this.growthSheet(), { height: '90%' })
   }
 
   @Builder
-  growthSheet() {
-    GrowthCurveView()
+  panelHeader(title: string) {
+    Row({ space: 12 }) {
+      Button('返回')
+        .backgroundColor('#F3F3F3')
+        .fontColor(BubuColor.warmBrown)
+        .onClick(() => {
+          this.showGrowth = false;
+          this.composingKind = null;
+        })
+      Text(title)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.warmBrown)
+      Blank()
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 8 })
   }
 
   @Builder
@@ -120,8 +150,9 @@ export struct HealthHomeView {
   }
 
   @Builder
-  recordSheet() {
+  recordPanel() {
     Column({ space: 14 }) {
+      this.panelHeader(this.composingKind ? `记录${healthKindMeta(this.composingKind).title}` : '健康记录')
       Text(this.composingKind ? `记录${healthKindMeta(this.composingKind).title}` : '')
         .fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       TextInput({ text: $$this.draftTitle, placeholder: this.composingKind ? healthKindMeta(this.composingKind).placeholder : '' })
@@ -131,7 +162,7 @@ export struct HealthHomeView {
       Button('保存').width('100%').backgroundColor(BubuColor.primary)
         .onClick(() => { this.save(); })
     }
-    .padding(20).width('100%')
+    .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
   }
 
   private async save(): Promise<void> {

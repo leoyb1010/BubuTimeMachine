@@ -43,8 +43,12 @@ export struct HomeView {
 
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
-    this.entries = await AppDatabase.shared.fetchEntries(false);
-    this.photoCount = (await AppDatabase.shared.fetchAllPhotos()).length;
+    this.entries = await AppDatabase.shared.fetchEntries(false) ?? [];
+    this.photoCount = (await AppDatabase.shared.fetchAllPhotos() ?? []).length;
+  }
+
+  private entryList(): Entry[] {
+    return this.entries ?? [];
   }
 
   // 一句话记录：有 AI 则先解析规整，无 AI/失败则直接存原文（离线优先）
@@ -122,6 +126,43 @@ export struct HomeView {
   }
 
   build() {
+    if (this.showRecord) {
+      this.recordPanel()
+    } else if (this.showProfile) {
+      Column() {
+        this.panelHeader('布布资料')
+        ChildProfileView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.showHealth) {
+      Column() {
+        this.panelHeader('布布健康')
+        HealthHomeView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.showSettings) {
+      Column() {
+        this.panelHeader('设置')
+        SettingsView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.showAlbum) {
+      Column() {
+        this.panelHeader('照片墙')
+        AlbumView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else {
+      this.homePage()
+    }
+  }
+
+  @Builder
+  homePage() {
     Scroll() {
       Column({ space: 14 }) {
         // 顶部：标题 + 设置入口
@@ -179,7 +220,7 @@ export struct HomeView {
 
         // 统计行（照片卡可点进相册）
         Row({ space: 12 }) {
-          this.statCard(`${this.entries.length}`, '个瞬间')
+          this.statCard(`${this.entryList().length}`, '个瞬间')
           Column({ space: 6 }) {
             Text(`${this.photoCount}`).fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
             Text('张照片').fontSize(12).fontColor(BubuColor.secondaryText)
@@ -211,31 +252,34 @@ export struct HomeView {
     }
     .backgroundColor(BubuColor.cream)
     .width('100%').height('100%')
-    .bindSheet($$this.showRecord, this.recordSheet(), { height: 320 })
-    .bindSheet($$this.showProfile, this.profileSheet(), { height: '80%' })
-    .bindSheet($$this.showHealth, this.healthSheet(), { height: '90%' })
-    .bindSheet($$this.showSettings, this.settingsSheet(), { height: '90%' })
-    .bindSheet($$this.showAlbum, this.albumSheet(), { height: '90%' })
   }
 
   @Builder
-  profileSheet() {
-    ChildProfileView()
+  panelHeader(title: string) {
+    Row({ space: 12 }) {
+      Button('返回')
+        .backgroundColor('#F3F3F3')
+        .fontColor(BubuColor.warmBrown)
+        .onClick(() => {
+          this.closePanel();
+        })
+      Text(title)
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.warmBrown)
+      Blank()
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 8 })
   }
 
-  @Builder
-  healthSheet() {
-    HealthHomeView()
-  }
-
-  @Builder
-  settingsSheet() {
-    SettingsView()
-  }
-
-  @Builder
-  albumSheet() {
-    AlbumView()
+  private closePanel(): void {
+    this.showRecord = false;
+    this.showProfile = false;
+    this.showHealth = false;
+    this.showSettings = false;
+    this.showAlbum = false;
+    this.reload();
   }
 
   @Builder
@@ -249,8 +293,9 @@ export struct HomeView {
   }
 
   @Builder
-  recordSheet() {
+  recordPanel() {
     Column({ space: 14 }) {
+      this.panelHeader('记录布布此刻')
       Text('记录布布此刻').fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       TextArea({ placeholder: '写一句关于布布的瞬间…', text: $$this.noteDraft })
         .height(100).borderRadius(12).backgroundColor('#F3F3F3')
@@ -292,6 +337,6 @@ export struct HomeView {
           }
         })
     }
-    .padding(20).width('100%')
+    .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
   }
 }

@@ -20,10 +20,23 @@ export struct GrowthCurveView {
   aboutToAppear(): void { this.reload(); }
 
   private async reload(): Promise<void> {
-    this.data = await AppDatabase.shared.fetchGrowth();
+    this.data = await AppDatabase.shared.fetchGrowth() ?? [];
+  }
+
+  private measurementList(): GrowthMeasurement[] {
+    return this.data ?? [];
   }
 
   build() {
+    if (this.showAdd) {
+      this.addPanel()
+    } else {
+      this.mainPage()
+    }
+  }
+
+  @Builder
+  mainPage() {
     Scroll() {
       Column({ space: 14 }) {
         Row() {
@@ -33,7 +46,7 @@ export struct GrowthCurveView {
             .onClick(() => { this.heightStr = ''; this.weightStr = ''; this.showAdd = true; })
         }.width('100%')
 
-        if (this.data.length === 0) {
+        if (this.measurementList().length === 0) {
           Text('记录身高体重，看布布一点点长大').fontSize(13).fontColor(BubuColor.secondaryText).margin({ top: 24 })
         } else {
           Text('身高 (cm)').fontSize(13).fontColor(BubuColor.primary).width('100%')
@@ -42,7 +55,7 @@ export struct GrowthCurveView {
             .onReady(() => { this.drawChart('height'); })
 
           // 数据列表
-          ForEach(this.data, (g: GrowthMeasurement) => {
+          ForEach(this.measurementList(), (g: GrowthMeasurement) => {
             Row() {
               Text(this.dateText(g.measuredAt)).fontSize(12).fontColor(BubuColor.secondaryText)
               Blank()
@@ -55,7 +68,6 @@ export struct GrowthCurveView {
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
-    .bindSheet($$this.showAdd, this.addSheet(), { height: 280 })
   }
 
   // 自绘折线
@@ -64,7 +76,7 @@ export struct GrowthCurveView {
     const w = c.width;
     const h = c.height;
     c.clearRect(0, 0, w, h);
-    const vals: number[] = this.data.map(g => (g.heightCm ?? 0)).filter(v => v > 0);
+    const vals: number[] = this.measurementList().map(g => (g.heightCm ?? 0)).filter(v => v > 0);
     if (vals.length < 1) return;
     const minV = Math.min(...vals) - 2;
     const maxV = Math.max(...vals) + 2;
@@ -91,8 +103,19 @@ export struct GrowthCurveView {
   }
 
   @Builder
-  addSheet() {
+  addPanel() {
     Column({ space: 14 }) {
+      Row({ space: 12 }) {
+        Button('返回')
+          .backgroundColor('#F3F3F3')
+          .fontColor(BubuColor.warmBrown)
+          .onClick(() => { this.showAdd = false; })
+        Text('记一次身高体重')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.warmBrown)
+        Blank()
+      }.width('100%')
       Text('记一次身高体重').fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       Row() {
         Text('身高(cm)').fontSize(15).fontColor(BubuColor.warmBrown)
@@ -106,7 +129,7 @@ export struct GrowthCurveView {
       }.width('100%').padding(12).backgroundColor(BubuColor.card).borderRadius(12)
       Button('保存').width('100%').backgroundColor(BubuColor.primary).onClick(() => { this.save(); })
     }
-    .padding(20).width('100%')
+    .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
   }
 
   private async save(): Promise<void> {

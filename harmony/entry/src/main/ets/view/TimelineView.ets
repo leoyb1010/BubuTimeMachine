@@ -23,10 +23,11 @@ export struct TimelineView {
 
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
-    this.entries = await AppDatabase.shared.fetchEntries(false);
+    const entries = await AppDatabase.shared.fetchEntries(false) ?? [];
+    this.entries = entries;
     const map = new Map<string, string>();
-    for (const e of this.entries) {
-      const media = await AppDatabase.shared.fetchMediaForEntry(e.id);
+    for (const e of entries) {
+      const media = await AppDatabase.shared.fetchMediaForEntry(e.id) ?? [];
       const photo = media.find(m => m.typeRaw === 'photo' && m.localFileName);
       if (photo && photo.localFileName) {
         map.set(e.id, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
@@ -35,13 +36,54 @@ export struct TimelineView {
     this.photoMap = map;
   }
 
+  private entryList(): Entry[] {
+    return this.entries ?? [];
+  }
+
   build() {
+    if (this.showDetail && this.detailEntry) {
+      Column() {
+        Row({ space: 12 }) {
+          Button('返回')
+            .backgroundColor('#F3F3F3')
+            .fontColor(BubuColor.warmBrown)
+            .onClick(() => {
+              this.showDetail = false;
+              this.detailEntry = null;
+              this.reload();
+            })
+          Text('记录详情')
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(BubuColor.warmBrown)
+          Blank()
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+        EntryDetailView({
+          entry: this.detailEntry!,
+          onDismiss: () => {
+            this.showDetail = false;
+            this.detailEntry = null;
+            this.reload();
+          }
+        })
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else {
+      this.mainPage()
+    }
+  }
+
+  @Builder
+  mainPage() {
     Column() {
       Text('时光轴')
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         .width('100%').padding({ left: 16, top: 16, bottom: 8 })
 
-      if (this.entries.length === 0) {
+      if (this.entryList().length === 0) {
         Column({ space: 10 }) {
           Text('🐣').fontSize(56)
           Text('还没有记录呢').fontSize(16).fontColor(BubuColor.warmBrown)
@@ -50,7 +92,7 @@ export struct TimelineView {
         .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else {
         List({ space: 12 }) {
-          ForEach(this.entries, (e: Entry) => {
+          ForEach(this.entryList(), (e: Entry) => {
             ListItem() {
               this.entryCard(e)
             }
@@ -67,20 +109,6 @@ export struct TimelineView {
       }
     }
     .width('100%').height('100%').backgroundColor(BubuColor.cream)
-    .bindSheet($$this.showDetail, this.detailSheet(), {
-      height: '90%',
-      onDisappear: () => { this.reload(); }
-    })
-  }
-
-  @Builder
-  detailSheet() {
-    if (this.detailEntry) {
-      EntryDetailView({
-        entry: this.detailEntry!,
-        onDismiss: () => { this.showDetail = false; }
-      })
-    }
   }
 
   @Builder

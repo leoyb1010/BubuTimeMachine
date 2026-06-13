@@ -19,10 +19,23 @@ export struct CapsuleView {
   aboutToAppear(): void { this.reload(); }
 
   private async reload(): Promise<void> {
-    this.capsules = await AppDatabase.shared.fetchCapsules();
+    this.capsules = await AppDatabase.shared.fetchCapsules() ?? [];
+  }
+
+  private capsuleList(): TimeCapsule[] {
+    return this.capsules ?? [];
   }
 
   build() {
+    if (this.showCompose) {
+      this.composePanel()
+    } else {
+      this.mainPage()
+    }
+  }
+
+  @Builder
+  mainPage() {
     Scroll() {
       Column({ space: 16 }) {
         Row() {
@@ -37,14 +50,14 @@ export struct CapsuleView {
             })
         }.width('100%')
 
-        if (this.capsules.length === 0) {
+        if (this.capsuleList().length === 0) {
           Column({ space: 10 }) {
             Text('✉️').fontSize(56)
             Text('写给未来布布的第一封信').fontSize(15).fontColor(BubuColor.warmBrown)
             Text('设一个解锁日，到那天再打开').fontSize(12).fontColor(BubuColor.secondaryText)
           }.width('100%').padding({ top: 40 })
         } else {
-          ForEach(this.capsules, (c: TimeCapsule) => {
+          ForEach(this.capsuleList(), (c: TimeCapsule) => {
             this.capsuleCard(c)
           }, (c: TimeCapsule) => c.id)
         }
@@ -52,7 +65,6 @@ export struct CapsuleView {
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
-    .bindSheet($$this.showCompose, this.composeSheet(), { height: 420 })
   }
 
   private isLocked(c: TimeCapsule): boolean {
@@ -79,8 +91,19 @@ export struct CapsuleView {
   }
 
   @Builder
-  composeSheet() {
+  composePanel() {
     Column({ space: 14 }) {
+      Row({ space: 12 }) {
+        Button('返回')
+          .backgroundColor('#F3F3F3')
+          .fontColor(BubuColor.warmBrown)
+          .onClick(() => { this.showCompose = false; })
+        Text('写给未来布布')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(BubuColor.warmBrown)
+        Blank()
+      }.width('100%')
       Text('写给未来布布').fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       TextInput({ text: $$this.draftTitle, placeholder: '给这封信起个名字' })
         .height(48).backgroundColor('#F3F3F3').borderRadius(10)
@@ -100,7 +123,7 @@ export struct CapsuleView {
       Button('封存').width('100%').backgroundColor(BubuColor.primary)
         .onClick(() => { this.save(); })
     }
-    .padding(20).width('100%')
+    .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
   }
 
   private async save(): Promise<void> {

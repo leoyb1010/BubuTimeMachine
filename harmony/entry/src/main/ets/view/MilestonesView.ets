@@ -37,7 +37,7 @@ export struct MilestonesView {
 
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
-    let list = await AppDatabase.shared.fetchMilestones();
+    let list = await AppDatabase.shared.fetchMilestones() ?? [];
     // 首次进入：把预置里程碑种入（仅当库里为空）
     if (list.length === 0) {
       const now = Date.now();
@@ -50,16 +50,21 @@ export struct MilestonesView {
         };
         await AppDatabase.shared.upsertMilestone(m);
       }
-      list = await AppDatabase.shared.fetchMilestones();
+      list = await AppDatabase.shared.fetchMilestones() ?? [];
     }
     this.milestones = list;
   }
 
-  private get achieved(): Milestone[] {
-    return this.milestones.filter(m => m.happenedAt !== undefined && m.happenedAt !== null);
+  private milestoneList(): Milestone[] {
+    return this.milestones ?? [];
   }
-  private get pending(): Milestone[] {
-    return this.milestones.filter(m => m.happenedAt === undefined || m.happenedAt === null);
+
+  private achievedList(): Milestone[] {
+    return this.milestoneList().filter(m => m.happenedAt !== undefined && m.happenedAt !== null);
+  }
+
+  private pendingList(): Milestone[] {
+    return this.milestoneList().filter(m => m.happenedAt === undefined || m.happenedAt === null);
   }
 
   build() {
@@ -68,27 +73,27 @@ export struct MilestonesView {
         Text('里程碑')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown).width('100%')
 
-        if (this.achieved.length > 0) {
-          Text(`⭐ 已点亮 ${this.achieved.length}`).fontSize(16).fontWeight(FontWeight.Bold)
+        if (this.achievedList().length > 0) {
+          Text(`⭐ 已点亮 ${this.achievedList().length}`).fontSize(16).fontWeight(FontWeight.Bold)
             .fontColor(BubuColor.primary).width('100%')
           Grid() {
-            ForEach(this.achieved, (m: Milestone) => {
+            ForEach(this.achievedList(), (m: Milestone) => {
               GridItem() { this.medallion(m, true) }
             }, (m: Milestone) => m.id)
           }
           .columnsTemplate('1fr 1fr 1fr').columnsGap(12).rowsGap(12)
-          .height(Math.ceil(this.achieved.length / 3) * 110)
+          .height(Math.ceil(this.achievedList().length / 3) * 110)
         }
 
         Text('适龄推荐 · 待点亮').fontSize(16).fontWeight(FontWeight.Bold)
           .fontColor(BubuColor.secondaryText).width('100%').margin({ top: 8 })
         Grid() {
-          ForEach(this.pending, (m: Milestone) => {
+          ForEach(this.pendingList(), (m: Milestone) => {
             GridItem() { this.medallion(m, false) }
           }, (m: Milestone) => m.id)
         }
         .columnsTemplate('1fr 1fr 1fr').columnsGap(12).rowsGap(12)
-        .height(Math.ceil(this.pending.length / 3) * 110)
+        .height(Math.ceil(this.pendingList().length / 3) * 110)
       }
       .padding(16).width('100%')
     }

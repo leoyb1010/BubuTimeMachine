@@ -12,7 +12,11 @@ export struct AlbumView {
   aboutToAppear(): void { this.reload(); }
 
   private async reload(): Promise<void> {
-    this.photos = await AppDatabase.shared.fetchAllPhotos();
+    this.photos = await AppDatabase.shared.fetchAllPhotos() ?? [];
+  }
+
+  private photoList(): Media[] {
+    return this.photos ?? [];
   }
 
   private uri(m: Media): string {
@@ -25,7 +29,7 @@ export struct AlbumView {
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         .width('100%').padding({ left: 16, top: 16, bottom: 8 })
 
-      if (this.photos.length === 0) {
+      if (this.photoList().length === 0) {
         Column({ space: 10 }) {
           Text('📷').fontSize(56)
           Text('还没有照片').fontSize(15).fontColor(BubuColor.warmBrown)
@@ -33,7 +37,7 @@ export struct AlbumView {
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else {
         Grid() {
-          ForEach(this.photos, (m: Media) => {
+          ForEach(this.photoList(), (m: Media) => {
             GridItem() {
               Image(this.uri(m))
                 .width('100%').aspectRatio(1).borderRadius(10).objectFit(ImageFit.Cover)
