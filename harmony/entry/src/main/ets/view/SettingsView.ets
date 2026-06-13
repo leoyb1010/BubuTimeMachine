@@ -2,6 +2,7 @@ import { ServerConfig } from '../services/ServerConfig';
 import { SyncEngine } from '../sync/SyncEngine';
 import { ALL_FAMILY_ROLES, FamilyRole } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
+import { MembersView } from './MembersView';
 import { promptAction } from '@kit.ArkUI';
 
 @Extend(Row)
@@ -18,6 +19,7 @@ export struct SettingsView {
   @State password: string = '';
   @State childName: string = '布布';
   @State roleIndex: number = 1; // 默认妈妈
+  @State showMembers: boolean = false;
 
   aboutToAppear(): void {
     const c = ServerConfig.shared;
@@ -66,6 +68,14 @@ export struct SettingsView {
           TextInput({ text: $$this.password, placeholder: '密码' }).type(InputType.Password).layoutWeight(1).textAlign(TextAlign.End)
         }.settingRow()
 
+        // 家庭成员入口
+        Row() {
+          Text('家庭成员').fontSize(15).fontColor(BubuColor.warmBrown)
+          Blank()
+          Text('管理 ›').fontSize(14).fontColor(BubuColor.primary)
+        }.settingRow().margin({ top: 8 })
+        .onClick(() => { this.showMembers = true; })
+
         Button('保存并立即同步')
           .width('100%').backgroundColor(BubuColor.primary).margin({ top: 12 })
           .onClick(() => { this.saveAndSync(); })
@@ -76,6 +86,12 @@ export struct SettingsView {
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
+    .bindSheet($$this.showMembers, this.membersSheet(), { height: '85%' })
+  }
+
+  @Builder
+  membersSheet() {
+    MembersView()
   }
 
   private async saveAndSync(): Promise<void> {

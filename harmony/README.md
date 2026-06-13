@@ -46,15 +46,31 @@ ArkTS 编译 0 error。
 | 布布档案编辑（性别/血型 Picker） | ✅ 完成（对齐 iOS） | `view/ChildProfileView.ets` |
 | 主题 token | ✅ 完成 | `theme/BubuTheme.ets` |
 
-### 🟡 / ⬜ 待续（诚实标注，**尚未实现**）
+### 已补齐（后续轮次）
+
+| 模块 | 状态 | 文件 |
+|---|---|---|
+| 记录：拍照/选图 | ✅ | HomeView + MediaStore + PhotoViewPicker |
+| 记录：录音 | ✅ | AudioRecorder(AVRecorder) + EntryWriter.entryWithPhoto(voice) |
+| 时光轴照片显示 + 详情页 | ✅ | TimelineView + EntryDetailView（大图/删除） |
+| 照片墙 | ✅ | AlbumView |
+| 健康（7类记录） | ✅ | HealthHomeView |
+| 里程碑墙（10预置可点亮） | ✅ | MilestonesView |
+| 时间胶囊（写信/解锁日） | ✅ | CapsuleView |
+| 布布的故事（AI入口） | ✅ | AIStudioView |
+| 设置（身份/服务器/同步） | ✅ | SettingsView |
+| 家庭成员管理 | ✅ | MembersView |
+| 身份卡翻面（性别/血型/出生地） | ✅ | IdentityCard（rotate 动画） |
+| UI/动效 | ✅ | clickEffect 按压、列表入场 transition、身份卡渐变质感 |
+
+### 🟡 / ⬜ 仍待续
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
-| 同步引擎完整化 | 🟡 | 已通：30s 轮询/前后台启停/登录/推 Entry+Profile/拉取游标。**待补**：媒体文件上传下载、其余 10 个 collection 双向映射、冲突合并细节、待删队列。iOS `SyncEngine.swift`(1183 行) 是范本，按同一模式补。 |
-| 媒体（H6） | ⬜ | 录音(AVRecorder)、拍照(Camera Kit)、相册(Photo Picker Kit)、缩略图、波形。需权限链路。 |
-| 健康/里程碑/胶囊/相册/AI Studio（H7） | ⬜ | 数据模型已就绪，UI 页面待写。里程碑/胶囊数据驱动，相对快；健康成长曲线鸿蒙无官方图表，可能自绘。 |
-| 系统集成（H8） | ⬜ | 服务卡片(≈小组件)、实况窗(≈灵动岛)、意图框架(≈App Intents)。独立 module，需共享数据。 |
-| 视觉打磨 | ⬜ | 按 HarmonyOS Design 精修材质/动效（不照抄 Apple）。 |
+| 同步引擎完整化 | 🟡 | 已通：30s 轮询/前后台启停/登录/推 Entry+Profile/拉取游标。**待补**：媒体文件上传下载、其余 collection 双向映射、冲突合并、待删队列。 |
+| 自然语言一句话记录 | ⬜ | iOS 的 /parse-natural-capture AI 解析。 |
+| 疫苗表 / 成长曲线图 | ⬜ | 健康子模块（曲线需自绘）。 |
+| 系统集成（H8） | ⬜ | 服务卡片(≈小组件)、实况窗(≈灵动岛)、意图框架(≈App Intents)。独立 module。 |
 | 单元测试 | ⬜ | 对照 iOS WaveNTests。 |
 
 ---

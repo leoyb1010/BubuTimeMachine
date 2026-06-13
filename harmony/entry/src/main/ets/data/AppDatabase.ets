@@ -1,7 +1,7 @@
 import { relationalStore } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord } from '../models/Models';
+import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember } from '../models/Models';
 import { SyncState } from '../models/Enums';
 
 const DOMAIN = 0x0000;
@@ -64,6 +64,83 @@ export class AppDatabase {
     await s.executeSql(`CREATE TABLE IF NOT EXISTS feed_event (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, actorRole TEXT NOT NULL, summary TEXT NOT NULL,
       targetLocalId TEXT, happenedAt INTEGER NOT NULL)`);
+    // VoiceNote
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS voice_note (
+      id TEXT PRIMARY KEY, remoteId TEXT, entryId TEXT NOT NULL, localFileName TEXT, remoteURL TEXT,
+      durationSeconds INTEGER NOT NULL, authorRole TEXT NOT NULL, waveformSamples TEXT, createdAt INTEGER NOT NULL)`);
+    // FamilyMember
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS family_member (
+      id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, relation TEXT NOT NULL,
+      avatarEmoji TEXT NOT NULL, themeColorHex TEXT NOT NULL, isPrimary INTEGER NOT NULL DEFAULT 0,
+      syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+  }
+
+  // —— VoiceNote ——
+  async insertVoiceNote(v: VoiceNote): Promise<void> {
+    const bucket: relationalStore.ValuesBucket = {
+      id: v.id, remoteId: v.remoteId ?? null, entryId: v.entryId, localFileName: v.localFileName ?? null,
+      remoteURL: v.remoteURL ?? null, durationSeconds: v.durationSeconds, authorRole: v.authorRole,
+      waveformSamples: JSON.stringify(v.waveformSamples), createdAt: v.createdAt
+    };
+    await this.store!.insert('voice_note', bucket);
+  }
+
+  async fetchVoiceForEntry(entryId: string): Promise<VoiceNote[]> {
+    const pred = new relationalStore.RdbPredicates('voice_note');
+    pred.equalTo('entryId', entryId);
+    const rs = await this.store!.query(pred);
+    const out: VoiceNote[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        entryId: rs.getString(rs.getColumnIndex('entryId')),
+        localFileName: AppDatabase.optStr(rs, 'localFileName'),
+        durationSeconds: rs.getLong(rs.getColumnIndex('durationSeconds')),
+        authorRole: rs.getString(rs.getColumnIndex('authorRole')),
+        waveformSamples: [],
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— FamilyMember ——
+  async upsertMember(m: FamilyMember): Promise<void> {
+    const bucket: relationalStore.ValuesBucket = {
+      id: m.id, remoteId: m.remoteId ?? null, name: m.name, relation: m.relation,
+      avatarEmoji: m.avatarEmoji, themeColorHex: m.themeColorHex, isPrimary: m.isPrimary ? 1 : 0,
+      syncState: m.syncState, createdAt: m.createdAt
+    };
+    await this.store!.insert('family_member', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+  }
+
+  async fetchMembers(): Promise<FamilyMember[]> {
+    const pred = new relationalStore.RdbPredicates('family_member');
+    pred.orderByAsc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: FamilyMember[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        name: rs.getString(rs.getColumnIndex('name')),
+        relation: rs.getString(rs.getColumnIndex('relation')),
+        avatarEmoji: rs.getString(rs.getColumnIndex('avatarEmoji')),
+        themeColorHex: rs.getString(rs.getColumnIndex('themeColorHex')),
+        isPrimary: rs.getLong(rs.getColumnIndex('isPrimary')) === 1,
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  async deleteMember(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('family_member');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
   }
 
   // —— Entry ——

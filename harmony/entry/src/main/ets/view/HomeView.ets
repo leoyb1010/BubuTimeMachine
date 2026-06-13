@@ -10,6 +10,8 @@ import { HealthHomeView } from './HealthHomeView';
 import { SettingsView } from './SettingsView';
 import { AlbumView } from './AlbumView';
 import { MediaStore } from '../services/MediaStore';
+import { AudioRecorder } from '../services/AudioRecorder';
+import { abilityAccessCtrl } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 
@@ -27,6 +29,9 @@ export struct HomeView {
   @State showAlbum: boolean = false;
   @State pickedPhotoName: string | null = null;   // 已选并落盘的照片文件名
   @State photoCount: number = 0;
+  @State recording: boolean = false;
+  @State recordedVoice: string | null = null;
+  @State recordedDur: number = 0;
 
   aboutToAppear(): void {
     this.reload();
@@ -36,6 +41,30 @@ export struct HomeView {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.entries = await AppDatabase.shared.fetchEntries(false);
     this.photoCount = (await AppDatabase.shared.fetchAllPhotos()).length;
+  }
+
+  // 录音开始/停止
+  private async toggleRecord(): Promise<void> {
+    if (this.recording) {
+      const res = await AudioRecorder.shared.stop();
+      this.recording = false;
+      if (res && res.fileName.length > 0) {
+        this.recordedVoice = res.fileName;
+        this.recordedDur = res.durationSec;
+      }
+    } else {
+      // 申请麦克风权限
+      try {
+        const atManager = abilityAccessCtrl.createAtManager();
+        await atManager.requestPermissionsFromUser(getContext(this), ['ohos.permission.MICROPHONE']);
+      } catch (e) {}
+      const ok = await AudioRecorder.shared.start();
+      if (ok) {
+        this.recording = true;
+      } else {
+        promptAction.showToast({ message: '无法开始录音，请检查麦克风权限' });
+      }
+    }
   }
 
   // 系统相册选一张照片 → 拷进沙盒，记下文件名
@@ -72,7 +101,11 @@ export struct HomeView {
         }.width('100%').padding({ top: 8 })
 
         if (this.profile) {
+          // 卡片自身轻点翻面；右上「编辑」按钮进资料编辑
           IdentityCard({ profile: this.profile! })
+          Text('编辑布布资料')
+            .fontSize(12).fontColor(BubuColor.primary)
+            .alignSelf(ItemAlign.End)
             .onClick(() => { this.showProfile = true; })
         } else {
           Column({ space: 10 }) {
@@ -179,27 +212,35 @@ export struct HomeView {
       TextArea({ placeholder: '写一句关于布布的瞬间…', text: $$this.noteDraft })
         .height(100).borderRadius(12).backgroundColor('#F3F3F3')
 
-      // 加照片
+      // 加照片 + 录音
       Row({ space: 10 }) {
-        Button(this.pickedPhotoName ? '✅ 已选 1 张照片' : '📷 加张照片')
+        Button(this.pickedPhotoName ? '✅ 已选照片' : '📷 加照片')
           .backgroundColor(this.pickedPhotoName ? BubuColor.success : '#F3F3F3')
           .fontColor(this.pickedPhotoName ? Color.White : BubuColor.warmBrown)
           .layoutWeight(1)
           .onClick(() => { this.pickPhoto(); })
+        Button(this.recording ? '⏺ 停止录音' : (this.recordedVoice ? `✅ ${this.recordedDur}s` : '🎙 录一段'))
+          .backgroundColor(this.recording ? BubuColor.primary : (this.recordedVoice ? BubuColor.success : '#F3F3F3'))
+          .fontColor(this.recording || this.recordedVoice ? Color.White : BubuColor.warmBrown)
+          .layoutWeight(1)
+          .onClick(() => { this.toggleRecord(); })
       }.width('100%')
 
       Button('保存')
         .width('100%').backgroundColor(BubuColor.primary)
         .onClick(async () => {
           const text = this.noteDraft.trim();
-          if (text.length === 0 && !this.pickedPhotoName) {
-            promptAction.showToast({ message: '写一句话，或加一张照片' });
+          if (text.length === 0 && !this.pickedPhotoName && !this.recordedVoice) {
+            promptAction.showToast({ message: '写一句话、加张照片，或录一段' });
             return;
           }
           try {
-            await EntryWriter.entryWithPhoto(text, this.pickedPhotoName, ServerConfig.shared.currentRole);
+            await EntryWriter.entryWithPhoto(text, this.pickedPhotoName, ServerConfig.shared.currentRole,
+              undefined, this.recordedVoice, this.recordedDur);
             this.noteDraft = '';
             this.pickedPhotoName = null;
+            this.recordedVoice = null;
+            this.recordedDur = 0;
             this.showRecord = false;
             await this.reload();
             promptAction.showToast({ message: '已经收好啦 🌟' });

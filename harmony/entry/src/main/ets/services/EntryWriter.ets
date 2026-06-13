@@ -1,6 +1,6 @@
 import { util } from '@kit.ArkTS';
 import { AppDatabase } from '../data/AppDatabase';
-import { Entry, FeedEvent, Media } from '../models/Models';
+import { Entry, FeedEvent, Media, VoiceNote } from '../models/Models';
 import { SyncState, FamilyRole, Mood, MediaType } from '../models/Enums';
 import { relationalStore } from '@kit.ArkData';
 
@@ -42,8 +42,9 @@ export class EntryWriter {
     return id;
   }
 
-  // 带一张照片的记录：photoFileName 为已落沙盒的相对文件名（MediaStore.copyIntoStore 返回）。
-  static async entryWithPhoto(note: string, photoFileName: string | null, role: FamilyRole, mood?: Mood): Promise<string> {
+  // 带照片/语音的记录：文件名为已落沙盒的相对名。voiceFileName/voiceDuration 可选。
+  static async entryWithPhoto(note: string, photoFileName: string | null, role: FamilyRole,
+                              mood?: Mood, voiceFileName?: string | null, voiceDuration?: number): Promise<string> {
     const now = Date.now();
     const id = util.generateRandomUUID(true);
     const trimmed = note.trim();
@@ -69,6 +70,19 @@ export class EntryWriter {
         createdAt: now
       };
       await AppDatabase.shared.insertMedia(media);
+    }
+
+    if (voiceFileName) {
+      const voice: VoiceNote = {
+        id: util.generateRandomUUID(true),
+        entryId: id,
+        localFileName: voiceFileName,
+        durationSeconds: voiceDuration ?? 0,
+        authorRole: role,
+        waveformSamples: [],
+        createdAt: now
+      };
+      await AppDatabase.shared.insertVoiceNote(voice);
     }
 
     const store = AppDatabase.shared.raw;
