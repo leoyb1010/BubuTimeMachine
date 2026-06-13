@@ -63,14 +63,21 @@ ArkTS 编译 0 error。
 | 身份卡翻面（性别/血型/出生地） | ✅ | IdentityCard（rotate 动画） |
 | UI/动效 | ✅ | clickEffect 按压、列表入场 transition、身份卡渐变质感 |
 
-### 🟡 / ⬜ 仍待续
+### 已补齐（最终轮）
+
+| 模块 | 状态 | 文件 |
+|---|---|---|
+| 自然语言一句话记录 | ✅ | AIService + HomeView 一句话条（AI 解析，离线降级原文） |
+| 成长曲线图（Canvas 自绘） | ✅ | GrowthCurveView（健康页进入） |
+| 服务卡片（≈iOS 小组件） | ✅ | BubuFormAbility + widget/pages/BubuCard + form_config.json |
+
+### 🟡 / ⬜ 仍待续（长尾）
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
-| 同步引擎完整化 | 🟡 | 已通：30s 轮询/前后台启停/登录/推 Entry+Profile/拉取游标。**待补**：媒体文件上传下载、其余 collection 双向映射、冲突合并、待删队列。 |
-| 自然语言一句话记录 | ⬜ | iOS 的 /parse-natural-capture AI 解析。 |
-| 疫苗表 / 成长曲线图 | ⬜ | 健康子模块（曲线需自绘）。 |
-| 系统集成（H8） | ⬜ | 服务卡片(≈小组件)、实况窗(≈灵动岛)、意图框架(≈App Intents)。独立 module。 |
+| 同步引擎完整化 | 🟡 | 已通：轮询/启停/登录/推 Entry+Profile/拉取游标。**待补**：媒体文件上传下载、其余 collection 双向映射、冲突合并、待删队列。 |
+| 疫苗表 UI | 🟡 | DAO 已就绪（vaccine_record + insert/fetch/markDone），列表 UI 待接。 |
+| 实况窗（≈灵动岛）/ 意图（≈App Intents） | ⬜ | 鸿蒙 LiveView / InsightIntent，独立能力。 |
 | 单元测试 | ⬜ | 对照 iOS WaveNTests。 |
 
 ---

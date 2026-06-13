@@ -1,4 +1,5 @@
 import { util } from '@kit.ArkTS';
+import { preferences } from '@kit.ArkData';
 import { ChildProfile } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { SyncState } from '../models/Enums';
@@ -127,6 +128,14 @@ export struct ChildProfileView {
     };
     await AppDatabase.shared.upsertChildProfile(p);
     this.profile = p;
+    // 镜像给服务卡片：写生日/名字到 Preferences，卡片据此显示年龄。
+    try {
+      const opt: preferences.Options = { name: 'bubu_widget' };
+      const store = preferences.getPreferencesSync(getContext(this), opt);
+      store.putSync('birthday', p.birthday);
+      store.putSync('childName', p.name);
+      store.flush();
+    } catch (e) {}
     promptAction.showToast({ message: '已保存档案 💛' });
   }
 

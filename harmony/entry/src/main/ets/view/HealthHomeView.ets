@@ -3,6 +3,7 @@ import { HealthRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { SyncState, HealthRecordKind, ALL_HEALTH_KINDS, healthKindMeta } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
+import { GrowthCurveView } from './GrowthCurveView';
 import { promptAction } from '@kit.ArkUI';
 
 // MARK: - 布布健康（对照 iOS HealthHomeView）
@@ -13,6 +14,7 @@ export struct HealthHomeView {
   @State composingKind: HealthRecordKind | null = null;
   @State draftTitle: string = '';
   @State draftDetail: string = '';
+  @State showGrowth: boolean = false;
 
   aboutToAppear(): void { this.reload(); }
 
@@ -29,9 +31,13 @@ export struct HealthHomeView {
   build() {
     Scroll() {
       Column({ space: 16 }) {
-        Text('布布健康')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-          .width('100%')
+        Row() {
+          Text('布布健康')
+            .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+          Blank()
+          Button('📈 成长曲线').backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+            .onClick(() => { this.showGrowth = true; })
+        }.width('100%')
 
         // 7 类入口网格
         Grid() {
@@ -72,6 +78,12 @@ export struct HealthHomeView {
       height: 360,
       onDisappear: () => { this.composingKind = null; }
     })
+    .bindSheet($$this.showGrowth, this.growthSheet(), { height: '90%' })
+  }
+
+  @Builder
+  growthSheet() {
+    GrowthCurveView()
   }
 
   @Builder

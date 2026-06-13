@@ -1,4 +1,5 @@
 import { ChildProfile, Entry } from '../models/Models';
+import { Mood } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
 import { ServerConfig } from '../services/ServerConfig';
 import { EntryWriter } from '../services/EntryWriter';
@@ -11,6 +12,7 @@ import { SettingsView } from './SettingsView';
 import { AlbumView } from './AlbumView';
 import { MediaStore } from '../services/MediaStore';
 import { AudioRecorder } from '../services/AudioRecorder';
+import { AIService } from '../services/AIService';
 import { abilityAccessCtrl } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -32,6 +34,8 @@ export struct HomeView {
   @State recording: boolean = false;
   @State recordedVoice: string | null = null;
   @State recordedDur: number = 0;
+  @State quickText: string = '';
+  @State parsing: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
@@ -41,6 +45,33 @@ export struct HomeView {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.entries = await AppDatabase.shared.fetchEntries(false);
     this.photoCount = (await AppDatabase.shared.fetchAllPhotos()).length;
+  }
+
+  // 一句话记录：有 AI 则先解析规整，无 AI/失败则直接存原文（离线优先）
+  private async quickCapture(): Promise<void> {
+    const text = this.quickText.trim();
+    if (text.length === 0) return;
+    this.parsing = true;
+    let note = text;
+    let mood: Mood | undefined = undefined;
+    try {
+      if (AIService.shared.isConfigured) {
+        const r = await AIService.shared.parseNaturalCapture(text);
+        if (r.note && r.note.length > 0) note = r.note;
+        if (r.mood) mood = r.mood as Mood;
+      }
+    } catch (e) {
+      // 解析失败：用原文
+    }
+    try {
+      await EntryWriter.quickTextEntry(note, ServerConfig.shared.currentRole, mood);
+      this.quickText = '';
+      await this.reload();
+      promptAction.showToast({ message: '已经收好啦 🌟' });
+    } catch (e) {
+      promptAction.showToast({ message: '保存失败，稍后再试' });
+    }
+    this.parsing = false;
   }
 
   // 录音开始/停止
@@ -133,6 +164,18 @@ export struct HomeView {
         .width('100%')
         .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.95 })
         .onClick(() => { this.showRecord = true; })
+
+        // 自然语言一句话记录（对照 iOS NaturalCaptureBar）
+        Row({ space: 8 }) {
+          TextInput({ text: $$this.quickText, placeholder: '一句话记录，如「布布今天会自己走路了」' })
+            .layoutWeight(1).backgroundColor('#F3F3F3').borderRadius(12).height(44)
+          Button(this.parsing ? '…' : '记')
+            .width(48).backgroundColor(BubuColor.primary)
+            .enabled(!this.parsing)
+            .onClick(() => { this.quickCapture(); })
+        }
+        .width('100%').padding(8)
+        .backgroundColor(BubuColor.card).borderRadius(16)
 
         // 统计行（照片卡可点进相册）
         Row({ space: 12 }) {

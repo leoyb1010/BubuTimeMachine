@@ -1,7 +1,7 @@
 import { relationalStore } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember } from '../models/Models';
+import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord } from '../models/Models';
 import { SyncState } from '../models/Enums';
 
 const DOMAIN = 0x0000;
@@ -73,6 +73,81 @@ export class AppDatabase {
       id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, relation TEXT NOT NULL,
       avatarEmoji TEXT NOT NULL, themeColorHex TEXT NOT NULL, isPrimary INTEGER NOT NULL DEFAULT 0,
       syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+    // GrowthMeasurement
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS growth_measurement (
+      id TEXT PRIMARY KEY, remoteId TEXT, measuredAt INTEGER NOT NULL, heightCm REAL, weightKg REAL,
+      headCircumferenceCm REAL, syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+    // VaccineRecord
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS vaccine_record (
+      id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, doseLabel TEXT, scheduledAt INTEGER,
+      administeredAt INTEGER, note TEXT, syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+  }
+
+  // —— GrowthMeasurement ——
+  async insertGrowth(g: GrowthMeasurement): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: g.id, remoteId: g.remoteId ?? null, measuredAt: g.measuredAt,
+      heightCm: g.heightCm ?? null, weightKg: g.weightKg ?? null,
+      headCircumferenceCm: g.headCircumferenceCm ?? null, syncState: g.syncState, createdAt: g.createdAt
+    };
+    await this.store!.insert('growth_measurement', v);
+  }
+
+  async fetchGrowth(): Promise<GrowthMeasurement[]> {
+    const pred = new relationalStore.RdbPredicates('growth_measurement');
+    pred.orderByAsc('measuredAt');
+    const rs = await this.store!.query(pred);
+    const out: GrowthMeasurement[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        measuredAt: rs.getLong(rs.getColumnIndex('measuredAt')),
+        heightCm: AppDatabase.optNum(rs, 'heightCm'),
+        weightKg: AppDatabase.optNum(rs, 'weightKg'),
+        headCircumferenceCm: AppDatabase.optNum(rs, 'headCircumferenceCm'),
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— VaccineRecord ——
+  async insertVaccine(v: VaccineRecord): Promise<void> {
+    const bucket: relationalStore.ValuesBucket = {
+      id: v.id, remoteId: v.remoteId ?? null, name: v.name, doseLabel: v.doseLabel ?? null,
+      scheduledAt: v.scheduledAt ?? null, administeredAt: v.administeredAt ?? null,
+      note: v.note ?? null, syncState: v.syncState, createdAt: v.createdAt
+    };
+    await this.store!.insert('vaccine_record', bucket);
+  }
+
+  async fetchVaccines(): Promise<VaccineRecord[]> {
+    const pred = new relationalStore.RdbPredicates('vaccine_record');
+    pred.orderByAsc('scheduledAt');
+    const rs = await this.store!.query(pred);
+    const out: VaccineRecord[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        name: rs.getString(rs.getColumnIndex('name')),
+        doseLabel: AppDatabase.optStr(rs, 'doseLabel'),
+        scheduledAt: AppDatabase.optNum(rs, 'scheduledAt'),
+        administeredAt: AppDatabase.optNum(rs, 'administeredAt'),
+        note: AppDatabase.optStr(rs, 'note'),
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  async markVaccineDone(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('vaccine_record');
+    pred.equalTo('id', id);
+    await this.store!.update({ administeredAt: Date.now(), syncState: SyncState.local }, pred);
   }
 
   // —— VoiceNote ——
