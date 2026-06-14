@@ -157,7 +157,7 @@ private struct BubuMetricPill: View {
                     .foregroundColor(WidgetPalette.secondary)
                     .lineLimit(1)
                 Text(value)
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .font(.system(size: 10.5, weight: .black, design: .rounded))
                     .foregroundColor(WidgetPalette.warmBrown)
                     .lineLimit(1)
                     .minimumScaleFactor(0.58)
@@ -165,7 +165,8 @@ private struct BubuMetricPill: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 36)
         .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
@@ -467,24 +468,26 @@ private struct BubuMomentSmallView: View {
     let snapshot: BubuSnapshot
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            BubuPhotoTile(imageData: snapshot.recentPhotoImageData, cornerRadius: 20)
-            LinearGradient(colors: [.clear, .black.opacity(0.44)], startPoint: .center, endPoint: .bottom)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        VStack(alignment: .leading, spacing: 6) {
+            BubuPhotoTile(imageData: snapshot.recentPhotoImageData, cornerRadius: 18)
+                .frame(height: 68)
             VStack(alignment: .leading, spacing: 3) {
-                Text(snapshot.recentMoodEmoji ?? "✨")
-                    .font(.system(size: 18))
-                Text(snapshot.recentEntryTitle)
-                    .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
+                HStack(spacing: 4) {
+                    Text(snapshot.recentMoodEmoji ?? "✨")
+                        .font(.system(size: 13))
+                    Text(dateText)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundColor(WidgetPalette.primary)
+                        .lineLimit(1)
+                }
+                Text(snapshot.recentEntryTitle.isEmpty ? "今日时光" : snapshot.recentEntryTitle)
+                    .font(.system(size: 14.5, weight: .black, design: .rounded))
+                    .foregroundColor(WidgetPalette.warmBrown)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.62)
-                Text(dateText)
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.86))
-                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
-            .padding(10)
+            .padding(.horizontal, 4)
+            Spacer(minLength: 0)
         }
     }
 
@@ -497,29 +500,26 @@ private struct BubuMomentMediumView: View {
     let snapshot: BubuSnapshot
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             BubuPhotoTile(imageData: snapshot.recentPhotoImageData)
-                .frame(width: 116)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("今日时光")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundColor(WidgetPalette.primary)
-                    Spacer()
-                    Text(snapshot.recentMoodEmoji ?? "✨")
-                        .font(.system(size: 18))
+                .frame(width: 108)
+                .frame(maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: 6) {
+                BubuMomentHeader(snapshot: snapshot, compact: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(snapshot.recentEntryTitle)
+                        .font(.system(size: 19, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.62)
+                    Text(snapshot.recentEntryNote)
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundColor(WidgetPalette.secondary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.68)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(snapshot.recentEntryTitle)
-                    .font(.system(size: 20, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.warmBrown)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.66)
-                Text(snapshot.recentEntryNote)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(WidgetPalette.secondary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.72)
-                Spacer(minLength: 0)
+                .layoutPriority(1)
                 HStack(spacing: 8) {
                     BubuMetricPill(title: "陪伴", value: "\(snapshot.daysSinceBirth) 天", icon: "heart.fill", tint: WidgetPalette.primary)
                     BubuMetricPill(title: "记录", value: "\(snapshot.totalEntryCount) 条", icon: "text.bubble.fill", tint: WidgetPalette.mint)
@@ -533,33 +533,25 @@ private struct BubuMomentLargeView: View {
     let snapshot: BubuSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("布布今天")
-                        .font(.system(size: 12, weight: .black, design: .rounded))
-                        .foregroundColor(WidgetPalette.primary)
-                    Text(snapshot.recentEntryTitle)
-                        .font(.system(size: 25, weight: .black, design: .rounded))
-                        .foregroundColor(WidgetPalette.warmBrown)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.68)
-                }
-                Spacer()
-                Text(snapshot.recentMoodEmoji ?? "✨")
-                    .font(.system(size: 28))
-            }
+        VStack(alignment: .leading, spacing: 9) {
+            BubuMomentHeader(snapshot: snapshot)
+            Text(snapshot.recentEntryTitle)
+                .font(.system(size: 24, weight: .black, design: .rounded))
+                .foregroundColor(WidgetPalette.warmBrown)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
 
             BubuPhotoStrip(snapshot: snapshot)
-                .frame(height: 96)
+                .frame(height: 108)
 
             Text(snapshot.recentEntryNote)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(.system(size: 12.5, weight: .medium, design: .rounded))
                 .foregroundColor(WidgetPalette.secondary)
                 .lineLimit(2)
-                .minimumScaleFactor(0.72)
+                .minimumScaleFactor(0.68)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.vertical, 7)
                 .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             HStack(spacing: 8) {
@@ -567,6 +559,31 @@ private struct BubuMomentLargeView: View {
                 BubuMetricPill(title: "全部记录", value: "\(snapshot.totalEntryCount) 条", icon: "book.pages.fill", tint: WidgetPalette.mint)
             }
             Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct BubuMomentHeader: View {
+    let snapshot: BubuSnapshot
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Label("今日时光", systemImage: "photo.on.rectangle.angled")
+                .font(.system(size: compact ? 9 : 11, weight: .black, design: .rounded))
+                .foregroundColor(WidgetPalette.primary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                Text(snapshot.recentMoodEmoji ?? "✨")
+                Text((snapshot.recentEntryDate ?? .now).formatted(.dateTime.month().day()))
+            }
+            .font(.system(size: compact ? 9 : 10, weight: .black, design: .rounded))
+            .foregroundColor(WidgetPalette.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, compact ? 7 : 9)
+            .padding(.vertical, compact ? 4 : 5)
+            .background(.white.opacity(0.58), in: Capsule())
         }
     }
 }
@@ -586,7 +603,7 @@ private struct BubuGrowthSmallView: View {
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .foregroundColor(WidgetPalette.roseDeep)
             }
-            Text("成长星座")
+            Text("里程碑")
                 .font(.system(size: 18, weight: .black, design: .rounded))
                 .foregroundColor(WidgetPalette.warmBrown)
                 .lineLimit(1)
@@ -620,7 +637,7 @@ private struct BubuGrowthMediumView: View {
                     BubuMetricPill(title: "体重", value: snapshot.latestWeightText, icon: "scalemass.fill", tint: WidgetPalette.honey)
                 }
                 HStack(spacing: 8) {
-                    BubuMetricPill(title: "星星", value: snapshot.milestoneProgressText, icon: "star.fill", tint: WidgetPalette.primary)
+                    BubuMetricPill(title: "里程碑", value: snapshot.milestoneProgressText, icon: "star.fill", tint: WidgetPalette.primary)
                     BubuMetricPill(title: "下一个", value: snapshot.nextMilestoneTitle, icon: "flag.checkered", tint: WidgetPalette.lav)
                 }
             }
@@ -643,7 +660,7 @@ private struct BubuGrowthLargeView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("成长星座")
+                    Text("里程碑")
                         .font(.system(size: 19, weight: .black, design: .rounded))
                         .foregroundColor(WidgetPalette.warmBrown)
                     Spacer()
@@ -789,7 +806,7 @@ struct BubuGrowthWidget: Widget {
             BubuWidgetEntryView(entry: entry, style: .growth)
         }
         .configurationDisplayName("布布成长一览")
-        .description("身高体重、成长星座和下一个里程碑。")
+        .description("身高体重、里程碑和下一个成长目标。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
         .containerBackgroundRemovable(false)

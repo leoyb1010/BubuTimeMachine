@@ -17,14 +17,33 @@ export class AccountService {
     return e.endsWith(suffix) ? e.slice(0, e.length - suffix.length) : email;
   }
 
+  private static identityCandidates(username: string): string[] {
+    const raw = username.trim().toLowerCase();
+    const email = AccountService.emailFor(raw);
+    const candidates: string[] = [email];
+    // 兼容服务器里已经存在的原始用户名账号，例如 identity = "yuanbo"。
+    if (raw.length > 0 && raw !== email) {
+      candidates.push(raw);
+    }
+    return candidates;
+  }
+
   async login(username: string, password: string, role: FamilyRole): Promise<void> {
     const u = username.trim();
     if (u.length === 0 || password.length < 6) {
       throw new Error('用户名至少 1 位、密码至少 6 位');
     }
-    const e = AccountService.emailFor(u);
-    await this.authWithPassword(e, password);
-    await this.persist(e, password, role);
+    let lastError: Error | null = null;
+    for (const identity of AccountService.identityCandidates(u)) {
+      try {
+        await this.authWithPassword(identity, password);
+        await this.persist(identity, password, role);
+        return;
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error('登录失败，请稍后再试');
+      }
+    }
+    throw lastError ?? new Error('登录失败，请确认用户名、密码和服务器地址');
   }
 
   async register(username: string, password: string, familyCode: string, role: FamilyRole): Promise<void> {
@@ -48,8 +67,8 @@ export class AccountService {
     } catch (e) {
       // 与 iOS 一致：用户名已存在时，如果密码正确，直接当登录成功。
       try {
-        await this.authWithPassword(AccountService.emailFor(u), password);
-        await this.persist(AccountService.emailFor(u), password, role);
+        const identity = await this.firstWorkingIdentity(u, password);
+        await this.persist(identity, password, role);
         return;
       } catch (authError) {
         throw new Error('这个用户名已被注册，但密码不对。换个用户名，或用正确密码去「登录」。');
@@ -82,11 +101,30 @@ export class AccountService {
     return token;
   }
 
+  private async firstWorkingIdentity(username: string, password: string): Promise<string> {
+    let lastError: Error | null = null;
+    for (const identity of AccountService.identityCandidates(username)) {
+      try {
+        await this.authWithPassword(identity, password);
+        return identity;
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error('登录失败');
+      }
+    }
+    throw lastError ?? new Error('登录失败');
+  }
+
+  private baseURL(): string {
+    const configured = ServerConfig.shared.baseURLString.trim();
+    const base = configured.length > 0 ? configured : ServerConfig.defaultBaseURL;
+    return base.replace(/\/+$/, '');
+  }
+
   private async request(method: string, path: string, body: string): Promise<string> {
     const req = http.createHttp();
     try {
       const methodEnum = method === 'POST' ? http.RequestMethod.POST : http.RequestMethod.GET;
-      const resp = await req.request(ServerConfig.defaultBaseURL + path, {
+      const resp = await req.request(this.baseURL() + path, {
         method: methodEnum,
         header: { 'Content-Type': 'application/json' } as Record<string, string>,
         extraData: body,
@@ -106,6 +144,9 @@ export class AccountService {
   private errorMessage(code: number, body: string, path: string): string {
     if (code === 400 && path.indexOf('/users/records') >= 0) {
       return '这个用户名可能已注册，换一个或直接登录';
+    }
+    if (code === 400 && path.indexOf('/auth-with-password') >= 0) {
+      return '用户名或密码不对；如果你在 iOS 用的是 yuanbo，也可以直接填 yuanbo 再试';
     }
     try {
       const obj = JSON.parse(body) as Record<string, Object>;

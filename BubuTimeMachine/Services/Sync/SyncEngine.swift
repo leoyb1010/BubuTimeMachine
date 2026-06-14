@@ -287,12 +287,22 @@ final class SyncEngine {
     }
 
     private func recordFailure(_ error: Error, item: String) {
+        if Self.isMissingOptionalServerCollection(error, item: item) {
+            softFailureThisRun = true
+            return
+        }
+
         if Self.isUserRecoverableTransient(error) {
             softFailureThisRun = true
             return
         }
 
         lastFailureReason = "\(item)：\(Self.safeUserMessage(for: error))"
+    }
+
+    private static func isMissingOptionalServerCollection(_ error: Error, item: String) -> Bool {
+        guard case APIError.server(let code, _) = error, code == 404 else { return false }
+        return item == "疫苗记录" || item == "成长测量" || item == "删除"
     }
 
     private static func isUserRecoverableTransient(_ error: Error) -> Bool {
@@ -334,9 +344,10 @@ final class SyncEngine {
         case APIError.notConfigured:
             return "还没有连接家里的服务器。"
         case APIError.server(let code, _):
-            if code == 400 || code == 403 || code == 404 {
+            if code == 400 || code == 403 {
                 return "服务器拒绝了这次同步，请到设置里查看连接配置。"
             }
+            if code == 404 { return "服务器暂时缺少这个同步模块，其他数据会继续同步。" }
             return "服务器暂时没响应，App 会继续自动补传。"
         case APIError.network(let message):
             if message.contains("本地文件") || message.contains("文件不见了") {

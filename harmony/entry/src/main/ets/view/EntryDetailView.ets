@@ -90,6 +90,7 @@ export struct EntryDetailView {
           this.firstPersonPlaceholder()
           this.familyEnsembleSection()
           this.toolbarRow()
+          Blank().height(150)
         }
         .padding(16)
         .width('100%')
@@ -149,7 +150,7 @@ export struct EntryDetailView {
         .onClick(() => { this.confirmDelete(); })
     }
     .width('100%')
-    .margin({ top: 8, bottom: 24 })
+    .margin({ top: 8, bottom: 16 })
   }
 
   // MARK: 年龄角标（对照 iOS ageBadge）

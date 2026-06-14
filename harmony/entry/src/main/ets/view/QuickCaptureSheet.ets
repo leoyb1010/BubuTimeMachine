@@ -3,7 +3,10 @@ import { CameraCaptureView } from './CameraCaptureView';
 import { VideoCaptureView } from './VideoCaptureView';
 import { Mood } from '../models/Enums';
 import { BubuColor, BubuFont, BubuRadius, BubuShadow } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
+import { BubuIcon, BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { MoodPicker } from '../components/MoodPicker';
 import { VoiceRecorderBar, VoicePlayerBubble } from '../components/VoiceComponents';
 import { MediaStore } from '../services/MediaStore';
@@ -27,6 +30,11 @@ export struct QuickCaptureSheet {
   onNaturalCapture?: () => void;
 
   private theme: string = BubuColor.primary;
+  @State private pageIn: boolean = false;
+
+  aboutToAppear(): void {
+    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+  }
 
   build() {
     Stack() {
@@ -46,7 +54,6 @@ export struct QuickCaptureSheet {
 
             this.noteField()
             this.voiceCard()
-            this.photoPicker()
             this.locationPrivacyCard()
 
             MoodPicker({
@@ -69,6 +76,9 @@ export struct QuickCaptureSheet {
           }
           .padding(16)
           .width('100%')
+          .opacity(this.pageIn ? 1 : 0)
+          .translate({ x: 0, y: this.pageIn ? 0 : BubuMotion.entranceOffsetY })
+          .animation(BubuMotion.gentle)
         }
         .layoutWeight(1)
       }
@@ -125,6 +135,7 @@ export struct QuickCaptureSheet {
   private async doSave(): Promise<void> {
     const ok = await this.model.save();
     if (ok) {
+      BubuHaptics.success();
       promptAction.showToast({ message: '已经收好啦 🌟' });
       this.onSaved?.();
     } else if (this.model.saveError !== null) {
@@ -154,20 +165,25 @@ export struct QuickCaptureSheet {
     .width('100%')
     .padding(16)
     .backgroundColor('#DBFFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(BubuRadius.card)
+    .border({ width: 1, color: '#76FFFFFF' })
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
   }
 
   @Builder
   naturalCaptureEntry() {
     Row({ space: 12 }) {
-      Text('✨')
-        .fontSize(18)
-        .width(38).height(38)
-        .textAlign(TextAlign.Center)
-        .backgroundColor(BubuColor.primary)
-        .fontColor(Color.White)
-        .borderRadius(19)
+      BubuIconBadge({
+        name: BubuIconName.sparkles,
+        badgeSize: 38,
+        iconSize: 18,
+        color: '#FFFFFF',
+        fill: BubuColor.primary,
+        radius: 19,
+        strokeWidth: 1.8,
+        filled: true
+      })
       Column({ space: 3 }) {
         Text('一句话智能记录')
           .fontSize(15)
@@ -186,62 +202,76 @@ export struct QuickCaptureSheet {
     .width('100%')
     .padding(12)
     .backgroundColor('#F2FFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(20)
-    .onClick(() => { this.onNaturalCapture?.(); })
+    .border({ width: 1, color: '#99FFFFFF' })
+    .shadow({ radius: 12, color: '#24000000', offsetY: 5 })
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.98 })
+    .onClick(() => {
+      BubuHaptics.tapLight();
+      this.onNaturalCapture?.();
+    })
   }
 
   @Builder
   primaryActions() {
-    Column({ space: 10 }) {
-      Row({ space: 10 }) {
-        this.actionCard('拍照', BubuExpression.yeah, '拍下此刻', () => { this.requestCamera(false); })
-        this.actionCard('录像', BubuExpression.playing, '录一段', () => { this.requestCamera(true); })
-      }.width('100%')
-      Row({ space: 10 }) {
-        this.actionCard('说给布布', BubuExpression.love, '录一段声音', () => {
-          promptAction.showToast({ message: '在下方「说给布布」卡片里录音' });
-        })
-        this.actionCard('写一句', BubuExpression.drawing, '留一句话', () => {
-          promptAction.showToast({ message: '在下方「写一句」里写下此刻' });
-        })
-      }.width('100%')
+    Row({ space: 8 }) {
+      this.actionCard('照片', BubuIconName.photo, '#61FFC2D6', () => { this.chooseMediaSource(false); })
+      this.actionCard('视频', BubuIconName.video, '#66DCC9FF', () => { this.chooseMediaSource(true); })
+      this.actionCard('文字', BubuIconName.textBubble, '#66BFEBD2', () => {
+        promptAction.showToast({ message: '在下方「写一句」里写下此刻' });
+      })
+      this.actionCard('语音', BubuIconName.waveform, '#66C4E4FF', () => {
+        promptAction.showToast({ message: '在下方「说给布布」卡片里录音' });
+      })
     }
     .width('100%')
   }
 
   @Builder
-  actionCard(title: string, expression: BubuExpression, subtitle: string, action: () => void) {
-    Column({ space: 7 }) {
-      BubuMascotBadge({ badgeSize: 38, expression: expression })
+  actionCard(title: string, iconName: string, tint: string, action: () => void) {
+    Column({ space: 6 }) {
+      BubuIconBadge({
+        name: iconName,
+        badgeSize: 36,
+        iconSize: 18,
+        color: BubuColor.deepRose,
+        fill: tint,
+        radius: 18,
+        strokeWidth: 2.2
+      })
       Text(title)
-        .fontSize(14)
-        .fontWeight(FontWeight.Bold)
+        .fontSize(12)
+        .fontWeight(FontWeight.Bolder)
         .fontColor(BubuColor.warmBrown)
-        .maxLines(1)
-      Text(subtitle)
-        .fontSize(11)
-        .fontColor(BubuColor.secondaryText)
         .maxLines(1)
     }
     .layoutWeight(1)
-    .height(112)
+    .height(78)
     .justifyContent(FlexAlign.Center)
-    .backgroundColor(BubuColor.card)
-    .borderRadius(BubuRadius.small)
-    .border({ width: 1, color: '#1FF28C9E' })
+    .backgroundColor('#EFFFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
+    .borderRadius(20)
+    .border({ width: 1, color: '#8FFFFFFF' })
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(action)
+    .onClick(() => {
+      BubuHaptics.selection();
+      action();
+    })
   }
 
   @Builder
   photoPicker() {
     Row({ space: 14 }) {
-      Text('🖼️')
-        .fontSize(28)
-        .width(48).height(48)
-        .textAlign(TextAlign.Center)
-        .backgroundColor('#1AF28C9E')
-        .borderRadius(16)
+      BubuIconBadge({
+        name: BubuIconName.photo,
+        badgeSize: 48,
+        iconSize: 26,
+        color: BubuColor.primary,
+        fill: '#1AF28C9E',
+        radius: 16,
+        strokeWidth: 2.4
+      })
       Column({ space: 4 }) {
         Text('从相册补充照片或视频')
           .fontSize(BubuFont.headline)
@@ -310,7 +340,9 @@ export struct QuickCaptureSheet {
     .width('100%')
     .padding(16)
     .backgroundColor('#B8FFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(BubuRadius.card)
+    .border({ width: 1, color: '#66FFFFFF' })
   }
 
   @Builder
@@ -338,8 +370,10 @@ export struct QuickCaptureSheet {
     }
     .width('100%')
     .padding(16)
-    .backgroundColor(BubuColor.card)
+    .backgroundColor('#E8FFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(BubuRadius.card)
+    .border({ width: 1, color: '#76FFFFFF' })
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     .alignItems(HorizontalAlign.Start)
   }
@@ -367,8 +401,10 @@ export struct QuickCaptureSheet {
     }
     .width('100%')
     .padding(16)
-    .backgroundColor(BubuColor.card)
+    .backgroundColor('#E8FFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(BubuRadius.card)
+    .border({ width: 1, color: '#76FFFFFF' })
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     .alignItems(HorizontalAlign.Start)
   }
@@ -441,8 +477,10 @@ export struct QuickCaptureSheet {
     }
     .width('100%')
     .padding(16)
-    .backgroundColor(BubuColor.card)
+    .backgroundColor('#E8FFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(BubuRadius.card)
+    .border({ width: 1, color: '#76FFFFFF' })
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     .alignItems(HorizontalAlign.Start)
   }
@@ -461,6 +499,42 @@ export struct QuickCaptureSheet {
     } catch (e) {
       promptAction.showToast({ message: '已取消' });
     }
+  }
+
+  private async pickVideo(): Promise<void> {
+    try {
+      const picker = new photoAccessHelper.PhotoViewPicker();
+      const opt = new photoAccessHelper.PhotoSelectOptions();
+      opt.MIMEType = photoAccessHelper.PhotoViewMIMETypes.VIDEO_TYPE;
+      opt.maxSelectNumber = 1;
+      const res = await picker.select(opt);
+      if (res.photoUris && res.photoUris.length > 0) {
+        this.model.addVideoUri(res.photoUris[0]);
+      }
+    } catch (e) {
+      promptAction.showToast({ message: '已取消' });
+    }
+  }
+
+  private chooseMediaSource(video: boolean): void {
+    promptAction.showDialog({
+      title: video ? '添加视频' : '添加照片',
+      message: video ? '选择录像方式' : '选择照片来源',
+      buttons: [
+        { text: video ? '打开相机录像' : '打开相机拍照', color: BubuColor.primary },
+        { text: video ? '从本地选择视频' : '从本地选择照片', color: BubuColor.warmBrown }
+      ]
+    }).then((res) => {
+      if (res.index === 0) {
+        this.requestCamera(video);
+      } else if (res.index === 1) {
+        if (video) {
+          this.pickVideo();
+        } else {
+          this.pickPhoto();
+        }
+      }
+    });
   }
 
   // 拍照 / 录像（对照 iOS requestCamera）。

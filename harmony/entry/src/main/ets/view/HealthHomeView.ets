@@ -15,6 +15,7 @@ export struct HealthHomeView {
   @State composingKind: HealthRecordKind | null = null;
   @State showGrowth: boolean = false;
   @State showVaccine: boolean = false;
+  @State private viewportW: number = 0;
 
   aboutToAppear(): void { this.reload(); }
 
@@ -43,6 +44,10 @@ export struct HealthHomeView {
       }
     }
     return total;
+  }
+
+  private isNarrow(): boolean {
+    return this.viewportW > 0 && this.viewportW < 320;
   }
 
   build() {
@@ -91,18 +96,28 @@ export struct HealthHomeView {
         }
         .width('100%').padding(16).backgroundColor(BubuColor.card).borderRadius(20)
 
-        // 成长曲线 / 疫苗接种入口（对照 iOS insightLinks）
-        Row({ space: 10 }) {
-          this.insightTile('📈', '成长曲线', '身高·体重·头围', () => { this.showGrowth = true; })
-          this.insightTile('💉', '疫苗接种', '按月龄排期打卡', () => { this.showVaccine = true; })
-        }.width('100%')
+	        // 成长曲线 / 疫苗接种入口（对照 iOS insightLinks）
+	        if (this.isNarrow()) {
+	          Column({ space: 10 }) {
+	            this.insightTile('📈', '成长曲线', '身高·体重·头围', () => { this.showGrowth = true; })
+	            this.insightTile('💉', '疫苗接种', '按月龄排期打卡', () => { this.showVaccine = true; })
+	          }.width('100%')
+	        } else {
+	          Row({ space: 10 }) {
+	            this.insightTile('📈', '成长曲线', '身高·体重·头围', () => { this.showGrowth = true; })
+	            this.insightTile('💉', '疫苗接种', '按月龄排期打卡', () => { this.showVaccine = true; })
+	          }.width('100%')
+	        }
 
         // 7 类快速记录入口（对照 iOS quickActions）
         Grid() {
           ForEach(ALL_HEALTH_KINDS, (k: HealthRecordKind) => {
             GridItem() { this.kindCard(k) }
           }, (k: HealthRecordKind) => k)
-        }.columnsTemplate('1fr 1fr').columnsGap(10).rowsGap(10).height(280)
+	        }.columnsTemplate(this.isNarrow() ? '1fr' : '1fr 1fr')
+	          .columnsGap(10)
+	          .rowsGap(10)
+	          .height(this.isNarrow() ? 532 : 280)
 
         // 今天（对照 iOS todaySection）
         Row({ space: 6 }) {
@@ -130,13 +145,18 @@ export struct HealthHomeView {
           }, (r: HealthRecord) => r.id + '_recent')
         }
 
-        // 免责声明（对照 iOS disclaimer）
-        Text('如果出现持续发热、过敏、精神状态异常等情况，请及时咨询医生。这里的记录主要用于家庭观察和复盘。')
-          .fontSize(12).fontColor(BubuColor.secondaryText).width('100%').margin({ top: 4 })
-      }
+	        // 免责声明（对照 iOS disclaimer）
+	        Text('如果出现持续发热、过敏、精神状态异常等情况，请及时咨询医生。这里的记录主要用于家庭观察和复盘。')
+	          .fontSize(12).fontColor(BubuColor.secondaryText).width('100%').margin({ top: 4 })
+	        Blank().height(this.isNarrow() ? 170 : 140)
+	      }
       .padding(16).width('100%')
     }
     .backgroundColor(BubuColor.cream).width('100%').height('100%')
+    .onAreaChange((_old: Area, area: Area) => {
+      const w = area.width as number;
+      if (w > 0) this.viewportW = w;
+    })
   }
 
   @Builder

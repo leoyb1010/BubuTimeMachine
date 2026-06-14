@@ -75,6 +75,8 @@ struct MilestonePickerSheet: View {
             context.insert(m)
         }
         try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
         dismiss()
     }
 }
@@ -241,11 +243,18 @@ struct MilestoneEditSheet: View {
             m.ageDescription = nil
         }
         try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
         dismiss()
     }
 
     private func deleteMilestone() {
-        if let m = milestone { context.delete(m); try? context.save() }
+        if let m = milestone {
+            context.delete(m)
+            try? context.save()
+            env.refreshWidgetSnapshot(context: context)
+            WidgetRefresher.reload()
+        }
         dismiss()
     }
 }

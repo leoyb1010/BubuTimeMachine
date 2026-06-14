@@ -1,5 +1,5 @@
 import { util } from '@kit.ArkTS';
-import { HealthRecord } from '../models/Models';
+import { GrowthMeasurement, HealthRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { SyncState, HealthRecordKind, healthKindMeta } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
@@ -74,6 +74,9 @@ export struct HealthRecordSheet {
   @State reaction: string = '';
   @State severity: string = '';
   @State temperatureCelsius: number | undefined = undefined;
+  @State heightCmText: string = '';
+  @State weightKgText: string = '';
+  @State headCircumferenceText: string = '';
   @State tags: string[] = [];
 
   private readonly suppUnits: string[] = ['滴', '粒', 'ml', '袋'];
@@ -107,6 +110,8 @@ export struct HealthRecordSheet {
         return this.startAt !== undefined || this.endAt !== undefined || titleTrim.length > 0 || this.tags.length > 0;
       case HealthRecordKind.symptom:
         return this.tags.length > 0 || this.temperatureCelsius !== undefined || this.draftDetail.trim().length > 0;
+      case HealthRecordKind.checkup:
+        return titleTrim.length > 0 || this.tags.length > 0 || this.amountValue !== undefined || this.hasGrowthMeasurement();
       default:
         return titleTrim.length > 0 || this.tags.length > 0 || this.amountValue !== undefined;
     }
@@ -374,7 +379,10 @@ export struct HealthRecordSheet {
       this.tagGrid(healthKindDesign(HealthRecordKind.checkup).chips, false)
       TextInput({ text: $$this.draftTitle, placeholder: '体检项目或疫苗名称' })
         .backgroundColor('#A6F5E8E0').borderRadius(16).padding(12).width('100%')
-      this.amountStepper('主要数值', this.amountUnit ?? 'cm', 0, 130, 0.5, false)
+      this.measurementInput('身高', 'cm', this.heightCmText, '如 78.5', (v: string) => { this.heightCmText = v; })
+      this.measurementInput('体重', 'kg', this.weightKgText, '如 10.2', (v: string) => { this.weightKgText = v; })
+      this.measurementInput('头围', 'cm', this.headCircumferenceText, '如 46.5', (v: string) => { this.headCircumferenceText = v; })
+      this.amountStepper('其它数值', this.amountUnit ?? 'cm', 0, 130, 0.5, false)
       Row({ space: 8 }) {
         ForEach(this.checkupUnits, (u: string) => {
           this.chip(u, this.amountUnit === u, false, () => { this.amountUnit = u; })
@@ -422,18 +430,51 @@ export struct HealthRecordSheet {
         Text(this.amountValue !== undefined ? `${HealthDraftUtil.cleanAmount(this.amountValue)}${unit}` : '未填写')
           .fontSize(17).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Row({ space: 10 }) {
-        Button('−').width(40).height(40).backgroundColor('#1AF28C9E').fontColor(BubuColor.primary)
+      Row({ space: 8 }) {
+        TextInput({
+          text: this.amountValue !== undefined ? HealthDraftUtil.cleanAmount(this.amountValue) : '',
+          placeholder: '输入'
+        })
+          .type(InputType.NUMBER_DECIMAL)
+          .width(82)
+          .textAlign(TextAlign.End)
+          .backgroundColor('#CCFFFFFF')
+          .borderRadius(12)
+          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+          .onChange((v: string) => {
+            const parsed = this.parseNumber(v);
+            this.amountValue = parsed === undefined ? undefined : Math.min(Math.max(parsed, min), max);
+          })
+        Text(unit).fontSize(11).fontColor(BubuColor.secondaryText).margin({ right: 2 })
+        Button('−').width(34).height(34).backgroundColor('#1AF28C9E').fontColor(BubuColor.primary)
           .onClick(() => {
             const cur = this.amountValue ?? min;
             this.amountValue = Math.min(Math.max(cur - step, min), max);
           })
-        Button('+').width(40).height(40).backgroundColor(BubuColor.primary).fontColor(Color.White)
+        Button('+').width(34).height(34).backgroundColor(BubuColor.primary).fontColor(Color.White)
           .onClick(() => {
             const cur = this.amountValue ?? min;
             this.amountValue = Math.min(Math.max(cur + step, min), max);
           })
       }
+    }
+    .width('100%').padding(12).backgroundColor('#A6FFF1E8').borderRadius(16)
+  }
+
+  @Builder
+  measurementInput(title: string, unit: string, value: string, placeholder: string, onChange: (v: string) => void) {
+    Row({ space: 8 }) {
+      Text(title).fontSize(13).fontWeight(FontWeight.Medium).fontColor(BubuColor.secondaryText)
+        .layoutWeight(1)
+      TextInput({ text: value, placeholder: placeholder })
+        .type(InputType.NUMBER_DECIMAL)
+        .width(126)
+        .textAlign(TextAlign.End)
+        .backgroundColor('#CCFFFFFF')
+        .borderRadius(12)
+        .padding({ left: 8, right: 8, top: 7, bottom: 7 })
+        .onChange(onChange)
+      Text(unit).fontSize(12).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown)
     }
     .width('100%').padding(12).backgroundColor('#A6FFF1E8').borderRadius(16)
   }
@@ -448,12 +489,27 @@ export struct HealthRecordSheet {
           .fontSize(17).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
       Row({ space: 10 }) {
-        Button('−').width(40).height(40).backgroundColor('#1ADB3B47').fontColor(BubuColor.danger)
+        TextInput({
+          text: this.temperatureCelsius !== undefined ? this.temperatureCelsius.toFixed(1) : '',
+          placeholder: '输入'
+        })
+          .type(InputType.NUMBER_DECIMAL)
+          .width(82)
+          .textAlign(TextAlign.End)
+          .backgroundColor('#CCFFFFFF')
+          .borderRadius(12)
+          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+          .onChange((v: string) => {
+            const parsed = this.parseNumber(v);
+            this.temperatureCelsius = parsed === undefined ? undefined : Math.min(Math.max(parsed, 34.0), 42.0);
+          })
+        Text('℃').fontSize(11).fontColor(BubuColor.secondaryText).margin({ right: 2 })
+        Button('−').width(34).height(34).backgroundColor('#1ADB3B47').fontColor(BubuColor.danger)
           .onClick(() => {
             const cur = this.temperatureCelsius ?? 36.5;
             this.temperatureCelsius = Math.min(Math.max(Math.round((cur - 0.1) * 10) / 10, 34.0), 42.0);
           })
-        Button('+').width(40).height(40).backgroundColor(BubuColor.danger).fontColor(Color.White)
+        Button('+').width(34).height(34).backgroundColor(BubuColor.danger).fontColor(Color.White)
           .onClick(() => {
             const cur = this.temperatureCelsius ?? 36.5;
             this.temperatureCelsius = Math.min(Math.max(Math.round((cur + 0.1) * 10) / 10, 34.0), 42.0);
@@ -502,6 +558,21 @@ export struct HealthRecordSheet {
     return `${d.getMonth() + 1}.${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
+  private parseNumber(text: string): number | undefined {
+    const normalized = text.replace('，', '.').trim();
+    if (normalized.length === 0) return undefined;
+    const value = parseFloat(normalized);
+    return isNaN(value) ? undefined : value;
+  }
+
+  private parsedHeight(): number | undefined { return this.parseNumber(this.heightCmText); }
+  private parsedWeight(): number | undefined { return this.parseNumber(this.weightKgText); }
+  private parsedHead(): number | undefined { return this.parseNumber(this.headCircumferenceText); }
+
+  private hasGrowthMeasurement(): boolean {
+    return this.parsedHeight() !== undefined || this.parsedWeight() !== undefined || this.parsedHead() !== undefined;
+  }
+
   // MARK: - 保存（对照 iOS save + makeRecord）
   private async save(): Promise<void> {
     if (!this.canSave()) return;
@@ -536,6 +607,18 @@ export struct HealthRecordSheet {
       amountText = amountText !== undefined ? `${amountText} · ${tempText}` : tempText;
     }
 
+    if (this.kind === HealthRecordKind.checkup && this.hasGrowthMeasurement()) {
+      const growthParts: string[] = [];
+      const h = this.parsedHeight();
+      const w = this.parsedWeight();
+      const head = this.parsedHead();
+      if (h !== undefined) growthParts.push(`身高 ${HealthDraftUtil.cleanAmount(h)}cm`);
+      if (w !== undefined) growthParts.push(`体重 ${HealthDraftUtil.cleanAmount(w)}kg`);
+      if (head !== undefined) growthParts.push(`头围 ${HealthDraftUtil.cleanAmount(head)}cm`);
+      const growthText = growthParts.join(' · ');
+      amountText = amountText !== undefined && amountText.length > 0 ? `${amountText} · ${growthText}` : growthText;
+    }
+
     const detailTrim = this.draftDetail.trim();
     const rec: HealthRecord = {
       id: util.generateRandomUUID(true),
@@ -556,6 +639,24 @@ export struct HealthRecordSheet {
       createdAt: now
     };
     await AppDatabase.shared.insertHealth(rec);
+    if (this.kind === HealthRecordKind.checkup && this.hasGrowthMeasurement()) {
+      const h = this.parsedHeight();
+      const w = this.parsedWeight();
+      const head = this.parsedHead();
+      const measurement: GrowthMeasurement = {
+        id: util.generateRandomUUID(true),
+        measuredAt: this.draftRecordedAt,
+        heightCm: h,
+        weightKg: w,
+        headCircumferenceCm: head,
+        note: [titleTrim, detailTrim].filter((s: string) => s.length > 0).join(' · '),
+        source: 'checkup',
+        syncState: SyncState.local,
+        createdAt: now,
+        updatedAt: now
+      };
+      await AppDatabase.shared.insertGrowth(measurement);
+    }
     promptAction.showToast({ message: '已经收好啦 🌟' });
     this.onDone();
   }

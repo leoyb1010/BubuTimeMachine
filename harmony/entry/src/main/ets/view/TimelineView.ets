@@ -5,9 +5,13 @@ import { ServerConfig } from '../services/ServerConfig';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { Mood, moodEmoji, FeedEventKind, SyncState } from '../models/Enums';
 import { BubuColor, BubuRadius } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { EntryDetailView } from './EntryDetailView';
 import { FamilyFeedView } from './FamilyFeedView';
+import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
+import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
 import { promptAction } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
@@ -32,10 +36,33 @@ export struct TimelineView {
   @State sections: TimelineSection[] = [];
   @State searchText: string = '';
 
-  @State showFamilyFeed: boolean = false;
-  @State detailEntry: Entry | null = null;
+	  @State showFamilyFeed: boolean = false;
+	  @State detailEntry: Entry | null = null;
+	  @State private pageIn: boolean = false;
+	  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
+	  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+	
+	  aboutToAppear(): void {
+	    this.tabBarVisible = true;
+	    this.reload();
+	    this.pageIn = false;
+	    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+	  }
 
-  aboutToAppear(): void { this.reload(); }
+  private onBackSignal(): void {
+    if (this.backSignal <= 0) return;
+    if (this.detailEntry !== null) {
+      this.detailEntry = null;
+      this.tabBarVisible = true;
+      this.reload();
+      return;
+    }
+    if (this.showFamilyFeed) {
+      this.showFamilyFeed = false;
+      this.tabBarVisible = true;
+      this.reload();
+    }
+  }
 
   private theme(): string { return BubuColor.primary; }
 
@@ -93,15 +120,16 @@ export struct TimelineView {
     return s !== undefined && s.toLowerCase().includes(q);
   }
 
-  build() {
-    if (this.detailEntry) {
-      this.detailPanel()
-    } else if (this.showFamilyFeed) {
-      FamilyFeedView({ onClose: () => { this.showFamilyFeed = false; this.reload(); } })
-    } else {
-      this.mainPage()
-    }
-  }
+	  build() {
+	    if (this.detailEntry) {
+	      this.detailPanel()
+	    } else if (this.showFamilyFeed) {
+	      FamilyFeedView({ onClose: () => { this.showFamilyFeed = false; this.tabBarVisible = true; this.reload(); } })
+	        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
+	    } else {
+	      this.mainPage()
+	    }
+	  }
 
   // 详情面板（对照 iOS navigationDestination → EntryDetailView）。保留与 HomeView 一致的 prop 契约。
   @Builder
@@ -110,14 +138,14 @@ export struct TimelineView {
       Row({ space: 12 }) {
         Button('返回')
           .backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
-          .onClick(() => { this.detailEntry = null; this.reload(); })
+          .onClick(() => { this.detailEntry = null; this.tabBarVisible = true; this.reload(); })
         Text('记录详情').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         Blank()
       }
       .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 })
       EntryDetailView({
         entry: this.detailEntry!,
-        onDismiss: () => { this.detailEntry = null; this.reload(); }
+        onDismiss: () => { this.detailEntry = null; this.tabBarVisible = true; this.reload(); }
       })
         .layoutWeight(1)
     }
@@ -132,14 +160,22 @@ export struct TimelineView {
         Text('时光轴')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         Blank()
-        Row({ space: 4 }) {
-          Text('👨‍👩‍👧').fontSize(16)
-          Text('家庭动态').fontSize(15).fontColor(this.theme())
-        }
+	        Row({ space: 4 }) {
+	          BubuIconBadge({
+	            name: BubuIconName.home,
+	            badgeSize: 24,
+	            iconSize: 14,
+	            color: this.theme(),
+	            fill: '#1AF28C9E',
+	            radius: 12,
+	            strokeWidth: 1.8
+	          })
+	          Text('家庭动态').fontSize(15).fontColor(this.theme())
+	        }
         .padding({ left: 10, right: 10, top: 6, bottom: 6 })
         .backgroundColor('#1AF28C9E')
         .borderRadius(100)
-        .onClick(() => { this.showFamilyFeed = true; })
+	        .onClick(() => { this.tabBarVisible = false; this.showFamilyFeed = true; })
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
 
@@ -157,29 +193,40 @@ export struct TimelineView {
         this.timeline()
       }
     }
-    .width('100%').height('100%').backgroundColor(BubuColor.background)
-  }
+	    .width('100%').height('100%').backgroundColor(BubuColor.background)
+	    .opacity(this.pageIn ? 1 : 0)
+	    .translate({ x: 0, y: this.pageIn ? 0 : BubuMotion.entranceOffsetY })
+	    .animation(BubuMotion.gentle)
+	  }
 
   // MARK: 时光轴主体（List + ListItemGroup 分段，section 头吸顶）
   @Builder
   timeline() {
-    List({ space: 16 }) {
+    Scroll() {
+      Column({ space: 18 }) {
       ForEach(this.sections, (section: TimelineSection) => {
-        ListItemGroup({ header: this.sectionHeader(section) }) {
-          ForEach(section.entries, (entry: Entry) => {
-            ListItem() {
-              this.timelineRow(entry)
-            }
-            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
-          }, (entry: Entry) => entry.id)
-        }
+        this.sectionBlock(section)
       }, (section: TimelineSection) => section.key)
+        Blank().height(132)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 12 })
     }
-    .layoutWeight(1)
-    .width('100%')
-    .padding({ left: 16, right: 16 })
-    .sticky(StickyStyle.Header)
+	    .layoutWeight(1)
+	    .width('100%')
+      .scrollable(ScrollDirection.Vertical)
     .scrollBar(BarState.Off)
+  }
+
+  @Builder
+  sectionBlock(section: TimelineSection) {
+    Column({ space: 12 }) {
+      this.sectionHeader(section)
+      ForEach(section.entries, (entry: Entry) => {
+        this.timelineRow(entry)
+      }, (entry: Entry) => entry.id)
+    }
+    .width('100%')
   }
 
   // MARK: 单条：左 hue 圆点 + 右大图卡片（对照 iOS timelineRow）
@@ -199,28 +246,33 @@ export struct TimelineView {
       .shadow({ radius: 3, color: '#2E000000', offsetY: 1 })
       .margin({ top: 16 })
 
-      Column() {
-        this.bigPhotoCard(entry)
-      }
-      .layoutWeight(1)
-      .onClick(() => { this.detailEntry = entry; })
-      .gesture(
-        LongPressGesture().onAction(() => { this.confirmDelete(entry); })
-      )
-    }
-    .width('100%')
-    .alignItems(VerticalAlign.Top)
-  }
+		      Column() {
+		        this.bigPhotoCard(entry)
+		      }
+		      .layoutWeight(1)
+		    }
+		    .width('100%')
+		    .alignItems(VerticalAlign.Top)
+        .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.985 })
+        .onClick(() => { this.openDetail(entry); })
+        .gesture(TapGesture().onAction(() => { this.openDetail(entry); }))
+		  }
+
+	  private openDetail(entry: Entry): void {
+	    BubuHaptics.selection();
+	    this.tabBarVisible = false;
+	    animateTo(BubuMotion.gentle, () => { this.detailEntry = entry; });
+	  }
 
   // MARK: 大图卡片（对照 iOS bigPhotoCard）：顶部图/占位 + 日期标 + 标题 + 备注 + tag 行
   @Builder
   bigPhotoCard(entry: Entry) {
     Column() {
-      // 顶部图（132 高）+ 左下日期标。
+      // 顶部图（178 高）+ 左下日期标，避免照片被压成扁条。
       Stack() {
         if (this.photoMap.has(entry.id)) {
           Image(this.photoMap.get(entry.id))
-            .width('100%').height(132).objectFit(ImageFit.Cover)
+            .width('100%').height(178).objectFit(ImageFit.Cover)
         } else {
           // 无图占位：hue 渐变 + 心情/默认 motif（对照 iOS BubuDreamPhoto）。
           Stack() {
@@ -228,7 +280,7 @@ export struct TimelineView {
               .fontSize(40)
           }
           .alignContent(Alignment.Center)
-          .width('100%').height(132)
+          .width('100%').height(178)
           .linearGradient({
             angle: 135,
             colors: [
@@ -244,7 +296,7 @@ export struct TimelineView {
           .padding({ left: 14, right: 14, bottom: 10 })
       }
       .alignContent(Alignment.BottomStart)
-      .width('100%').height(132).clip(true)
+      .width('100%').height(178).clip(true)
 
       // 标题 + 备注 + tag 行。
       Column({ space: 4 }) {
@@ -271,12 +323,14 @@ export struct TimelineView {
       .padding(14)
       .width('100%')
     }
-    .width('100%')
-    .backgroundColor(BubuColor.card)
-    .borderRadius(24)
-    .clip(true)
-    .shadow({ radius: 14, color: '#33B57870', offsetY: 8 })
-  }
+	    .width('100%')
+		    .backgroundColor(BubuColor.card)
+		    .borderRadius(24)
+		    .clip(true)
+		    .shadow({ radius: 14, color: '#33B57870', offsetY: 8 })
+        .onClick(() => { this.openDetail(entry); })
+        .gesture(TapGesture().onAction(() => { this.openDetail(entry); }))
+		  }
 
   // 月份 + 当时年龄锚点（对照 iOS sectionHeader）。
   @Builder
@@ -310,7 +364,7 @@ export struct TimelineView {
   @Builder
   emptyState() {
     Column({ space: 18 }) {
-      Text('🐣').fontSize(78)
+      BubuMascotBadge({ badgeSize: 86, expression: BubuExpression.happy })
       Text('还没有记录呢\n点上面的「记录此刻」，留住布布的第一个瞬间吧')
         .fontSize(18).fontColor(BubuColor.secondaryText)
         .textAlign(TextAlign.Center)
@@ -321,7 +375,7 @@ export struct TimelineView {
   @Builder
   searchEmptyState() {
     Column({ space: 16 }) {
-      Text('😮').fontSize(72)
+      BubuMascotBadge({ badgeSize: 82, expression: BubuExpression.surprised })
       Text(`没找到「${this.searchText}」相关的记录`)
         .fontSize(18).fontColor(BubuColor.secondaryText)
         .textAlign(TextAlign.Center)

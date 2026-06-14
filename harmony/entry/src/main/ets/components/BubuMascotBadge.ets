@@ -53,33 +53,6 @@ export function expressionForMood(mood: Mood | undefined): BubuExpression {
   }
 }
 
-// 表情 → emoji 兜底（资源贴纸缺失时显示）。复用心情 emoji 语义。
-function expressionEmoji(e: BubuExpression): string {
-  switch (e) {
-    case BubuExpression.eating: return '😋';
-    case BubuExpression.drinking: return '🥤';
-    case BubuExpression.sleeping: return '😴';
-    case BubuExpression.playing: return '🧸';
-    case BubuExpression.sport: return '💪';
-    case BubuExpression.reading: return '📖';
-    case BubuExpression.drawing: return '🎨';
-    case BubuExpression.happy: return '😄';
-    case BubuExpression.surprised: return '😮';
-    case BubuExpression.angry: return '😤';
-    case BubuExpression.shy: return '🫣';
-    case BubuExpression.thinking: return '🤔';
-    case BubuExpression.cheer: return '🎉';
-    case BubuExpression.bye: return '👋';
-    case BubuExpression.love: return '💗';
-    case BubuExpression.travel: return '🧳';
-    case BubuExpression.bath: return '🛁';
-    case BubuExpression.music: return '🎵';
-    case BubuExpression.tv: return '📺';
-    case BubuExpression.yeah: return '✌️';
-    default: return '😄';
-  }
-}
-
 // MARK: - 布布吉祥物徽章（对照 iOS DesignSystem/Components/BubuMascotBadge.swift）
 // 显示单张布布表情贴纸（绝不显示整张合集）。expression 优先；否则按 mood 自动选；都没有则默认开心。
 @Component
@@ -93,13 +66,38 @@ export struct BubuMascotBadge {
     return this.expression !== undefined ? this.expression : expressionForMood(this.mood);
   }
 
+  private resolvedResource(): Resource {
+    switch (this.resolved()) {
+      case BubuExpression.eating: return $r('app.media.bubu_eating');
+      case BubuExpression.drinking: return $r('app.media.bubu_drinking');
+      case BubuExpression.sleeping: return $r('app.media.bubu_sleeping');
+      case BubuExpression.playing: return $r('app.media.bubu_playing');
+      case BubuExpression.sport: return $r('app.media.bubu_sport');
+      case BubuExpression.reading: return $r('app.media.bubu_reading');
+      case BubuExpression.drawing: return $r('app.media.bubu_drawing');
+      case BubuExpression.happy: return $r('app.media.bubu_happy');
+      case BubuExpression.surprised: return $r('app.media.bubu_surprised');
+      case BubuExpression.angry: return $r('app.media.bubu_angry');
+      case BubuExpression.shy: return $r('app.media.bubu_shy');
+      case BubuExpression.thinking: return $r('app.media.bubu_thinking');
+      case BubuExpression.cheer: return $r('app.media.bubu_cheer');
+      case BubuExpression.bye: return $r('app.media.bubu_bye');
+      case BubuExpression.love: return $r('app.media.bubu_love');
+      case BubuExpression.travel: return $r('app.media.bubu_travel');
+      case BubuExpression.bath: return $r('app.media.bubu_bath');
+      case BubuExpression.music: return $r('app.media.bubu_music');
+      case BubuExpression.tv: return $r('app.media.bubu_tv');
+      case BubuExpression.yeah: return $r('app.media.bubu_yeah');
+      default: return $r('app.media.bubu_happy');
+    }
+  }
+
   build() {
-    // NOTE: iOS 用 Image(asset) 加载布布贴纸；本切片未携带贴纸资源，
-    // 故以 emoji 兜底渲染（按表情语义）。资源就绪后可改为 Image($r('app.media.<assetName>'))。
     Stack() {
-      Text(expressionEmoji(this.resolved()))
-        .fontSize(this.badgeSize * 0.6)
-        .textAlign(TextAlign.Center)
+      Image(this.resolvedResource())
+        .width(this.badgeSize)
+        .height(this.badgeSize)
+        .objectFit(ImageFit.Cover)
     }
     .width(this.badgeSize)
     .height(this.badgeSize)

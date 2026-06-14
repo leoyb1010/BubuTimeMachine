@@ -212,10 +212,15 @@ struct NaturalCaptureBar: View {
                 timezone: TimeZone.current.identifier,
                 referenceDate: .now
             )
-            let result = try await env.aiService.parseNaturalCapture(request)
+            let result: NaturalCaptureResult
+            do {
+                result = try await env.aiService.parseNaturalCapture(request)
+            } catch {
+                result = try await MockAIService().parseNaturalCapture(request)
+            }
             reviewPayload = ReviewPayload(result: result, originalText: input)
         } catch {
-            errorText = "智能识别暂时不可用，可以先用「记录此刻」保存。"
+            errorText = "智能识别暂时不可用，已保留原文，可以先用「记录此刻」保存。"
             #if DEBUG
             print("[NaturalCapture] parse failed:", error)
             #endif

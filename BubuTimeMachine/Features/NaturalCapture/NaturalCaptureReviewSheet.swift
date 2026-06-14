@@ -388,6 +388,8 @@ struct NaturalCaptureReviewSheet: View {
             router.save(item)
         }
         try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
         env.syncEngine.syncNow()
         BubuHaptics.success()
         BubuSound.play(.save)

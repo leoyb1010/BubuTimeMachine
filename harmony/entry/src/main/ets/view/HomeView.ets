@@ -1,13 +1,17 @@
-import { ChildProfile, Entry } from '../models/Models';
+import { ChildProfile, Entry, GrowthMeasurement } from '../models/Models';
 import { Mood, SyncState, moodEmoji, FamilyRole } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
 import { ServerConfig } from '../services/ServerConfig';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor, BubuFont, BubuRadius, BubuShadow } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { BubuIdentityCard } from '../components/BubuIdentityCard';
+import { BubuIcon, BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { ChildProfileView } from './ChildProfileView';
 import { HealthHomeView } from './HealthHomeView';
+import { GrowthCurveView } from './GrowthCurveView';
 import { SettingsView } from './SettingsView';
 import { AlbumView } from './AlbumView';
 import { TimelineView } from './TimelineView';
@@ -18,11 +22,11 @@ import { CaptureModel } from './CaptureModel';
 import { QuickCaptureSheet } from './QuickCaptureSheet';
 import { OnThisDayView } from './OnThisDayView';
 import { DailyQuestion } from './DailyQuestion';
+import { NaturalCaptureBar } from './NaturalCaptureBar';
 import { HomeRoute, BirthdayCountdownView } from './HomeDestinations';
-import { promptAction } from '@kit.ArkUI';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS Features/Capture/CaptureHomeView.swift）
-// 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（星座/成长/故事/今日一问）
+// 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（里程碑/成长/故事/今日一问）
 // → 最近时光 → 那年今日 → 同步健康度。记录走 CaptureModel + EntryWriter（与意图/小组件同一写入层）。
 // 沿用 RootPage 既有的零参 HomeView() 契约与内部 @State 索引式导航（HomeRoute）。
 @Component
@@ -40,17 +44,63 @@ export struct HomeView {
   @State milestoneTotal: number = 0;
   @State milestoneDoneCount: number = 0;
   @State pendingSyncCount: number = 0;
+  @State growthMeasurements: GrowthMeasurement[] = [];
   // 快速记录业务模型（对照 iOS @State model: CaptureModel?）。
   @State model: CaptureModel = new CaptureModel(ServerConfig.shared.currentRole);
   // 底栏中央「记录」键触发计数（对照 iOS quickCaptureTrigger）。RootPage 自增 → 打开快速记录。
   @Link @Watch('onCaptureSignal') captureSignal: number;
+  // RootPage 注入：首页里程碑卡直接切到「里程碑」Tab，避免误进健康。
+  onOpenMilestones?: () => void;
+
+  @State private pageIn: boolean = false;
+  @State private floatLoop: boolean = false;
+  @State private heroBreath: boolean = false;
+  @State private viewportW: number = 0;
+  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
+  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+  @StorageLink('bubuHandledCaptureSignal') handledCaptureSignal: number = 0;
 
   private onCaptureSignal(): void {
-    if (this.captureSignal > 0) this.startQuickCapture();
+    if (this.captureSignal > this.handledCaptureSignal) {
+      this.handledCaptureSignal = this.captureSignal;
+      this.startQuickCapture();
+    }
+  }
+
+  private onBackSignal(): void {
+    if (this.backSignal <= 0) return;
+    if (this.selectedEntry !== null) {
+      this.selectedEntry = null;
+      this.tabBarVisible = true;
+      this.reload();
+      return;
+    }
+    if (this.route !== HomeRoute.home) {
+      this.route = HomeRoute.home;
+      this.tabBarVisible = true;
+      this.reload();
+    }
   }
 
   aboutToAppear(): void {
+    this.tabBarVisible = true;
     this.reload();
+    this.startHomeMotion();
+    if (this.captureSignal > this.handledCaptureSignal) {
+      this.handledCaptureSignal = this.captureSignal;
+      setTimeout(() => {
+        this.startQuickCapture();
+      }, 80);
+    }
+  }
+
+  private startHomeMotion(): void {
+    this.pageIn = false;
+    this.floatLoop = false;
+    this.heroBreath = false;
+    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+    animateTo(BubuMotion.floating, () => { this.floatLoop = true; });
+    animateTo(BubuMotion.breathe, () => { this.heroBreath = true; });
   }
 
   private async reload(): Promise<void> {
@@ -59,15 +109,18 @@ export struct HomeView {
     this.entries = entries;
     const photos = await AppDatabase.shared.fetchAllPhotos() ?? [];
     const health = await AppDatabase.shared.fetchHealth() ?? [];
+    const growth = await AppDatabase.shared.fetchGrowth() ?? [];
     const milestones = await AppDatabase.shared.fetchMilestones() ?? [];
     const capsules = await AppDatabase.shared.fetchCapsules() ?? [];
     this.photoCount = photos.length;
     this.healthCount = health.length;
+    this.growthMeasurements = growth;
     this.milestoneTotal = milestones.length;
     this.milestoneDoneCount = milestones.filter(m => m.happenedAt !== undefined).length;
     this.pendingSyncCount =
       this.entries.filter(e => e.syncState !== SyncState.synced).length +
       health.filter(h => h.syncState !== SyncState.synced).length +
+      growth.filter(g => g.syncState !== SyncState.synced).length +
       milestones.filter(m => m.syncState !== SyncState.synced).length +
       capsules.filter(c => c.syncState !== SyncState.synced).length;
     // 首张照片缩略图映射（最近两条 + 那年今日）。
@@ -88,8 +141,36 @@ export struct HomeView {
 
   // 打开快速记录（对照 iOS startQuickCapture）。
   private startQuickCapture(prefillNote: string = ''): void {
+    BubuHaptics.tapLight();
     this.model.startQuickCapture(prefillNote);
-    this.route = HomeRoute.record;
+    this.tabBarVisible = false;
+    setTimeout(() => {
+      animateTo(BubuMotion.gentle, () => { this.route = HomeRoute.record; });
+    }, 40);
+  }
+
+  private navigate(route: HomeRoute): void {
+    BubuHaptics.selection();
+    this.tabBarVisible = false;
+    setTimeout(() => {
+      animateTo(BubuMotion.gentle, () => { this.route = route; });
+    }, 40);
+  }
+
+  private openMilestones(): void {
+    BubuHaptics.selection();
+    this.tabBarVisible = true;
+    if (this.onOpenMilestones) {
+      this.onOpenMilestones();
+    }
+  }
+
+  private isCompact(): boolean {
+    return this.viewportW <= 0 || this.viewportW < 1500;
+  }
+
+  private isNarrow(): boolean {
+    return this.viewportW > 0 && this.viewportW < 320;
   }
 
   build() {
@@ -98,14 +179,15 @@ export struct HomeView {
         model: this.model,
         onSaved: () => {
           this.route = HomeRoute.home;
+          this.tabBarVisible = true;
           this.reload();
         },
         onClose: () => {
           this.route = HomeRoute.home;
+          this.tabBarVisible = true;
         },
         onNaturalCapture: () => {
-          // 一句话智能记录：本切片回落到把焦点留在写一句（与 iOS NaturalCapturePanel 等价入口）。
-          promptAction.showToast({ message: '在「写一句」里写下此刻，保存时会智能规整' });
+          this.navigate(HomeRoute.naturalCapture);
         }
       })
     } else if (this.selectedEntry) {
@@ -135,10 +217,18 @@ export struct HomeView {
           .layoutWeight(1)
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.route === HomeRoute.growth) {
+      Column() {
+        this.panelHeader('成长曲线')
+        GrowthCurveView()
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.route === HomeRoute.settings) {
       SettingsView({
         onClose: () => {
           this.route = HomeRoute.home;
+          this.tabBarVisible = true;
           this.reload();
         }
       })
@@ -161,8 +251,19 @@ export struct HomeView {
       Column() {
         this.panelHeader('那年今日')
         OnThisDayView({
-          onSelect: (entry: Entry) => { this.selectedEntry = entry; }
+          onSelect: (entry: Entry) => {
+            this.tabBarVisible = false;
+            this.selectedEntry = entry;
+          }
         })
+          .layoutWeight(1)
+      }
+      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.route === HomeRoute.naturalCapture) {
+      Column() {
+        this.panelHeader('一句话智能记录')
+        NaturalCaptureBar()
+          .padding(16)
           .layoutWeight(1)
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
@@ -182,7 +283,7 @@ export struct HomeView {
   homePage() {
     Stack() {
       Scroll() {
-        Column({ space: 12 }) {
+        Column({ space: this.isCompact() ? 10 : 12 }) {
           this.greetingRow()
           this.identityCardTop()
           this.primaryActionDock()
@@ -191,15 +292,18 @@ export struct HomeView {
           this.onThisDaySection()
           this.saveHealthStrip()
           // 给底部悬浮 Tab 栏与浮动按钮留出空间。
-          Blank().height(110)
-        }
-        .padding({ left: 16, right: 16, top: 8 })
-        .width('100%')
+	          Blank().height(this.isCompact() ? 142 : 130)
+	        }
+	        .padding({ left: this.isCompact() ? 12 : 16, right: this.isCompact() ? 12 : 16, top: this.isCompact() ? 6 : 8 })
+	        .width('100%')
+        .opacity(this.pageIn ? 1 : 0)
+        .translate({ x: 0, y: this.pageIn ? 0 : BubuMotion.entranceOffsetY })
+        .animation(BubuMotion.gentle)
       }
       .backgroundColor(BubuColor.cream)
       .width('100%').height('100%')
 
-      // 一句话智能记录浮动按钮（对照 iOS naturalCaptureFloatingButton）。
+      // 一句话智能记录浮动按钮：对齐 iOS 1.2.0，手机/折叠屏都保留轻量入口。
       this.naturalCaptureFloatingButton()
 
       // 保存成功贴纸（对照 iOS savedToast）。
@@ -207,9 +311,13 @@ export struct HomeView {
         this.savedToast()
       }
     }
-    .alignContent(Alignment.BottomEnd)
-    .width('100%').height('100%')
-  }
+	    .alignContent(Alignment.BottomEnd)
+	    .width('100%').height('100%')
+	    .onAreaChange((_old: Area, area: Area) => {
+	      const w = area.width as number;
+	      if (w > 0) this.viewportW = w;
+	    })
+	  }
 
   // MARK: 顶部问候行（对照 iOS greetingRow + todayStatusPill）
 
@@ -218,17 +326,17 @@ export struct HomeView {
     Row() {
       Column({ space: 1 }) {
         Text(`${this.greetingText()} 呀`)
-          .fontSize(14)
+          .fontSize(this.isCompact() ? 12 : 14)
           .fontWeight(FontWeight.Medium)
           .fontColor(BubuColor.secondaryText)
         if (this.profile) {
           Row({ space: 8 }) {
             Text(this.profile!.name)
-              .fontSize(28)
+              .fontSize(this.isCompact() ? 24 : 28)
               .fontWeight(FontWeight.Bolder)
               .fontColor(BubuColor.warmBrown)
             Text(AgeCalculator.ageDescription(this.profile!.birthday, Date.now()))
-              .fontSize(14)
+              .fontSize(this.isCompact() ? 12 : 14)
               .fontWeight(FontWeight.Medium)
               .fontColor(BubuColor.primary)
           }
@@ -240,38 +348,43 @@ export struct HomeView {
 
       this.todayStatusPill()
 
-      Text('⚙️')
-        .fontSize(18)
-        .width(42).height(42)
-        .textAlign(TextAlign.Center)
-        .backgroundColor('#F2FFFFFF')
-        .borderRadius(21)
+      BubuIconBadge({
+        name: BubuIconName.gear,
+        badgeSize: this.isCompact() ? 38 : 42,
+        iconSize: this.isCompact() ? 18 : 20,
+        color: BubuColor.primary,
+        fill: '#F2FFFFFF',
+        radius: this.isCompact() ? 19 : 21,
+        strokeWidth: 2.3
+      })
         .margin({ left: 8 })
-        .onClick(() => { this.route = HomeRoute.settings; })
+        .onClick(() => {
+          this.navigate(HomeRoute.settings);
+        })
     }
     .width('100%')
-    .padding({ top: 2 })
+    .padding({ top: this.isCompact() ? 0 : 2 })
   }
 
   @Builder
   todayStatusPill() {
     Column({ space: 3 }) {
       Row({ space: 5 }) {
-        Text('📅').fontSize(10)
+        BubuIcon({ name: BubuIconName.calendar, iconSize: 11, color: BubuColor.secondaryText, strokeWidth: 1.8 })
         Text(this.todayText())
           .fontSize(11)
           .fontWeight(FontWeight.Bold)
           .fontColor(BubuColor.secondaryText)
       }
       Row({ space: 5 }) {
-        Text(this.weatherSymbol()).fontSize(11)
+        BubuIcon({ name: this.weatherIconName(), iconSize: 12, color: BubuColor.secondaryText, strokeWidth: 1.7 })
         Text(this.weatherMoodText())
           .fontSize(11)
           .fontColor(BubuColor.secondaryText)
       }
     }
     .alignItems(HorizontalAlign.End)
-    .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+    .padding({ left: this.isCompact() ? 8 : 10, right: this.isCompact() ? 8 : 10, top: this.isCompact() ? 6 : 7, bottom: this.isCompact() ? 6 : 7 })
     .backgroundColor('#85FFFFFF')
     .borderRadius(17)
   }
@@ -281,12 +394,16 @@ export struct HomeView {
   @Builder
   identityCardTop() {
     if (this.profile) {
-      BubuIdentityCard({ profile: this.profile! })
+      BubuIdentityCard({ profile: this.profile!, compact: this.isCompact() })
+	        .scale({ x: this.heroBreath && !this.isCompact() ? 1.006 : 1, y: this.heroBreath && !this.isCompact() ? 1.006 : 1 })
+        .animation(BubuMotion.breathe)
       Text('编辑布布资料')
         .fontSize(12)
         .fontColor(BubuColor.primary)
         .alignSelf(ItemAlign.End)
-        .onClick(() => { this.route = HomeRoute.profile; })
+        .onClick(() => {
+          this.navigate(HomeRoute.profile);
+        })
     } else {
       Row({ space: 14 }) {
         BubuMascotBadge({ badgeSize: 56, expression: BubuExpression.happy })
@@ -311,7 +428,9 @@ export struct HomeView {
       })
       .borderRadius(BubuRadius.card)
       .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
-      .onClick(() => { this.route = HomeRoute.profile; })
+      .onClick(() => {
+        this.navigate(HomeRoute.profile);
+      })
     }
   }
 
@@ -319,24 +438,25 @@ export struct HomeView {
 
   @Builder
   primaryActionDock() {
-    Row({ space: 10 }) {
+    Row({ space: this.isCompact() ? 8 : 10 }) {
       // 记录此刻（主操作，占满剩余宽度）。
-      Row({ space: 10 }) {
-        Text('+')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bolder)
-          .fontColor(Color.White)
-          .width(42).height(42)
-          .textAlign(TextAlign.Center)
-          .linearGradient({ angle: 135, colors: [[BubuColor.primary, 0.0], [BubuColor.deepRose, 1.0]] })
-          .borderRadius(21)
+      Row({ space: this.isCompact() ? 8 : 10 }) {
+        BubuIconBadge({
+          name: BubuIconName.plus,
+          badgeSize: this.isCompact() ? 38 : 44,
+          iconSize: this.isCompact() ? 20 : 23,
+          color: '#FFFFFF',
+          fill: BubuColor.primary,
+          radius: this.isCompact() ? 19 : 22,
+          strokeWidth: 3
+        })
         Column({ space: 2 }) {
           Text('记录此刻')
-            .fontSize(16)
+            .fontSize(this.isCompact() ? 14 : 16)
             .fontWeight(FontWeight.Bolder)
             .fontColor(BubuColor.warmBrown)
           Text('照片、语音、文字一起收好')
-            .fontSize(11)
+            .fontSize(this.isCompact() ? 10 : 11)
             .fontColor(BubuColor.secondaryText)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -344,62 +464,79 @@ export struct HomeView {
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
       }
-      .height(64)
+      .height(this.isCompact() ? 56 : 64)
       .layoutWeight(1)
-      .padding({ left: 12, right: 10 })
+      .padding({ left: this.isCompact() ? 10 : 12, right: this.isCompact() ? 8 : 10 })
       .backgroundColor('#F2FFFFFF')
-      .borderRadius(24)
+      .borderRadius(this.isCompact() ? 20 : 24)
       .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.96 })
       .onClick(() => { this.startQuickCapture(); })
 
-      this.quickDockButton('🖼️', '相册', `${this.photoCount} 张`, BubuColor.mint, () => { this.route = HomeRoute.album; })
-      this.quickDockButton('🩺', '健康', '餐睡', BubuColor.sky, () => { this.route = HomeRoute.health; })
+      this.quickDockButton(BubuIconName.photo, '相册', `${this.photoCount} 张`, BubuColor.mint, () => {
+        this.navigate(HomeRoute.album);
+      })
+      this.quickDockButton(BubuIconName.health, '健康', '餐睡', BubuColor.sky, () => {
+        this.navigate(HomeRoute.health);
+      })
     }
     .width('100%')
   }
 
   @Builder
-  quickDockButton(icon: string, title: string, subtitle: string, tint: string, action: () => void) {
+  quickDockButton(iconName: string, title: string, subtitle: string, tint: string, action: () => void) {
     Column({ space: 3 }) {
-      Text(icon)
-        .fontSize(16)
-        .width(28).height(28)
-        .textAlign(TextAlign.Center)
-        .backgroundColor(tint)
-        .borderRadius(14)
+      BubuIconBadge({
+        name: iconName,
+        badgeSize: this.isCompact() ? 30 : 34,
+        iconSize: this.isCompact() ? 16 : 18,
+        color: BubuColor.deepRose,
+        fill: tint,
+        radius: this.isCompact() ? 15 : 17,
+        strokeWidth: 2.1
+      })
       Text(title)
-        .fontSize(11)
+        .fontSize(this.isCompact() ? 10 : 11)
         .fontWeight(FontWeight.Bold)
         .fontColor(BubuColor.warmBrown)
       Text(subtitle)
-        .fontSize(9)
+        .fontSize(this.isCompact() ? 8 : 9)
         .fontColor(BubuColor.secondaryText)
         .maxLines(1)
     }
-    .width(66).height(64)
+    .width(this.isCompact() ? 58 : 66).height(this.isCompact() ? 56 : 64)
     .justifyContent(FlexAlign.Center)
     .backgroundColor('#F2FFFFFF')
-    .borderRadius(22)
+    .borderRadius(this.isCompact() ? 19 : 22)
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
     .onClick(action)
   }
 
-  // MARK: 紧凑四宫格 — 成长星座 / 成长数据 / 故事 / 今日一问（对照 iOS dashboardGridTop）
+  // MARK: 紧凑四宫格 — 里程碑 / 成长数据 / 故事 / 今日一问（对照 iOS dashboardGridTop）
 
   @Builder
-  dashboardGridTop() {
-    Column({ space: 10 }) {
-      Row({ space: 10 }) {
-        this.constellationTile()
-        this.growthTile()
-      }.width('100%')
-      Row({ space: 10 }) {
-        this.storyTile()
-        this.dailyQuestionTile()
-      }.width('100%')
-    }
-    .width('100%')
-  }
+	  dashboardGridTop() {
+	    if (this.isNarrow()) {
+	      Column({ space: 10 }) {
+	        this.constellationTile()
+	        this.growthTile()
+	        this.storyTile()
+	        this.dailyQuestionTile()
+	      }
+	      .width('100%')
+	    } else {
+	      Column({ space: 10 }) {
+	        Row({ space: 10 }) {
+	          this.constellationTile()
+	          this.growthTile()
+	        }.width('100%')
+	        Row({ space: 10 }) {
+	          this.storyTile()
+	          this.dailyQuestionTile()
+	        }.width('100%')
+	      }
+	      .width('100%')
+	    }
+	  }
 
   @Builder
   tileSurface(fill: string) {
@@ -410,14 +547,18 @@ export struct HomeView {
   constellationTile() {
     Column({ space: 6 }) {
       Row({ space: 8 }) {
-        Text('✨')
-          .fontSize(15)
-          .width(34).height(34)
-          .textAlign(TextAlign.Center)
-          .backgroundColor('#61FFC2D6')
-          .borderRadius(17)
+        BubuIconBadge({
+          name: BubuIconName.sparkles,
+          badgeSize: 38,
+          iconSize: 16,
+          color: BubuColor.deepRose,
+          fill: '#61FFC2D6',
+          radius: 19,
+          strokeWidth: 1.8,
+          filled: true
+        })
         Column({ space: 2 }) {
-          Text('成长星座')
+          Text('里程碑')
             .fontSize(14)
             .fontWeight(FontWeight.Bolder)
             .fontColor(BubuColor.warmBrown)
@@ -433,41 +574,45 @@ export struct HomeView {
       // 迷你星座装饰（对照 iOS BubuMiniConstellation）。
       Row({ space: 6 }) {
         ForEach([0, 1, 2, 3, 4], (i: number) => {
-          Text(i < this.milestoneDoneCount ? '★' : '☆')
-            .fontSize(14)
-            .fontColor(i < this.milestoneDoneCount ? BubuColor.butter : BubuColor.secondaryText)
+          BubuIcon({
+            name: BubuIconName.star,
+            iconSize: 14,
+            color: i < this.milestoneDoneCount ? BubuColor.butter : BubuColor.secondaryText,
+            strokeWidth: 1.6,
+            filled: i < this.milestoneDoneCount
+          })
         }, (i: number) => `star-${i}`)
       }
     }
     .layoutWeight(1)
-    .height(104)
-    .padding(12)
+    .height(this.isCompact() ? 96 : 104)
+    .padding(this.isCompact() ? 10 : 12)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(BubuColor.card)
     .borderRadius(24)
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => { this.route = HomeRoute.health; })
+    .onClick(() => { this.openMilestones(); })
   }
 
   @Builder
   growthTile() {
-    Column({ space: 6 }) {
+    Column({ space: this.isCompact() ? 4 : 6 }) {
       Row({ space: 6 }) {
-        this.growthStat('身高', '—', 'cm')
-        this.growthStat('体重', '—', 'kg')
+        this.growthStat('身高', this.latestGrowthValue('height'), 'cm')
+        this.growthStat('体重', this.latestGrowthValue('weight'), 'kg')
       }.width('100%')
       // 渐升 bar（装饰，对照 iOS growthBars）。
       Row({ space: 4 }) {
         ForEach([40, 55, 62, 70, 76, 88, 100], (h: number, i: number) => {
           Column()
             .layoutWeight(1)
-            .height(30 * h / 100)
+            .height((this.isCompact() ? 24 : 30) * h / 100)
             .backgroundColor(i === 6 ? BubuColor.primary : BubuColor.peach)
             .borderRadius(3)
         }, (h: number, i: number) => `bar-${i}`)
       }
-      .height(30)
+      .height(this.isCompact() ? 24 : 30)
       .alignItems(VerticalAlign.Bottom)
       .width('100%')
       Text('成长数据')
@@ -475,13 +620,15 @@ export struct HomeView {
         .fontColor(BubuColor.secondaryText)
     }
     .layoutWeight(1)
-    .height(104)
-    .padding(14)
+    .height(this.isCompact() ? 96 : 104)
+    .padding(this.isCompact() ? 12 : 14)
     .alignItems(HorizontalAlign.Start)
     .backgroundColor(BubuColor.card)
     .borderRadius(24)
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => { this.route = HomeRoute.health; })
+    .onClick(() => {
+      this.navigate(HomeRoute.growth);
+    })
   }
 
   @Builder
@@ -492,11 +639,11 @@ export struct HomeView {
         .fontColor(BubuColor.secondaryText)
       Row({ space: 1 }) {
         Text(value)
-          .fontSize(19)
+          .fontSize(this.isCompact() ? 17 : 19)
           .fontWeight(FontWeight.Bolder)
           .fontColor(BubuColor.warmBrown)
         Text(unit)
-          .fontSize(12)
+          .fontSize(this.isCompact() ? 11 : 12)
           .fontColor(BubuColor.warmBrown)
       }
       .alignItems(VerticalAlign.Bottom)
@@ -505,16 +652,32 @@ export struct HomeView {
     .alignItems(HorizontalAlign.Start)
   }
 
+  private latestGrowthValue(kind: 'height' | 'weight'): string {
+    const ordered = this.growthMeasurements
+      .slice()
+      .sort((a: GrowthMeasurement, b: GrowthMeasurement) => b.measuredAt - a.measuredAt);
+    for (const g of ordered) {
+      const value = kind === 'height' ? g.heightCm : g.weightKg;
+      if (value !== undefined && value !== null) {
+        return Math.round(value) === value ? `${Math.round(value)}` : value.toFixed(1);
+      }
+    }
+    return '—';
+  }
+
   @Builder
   storyTile() {
     Row({ space: 10 }) {
-      Text('✦')
-        .fontSize(24)
-        .width(46).height(52)
-        .textAlign(TextAlign.Center)
-        .backgroundColor('#FFFFFF')
-        .fontColor(BubuColor.deepRose)
-        .borderRadius(13)
+      BubuIconBadge({
+        name: BubuIconName.sparkles,
+        badgeSize: 46,
+        iconSize: 24,
+        color: BubuColor.deepRose,
+        fill: '#FFFFFF',
+        radius: 13,
+        strokeWidth: 2,
+        filled: true
+      })
       Column({ space: 3 }) {
         Text('故事绘本')
           .fontSize(14)
@@ -533,8 +696,8 @@ export struct HomeView {
       .layoutWeight(1)
     }
     .layoutWeight(1)
-    .height(104)
-    .padding(12)
+    .height(this.isCompact() ? 96 : 104)
+    .padding(this.isCompact() ? 10 : 12)
     .justifyContent(FlexAlign.Center)
     .linearGradient({
       angle: 135,
@@ -542,7 +705,9 @@ export struct HomeView {
     })
     .borderRadius(24)
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => { this.route = HomeRoute.timeline; })
+    .onClick(() => {
+      this.navigate(HomeRoute.timeline);
+    })
   }
 
   @Builder
@@ -570,8 +735,8 @@ export struct HomeView {
       .layoutWeight(1)
     }
     .layoutWeight(1)
-    .height(104)
-    .padding(12)
+    .height(this.isCompact() ? 96 : 104)
+    .padding(this.isCompact() ? 10 : 12)
     .justifyContent(FlexAlign.Center)
     .backgroundColor(BubuColor.card)
     .borderRadius(24)
@@ -602,7 +767,9 @@ export struct HomeView {
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
             .fontColor(BubuColor.primary)
-            .onClick(() => { this.route = HomeRoute.timeline; })
+            .onClick(() => {
+              this.navigate(HomeRoute.timeline);
+            })
         }
         .width('100%')
         ForEach(this.entryList().slice(0, 2), (entry: Entry) => {
@@ -656,7 +823,11 @@ export struct HomeView {
     .borderRadius(22)
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.97 })
-    .onClick(() => { this.selectedEntry = entry; })
+    .onClick(() => {
+      BubuHaptics.selection();
+      this.tabBarVisible = false;
+      animateTo(BubuMotion.gentle, () => { this.selectedEntry = entry; });
+    })
   }
 
   // MARK: 那年今日（对照 iOS onThisDaySection）
@@ -666,8 +837,8 @@ export struct HomeView {
     if (this.onThisDayEntries().length > 0) {
       Column({ space: 10 }) {
         Row({ space: 6 }) {
-          Text('📅').fontSize(18)
-          Text('那年今日')
+        BubuIcon({ name: BubuIconName.calendar, iconSize: 18, color: BubuColor.primary, strokeWidth: 2.1 })
+        Text('那年今日')
             .fontSize(16)
             .fontWeight(FontWeight.Bold)
             .fontColor(BubuColor.warmBrown)
@@ -675,7 +846,9 @@ export struct HomeView {
           Blank()
         }
         .width('100%')
-        .onClick(() => { this.route = HomeRoute.onThisDay; })
+        .onClick(() => {
+          this.navigate(HomeRoute.onThisDay);
+        })
 
         Scroll() {
           Row({ space: 12 }) {
@@ -723,7 +896,11 @@ export struct HomeView {
     }
     .width(130)
     .alignItems(HorizontalAlign.Start)
-    .onClick(() => { this.selectedEntry = e; })
+    .onClick(() => {
+      BubuHaptics.selection();
+      this.tabBarVisible = false;
+      animateTo(BubuMotion.gentle, () => { this.selectedEntry = e; });
+    })
   }
 
   // MARK: 保存健康度（对照 iOS saveHealthStrip）
@@ -731,9 +908,12 @@ export struct HomeView {
   @Builder
   saveHealthStrip() {
     Row({ space: 10 }) {
-      Text(this.pendingSyncCount === 0 ? '☁️' : '🔄')
-        .fontSize(22)
-        .fontColor(this.pendingSyncCount === 0 ? BubuColor.success : BubuColor.primary)
+      BubuIcon({
+        name: this.pendingSyncCount === 0 ? BubuIconName.checkCloud : BubuIconName.sync,
+        iconSize: 22,
+        color: this.pendingSyncCount === 0 ? BubuColor.success : BubuColor.primary,
+        strokeWidth: 2.2
+      })
       Column({ space: 2 }) {
         Text('本地已保存')
           .fontSize(13)
@@ -751,34 +931,50 @@ export struct HomeView {
         .fontColor(BubuColor.primary)
     }
     .width('100%')
-    .padding(12)
-    .backgroundColor('#CCFFFFFF')
-    .borderRadius(BubuRadius.small)
-    .onClick(() => { this.route = HomeRoute.settings; })
-  }
+	    .padding(12)
+	    .backgroundColor('#CCFFFFFF')
+	    .borderRadius(BubuRadius.small)
+	    .onClick(() => { this.navigate(HomeRoute.settings); })
+	  }
 
   // MARK: 浮动按钮 / 保存贴纸（对照 iOS naturalCaptureFloatingButton / savedToast）
 
   @Builder
   naturalCaptureFloatingButton() {
-    Column() {
-      Text('AI')
-        .fontSize(13)
-        .fontWeight(FontWeight.Bolder)
-        .fontColor(Color.White)
+    Stack() {
+      Column({ space: 0 }) {
+        BubuIcon({
+          name: BubuIconName.magic,
+          iconSize: this.isCompact() ? 20 : 22,
+          color: '#FFFFFF',
+          strokeWidth: 2.4
+        })
+        Text('AI')
+          .fontSize(this.isCompact() ? 9 : 10)
+          .fontWeight(FontWeight.Bolder)
+          .fontColor(Color.White)
+      }
+      .width(this.isCompact() ? 50 : 56).height(this.isCompact() ? 50 : 56)
+      .justifyContent(FlexAlign.Center)
+      .linearGradient({
+        angle: 135,
+        colors: [[BubuColor.primary, 0.0], [BubuColor.pink, 0.58], [BubuColor.peach, 1.0]]
+      })
+      .borderRadius(this.isCompact() ? 25 : 28)
+      .border({ width: 1.5, color: '#DFFFFFFF' })
+      .shadow({ radius: this.floatLoop ? 12 : 9, color: '#3DE15C86', offsetY: this.floatLoop ? 5 : 3 })
+
+      BubuIcon({ name: BubuIconName.sparkles, iconSize: 10, color: BubuColor.butter, strokeWidth: 1.4, filled: true })
+        .position({ x: this.isCompact() ? 9 : 10, y: this.isCompact() ? 11 : 12 })
+      BubuIcon({ name: BubuIconName.sparkles, iconSize: 9, color: '#FFFFFF', strokeWidth: 1.3, filled: true })
+        .position({ x: this.isCompact() ? 42 : 48, y: this.isCompact() ? 12 : 13 })
     }
-    .width(66).height(66)
-    .justifyContent(FlexAlign.Center)
-    .linearGradient({
-      angle: 135,
-      colors: [['#FFFFFF', 0.0], [BubuColor.pink, 0.6], [BubuColor.lav, 1.0]]
-    })
-    .borderRadius(33)
-    .border({ width: 2, color: '#D1FFFFFF' })
-    .shadow({ radius: 16, color: '#47E15C86', offsetY: 8 })
-    .margin({ right: 18, bottom: 98 })
+    .width(this.isCompact() ? 54 : 60).height(this.isCompact() ? 54 : 60)
+    .margin({ right: this.isCompact() ? 14 : 18, bottom: this.isCompact() ? 124 : 150 })
+    .scale({ x: this.floatLoop ? 1.018 : 1, y: this.floatLoop ? 1.018 : 1 })
+    .animation(BubuMotion.floating)
     .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
-    .onClick(() => { this.startQuickCapture(); })
+    .onClick(() => { this.navigate(HomeRoute.naturalCapture); })
   }
 
   @Builder
@@ -825,6 +1021,7 @@ export struct HomeView {
   private closePanel(): void {
     this.route = HomeRoute.home;
     this.selectedEntry = null;
+    this.tabBarVisible = true;
     this.reload();
   }
 
@@ -850,14 +1047,14 @@ export struct HomeView {
     return `${now.getMonth() + 1}月${now.getDate()}日 ${weekdays[now.getDay()]}`;
   }
 
-  private weatherSymbol(): string {
+  private weatherIconName(): string {
     const h = new Date().getHours();
     if (h >= 6 && h < 18) {
-      return '⛅';
+      return BubuIconName.cloudSun;
     } else if (h >= 18 && h < 23) {
-      return '🌙';
+      return BubuIconName.moon;
     }
-    return '✨';
+    return BubuIconName.sparkles;
   }
 
   private weatherMoodText(): string {

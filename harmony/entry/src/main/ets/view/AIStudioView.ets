@@ -7,6 +7,7 @@ import { FamilyEnsembleView } from './FamilyEnsembleView';
 import { GrowthReportView } from './GrowthReportView';
 import { BubuStoryView } from './BubuStoryView';
 import { CapsuleView } from './CapsuleView';
+import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 
 // MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
 // 自托管 AI 的创作中心：成长绘本 / 未来胶囊 / 第一人称日记 / 成长电影 / 家人合奏 / 成长报告。
@@ -14,7 +15,7 @@ import { CapsuleView } from './CapsuleView';
 
 // 魔法屋四块创作能力（对照 iOS creativeGrid 的 capabilityTile）。
 interface CapabilityTile {
-  icon: string;       // iOS 用 SF Symbol；此处 emoji 兜底
+  iconName: string;
   title: string;
   subtitle: string;
   tint: string;       // 背景渐变副色
@@ -22,18 +23,41 @@ interface CapabilityTile {
 }
 
 const CAPABILITY_TILES: CapabilityTile[] = [
-  { icon: '💬', title: '第一人称日记', subtitle: '改写成布布的话', tint: BubuColor.pink, route: 'diary' },
-  { icon: '🎞️', title: '成长电影', subtitle: '精选照片成短片', tint: BubuColor.sky, route: 'movie' },
-  { icon: '👨‍👩‍👧', title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' },
-  { icon: '📈', title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' }
+  { iconName: BubuIconName.textBubble, title: '第一人称日记', subtitle: '改写成布布的话', tint: BubuColor.pink, route: 'diary' },
+  { iconName: BubuIconName.video, title: '成长电影', subtitle: '精选照片成短片', tint: BubuColor.sky, route: 'movie' },
+  { iconName: BubuIconName.home, title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' },
+  { iconName: BubuIconName.sparkles, title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' }
 ];
 
 @Component
 export struct AIStudioView {
   // 当前子页路由（空 = 魔法屋首页）。对照 iOS NavigationLink 的目的地。
   @State private route: string = '';
+  @State private viewportW: number = 0;
+  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
+  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
   // 主题主色（对照 iOS env.theme.theme.primary）。
   private theme: string = BubuColor.primary;
+
+  aboutToAppear(): void {
+    this.tabBarVisible = true;
+  }
+
+  private onBackSignal(): void {
+    if (this.backSignal <= 0) return;
+    if (this.route.length > 0) {
+      this.route = '';
+      this.tabBarVisible = true;
+    }
+  }
+
+  private isCompact(): boolean {
+    return this.viewportW <= 0 || this.viewportW < 1500;
+  }
+
+  private isNarrow(): boolean {
+    return this.viewportW > 0 && this.viewportW < 320;
+  }
 
   build() {
     if (this.route === 'diary') {
@@ -48,14 +72,16 @@ export struct AIStudioView {
       // 成长绘本（对照 iOS BubuStoryView 翻页绘本）
       Column() {
         this.subBackBar('布布的成长绘本')
-        BubuStoryView()
-      }.width('100%').height('100%').backgroundColor(BubuColor.background)
+        BubuStoryView({ compact: this.isCompact() })
+          .layoutWeight(1)
+      }.width('100%').height('100%').justifyContent(FlexAlign.Start).backgroundColor(BubuColor.background)
     } else if (this.route === 'capsule') {
       // 未来胶囊（对照 iOS CapsuleHomeView，收进魔法屋）
       Column() {
         this.subBackBar('未来胶囊')
         CapsuleView()
-      }.width('100%').height('100%').backgroundColor(BubuColor.background)
+          .layoutWeight(1)
+      }.width('100%').height('100%').justifyContent(FlexAlign.Start).backgroundColor(BubuColor.background)
     } else {
       this.homePage()
     }
@@ -66,7 +92,7 @@ export struct AIStudioView {
   subBackBar(title: string) {
     Row({ space: 8 }) {
       Text('‹ 返回').fontSize(BubuFont.body).fontColor(BubuColor.primary)
-        .onClick(() => { this.route = ''; })
+        .onClick(() => { this.route = ''; this.tabBarVisible = true; })
       Blank()
       Text(title).fontSize(BubuFont.body).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       Blank()
@@ -84,31 +110,36 @@ export struct AIStudioView {
         this.capsuleCard()
 
         // 「布布的魔法屋」分组标题（对照 iOS caption.semibold）。
-        Text('布布的魔法屋')
-          .fontSize(BubuFont.caption)
+	        Text('布布的魔法屋')
+	          .fontSize(BubuFont.caption)
           .fontWeight(FontWeight.Medium)
           .fontColor(BubuColor.secondaryText)
           .width('100%')
           .margin({ left: 6, top: 2 })
-
-        this.creativeGrid()
-      }
+	
+	        this.creativeGrid()
+	        Blank().height(130)
+	      }
       .padding(16)
       .width('100%')
     }
-    .backgroundColor(BubuColor.background)
-    .width('100%')
-    .height('100%')
-  }
+	    .backgroundColor(BubuColor.background)
+	    .width('100%')
+	    .height('100%')
+	    .onAreaChange((_old: Area, area: Area) => {
+	      const w = area.width as number;
+	      if (w > 0) this.viewportW = w;
+	    })
+	  }
 
   // 顶部 banner（对照 iOS banner：主色渐变 + 布布画画表情）。
   @Builder
   banner() {
     Row({ space: 12 }) {
-      BubuMascotBadge({ badgeSize: 58, expression: BubuExpression.drawing })
+	      BubuMascotBadge({ badgeSize: this.isCompact() ? 48 : 58, expression: BubuExpression.drawing })
       Column({ space: 4 }) {
         Text('布布的魔法屋')
-          .fontSize(BubuFont.title)
+	          .fontSize(this.isCompact() ? 23 : BubuFont.title)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
         Text('故事、电影、报告和未来胶囊')
@@ -121,7 +152,7 @@ export struct AIStudioView {
       .layoutWeight(1)
     }
     .width('100%')
-    .padding(20)
+	    .padding(this.isCompact() ? 16 : 20)
     .linearGradient({
       angle: 135,
       colors: [[this.theme, 0.0], ['#BFF28C9E', 1.0]]
@@ -171,7 +202,7 @@ export struct AIStudioView {
     })
     .borderRadius(BubuRadius.card)
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
-    .onClick(() => { this.route = 'story'; })
+    .onClick(() => { this.tabBarVisible = false; this.route = 'story'; })
   }
 
   // 未来胶囊卡（lav→sky 信封；对照 iOS capsuleCard）。
@@ -180,7 +211,15 @@ export struct AIStudioView {
   capsuleCard() {
     Row({ space: 14 }) {
       Stack() {
-        Text('✉️').fontSize(26)
+        BubuIconBadge({
+          name: BubuIconName.send,
+          badgeSize: 54,
+          iconSize: 25,
+          color: '#FFFFFF',
+          fill: '#00000000',
+          radius: 17,
+          strokeWidth: 2.4
+        })
       }
       .width(60)
       .height(60)
@@ -211,38 +250,51 @@ export struct AIStudioView {
     .borderRadius(24)
     .border({ width: 1, color: '#99FFFFFF' })
     .shadow({ radius: 12, color: '#38DCC9FF', offsetY: 6 })
-    .onClick(() => { this.route = 'capsule'; })
+    .onClick(() => { this.tabBarVisible = false; this.route = 'capsule'; })
   }
 
   // 创作能力 2×2 宫格（对照 iOS creativeGrid 的 LazyVGrid）。
   @Builder
-  creativeGrid() {
-    Column({ space: 10 }) {
-      Row({ space: 10 }) {
-        this.capabilityTile(CAPABILITY_TILES[0])
-        this.capabilityTile(CAPABILITY_TILES[1])
-      }.width('100%')
-      Row({ space: 10 }) {
-        this.capabilityTile(CAPABILITY_TILES[2])
-        this.capabilityTile(CAPABILITY_TILES[3])
-      }.width('100%')
-    }
-    .width('100%')
-  }
+	  creativeGrid() {
+	    if (this.isNarrow()) {
+	      Column({ space: 10 }) {
+	        this.capabilityTile(CAPABILITY_TILES[0])
+	        this.capabilityTile(CAPABILITY_TILES[1])
+	        this.capabilityTile(CAPABILITY_TILES[2])
+	        this.capabilityTile(CAPABILITY_TILES[3])
+	      }
+	      .width('100%')
+	    } else {
+	      Column({ space: 10 }) {
+	        Row({ space: 10 }) {
+	          this.capabilityTile(CAPABILITY_TILES[0])
+	          this.capabilityTile(CAPABILITY_TILES[1])
+	        }.width('100%')
+	        Row({ space: 10 }) {
+	          this.capabilityTile(CAPABILITY_TILES[2])
+	          this.capabilityTile(CAPABILITY_TILES[3])
+	        }.width('100%')
+	      }
+	      .width('100%')
+	    }
+	  }
 
   // 单块创作能力磁贴（对照 iOS capabilityTile：图标徽 + 标题 + 副标题，渐变卡）。
   @Builder
   capabilityTile(tile: CapabilityTile) {
     Column({ space: 8 }) {
       Row() {
-        Stack() {
-          Text(tile.icon).fontSize(17)
-        }
-        .width(36)
-        .height(36)
-        .backgroundColor(tile.tint)
-        .opacity(0.72)
-        .borderRadius(13)
+        BubuIconBadge({
+          name: tile.iconName,
+          badgeSize: 40,
+          iconSize: 20,
+          color: BubuColor.deepRose,
+          fill: tile.tint,
+          radius: 15,
+          strokeWidth: 2.1,
+          filled: tile.iconName === BubuIconName.sparkles
+        })
+          .opacity(0.82)
         Blank()
         Text('›').fontSize(13).fontWeight(FontWeight.Bolder).fontColor(BubuColor.secondaryText).opacity(0.72)
       }
@@ -263,8 +315,8 @@ export struct AIStudioView {
     }
     .alignItems(HorizontalAlign.Start)
     .layoutWeight(1)
-    .height(112)
-    .padding(13)
+	    .height(this.isCompact() ? 116 : 126)
+    .padding({ left: 14, right: 14, top: 13, bottom: 14 })
     .linearGradient({
       angle: 135,
       colors: [['#FAFFFFFF', 0.0], [tile.tint, 1.0]]
@@ -273,6 +325,6 @@ export struct AIStudioView {
     .border({ width: 1, color: '#9EFFFFFF' })
     .shadow({ radius: 12, color: '#38B57870', offsetY: 7 })
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => { this.route = tile.route; })
+    .onClick(() => { this.tabBarVisible = false; this.route = tile.route; })
   }
 }

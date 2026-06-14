@@ -19,6 +19,7 @@ struct QuickCaptureSheet: View {
     @State private var highlightedTarget: CaptureTarget?
     @State private var requestingCamera = false
     @State private var showNaturalCapture = false
+    @State private var panelAppeared = false
 
     private var theme: Color { env.theme.theme.primary }
 
@@ -44,8 +45,6 @@ struct QuickCaptureSheet: View {
                             voiceCard
                                 .id(CaptureTarget.voice)
 
-                            photoPicker
-
                             locationPrivacyCard
 
                             MoodPicker(selection: $model.mood, tint: theme)
@@ -60,6 +59,13 @@ struct QuickCaptureSheet: View {
                             Spacer(minLength: 12)
                         }
                         .padding()
+                        .opacity(panelAppeared ? 1 : 0)
+                        .offset(y: panelAppeared ? 0 : 14)
+                        .onAppear {
+                            withAnimation(BubuMotion.gentle) {
+                                panelAppeared = true
+                            }
+                        }
                     }
                 }
 
@@ -145,12 +151,14 @@ struct QuickCaptureSheet: View {
             Spacer()
         }
         .padding()
-        .background(BubuTheme.Color.card.opacity(0.86), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.58), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme)
         .bubuCardShadow()
     }
 
     private var naturalCaptureEntry: some View {
         Button {
+            BubuHaptics.tapLight()
             showNaturalCapture = true
         } label: {
             HStack(spacing: 12) {
@@ -175,64 +183,77 @@ struct QuickCaptureSheet: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding(12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.60), lineWidth: 1)
-            }
+            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .bubuGlassSurface(cornerRadius: 20, tint: theme, interactive: true)
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.60), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubuPressableStyle(scale: 0.98))
         .accessibilityLabel("打开一句话智能记录")
     }
 
     private func primaryActions(proxy: ScrollViewProxy) -> some View {
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 2)
-        return LazyVGrid(columns: columns, spacing: 10) {
-            Button { Task { await requestCamera(video: false) } } label: {
-                actionCard("拍照", expression: .yeah, subtitle: "拍下此刻")
+        HStack(spacing: 8) {
+            Menu {
+                Button { Task { await requestCamera(video: false) } } label: {
+                    Label("打开相机", systemImage: "camera.fill")
+                }
+                PhotosPicker(selection: $model.pickedItems, maxSelectionCount: 9, matching: .images) {
+                    Label("从相册选择", systemImage: "photo.on.rectangle.angled")
+                }
+            } label: {
+                actionChip("照片", systemImage: "camera.fill", tint: BubuTheme.Color.pink)
             }
-            .buttonStyle(.plain)
             .disabled(requestingCamera)
 
-            Button { Task { await requestCamera(video: true) } } label: {
-                actionCard("录像", expression: .playing, subtitle: "录一段")
+            Menu {
+                Button { Task { await requestCamera(video: true) } } label: {
+                    Label("打开相机录像", systemImage: "video.fill")
+                }
+                PhotosPicker(selection: $model.pickedItems, maxSelectionCount: 9, matching: .videos) {
+                    Label("从相册选择视频", systemImage: "film.stack")
+                }
+            } label: {
+                actionChip("视频", systemImage: "video.fill", tint: BubuTheme.Color.lav)
             }
-            .buttonStyle(.plain)
             .disabled(requestingCamera)
 
-            Button { jump(to: .voice, proxy: proxy) } label: {
-                actionCard("说给布布", expression: .love, subtitle: "录一段声音")
+            Button {
+                jump(to: .note, proxy: proxy)
+            } label: {
+                actionChip("文字", systemImage: "text.bubble.fill", tint: BubuTheme.Color.mint)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BubuPressableStyle(scale: 0.97))
 
-            Button { jump(to: .note, proxy: proxy) } label: {
-                actionCard("写一句", expression: .drawing, subtitle: "留一句话")
+            Button {
+                jump(to: .voice, proxy: proxy)
+            } label: {
+                actionChip("语音", systemImage: "waveform", tint: BubuTheme.Color.sky)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BubuPressableStyle(scale: 0.97))
         }
     }
 
-    private func actionCard(_ title: String, expression: BubuExpression, subtitle: String) -> some View {
-        VStack(spacing: 7) {
-            BubuMascotBadge(size: 38, expression: expression)
+    private func actionChip(_ title: String, systemImage: String, tint: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .black))
+                .foregroundStyle(BubuTheme.Color.deepRose)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.72), in: Circle())
             Text(title)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .font(.system(size: 12, weight: .black, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
-            Text(subtitle)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 112)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .frame(height: 72)
+        .background(Color.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .bubuGlassSurface(cornerRadius: 20, tint: tint, interactive: true)
         .overlay {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous)
-                .stroke(theme.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(.white.opacity(0.58), lineWidth: 1)
         }
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var photoPicker: some View {
@@ -310,7 +331,8 @@ struct QuickCaptureSheet: View {
             }
         }
         .padding()
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.70), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme)
         .bubuCardShadow()
     }
 
@@ -378,6 +400,7 @@ struct QuickCaptureSheet: View {
         }
         .padding()
         .background(BubuTheme.Color.card.opacity(0.72), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme)
     }
 
     private var noteField: some View {
@@ -403,6 +426,7 @@ struct QuickCaptureSheet: View {
         }
         .padding()
         .background(cardBackground(for: .note), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: highlightedTarget == .note ? theme : nil)
         .overlay(highlightStroke(for: .note))
         .bubuCardShadow()
     }
@@ -426,6 +450,7 @@ struct QuickCaptureSheet: View {
         }
         .padding()
         .background(cardBackground(for: .voice), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: highlightedTarget == .voice ? theme : nil)
         .overlay(highlightStroke(for: .voice))
         .bubuCardShadow()
     }
@@ -453,7 +478,8 @@ struct QuickCaptureSheet: View {
     }
 
     private func jump(to target: CaptureTarget, proxy: ScrollViewProxy) {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+        BubuHaptics.selection()
+        withAnimation(BubuMotion.gentle) {
             proxy.scrollTo(target, anchor: .center)
             highlightedTarget = target
         }
@@ -474,6 +500,7 @@ struct QuickCaptureSheet: View {
     @MainActor
     private func requestCamera(video: Bool) async {
         guard !requestingCamera else { return }
+        BubuHaptics.tapLight()
         requestingCamera = true
         defer { requestingCamera = false }
         noteFocused = false
@@ -515,7 +542,8 @@ struct QuickCaptureSheet: View {
             Text(hint).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
         }
         .padding(28)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme)
         .bubuCardShadow()
     }
 }

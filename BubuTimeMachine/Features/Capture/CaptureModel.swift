@@ -176,6 +176,7 @@ final class CaptureModel {
                               targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt)
         context.insert(event)
         try? context.save()
+        refreshWidgetSnapshot(context: context)
 
         lastSavedEntryID = entry.id
         let mediaText = savedCount > 0 ? " · \(savedCount) 个媒体" : ""
@@ -329,6 +330,12 @@ final class CaptureModel {
             try? await Task.sleep(for: .seconds(1.8))
             withAnimation(BubuMotion.gentle) { savedFlash = false }
         }
+    }
+
+    private func refreshWidgetSnapshot(context: ModelContext) {
+        guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
+        SharedDefaults.saveWidgetSnapshot(snapshot)
+        WidgetRefresher.reload()
     }
 }
 

@@ -110,7 +110,138 @@ export class AppDatabase {
     // PendingDeletion（待同步删除队列）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS pending_deletion (
       id TEXT PRIMARY KEY, collection TEXT NOT NULL, remoteId TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+    await this.runSchemaMigrations();
+  }
+
+  private async runSchemaMigrations(): Promise<void> {
+    // Fresh installs already have these columns through CREATE TABLE. Existing testers may
+    // carry older local tables, so keep every migration idempotent.
+    await this.addColumnIfMissing('entry', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('entry', 'firstPersonNote', 'TEXT');
+    await this.addColumnIfMissing('entry', 'locationName', 'TEXT');
+    await this.addColumnIfMissing('entry', 'latitude', 'REAL');
+    await this.addColumnIfMissing('entry', 'longitude', 'REAL');
+    await this.addColumnIfMissing('entry', 'moodRaw', 'TEXT');
+    await this.addColumnIfMissing('entry', 'isArchived', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('entry', 'editedAt', 'INTEGER');
+
+    await this.addColumnIfMissing('media', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('media', 'entryId', 'TEXT');
+    await this.addColumnIfMissing('media', 'typeRaw', "TEXT NOT NULL DEFAULT 'photo'");
+    await this.addColumnIfMissing('media', 'localFileName', 'TEXT');
+    await this.addColumnIfMissing('media', 'remoteURL', 'TEXT');
+    await this.addColumnIfMissing('media', 'thumbnailFileName', 'TEXT');
+    await this.addColumnIfMissing('media', 'durationSeconds', 'REAL');
+    await this.addColumnIfMissing('media', 'width', 'INTEGER');
+    await this.addColumnIfMissing('media', 'height', 'INTEGER');
+    await this.addColumnIfMissing('media', 'uploadProgress', 'REAL NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('media', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('media', 'aiTags', 'TEXT');
+    await this.addColumnIfMissing('media', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('child_profile', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'gender', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'bloodType', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'birthPlace', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'avatarMediaFileName', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'avatarRemoteURL', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'heroBackgroundFileName', 'TEXT');
+    await this.addColumnIfMissing('child_profile', 'syncState', "TEXT NOT NULL DEFAULT 'synced'");
+    await this.addColumnIfMissing('child_profile', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('milestone', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('milestone', 'detail', 'TEXT');
+    await this.addColumnIfMissing('milestone', 'happenedAt', 'INTEGER');
+    await this.addColumnIfMissing('milestone', 'ageDescription', 'TEXT');
+    await this.addColumnIfMissing('milestone', 'isCustom', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('milestone', 'ceremonyPlayed', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('milestone', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('milestone', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('milestone', 'entryId', 'TEXT');
+
+    await this.addColumnIfMissing('time_capsule', 'remoteId', 'TEXT');
     await this.addColumnIfMissing('time_capsule', 'letterText', 'TEXT');
+    await this.addColumnIfMissing('time_capsule', 'encryptedBlobFileName', 'TEXT');
+    await this.addColumnIfMissing('time_capsule', 'coverEmoji', 'TEXT');
+    await this.addColumnIfMissing('time_capsule', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('time_capsule', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('health_record', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'detail', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'amountText', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'reaction', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'amountValue', 'REAL');
+    await this.addColumnIfMissing('health_record', 'amountUnit', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'startAt', 'INTEGER');
+    await this.addColumnIfMissing('health_record', 'endAt', 'INTEGER');
+    await this.addColumnIfMissing('health_record', 'severity', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'temperatureCelsius', 'REAL');
+    await this.addColumnIfMissing('health_record', 'tags', 'TEXT');
+    await this.addColumnIfMissing('health_record', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('health_record', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('voice_note', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('voice_note', 'localFileName', 'TEXT');
+    await this.addColumnIfMissing('voice_note', 'remoteURL', 'TEXT');
+    await this.addColumnIfMissing('voice_note', 'transcript', 'TEXT');
+    await this.addColumnIfMissing('voice_note', 'waveformSamples', 'TEXT');
+    await this.addColumnIfMissing('voice_note', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('voice_note', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('family_member', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('family_member', 'avatarEmoji', "TEXT NOT NULL DEFAULT ''");
+    await this.addColumnIfMissing('family_member', 'themeColorHex', "TEXT NOT NULL DEFAULT ''");
+    await this.addColumnIfMissing('family_member', 'isPrimary', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('family_member', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('family_member', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('growth_measurement', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('growth_measurement', 'heightCm', 'REAL');
+    await this.addColumnIfMissing('growth_measurement', 'weightKg', 'REAL');
+    await this.addColumnIfMissing('growth_measurement', 'headCircumferenceCm', 'REAL');
+    await this.addColumnIfMissing('growth_measurement', 'note', 'TEXT');
+    await this.addColumnIfMissing('growth_measurement', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+    await this.addColumnIfMissing('growth_measurement', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('growth_measurement', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('growth_measurement', 'updatedAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('vaccine_record', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'doseId', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'doseLabel', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'injectedAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('vaccine_record', 'hospital', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'injectionSite', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'reaction', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'note', 'TEXT');
+    await this.addColumnIfMissing('vaccine_record', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+    await this.addColumnIfMissing('vaccine_record', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('vaccine_record', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('vaccine_record', 'updatedAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('comment', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('comment', 'voiceFileName', 'TEXT');
+    await this.addColumnIfMissing('comment', 'remoteURL', 'TEXT');
+    await this.addColumnIfMissing('comment', 'voiceDuration', 'REAL NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('comment', 'voiceWaveform', 'TEXT');
+    await this.addColumnIfMissing('comment', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('comment', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('voice_memo', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('voice_memo', 'localFileName', 'TEXT');
+    await this.addColumnIfMissing('voice_memo', 'remoteURL', 'TEXT');
+    await this.addColumnIfMissing('voice_memo', 'transcript', 'TEXT');
+    await this.addColumnIfMissing('voice_memo', 'ageYears', 'INTEGER');
+    await this.addColumnIfMissing('voice_memo', 'durationSeconds', 'REAL');
+    await this.addColumnIfMissing('voice_memo', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('voice_memo', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+
+    await this.addColumnIfMissing('first_time', 'remoteId', 'TEXT');
+    await this.addColumnIfMissing('first_time', 'detectedByAI', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('first_time', 'confirmedByParent', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('first_time', 'ceremonyPlayed', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('first_time', 'entryId', 'TEXT');
+    await this.addColumnIfMissing('first_time', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('first_time', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
   }
 
   private async addColumnIfMissing(table: string, column: string, type: string): Promise<void> {

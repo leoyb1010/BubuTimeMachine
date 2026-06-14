@@ -139,11 +139,11 @@ struct TimelineView: View {
                     if let media = entry.media.first {
                         MediaThumbnail(media: media, mediaStore: env.mediaStore)
                     } else {
-                        BubuDreamPhoto(hue: Double(abs(entry.id.hashValue) % 360), height: 132,
+                        BubuDreamPhoto(hue: Double(abs(entry.id.hashValue) % 360), height: 178,
                                        cornerRadius: 0, motif: entry.mood?.emoji ?? "◡")
                     }
                 }
-                .frame(height: 132)
+                .frame(height: 178)
                 .frame(maxWidth: .infinity)
                 .clipped()
 

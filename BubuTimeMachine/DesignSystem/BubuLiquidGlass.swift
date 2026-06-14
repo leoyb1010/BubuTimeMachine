@@ -20,6 +20,20 @@ extension View {
     }
 
     @ViewBuilder
+    nonisolated func bubuGlassCapsule(
+        tint: Color? = nil,
+        interactive: Bool = false
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            let glass = (tint.map { Glass.regular.tint($0.opacity(0.16)) } ?? Glass.regular)
+                .interactive(interactive)
+            self.glassEffect(glass, in: Capsule())
+        } else {
+            self.background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+
+    @ViewBuilder
     @MainActor
     func bubuGlassButton(prominent: Bool = false) -> some View {
         if #available(iOS 26.0, *) {

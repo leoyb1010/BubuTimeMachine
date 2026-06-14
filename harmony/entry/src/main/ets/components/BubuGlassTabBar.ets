@@ -4,17 +4,20 @@
 // SwiftUI .ultraThinMaterial Capsule → ArkUI backgroundBlurStyle + 大圆角胶囊。
 
 import { BubuColor, BubuGradient } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
+import { BubuIcon, BubuIconName } from './BubuIcon';
 
 // 单个 Tab 项（对照 iOS BubuTabItem）。
 export class BubuTabItem {
   id: number;
   title: string;
-  iconText: string;   // iOS 用 SF Symbol；此处用字符/emoji 占位
+  iconName: string;
 
-  constructor(id: number, title: string, iconText: string) {
+  constructor(id: number, title: string, iconName: string) {
     this.id = id;
     this.title = title;
-    this.iconText = iconText;
+    this.iconName = iconName;
   }
 }
 
@@ -22,17 +25,24 @@ export class BubuTabItem {
 export struct BubuGlassTabBar {
   @Link selection: number;
   tint: string = BubuColor.primary;
+  @Prop compact: boolean = false;
   /// 中央凸起键动作：打开「记录此刻」输入流。
   onCenterTap: () => void = () => {};
+  @State private centerBreath: boolean = false;
+  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
+
+  aboutToAppear(): void {
+    animateTo(BubuMotion.breathe, () => { this.centerBreath = true; });
+  }
 
   // 四个页面入口（胶囊收进魔法屋，底栏不再拥挤）。
   private readonly left: BubuTabItem[] = [
-    new BubuTabItem(0, '首页', '🏠'),
-    new BubuTabItem(1, '时光', '🕐'),
+    new BubuTabItem(0, '首页', BubuIconName.home),
+    new BubuTabItem(1, '时光', BubuIconName.clock),
   ];
   private readonly right: BubuTabItem[] = [
-    new BubuTabItem(2, '星座', '⭐'),
-    new BubuTabItem(3, '魔法屋', '🪄'),
+    new BubuTabItem(2, '里程碑', BubuIconName.star),
+    new BubuTabItem(3, '魔法屋', BubuIconName.magic),
   ];
 
   build() {
@@ -41,51 +51,72 @@ export struct BubuGlassTabBar {
       this.centerButton()
       ForEach(this.right, (item: BubuTabItem) => { this.tabButton(item); }, (it: BubuTabItem) => it.id.toString())
     }
-    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .height(this.compact ? 68 : 78)
+    .padding({ left: this.compact ? 7 : 10, right: this.compact ? 7 : 10, top: this.compact ? 7 : 10, bottom: this.compact ? 7 : 10 })
+    .alignItems(VerticalAlign.Center)
+    .backgroundColor('#8AFFFFFF')
     .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(40)
     .border({ width: 1, color: '#9EFFFFFF' })   // white opacity 0.62
-    .shadow({ radius: 18, color: '#47E15C86', offsetY: 10 })  // deepRose opacity 0.28
-    .margin({ left: 14, right: 14, bottom: 6 })
+    .shadow({ radius: this.compact ? 14 : 18, color: '#47E15C86', offsetY: this.compact ? 7 : 10 })  // deepRose opacity 0.28
+    .margin({ left: this.compact ? 8 : 14, right: this.compact ? 8 : 14, bottom: this.compact ? 2 : 6 })
   }
 
   @Builder
   private tabButton(item: BubuTabItem) {
-    Column({ space: 3 }) {
-      Text(item.iconText).fontSize(18)
+    Column({ space: 4 }) {
+      BubuIcon({
+        name: item.iconName,
+        iconSize: this.compact ? 18 : 20,
+        color: this.selection === item.id ? this.tint : BubuColor.secondaryText,
+        strokeWidth: 2.2,
+        filled: this.selection === item.id && item.iconName === BubuIconName.star
+      })
       Text(item.title)
-        .fontSize(10)
+        .fontSize(this.compact ? 8.5 : 10)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.selection === item.id ? this.tint : BubuColor.secondaryText)
     }
-    .width(56)
-    .height(50)
+    .width(this.compact ? 46 : 58)
+    .height(this.compact ? 46 : 52)
     .justifyContent(FlexAlign.Center)
-    .backgroundColor(this.selection === item.id ? '#C7FCEDE4' : '#00000000')  // cream2 opacity 0.78
-    .borderRadius(16)
+    .backgroundColor('#00000000')
+    .borderRadius(this.compact ? 14 : 16)
+    .animation(BubuMotion.quick)
     .onClick(() => {
-      animateTo({ duration: 320, curve: Curve.Friction }, () => { this.selection = item.id; });
+      BubuHaptics.selection();
+      this.tabBarVisible = true;
+      animateTo(BubuMotion.quick, () => { this.selection = item.id; });
     })
   }
 
   @Builder
   private centerButton() {
     Column({ space: 1 }) {
-      Text('+').fontSize(23).fontWeight(FontWeight.Bolder).fontColor('#FFFFFF')
-      Text('记录').fontSize(9).fontWeight(FontWeight.Bolder).fontColor('#FFFFFF')
+      BubuIcon({
+        name: BubuIconName.plus,
+        iconSize: this.compact ? 23 : 26,
+        color: '#FFFFFF',
+        strokeWidth: 3.2
+      })
+      Text('记录').fontSize(this.compact ? 7.5 : 9).fontWeight(FontWeight.Bolder).fontColor('#FFFFFF')
     }
-    .width(58)
-    .height(58)
+    .width(this.compact ? 54 : 60)
+    .height(this.compact ? 54 : 60)
     .justifyContent(FlexAlign.Center)
     .linearGradient({
       angle: BubuGradient.angleTopLeadingToBottomTrailing,
       colors: BubuGradient.primaryButtonColors
     })
-    .borderRadius(29)
+    .borderRadius(this.compact ? 27 : 30)
     .border({ width: 1.5, color: '#80FFFFFF' })   // white opacity 0.5
-    .shadow({ radius: 10, color: '#80E15C86', offsetY: 4 })  // deepRose opacity 0.5
-    .translate({ x: 0, y: -9 })
-    .margin({ left: 3, right: 3 })
-    .onClick(() => { this.onCenterTap(); })
+    .shadow({ radius: this.centerBreath ? 12 : 8, color: '#73E15C86', offsetY: 4 })
+    .scale({ x: this.centerBreath ? 1.018 : 1, y: this.centerBreath ? 1.018 : 1 })
+    .animation(BubuMotion.breathe)
+    .margin({ left: this.compact ? 2 : 3, right: this.compact ? 2 : 3 })
+    .onClick(() => {
+      BubuHaptics.tapLight();
+      animateTo(BubuMotion.quick, () => { this.onCenterTap(); });
+    })
   }
 }

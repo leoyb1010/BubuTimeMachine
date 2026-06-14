@@ -47,6 +47,7 @@ extension SharedWidgetSnapshot {
         let photoFileNames = recentPhotoFileNames(from: entries, limit: 4)
         let recentEntry = entries.first
         let measurements = recentMeasurements(context: context)
+        let healthRecords = recentHealthRecords(context: context)
         let milestones = allMilestones(context: context)
         let achieved = milestones.filter(\.isAchieved)
         let latestMilestone = achieved.sorted {
@@ -67,8 +68,8 @@ extension SharedWidgetSnapshot {
             recentEntryNote: clean(recentEntry?.firstPersonNote, maxLength: 46) ?? clean(recentEntry?.note, maxLength: 46),
             recentEntryDate: recentEntry?.happenedAt,
             recentMoodEmoji: recentEntry?.mood?.emoji,
-            latestHeightCm: latestNonNil(measurements.compactMap(\.heightCm)),
-            latestWeightKg: latestNonNil(measurements.compactMap(\.weightKg)),
+            latestHeightCm: latestHeight(from: measurements, healthRecords: healthRecords),
+            latestWeightKg: latestWeight(from: measurements, healthRecords: healthRecords),
             achievedMilestoneCount: achieved.count,
             totalMilestoneCount: milestones.count,
             latestMilestoneTitle: clean(latestMilestone?.title, maxLength: 18),
@@ -99,6 +100,15 @@ extension SharedWidgetSnapshot {
             sortBy: [SortDescriptor(\.measuredAt, order: .reverse)]
         )
         descriptor.fetchLimit = 12
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    @MainActor
+    private static func recentHealthRecords(context: ModelContext) -> [HealthRecord] {
+        var descriptor = FetchDescriptor<HealthRecord>(
+            sortBy: [SortDescriptor(\.recordedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 80
         return (try? context.fetch(descriptor)) ?? []
     }
 
@@ -152,6 +162,16 @@ extension SharedWidgetSnapshot {
 
     private static func latestNonNil(_ values: [Double]) -> Double? {
         values.first
+    }
+
+    private static func latestHeight(from measurements: [GrowthMeasurement], healthRecords: [HealthRecord]) -> Double? {
+        latestNonNil(measurements.compactMap(\.heightCm))
+        ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(.height, from: $0) }.first
+    }
+
+    private static func latestWeight(from measurements: [GrowthMeasurement], healthRecords: [HealthRecord]) -> Double? {
+        latestNonNil(measurements.compactMap(\.weightKg))
+        ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(.weight, from: $0) }.first
     }
 }
 

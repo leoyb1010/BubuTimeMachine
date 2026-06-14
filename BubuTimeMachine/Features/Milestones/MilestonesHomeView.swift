@@ -15,7 +15,7 @@ struct MilestonesHomeView: View {
     @State private var detailFor: Milestone?
     @State private var searchText = ""
     @State private var selectedCategory = "全部"
-    @State private var isConstellation = true   // 展示方式：成长星座 / 奖章墙
+    @State private var isConstellation = true   // 展示方式：星盘视图 / 奖章墙
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -44,7 +44,7 @@ struct MilestonesHomeView: View {
                 progressHeader
                 filters
                 if isConstellation {
-                    // 成长星座视图（复用同一份筛选后的里程碑）
+                    // 星盘视图（复用同一份筛选后的里程碑）
                     BubuConstellationView(milestones: filteredMilestones, primary: theme) { m in
                         detailFor = m
                     }
@@ -66,7 +66,7 @@ struct MilestonesHomeView: View {
                 } label: {
                     Image(systemName: isConstellation ? "square.grid.2x2.fill" : "sparkles")
                 }
-                .accessibilityLabel(isConstellation ? "切换到奖章墙" : "切换到成长星座")
+                .accessibilityLabel(isConstellation ? "切换到奖章墙" : "切换到星盘视图")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -85,6 +85,8 @@ struct MilestonesHomeView: View {
                 milestone.ceremonyPlayed = true
                 milestone.syncState = .local
                 try? context.save()
+                env.refreshWidgetSnapshot(context: context)
+                WidgetRefresher.reload()
                 ceremonyFor = nil
             }
         }

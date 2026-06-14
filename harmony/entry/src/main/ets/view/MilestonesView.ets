@@ -1,6 +1,6 @@
 // MARK: - 里程碑 & 成就墙（对照 iOS Features/Milestones/MilestonesHomeView.swift）
 // 已达成（高亮）+ 待达成（待解锁）网格。可从预设库添加，也可完全自定义。
-// 展示方式可在「成长星座」与「奖章墙」间切换。点亮新里程碑时由本页播放仪式。
+// 展示方式可在「星盘视图」与「奖章墙」间切换。点亮新里程碑时由本页播放仪式。
 
 import { util } from '@kit.ArkTS';
 import { Milestone, ChildProfile } from '../models/Models';
@@ -9,8 +9,11 @@ import { AppDatabase } from '../data/AppDatabase';
 import { SyncState } from '../models/Enums';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor, BubuFont, BubuRadius, BubuShadow } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
 import { BubuProgressRing, BubuSparkle } from '../components/MacaronComponents';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
+import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { CeremonyAnimation } from '../components/CeremonyAnimation';
 import { BubuConstellationView } from './BubuConstellationView';
 import { MilestonePickerSheet, MilestoneEditSheet } from './MilestoneSheets';
@@ -22,7 +25,7 @@ export struct MilestonesView {
 
   @State private searchText: string = '';
   @State private selectedCategory: string = '全部';
-  @State private isConstellation: boolean = true;   // 展示方式：成长星座 / 奖章墙
+  @State private isConstellation: boolean = true;   // 展示方式：星盘视图 / 奖章墙
 
   // 弹层状态（iOS .sheet → ArkUI @State + Stack 覆盖）
   @State private showPicker: boolean = false;
@@ -31,13 +34,43 @@ export struct MilestonesView {
   // 仪式（iOS .fullScreenCover）
   @State private ceremonyFor: Milestone | null = null;
   @State private showAddMenu: boolean = false;
+  @State private pageIn: boolean = false;
+  @State private viewportW: number = 0;
+  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
 
-  aboutToAppear(): void { this.reload(); }
+  aboutToAppear(): void {
+    this.reload();
+    this.pageIn = false;
+    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+  }
 
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.milestones = await AppDatabase.shared.fetchMilestones() ?? [];
     this.checkPendingCeremony();
+  }
+
+  private onBackSignal(): void {
+    if (this.backSignal <= 0) return;
+    if (this.showAddMenu) {
+      this.showAddMenu = false;
+      return;
+    }
+    if (this.showPicker) {
+      this.showPicker = false;
+      return;
+    }
+    if (this.showCustom) {
+      this.showCustom = false;
+      return;
+    }
+    if (this.detailFor !== null) {
+      this.detailFor = null;
+      return;
+    }
+    if (this.ceremonyFor !== null) {
+      this.ceremonyFor = null;
+    }
   }
 
   // —— 计算属性（对照 iOS）——
@@ -76,6 +109,20 @@ export struct MilestonesView {
     return ['全部'].concat(MILESTONE_CATEGORIES);
   }
 
+  private gridColumns(): string {
+    if (this.viewportW <= 0) return '1fr 1fr 1fr';
+    if (this.viewportW > 0 && this.viewportW < 320) return '1fr 1fr';
+    if (this.viewportW > 0 && this.viewportW < 1500) return '1fr 1fr 1fr';
+    return '1fr 1fr 1fr 1fr';
+  }
+
+  private gridColumnCount(): number {
+    if (this.viewportW <= 0) return 3;
+    if (this.viewportW > 0 && this.viewportW < 320) return 2;
+    if (this.viewportW > 0 && this.viewportW < 1500) return 3;
+    return 4;
+  }
+
   // 有新达成且未播放仪式 → 播放（对照 iOS onChange）。
   private checkPendingCeremony(): void {
     if (this.ceremonyFor !== null) { return; }
@@ -91,7 +138,7 @@ export struct MilestonesView {
           this.progressHeader()
           this.filters()
           if (this.isConstellation) {
-            // 成长星座视图（复用同一份筛选后的里程碑）
+            // 星盘视图（复用同一份筛选后的里程碑）
             BubuConstellationView({
               milestones: this.filteredMilestones(),
               primary: BubuColor.primary,
@@ -101,11 +148,14 @@ export struct MilestonesView {
             if (this.achieved().length > 0) { this.achievedWall() }
             if (this.pending().length > 0) { this.pendingWall() }
           }
-          if (this.milestones.length === 0) { this.emptyState() }
-          Blank().height(30)
+	          if (this.milestones.length === 0) { this.emptyState() }
+	          Blank().height(130)
         }
-        .padding(16).width('100%')
-      }
+	        .padding(16).width('100%')
+	        .opacity(this.pageIn ? 1 : 0)
+	        .translate({ x: 0, y: this.pageIn ? 0 : BubuMotion.entranceOffsetY })
+	        .animation(BubuMotion.gentle)
+	      }
       .backgroundColor(BubuColor.background).width('100%').height('100%')
 
       // 顶栏切换 + 添加（对照 iOS toolbar 左右两侧按钮）
@@ -149,8 +199,12 @@ export struct MilestonesView {
         })
       }
     }
-    .width('100%').height('100%')
-  }
+	    .width('100%').height('100%')
+	    .onAreaChange((_old: Area, area: Area) => {
+	      const w = area.width as number;
+	      if (w > 0) this.viewportW = w;
+	    })
+	  }
 
   private ceremonySubtitle(): string {
     const m: Milestone | null = this.ceremonyFor;
@@ -164,18 +218,37 @@ export struct MilestonesView {
   private topBar() {
     Row() {
       // 左：切换展示方式
-      Text(this.isConstellation ? '▦' : '✦')
-        .fontSize(20).fontColor(BubuColor.primary)
-        .width(40).height(40).textAlign(TextAlign.Center)
-        .onClick(() => { this.isConstellation = !this.isConstellation; })
+      BubuIconBadge({
+        name: this.isConstellation ? BubuIconName.grid : BubuIconName.star,
+        badgeSize: 40,
+        iconSize: 20,
+        color: BubuColor.primary,
+        fill: '#F2FFFFFF',
+        radius: 20,
+        strokeWidth: 2.1,
+        filled: !this.isConstellation
+      })
+	        .onClick(() => {
+	          BubuHaptics.selection();
+	          animateTo(BubuMotion.quick, () => { this.isConstellation = !this.isConstellation; });
+	        })
       Blank()
       Text('里程碑').fontSize(BubuFont.headline).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       Blank()
       // 右：添加
-      Text('＋')
-        .fontSize(24).fontWeight(FontWeight.Bold).fontColor(BubuColor.primary)
-        .width(40).height(40).textAlign(TextAlign.Center)
-        .onClick(() => { this.showAddMenu = !this.showAddMenu; })
+      BubuIconBadge({
+        name: BubuIconName.plus,
+        badgeSize: 40,
+        iconSize: 22,
+        color: BubuColor.primary,
+        fill: '#F2FFFFFF',
+        radius: 20,
+        strokeWidth: 2.8
+      })
+	        .onClick(() => {
+	          BubuHaptics.tapLight();
+	          animateTo(BubuMotion.quick, () => { this.showAddMenu = !this.showAddMenu; });
+	        })
     }
     .width('100%').padding({ left: 8, right: 8, top: 6 })
     .position({ x: 0, y: 0 })
@@ -250,11 +323,16 @@ export struct MilestonesView {
           ForEach(this.categoryOptions(), (category: string) => {
             Text(category)
               .fontSize(BubuFont.caption).fontWeight(FontWeight.Medium)
-              .fontColor(this.selectedCategory === category ? '#FFFFFF' : BubuColor.primary)
+	        .fontColor(this.selectedCategory === category ? '#FFFFFF' : BubuColor.primary)
               .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-              .backgroundColor(this.selectedCategory === category ? BubuColor.primary : BubuColor.softFill)
-              .borderRadius(20)
-              .onClick(() => { this.selectedCategory = category; })
+	              .backgroundColor(this.selectedCategory === category ? BubuColor.primary : BubuColor.softFill)
+	              .borderRadius(20)
+	              .scale({ x: this.selectedCategory === category ? 1.05 : 1, y: this.selectedCategory === category ? 1.05 : 1 })
+	              .animation(BubuMotion.quick)
+	              .onClick(() => {
+	                BubuHaptics.selection();
+	                animateTo(BubuMotion.quick, () => { this.selectedCategory = category; });
+	              })
           }, (category: string) => category)
         }
       }
@@ -274,8 +352,8 @@ export struct MilestonesView {
           GridItem() { this.medallion(m, true) }
         }, (m: Milestone) => m.id)
       }
-      .columnsTemplate('1fr 1fr 1fr 1fr').columnsGap(10).rowsGap(10)
-      .height(Math.ceil(this.achieved().length / 4) * 96).width('100%')
+	      .columnsTemplate(this.gridColumns()).columnsGap(10).rowsGap(10)
+	      .height(Math.ceil(this.achieved().length / this.gridColumnCount()) * 108).width('100%')
     }
     .width('100%')
   }
@@ -296,8 +374,8 @@ export struct MilestonesView {
           GridItem() { this.medallion(m, false) }
         }, (m: Milestone) => m.id)
       }
-      .columnsTemplate('1fr 1fr 1fr 1fr').columnsGap(10).rowsGap(10)
-      .height(Math.ceil(this.pending().length / 4) * 96).width('100%')
+	      .columnsTemplate(this.gridColumns()).columnsGap(10).rowsGap(10)
+	      .height(Math.ceil(this.pending().length / this.gridColumnCount()) * 108).width('100%')
     }
     .width('100%')
   }
@@ -307,12 +385,12 @@ export struct MilestonesView {
   private medallion(m: Milestone, lit: boolean) {
     Column({ space: 8 }) {
       Stack() {
-        Circle().width(54).height(54)
+        Circle().width(62).height(62)
           .fill(lit ? '#26F28C9E' : BubuColor.softFill)
           .border({ width: lit ? 2 : 0, color: BubuColor.primary })
-        Text(m.emoji).fontSize(28).opacity(lit ? 1 : 0.45)
+        Text(m.emoji).fontSize(lit ? 32 : 29).opacity(lit ? 1 : 0.58)
       }
-      .width(54).height(54)
+      .width(62).height(62)
       Text(m.title)
         .fontSize(12).fontWeight(FontWeight.Medium)
         .fontColor(lit ? BubuColor.warmBrown : BubuColor.secondaryText)

@@ -13,11 +13,13 @@ export enum HomeRoute {
   record,          // 记录此刻（快速记录面板）
   profile,         // 布布资料
   health,          // 布布健康
+  growth,          // 成长曲线
   settings,        // 设置
   album,           // 相册 / 照片墙
   timeline,        // 时光轴
   birthday,        // 生日倒计时
   onThisDay,       // 那年今日
+  naturalCapture,  // 一句话智能记录
   entryDetail      // 单条记录详情
 }
 

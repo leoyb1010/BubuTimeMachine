@@ -34,15 +34,59 @@ export class APIClient {
   async authenticate(): Promise<boolean> {
     const cfg = ServerConfig.shared;
     if (!cfg.isConfigured) return false;
+    const identities = APIClient.identityCandidates(cfg.accountEmail);
+    let lastError: Object | null = null;
+    for (const identity of identities) {
+      try {
+        const body = JSON.stringify({ identity: identity, password: cfg.accountPassword });
+        const resp = await this.request('POST', '/api/collections/users/auth-with-password', body, false);
+        const auth = JSON.parse(resp) as AuthResponse;
+        this.token = auth.token;
+        if (this.token.length > 0) {
+          if (cfg.accountEmail !== identity) {
+            cfg.accountEmail = identity;
+            await cfg.persistServer();
+          }
+          return true;
+        }
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    hilog.error(DOMAIN, 'Bubu', `登录失败: ${JSON.stringify(lastError)}`);
+    this.token = '';
+    return false;
+  }
+
+  private static identityCandidates(account: string): string[] {
+    const raw = account.trim().toLowerCase();
+    if (raw.length === 0) return [];
+    const candidates: string[] = [];
+    candidates.push(raw.indexOf('@') >= 0 ? raw : `${raw}@bubu.family`);
+    if (raw.indexOf('@') < 0) candidates.push(raw);
+    const at = raw.indexOf('@bubu.family');
+    if (at > 0) candidates.push(raw.substring(0, at));
+    const deduped: string[] = [];
+    for (const item of candidates) {
+      if (item.length > 0 && deduped.indexOf(item) < 0) deduped.push(item);
+    }
+    return deduped;
+  }
+
+  private authHeader(token: string): string {
+    return token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+  }
+
+  async authProbe(): Promise<string> {
+    const cfg = ServerConfig.shared;
+    if (!cfg.isConfigured) return '还没有登录服务器';
     try {
-      const body = JSON.stringify({ identity: cfg.accountEmail, password: cfg.accountPassword });
-      const resp = await this.request('POST', '/api/collections/users/auth-with-password', body, false);
-      const auth = JSON.parse(resp) as AuthResponse;
-      this.token = auth.token;
-      return this.token.length > 0;
+      const ok = await this.ping();
+      if (!ok) return '服务器连接失败';
+      const authed = await this.authenticate();
+      return authed ? '账号验证成功' : '账号或密码验证失败';
     } catch (e) {
-      hilog.error(DOMAIN, 'Bubu', `登录失败: ${JSON.stringify(e)}`);
-      return false;
+      return `服务器验证异常：${JSON.stringify(e)}`;
     }
   }
 
@@ -156,7 +200,7 @@ export class APIClient {
     }
 
     const header: Record<string, string> = {};
-    if (tokenStr.length > 0) header['Authorization'] = tokenStr;
+    if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
     if (onProgress) onProgress(0);
     return await this.multipartViaHttp(
       isPatch ? 'PATCH' : 'POST', url, formData, fileField, filePath, fileName, header, onProgress);
@@ -235,7 +279,7 @@ export class APIClient {
     const req = http.createHttp();
     try {
       const header: Record<string, string> = {};
-      if (tokenStr.length > 0) header['Authorization'] = tokenStr;
+      if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
       const resp = await req.request(remoteURL, {
         method: http.RequestMethod.GET,
         header: header,
@@ -301,7 +345,7 @@ export class APIClient {
     const req = http.createHttp();
     try {
       const header: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (auth && this.token.length > 0) header['Authorization'] = this.token;
+      if (auth && this.token.length > 0) header['Authorization'] = this.authHeader(this.token);
       const methodEnum = method === 'POST' ? http.RequestMethod.POST
         : method === 'PATCH' ? http.RequestMethod.PATCH
         : method === 'DELETE' ? http.RequestMethod.DELETE

@@ -68,6 +68,7 @@ struct EntryDetailView: View {
                     if editing {
                         markEntryDirty()
                         try? context.save()
+                        refreshWidgets()
                         env.syncEngine.syncNow()
                     }
                     withAnimation(.smooth) { editing.toggle() }
@@ -237,6 +238,7 @@ struct EntryDetailView: View {
             BubuHaptics.selection()
         }
         try? context.save()
+        refreshWidgets()
         env.syncEngine.syncNow()
     }
 
@@ -341,6 +343,7 @@ struct EntryDetailView: View {
                                                  summary: "补充了一段语音记录",
                                                  targetLocalId: entry.id.uuidString))
                         try? context.save()
+                        refreshWidgets()
                     }
                 }
             }
@@ -466,6 +469,7 @@ struct EntryDetailView: View {
         appendPick = []
         markEntryDirty()
         try? context.save()
+        refreshWidgets()
         env.syncEngine.syncNow()
     }
 
@@ -474,6 +478,7 @@ struct EntryDetailView: View {
         context.delete(media)
         markEntryDirty()
         try? context.save()
+        refreshWidgets()
         env.syncEngine.syncNow()
     }
 
@@ -482,12 +487,18 @@ struct EntryDetailView: View {
         context.delete(voice)
         markEntryDirty()
         try? context.save()
+        refreshWidgets()
         env.syncEngine.syncNow()
     }
 
     private func markEntryDirty() {
         entry.editedAt = .now
         entry.syncState = .local
+    }
+
+    private func refreshWidgets() {
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
     }
 
     private func deleteEntry() {
@@ -498,6 +509,7 @@ struct EntryDetailView: View {
                                  summary: "删除了一条时光轴记录",
                                  targetLocalId: entry.id.uuidString))
         try? context.save()
+        refreshWidgets()
         env.syncEngine.syncNow()
         dismiss()
     }

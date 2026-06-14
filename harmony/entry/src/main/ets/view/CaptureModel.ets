@@ -4,6 +4,7 @@ import { ServerConfig } from '../services/ServerConfig';
 import { EntryWriter } from '../services/EntryWriter';
 import { AIService, NaturalCaptureResult } from '../services/AIService';
 import { MediaStore } from '../services/MediaStore';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 // MARK: - 记录此刻 业务模型（对照 iOS Features/Capture/CaptureModel.swift）
 // iOS 是 @Observable @MainActor class：把选中的媒体落本地并自动分析，写入 SwiftData（Entry + Media）。
@@ -17,7 +18,10 @@ export interface SelectedMediaPreview {
   uri: string;        // 沙盒内文件 URI（用于 Image 显示）
   isVideo: boolean;
   label: string;
+  fileName?: string;
 }
+
+const DOMAIN = 0x0000;
 
 @Observed
 export class CaptureModel {
@@ -100,7 +104,8 @@ export class CaptureModel {
         index,
         uri: 'file://' + MediaStore.shared.fullPath(name),
         isVideo: false,
-        label: '照片'
+        label: '照片',
+        fileName: name
       }]);
     } else {
       this.saveError = '照片读取失败';
@@ -110,13 +115,19 @@ export class CaptureModel {
   // 加入一段录像预览（对照 iOS addCameraVideo）。
   // NOTE: 视频写入未接入 EntryWriter，本切片仅做预览展示与 // NOTE 占位。
   addVideoUri(uri: string): void {
-    const index = this.selectedPreviews.length;
-    this.selectedPreviews = this.selectedPreviews.concat([{
-      index,
-      uri,
-      isVideo: true,
-      label: '录像'
-    }]);
+    const name = MediaStore.shared.importFile(uri, 'mp4');
+    if (name) {
+      const index = this.selectedPreviews.length;
+      this.selectedPreviews = this.selectedPreviews.concat([{
+        index,
+        uri: 'file://' + MediaStore.shared.fullPath(name),
+        isVideo: true,
+        label: '视频',
+        fileName: name
+      }]);
+    } else {
+      this.saveError = '视频读取失败';
+    }
   }
 
   // 移除已选媒体（对照 iOS removePickedItem）。
@@ -131,8 +142,8 @@ export class CaptureModel {
       return { index: i, uri: p.uri, isVideo: p.isVideo, label: p.label };
     });
     // 重排后首张照片重新认定。
-    const firstPhoto = this.selectedPreviews.find(p => !p.isVideo);
-    this.pickedPhotoName = firstPhoto ? this.pickedPhotoName : this.pickedPhotoName;
+    const firstPhoto = this.selectedPreviews.find(p => !p.isVideo && p.fileName !== undefined);
+    this.pickedPhotoName = firstPhoto?.fileName ?? null;
   }
 
   // 设置语音（对照 iOS pendingVoice）。
@@ -156,16 +167,23 @@ export class CaptureModel {
     this.isSaving = true;
     const noteText = this.trimmedNote();
     try {
+      const firstPhoto = this.selectedPreviews.find(p => !p.isVideo && p.fileName !== undefined);
+      const photoName = firstPhoto?.fileName ?? this.pickedPhotoName;
+      const videoNames = this.selectedPreviews
+        .filter(p => p.isVideo && p.fileName !== undefined)
+        .map(p => p.fileName!);
       const id = await EntryWriter.entryWithPhoto(
         noteText,
-        this.pickedPhotoName,
+        photoName,
         this.role,
         this.mood,
         this.pendingVoiceFileName,
-        this.pendingVoiceDuration
+        this.pendingVoiceDuration,
+        videoNames
       );
       this.lastSavedEntryID = id;
-      const mediaText = this.pickedPhotoName ? ' · 1 个媒体' : '';
+      const mediaCount = (photoName ? 1 : 0) + videoNames.length;
+      const mediaText = mediaCount > 0 ? ` · ${mediaCount} 个媒体` : '';
       const voiceText = this.pendingVoiceFileName ? ' · 1 段语音' : '';
       this.lastSavedSummary = `已保存到手机${mediaText}${voiceText}`;
       // 清空草稿（对照 iOS 保存后重置）。
@@ -179,7 +197,8 @@ export class CaptureModel {
       this.isSaving = false;
       return true;
     } catch (e) {
-      this.saveError = '保存失败，稍后再试';
+      hilog.error(DOMAIN, 'Bubu', `记录保存失败: ${JSON.stringify(e)}`);
+      this.saveError = `保存失败：${JSON.stringify(e)}`;
       this.isSaving = false;
       return false;
     }
@@ -215,7 +234,8 @@ export class CaptureModel {
       this.flashSaved();
       return true;
     } catch (e) {
-      this.saveError = '保存失败，稍后再试';
+      hilog.error(DOMAIN, 'Bubu', `智能记录保存失败: ${JSON.stringify(e)}`);
+      this.saveError = `保存失败：${JSON.stringify(e)}`;
       this.isSaving = false;
       return false;
     }

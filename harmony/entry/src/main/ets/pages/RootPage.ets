@@ -7,6 +7,7 @@ import { WhatsNewView } from '../view/WhatsNewView';
 import { BubuGlassTabBar } from '../components/BubuGlassTabBar';
 import { DesignGallery } from '../components/DesignGallery';
 import { BubuColor } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
 import { ThemeManager } from '../theme/ThemeManager';
 import { WidgetRefresher } from '../theme/WidgetRefresher';
 import { AppDatabase } from '../data/AppDatabase';
@@ -27,7 +28,10 @@ struct RootPage {
   @State booted: boolean = false;
   @State showGallery: boolean = false;   // 恒 false，仅用于强制编译设计组件
   @State showWhatsNew: boolean = false;
+  @State viewportW: number = 0;
   @StorageLink('themeTick') themeTick: number = 0;  // 主题切换驱动重绘
+  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
+  @StorageLink('bubuBackSignal') backSignal: number = 0;
 
   private whatsNewStore: preferences.Preferences | null = null;
 
@@ -66,6 +70,27 @@ struct RootPage {
     WidgetRefresher.reload();
   }
 
+  private isCompact(): boolean {
+    return this.viewportW <= 0 || this.viewportW < 1500;
+  }
+
+  onBackPress(): boolean {
+    if (this.showWhatsNew) {
+      this.showWhatsNew = false;
+      return true;
+    }
+    this.backSignal = this.backSignal + 1;
+    if (!this.tabBarVisible) {
+      this.tabBarVisible = true;
+      return true;
+    }
+    if (this.selection !== 0) {
+      animateTo(BubuMotion.quick, () => { this.selection = 0; });
+      return true;
+    }
+    return true;
+  }
+
   build() {
     Stack() {
       if (!this.booted) {
@@ -100,32 +125,49 @@ struct RootPage {
       // 页面区
       Stack() {
         if (this.selection === 0) {
-          HomeView({ captureSignal: this.captureSignal })
+          HomeView({
+            captureSignal: this.captureSignal,
+            onOpenMilestones: () => {
+              animateTo(BubuMotion.gentle, () => { this.selection = 2; });
+            }
+          })
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
         } else if (this.selection === 1) {
           TimelineView()
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
         } else if (this.selection === 2) {
           MilestonesView()
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
         } else {
           AIStudioView()
+            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
         }
       }
       .width('100%')
       .height('100%')
+      .animation(BubuMotion.gentle)
 
       // 奶油马卡龙玻璃胶囊底栏（对照 iOS BubuGlassTabBar）。中央键 = 回首页并触发快速记录。
-      BubuGlassTabBar({
-        selection: this.selection,
-        tint: ThemeManager.shared.theme.primary,
-        onCenterTap: () => {
-          this.selection = 0;
-          this.captureSignal = this.captureSignal + 1;
-        }
-      })
+      if (this.tabBarVisible) {
+        BubuGlassTabBar({
+          selection: this.selection,
+          tint: ThemeManager.shared.theme.primary,
+          compact: this.isCompact(),
+          onCenterTap: () => {
+            this.selection = 0;
+            this.captureSignal = this.captureSignal + 1;
+          }
+        })
+      }
     }
     .alignContent(Alignment.Bottom)
     .width('100%')
     .height('100%')
     .backgroundColor(BubuColor.cream)
+    .onAreaChange((_old: Area, area: Area) => {
+      const w = area.width as number;
+      if (w > 0) this.viewportW = w;
+    })
   }
 
   @Builder

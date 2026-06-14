@@ -17,6 +17,8 @@ struct CaptureHomeView: View {
     @Query private var milestones: [Milestone]
     @Query(sort: \GrowthMeasurement.measuredAt, order: .reverse)
     private var measurements: [GrowthMeasurement]
+    @Query(sort: \HealthRecord.recordedAt, order: .reverse)
+    private var healthRecords: [HealthRecord]
 
     @State private var model: CaptureModel?
     @State private var firstTimeSuggestion: String?
@@ -29,9 +31,9 @@ struct CaptureHomeView: View {
     @Namespace private var zoomNS
 
     private var profile: ChildProfile? { profiles.first }
-    private var theme: BubuThemeDefinition { env.theme.theme }
+    private var theme: BubuThemeDefinition { BubuThemeDefinition.default }
     private var homeSurface: Color {
-        env.themedCard.opacity(env.isDarkTheme ? 0.88 : 0.94)
+        Color.white.opacity(0.94)
     }
 
     var body: some View {
@@ -52,7 +54,7 @@ struct CaptureHomeView: View {
                     onThisDaySection
                     saveHealthStrip
                     // 给底部悬浮玻璃 Tab 栏留出空间
-                    Spacer(minLength: 110)
+                    Spacer(minLength: 150)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -109,6 +111,7 @@ struct CaptureHomeView: View {
         .sheet(isPresented: $showNaturalCapture) {
             NaturalCapturePanel()
         }
+        .preferredColorScheme(.light)
     }
 
     /// 保存后调用 AI 识别"第一次"（仅在启用真实 AI 时）。
@@ -155,28 +158,19 @@ struct CaptureHomeView: View {
     @ViewBuilder
     private var heroBackground: some View {
         ZStack {
-            BubuThemedBackground()
+            LinearGradient(colors: [
+                Color(hex: "#FFF5F0"),
+                Color(hex: "#FDEDE6"),
+                Color(hex: "#FFF8F2")
+            ], startPoint: .topLeading, endPoint: .bottomTrailing)
 
-            if env.theme.heroMode == .photo,
-               let name = profile?.heroBackgroundFileName,
-               let data = env.mediaStore.data(forMedia: name),
-               let ui = UIImage(data: data) {
-                // 首页和其它页面保持同一主题底色；照片只做低透明度质感，避免文字压在照片高亮处。
-                Color.clear
-                    .overlay {
-                    Image(uiImage: ui)
-                        .resizable()
-                        .scaledToFill()
-                    }
-                    .opacity(env.isDarkTheme ? 0.10 : 0.14)
-                    .saturation(0.75)
-                    .clipped()
-            }
+            BubuBlobBackground(tint: BubuTheme.Color.primary, includeBase: false)
+                .opacity(0.34)
 
             LinearGradient(colors: [
-                BubuTheme.Color.background.opacity(env.isDarkTheme ? 0.20 : 0.34),
+                Color(hex: "#FFF7F1").opacity(0.28),
                 .clear,
-                BubuTheme.Color.background.opacity(env.isDarkTheme ? 0.36 : 0.58)
+                Color(hex: "#FFF7F1").opacity(0.62)
             ], startPoint: .top, endPoint: .bottom)
             .allowsHitTesting(false)
         }
@@ -384,11 +378,25 @@ struct CaptureHomeView: View {
         }
     }
 
-    // MARK: 紧凑四宫格 — 成长星座 / 成长数据 / 故事 / 今日一问
+    // MARK: 紧凑四宫格 — 里程碑 / 成长数据 / 故事 / 今日一问
 
     private var litMilestoneCount: Int { milestones.filter(\.isAchieved).count }
-    private var latestHeight: Double? { measurements.compactMap(\.heightCm).first }
-    private var latestWeight: Double? { measurements.compactMap(\.weightKg).first }
+    private var latestHeight: Double? {
+        measurements.compactMap(\.heightCm).first ?? latestLegacyGrowthValue(.height)
+    }
+
+    private var latestWeight: Double? {
+        measurements.compactMap(\.weightKg).first ?? latestLegacyGrowthValue(.weight)
+    }
+
+    private func latestLegacyGrowthValue(_ metric: WHOGrowthStandard.Metric) -> Double? {
+        for record in healthRecords {
+            if let value = GrowthMeasurementExtractor.value(metric, from: record) {
+                return value
+            }
+        }
+        return nil
+    }
 
     private var dashboardGridTop: some View {
         LazyVGrid(columns: [
@@ -418,7 +426,7 @@ struct CaptureHomeView: View {
                         .foregroundStyle(BubuTheme.Color.deepRose)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("成长星座")
+                    Text("里程碑")
                         .font(.system(size: 14, weight: .heavy, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                         .lineLimit(1)
@@ -428,8 +436,16 @@ struct CaptureHomeView: View {
                 }
                 Spacer(minLength: 0)
             }
-            BubuMiniConstellation(done: max(1, litMilestoneCount), height: 42)
-                .frame(height: 42)
+            HStack(spacing: 7) {
+                ForEach(0..<5, id: \.self) { index in
+                    Image(systemName: index < min(litMilestoneCount, 5) ? "star.fill" : "star")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(index < min(litMilestoneCount, 5)
+                                         ? BubuTheme.Color.butter
+                                         : BubuTheme.Color.secondaryText.opacity(0.46))
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -510,8 +526,8 @@ struct CaptureHomeView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         let surface = fill ?? AnyShapeStyle(LinearGradient(colors: [
-            BubuTheme.Color.card.opacity(0.96),
-            BubuTheme.Color.cream2.opacity(0.58)
+            Color.white.opacity(0.96),
+            Color(hex: "#FCEDE4").opacity(0.62)
         ], startPoint: .topLeading, endPoint: .bottomTrailing))
         return VStack(alignment: .leading, spacing: 6) {
             content()
@@ -637,7 +653,7 @@ struct CaptureHomeView: View {
             Button { model?.startQuickCapture() } label: {
                 VStack(spacing: 8) {
                     ZStack {
-                        Circle().fill(BubuTheme.Color.cream2).frame(width: 46, height: 46)
+                        Circle().fill(Color(hex: "#FFF1E8")).frame(width: 46, height: 46)
                         Image(systemName: "plus")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(BubuTheme.Color.deepRose)
@@ -652,7 +668,7 @@ struct CaptureHomeView: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 130)
                 .background(
-                    LinearGradient(colors: [BubuTheme.Color.card, BubuTheme.Color.cream2],
+                    LinearGradient(colors: [Color.white.opacity(0.96), Color(hex: "#FFF1E8").opacity(0.72)],
                                    startPoint: .top, endPoint: .bottom),
                     in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                 )
@@ -722,7 +738,7 @@ struct CaptureHomeView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .bubuCardShadow()
     }
 
@@ -956,14 +972,20 @@ struct CaptureHomeView: View {
             HStack {
                 Spacer()
                 Button {
+                    BubuHaptics.tapLight()
                     showNaturalCapture = true
                 } label: {
-                    NaturalCaptureFloatingBubble()
+                    NaturalCaptureFloatingBubble(isDragging: naturalCaptureButtonDrag != .zero)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("一句话智能记录")
                 .offset(CGSize(width: naturalCaptureButtonOffset.width + naturalCaptureButtonDrag.width,
                                height: naturalCaptureButtonOffset.height + naturalCaptureButtonDrag.height))
+                .transaction { transaction in
+                    if naturalCaptureButtonDrag != .zero {
+                        transaction.animation = nil
+                    }
+                }
                 .gesture(
                     DragGesture(minimumDistance: 4)
                         .updating($naturalCaptureButtonDrag) { value, state, _ in
@@ -974,8 +996,8 @@ struct CaptureHomeView: View {
                             naturalCaptureButtonOffset.height += value.translation.height
                         }
                 )
-                .padding(.trailing, 18)
-                .padding(.bottom, 98)
+                .padding(.trailing, 16)
+                .padding(.bottom, 118)
             }
         }
         .allowsHitTesting(true)
@@ -983,77 +1005,58 @@ struct CaptureHomeView: View {
 }
 
 private struct NaturalCaptureFloatingBubble: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var breathing = false
-    @State private var sparkle = false
+    let isDragging: Bool
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Circle()
                 .fill(
-                    RadialGradient(colors: [
-                        .white.opacity(0.96),
-                        BubuTheme.Color.pink.opacity(0.96),
-                        BubuTheme.Color.lav.opacity(0.88)
-                    ], center: .topLeading, startRadius: 4, endRadius: 62)
+                    LinearGradient(colors: [
+                        BubuTheme.Color.primary,
+                        BubuTheme.Color.pink.opacity(0.95),
+                        BubuTheme.Color.peach.opacity(0.90)
+                    ], startPoint: .topLeading, endPoint: .bottomTrailing)
                 )
-                .frame(width: 66, height: 66)
+                .frame(width: 50, height: 50)
                 .overlay {
                     Circle()
-                        .stroke(.white.opacity(0.82), lineWidth: 2)
+                        .stroke(.white.opacity(0.86), lineWidth: 1.4)
                 }
-                .shadow(color: BubuTheme.Color.deepRose.opacity(0.28), radius: 16, y: 8)
-
-            Circle()
-                .fill(BubuTheme.Color.primary.opacity(0.20))
-                .frame(width: breathing ? 82 : 68, height: breathing ? 82 : 68)
-                .blur(radius: 10)
-                .opacity(breathing ? 0.42 : 0.20)
-                .zIndex(-1)
-
-            BubuMascotBadge(size: 43, expression: .drawing)
-                .offset(x: -7, y: -9)
-                .scaleEffect(breathing ? 1.03 : 0.98)
+                .shadow(color: BubuTheme.Color.deepRose.opacity(isDragging ? 0.10 : 0.24),
+                        radius: isDragging ? 5 : 10,
+                        y: isDragging ? 2 : 5)
+                .overlay {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 24, weight: .black))
+                        .foregroundStyle(.white)
+                        .rotationEffect(.degrees(-10))
+                        .shadow(color: BubuTheme.Color.deepRose.opacity(0.18), radius: 2, y: 1)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    Text("AI")
+                        .font(.system(size: 10.5, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .shadow(color: BubuTheme.Color.deepRose.opacity(0.36), radius: 2, y: 1)
+                        .padding(.trailing, 7)
+                        .padding(.bottom, 5)
+                }
+                .offset(x: -7, y: -7)
 
             BubuStarShape()
                 .fill(BubuTheme.Color.butter)
-                .frame(width: 13, height: 13)
-                .rotationEffect(.degrees(sparkle ? 18 : -12))
-                .offset(x: -47, y: -46)
-                .opacity(sparkle ? 1 : 0.55)
+                .frame(width: 9, height: 9)
+                .rotationEffect(.degrees(-12))
+                .offset(x: -42, y: -38)
+                .opacity(isDragging ? 0.55 : 0.86)
 
             Image(systemName: "sparkles")
-                .font(.system(size: 12, weight: .black))
-                .foregroundStyle(.white)
-                .offset(x: -6, y: -51)
-                .scaleEffect(sparkle ? 1.12 : 0.82)
+                .font(.system(size: 9, weight: .black))
+                .foregroundStyle(BubuTheme.Color.butter)
+                .offset(x: -3, y: -40)
+                .opacity(isDragging ? 0.55 : 0.92)
 
-            Text("AI")
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .frame(height: 22)
-                .background(BubuTheme.Gradient.primaryButton, in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.75), lineWidth: 1))
-                .shadow(color: BubuTheme.Color.deepRose.opacity(0.28), radius: 5, y: 2)
-                .offset(x: 4, y: 2)
         }
-        .frame(width: 76, height: 76)
+        .frame(width: 58, height: 58)
         .contentShape(Circle())
-        .scaleEffect(breathing ? 1.02 : 0.98)
-        .offset(y: breathing ? -2 : 2)
-        .onAppear {
-            guard !reduceMotion else {
-                breathing = true
-                sparkle = true
-                return
-            }
-            withAnimation(.easeInOut(duration: 1.55).repeatForever(autoreverses: true)) {
-                breathing = true
-            }
-            withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true).delay(0.15)) {
-                sparkle = true
-            }
-        }
     }
 }

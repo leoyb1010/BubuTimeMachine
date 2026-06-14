@@ -18,7 +18,7 @@ struct BubuConstellationView: View {
     // 星盘显示一部分未点亮星，避免 0 点亮时空白；已点亮星保持发光并连线。
     private var achieved: [Milestone] { milestones.filter(\.isAchieved) }
     private var shown: [Milestone] {
-        let maxStars = 18
+        let maxStars = 12
         let lit = Array(achieved.prefix(maxStars))
         let locked = milestones.filter { !$0.isAchieved }
         return Array((lit + locked).prefix(maxStars))
@@ -91,7 +91,7 @@ struct BubuConstellationView: View {
 
     private var starboardHeight: CGFloat {
         // 首页式紧凑星盘：信息够看，但不把底栏附近空间全部吃掉。
-        max(300, min(370, 260 + CGFloat(shown.count) * 5))
+        max(260, min(320, 230 + CGFloat(shown.count) * 4))
     }
 
     // 锚点布局：前 10 用模板比例；超出部分用黄金角螺旋错落填充。
@@ -120,7 +120,7 @@ struct BubuConstellationView: View {
         // 已点亮的星顺序连线：底层浅粉粗描边 + 上层 rose→lav 渐变细线（对照设计稿双层 path）。
         let litPositions = zip(positions, milestones).compactMap { point, milestone in
             milestone.isAchieved ? point : nil
-        }
+        }.suffix(7)
         if litPositions.count >= 2 {
             let path = Path { p in
                 for (k, pt) in litPositions.enumerated() {
@@ -129,11 +129,11 @@ struct BubuConstellationView: View {
             }
             ZStack {
                 path.stroke(BubuTheme.Color.pink.opacity(0.55),
-                            style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                 path.stroke(
                     LinearGradient(colors: [BubuTheme.Color.primary, BubuTheme.Color.lav],
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
-                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                    style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
             }
         }
     }
@@ -146,9 +146,9 @@ struct BubuConstellationView: View {
                                   reduceMotion: reduceMotion)
                 if m.isAchieved || !dense {
                     Text(m.title)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(m.isAchieved ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
-                        .lineLimit(1).frame(width: 78)
+                        .lineLimit(1).frame(width: 66)
                         .shadow(color: BubuTheme.Color.cream.opacity(0.95), radius: 3)
                 }
             }
@@ -174,10 +174,10 @@ private struct ConstellationStar: View {
             // 呼吸光晕
             if lit {
                 Circle().fill(color)
-                    .frame(width: 54, height: 54)
+                    .frame(width: 42, height: 42)
                     .blur(radius: 6)
-                    .opacity(halo ? 0.6 : 0.32)
-                    .scaleEffect(halo ? 1.18 : 0.9)
+                    .opacity(halo ? 0.48 : 0.26)
+                    .scaleEffect(halo ? 1.14 : 0.9)
             }
             Circle()
                 .fill(lit
@@ -186,11 +186,11 @@ private struct ConstellationStar: View {
                                                      startRadius: 1,
                                                      endRadius: 28))
                       : AnyShapeStyle(BubuTheme.Color.softFill))
-                .frame(width: lit ? 48 : 34, height: lit ? 48 : 34)
+                .frame(width: lit ? 38 : 26, height: lit ? 38 : 26)
                 .overlay(Circle().stroke(lit ? .white : BubuTheme.Color.hairline.opacity(0.8),
                                          lineWidth: lit ? 2 : 1))
-                .overlay(Text(emoji).font(.system(size: lit ? 22 : 15)).grayscale(lit ? 0 : 1).opacity(lit ? 1 : 0.45))
-                .shadow(color: lit ? color.opacity(0.6) : .clear, radius: 6, y: 3)
+                .overlay(Text(emoji).font(.system(size: lit ? 17 : 11)).grayscale(lit ? 0 : 1).opacity(lit ? 1 : 0.45))
+                .shadow(color: lit ? color.opacity(0.45) : .clear, radius: 5, y: 2)
         }
         .scaleEffect(reduceMotion ? 1 : (popped ? 1 : 0))
         .opacity(reduceMotion ? 1 : (popped ? 1 : 0))

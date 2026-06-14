@@ -44,7 +44,8 @@ export class EntryWriter {
 
   // 带照片/语音的记录：文件名为已落沙盒的相对名。voiceFileName/voiceDuration 可选。
   static async entryWithPhoto(note: string, photoFileName: string | null, role: FamilyRole,
-                              mood?: Mood, voiceFileName?: string | null, voiceDuration?: number): Promise<string> {
+                              mood?: Mood, voiceFileName?: string | null, voiceDuration?: number,
+                              videoFileNames: string[] = []): Promise<string> {
     const now = Date.now();
     const id = util.generateRandomUUID(true);
     const trimmed = note.trim();
@@ -66,6 +67,20 @@ export class EntryWriter {
         entryId: id,
         typeRaw: MediaType.photo,
         localFileName: photoFileName,
+        uploadProgress: 0,
+        syncState: SyncState.local,
+        aiTags: [],
+        createdAt: now
+      };
+      await AppDatabase.shared.insertMedia(media);
+    }
+
+    for (const videoFileName of videoFileNames) {
+      const media: Media = {
+        id: util.generateRandomUUID(true),
+        entryId: id,
+        typeRaw: MediaType.video,
+        localFileName: videoFileName,
         uploadProgress: 0,
         syncState: SyncState.local,
         aiTags: [],

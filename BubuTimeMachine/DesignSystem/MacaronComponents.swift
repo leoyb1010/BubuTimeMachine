@@ -24,11 +24,14 @@ struct BubuBlob: View {
 /// 一整屏的柔光氛围背景：几个马卡龙色球漂在奶油底上。静态（不动），零每帧成本。
 struct BubuBlobBackground: View {
     var tint: Color = BubuTheme.Color.primary
+    var includeBase: Bool = true
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                BubuTheme.Color.background
+                if includeBase {
+                    BubuTheme.Color.background
+                }
                 BubuBlob(color: BubuTheme.Color.peach, size: geo.size.width * 0.75, opacity: 0.45)
                     .position(x: geo.size.width * 0.12, y: geo.size.height * 0.10)
                 BubuBlob(color: BubuTheme.Color.lav, size: geo.size.width * 0.70, opacity: 0.35)

@@ -76,6 +76,7 @@ final class AppEnvironment {
     func bootstrap(context: ModelContext) {
         seedMilestonePresetsIfNeeded(context: context)
         VaccineLegacyMigrator.migrateIfNeeded(context: context)
+        GrowthMeasurementBackfill.run(context: context)
         syncEngine.attach(context: context)
         syncEngine.start()
         ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)

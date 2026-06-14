@@ -68,10 +68,16 @@ struct HealthRecordSheet: View {
         let record = draft.makeRecord(kind: kind)
         record.syncState = .local
         context.insert(record)
+        if kind == .checkup, draft.hasGrowthMeasurement {
+            let measurement = draft.makeGrowthMeasurement()
+            context.insert(measurement)
+        }
         context.insert(FeedEvent(kind: .healthRecorded,
                                  actorRole: env.config.currentRole.rawValue,
                                  summary: "记录了\(kind.title)：\(record.title)"))
         try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
         env.syncEngine.syncNow()
         dismiss()
     }
@@ -88,7 +94,14 @@ struct HealthRecordDraft: Equatable {
     var reaction = ""
     var severity = ""
     var temperatureCelsius: Double?
+    var heightCm: Double?
+    var weightKg: Double?
+    var headCircumferenceCm: Double?
     var tags: [String] = []
+
+    var hasGrowthMeasurement: Bool {
+        heightCm != nil || weightKg != nil || headCircumferenceCm != nil
+    }
 
     func canSave(kind: HealthRecordKind) -> Bool {
         switch kind {
@@ -98,6 +111,8 @@ struct HealthRecordDraft: Equatable {
             return startAt != nil || endAt != nil || !title.trimmed.isEmpty || !tags.isEmpty
         case .symptom:
             return !tags.isEmpty || temperatureCelsius != nil || !detail.trimmed.isEmpty
+        case .checkup:
+            return !title.trimmed.isEmpty || !tags.isEmpty || amountValue != nil || hasGrowthMeasurement
         default:
             return !title.trimmed.isEmpty || !tags.isEmpty || amountValue != nil
         }
@@ -138,7 +153,32 @@ struct HealthRecordDraft: Equatable {
             record.amountText = [record.amountText, tempText].compactMap { $0 }.joined(separator: " · ")
         }
 
+        if kind == .checkup, hasGrowthMeasurement {
+            let growthText = [
+                heightCm.map { "身高 \(Self.cleanAmount($0))cm" },
+                weightKg.map { "体重 \(Self.cleanAmount($0))kg" },
+                headCircumferenceCm.map { "头围 \(Self.cleanAmount($0))cm" }
+            ].compactMap { $0 }.joined(separator: " · ")
+            record.amountText = [record.amountText, growthText.isEmpty ? nil : growthText]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+        }
+
         return record
+    }
+
+    func makeGrowthMeasurement() -> GrowthMeasurement {
+        let measurement = GrowthMeasurement(measuredAt: recordedAt, source: "checkup")
+        measurement.heightCm = heightCm
+        measurement.weightKg = weightKg
+        measurement.headCircumferenceCm = headCircumferenceCm
+        let noteParts = [
+            title.trimmed.isEmpty ? nil : title.trimmed,
+            detail.trimmed.isEmpty ? nil : detail.trimmed
+        ].compactMap { $0 }
+        measurement.note = noteParts.isEmpty ? nil : noteParts.joined(separator: " · ")
+        measurement.syncState = .local
+        return measurement
     }
 
     static func durationText(from start: Date, to end: Date) -> String {
@@ -367,7 +407,12 @@ private struct CheckupComposer: View {
             TagGrid(chips: HealthRecordKind.checkup.design.chips, selected: $draft.tags, tint: tint)
             TextField("体检项目或疫苗名称", text: $draft.title)
                 .healthTextField()
-            AmountStepper(title: "主要数值", value: $draft.amountValue, unit: draft.amountUnit ?? "cm", range: 0...130, step: 0.5, tint: tint)
+            VStack(spacing: 10) {
+                AmountStepper(title: "身高", value: $draft.heightCm, unit: "cm", range: 30...140, step: 0.5, tint: tint)
+                AmountStepper(title: "体重", value: $draft.weightKg, unit: "kg", range: 1...40, step: 0.1, tint: tint)
+                AmountStepper(title: "头围", value: $draft.headCircumferenceCm, unit: "cm", range: 20...70, step: 0.5, tint: tint)
+            }
+            AmountStepper(title: "其它数值", value: $draft.amountValue, unit: draft.amountUnit ?? "cm", range: 0...130, step: 0.5, tint: tint)
             HStack {
                 ForEach(["cm", "kg", "针", "颗"], id: \.self) { unit in
                     SelectableChip(text: unit, selected: draft.amountUnit == unit, tint: tint) {
@@ -507,7 +552,7 @@ private struct AmountStepper: View {
     let tint: Color
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(BubuTheme.Font.caption.weight(.semibold))
@@ -517,6 +562,22 @@ private struct AmountStepper: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
             }
             Spacer()
+            HStack(spacing: 4) {
+                TextField("输入", text: numericText)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 62)
+                if value != nil {
+                    Text(unit)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? range.lowerBound },
                 set: { value = min(max($0, range.lowerBound), range.upperBound) }
@@ -527,13 +588,30 @@ private struct AmountStepper: View {
         .padding(12)
         .background(BubuTheme.Color.cream.opacity(0.65), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
     }
+
+    private var numericText: Binding<String> {
+        Binding {
+            value.map { HealthRecordDraft.cleanAmount($0) } ?? ""
+        } set: { raw in
+            let text = raw
+                .replacingOccurrences(of: "，", with: ".")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                value = nil
+                return
+            }
+            if let parsed = Double(text) {
+                value = min(max(parsed, range.lowerBound), range.upperBound)
+            }
+        }
+    }
 }
 
 private struct TemperatureStepper: View {
     @Binding var value: Double?
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("体温")
                     .font(BubuTheme.Font.caption.weight(.semibold))
@@ -543,6 +621,15 @@ private struct TemperatureStepper: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
             }
             Spacer()
+            TextField("输入", text: temperatureText)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 76)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? 36.5 },
                 set: { value = min(max($0, 34.0), 42.0) }
@@ -552,6 +639,23 @@ private struct TemperatureStepper: View {
         }
         .padding(12)
         .background(BubuTheme.Color.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+    }
+
+    private var temperatureText: Binding<String> {
+        Binding {
+            value.map { String(format: "%.1f", $0) } ?? ""
+        } set: { raw in
+            let text = raw
+                .replacingOccurrences(of: "，", with: ".")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else {
+                value = nil
+                return
+            }
+            if let parsed = Double(text) {
+                value = min(max(parsed, 34.0), 42.0)
+            }
+        }
     }
 }
 

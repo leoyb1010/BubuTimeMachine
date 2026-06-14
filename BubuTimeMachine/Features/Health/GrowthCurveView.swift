@@ -80,20 +80,9 @@ struct GrowthCurveView: View {
         return merged.keys.sorted().map { ($0, merged[$0]!) }
     }
 
-    /// 从记录里抽数值：匹配指标关键字，取 amountText/title/detail 里的第一个数字。
+    /// 从旧健康记录里抽结构化数值，和首页/启动迁移共用同一套解析规则。
     private func parseValue(from record: HealthRecord) -> Double? {
-        let haystack = ([record.title, record.amountText, record.detail].compactMap { $0 } + record.tags).joined(separator: " ")
-        guard metric.keywords.contains(where: { haystack.contains($0) }) else { return nil }
-        if let value = record.amountValue,
-           record.amountUnit == metric.unit {
-            return value
-        }
-        // 抽第一个浮点数
-        let pattern = #"(\d+\.?\d*)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: haystack, range: NSRange(haystack.startIndex..., in: haystack)),
-              let range = Range(match.range(at: 1), in: haystack) else { return nil }
-        return Double(haystack[range])
+        GrowthMeasurementExtractor.value(metric, from: record)
     }
 
     @ViewBuilder

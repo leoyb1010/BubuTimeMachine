@@ -18,3 +18,5 @@ build/
 
 # 本地 Claude/Codex worktree 缓存（不入产品仓库）
 .claude/
+harmony/.codegenie/
+harmony/.ios_ref/

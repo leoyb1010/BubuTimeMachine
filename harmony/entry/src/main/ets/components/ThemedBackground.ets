@@ -34,7 +34,7 @@ export struct ThemedBackground {
       }
 
       // 2) 奶油马卡龙柔光氛围色球（静态、零每帧成本）。深色降透明度。
-      BubuBlobBackground({ tint: this.theme.theme.primary })
+      BubuBlobBackground({ tint: this.theme.theme.primary, includeBase: false })
         .opacity(this.theme.theme.isDark ? 0.35 : 1.0)
 
       // 3) 纸纹叠加（封顶 5%，姥姥大字号自动关闭——由调用方控制 largeText）。

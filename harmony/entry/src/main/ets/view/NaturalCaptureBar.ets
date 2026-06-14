@@ -1,6 +1,10 @@
 import { promptAction } from '@kit.ArkUI';
-import { BubuColor, BubuFont } from '../theme/BubuTheme';
+import { BubuColor, BubuFont, BubuShadow } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
+import { BubuIcon, BubuIconName } from '../components/BubuIcon';
 import { AIService, nowISO } from '../services/AIService';
+import { MockAIService } from '../services/MockAIService';
 import { ServerConfig } from '../services/ServerConfig';
 import {
   NaturalCaptureRequest, NaturalCaptureParseResult
@@ -22,6 +26,11 @@ export struct NaturalCaptureBar {
   // 确认页路由（对照 sheet(item: reviewPayload)）。
   @State private reviewResult: NaturalCaptureParseResult | null = null;
   @State private reviewOriginalText: string = '';
+  @State private pageIn: boolean = false;
+
+  aboutToAppear(): void {
+    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+  }
 
   private isBusy(): boolean {
     return this.isParsing;
@@ -35,11 +44,8 @@ export struct NaturalCaptureBar {
     Stack() {
       Column({ space: 8 }) {
         Row({ space: 10 }) {
-          Text('✨')
-            .fontSize(17)
-            .fontColor(BubuColor.primary)
+          BubuIcon({ name: BubuIconName.sparkles, iconSize: 18, color: BubuColor.primary, strokeWidth: 1.8, filled: true })
             .width(34).height(34)
-            .textAlign(TextAlign.Center)
             .backgroundColor('#1AF28C9E')
             .borderRadius(17)
 
@@ -61,30 +67,36 @@ export struct NaturalCaptureBar {
               .onSubmit(() => { this.parseText(); })
 
             // 发送按钮（对照 arrow.up.circle.fill）。
-            Text('⬆')
-              .fontSize(26)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.trimmed().length === 0 ? '#80A98D82' : BubuColor.primary)
+            BubuIcon({
+              name: BubuIconName.send,
+              iconSize: 25,
+              color: this.trimmed().length === 0 ? '#80A98D82' : BubuColor.primary,
+              strokeWidth: 2.4,
+              filled: this.trimmed().length > 0
+            })
               .width(34).height(34)
-              .textAlign(TextAlign.Center)
               .onClick(() => {
                 if (this.trimmed().length === 0 || this.isBusy()) return;
+                BubuHaptics.selection();
                 this.parseText();
               })
           }
 
           // 语音按钮（NOTE 占位）。
-          Text('🎤')
-            .fontSize(17)
-            .fontColor(BubuColor.primary)
+          BubuIcon({ name: BubuIconName.mic, iconSize: 20, color: BubuColor.primary, strokeWidth: 2.2 })
+            .width(28).height(34)
             .onClick(() => {
+              BubuHaptics.tapLight();
               promptAction.showToast({ message: '语音记录即将开放，先打字给布布吧 🌟' });
             })
         }
         .width('100%')
         .padding(12)
-        .backgroundColor(BubuColor.card)
-        .borderRadius(22)
+        .backgroundColor('#E8FFFFFF')
+        .backgroundBlurStyle(BlurStyle.Thin)
+        .borderRadius(24)
+        .border({ width: 1, color: '#8FFFFFFF' })
+        .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
 
         if (this.slowHint !== null && this.isParsing) {
           Text(this.slowHint)
@@ -103,6 +115,9 @@ export struct NaturalCaptureBar {
         }
       }
       .width('100%')
+      .opacity(this.pageIn ? 1 : 0)
+      .translate({ x: 0, y: this.pageIn ? 0 : BubuMotion.entranceOffsetY })
+      .animation(BubuMotion.gentle)
 
       // 确认页（对照 sheet）。
       if (this.reviewResult !== null) {
@@ -141,11 +156,16 @@ export struct NaturalCaptureBar {
         timezone: 'Asia/Shanghai',
         referenceDate: nowISO()
       };
-      const result: NaturalCaptureParseResult = await AIService.shared.parseNaturalCaptureFull(request);
+      let result: NaturalCaptureParseResult;
+      try {
+        result = await AIService.shared.parseNaturalCaptureFull(request);
+      } catch (realError) {
+        result = await MockAIService.shared.parseNaturalCaptureFull(request);
+      }
       this.reviewOriginalText = input;
       this.reviewResult = result;
     } catch (e) {
-      this.errorText = '智能识别暂时不可用，可以先用「记录此刻」保存。';
+      this.errorText = '智能识别暂时不可用，已保留原文，可以先用「记录此刻」保存。';
     } finally {
       clearTimeout(slowTimer);
       this.slowHint = null;

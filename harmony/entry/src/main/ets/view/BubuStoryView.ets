@@ -11,6 +11,7 @@ import { BubuSparkle } from '../components/MacaronComponents';
 
 @Component
 export struct BubuStoryView {
+  @Prop compact: boolean = false;
   @State private milestones: Milestone[] = [];
   // 阅读器覆盖（iOS NavigationLink → ArkUI 内部 @State 整页覆盖；RootPage 导航另波次接管）。
   @State private readerOpen: boolean = false;
@@ -27,24 +28,32 @@ export struct BubuStoryView {
   }
 
   build() {
-    Stack() {
-      Scroll() {
-        Column({ space: 18 }) {
-          this.banner()
-          if (this.chapters().length === 0) {
-            this.emptyState()
-          } else {
-            Column({ space: 14 }) {
-              ForEach(this.chapters(), (ch: StoryChapter, idx: number) => {
-                this.chapterCard(ch, idx)
-              }, (ch: StoryChapter) => ch.id)
-            }.width('100%')
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column() {
+        Scroll() {
+          Column({ space: 18 }) {
+            this.banner()
+            if (this.chapters().length === 0) {
+              this.emptyState()
+            } else {
+              Column({ space: 14 }) {
+                ForEach(this.chapters(), (ch: StoryChapter, idx: number) => {
+                  this.chapterCard(ch, idx)
+                }, (ch: StoryChapter) => ch.id)
+              }.width('100%')
+            }
+            Blank().height(30)
           }
-          Blank().height(30)
+          .padding({ left: 18, right: 18, top: 8 }).width('100%')
         }
-        .padding({ left: 18, right: 18, top: 8 }).width('100%')
+        .layoutWeight(1)
+        .translate({ x: 0, y: this.compact ? -40 : 0 })
+        .backgroundColor(BubuColor.background)
+        .width('100%')
       }
-      .backgroundColor(BubuColor.background).width('100%').height('100%')
+      .width('100%')
+      .height('100%')
+      .backgroundColor(BubuColor.background)
 
       // 阅读器覆盖
       if (this.readerOpen) {

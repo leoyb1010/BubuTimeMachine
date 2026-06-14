@@ -7,6 +7,8 @@
 
 import { Milestone } from '../models/Models';
 import { BubuColor } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
+import { BubuHaptics } from '../theme/BubuHaptics';
 import { BubuSparkle } from '../components/MacaronComponents';
 
 interface PtRatio { x: number; y: number; }
@@ -14,8 +16,8 @@ interface Pt { x: number; y: number; }
 
 @Component
 export struct BubuConstellationView {
-  milestones: Milestone[] = [];           // 已筛选
-  primary: string = BubuColor.primary;
+  @Prop @Watch('onMilestonesChanged') milestones: Milestone[] = [];           // 已筛选
+  @Prop primary: string = BubuColor.primary;
   onTapStar: (m: Milestone) => void = () => {};
 
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
@@ -24,6 +26,18 @@ export struct BubuConstellationView {
   // 画布尺寸（onAreaChange 测得）。初值给一个合理默认，避免首帧 0。
   @State private boardW: number = 340;
   @State private boardH: number = 320;
+  @State private boardBreath: boolean = false;
+  private ready: boolean = false;
+
+  aboutToAppear(): void {
+    animateTo(BubuMotion.breathe, () => { this.boardBreath = true; });
+  }
+
+  private onMilestonesChanged(): void {
+    if (this.ready) {
+      this.draw();
+    }
+  }
 
   // 设计稿手工锚点（在画布上的比例坐标，错落有致，绝不挤成网格）。对照 iOS anchorTemplate。
   private static readonly anchorTemplate: PtRatio[] = [
@@ -43,7 +57,7 @@ export struct BubuConstellationView {
 
   // 星盘显示一部分未点亮星，避免 0 点亮时空白；已点亮星保持发光并连线。对照 iOS shown。
   private shown(): Milestone[] {
-    const maxStars: number = 18;
+    const maxStars: number = 12;
     const lit: Milestone[] = this.achievedList().slice(0, maxStars);
     const locked: Milestone[] = this.milestones.filter((m: Milestone) => !this.isAchieved(m));
     return lit.concat(locked).slice(0, maxStars);
@@ -53,7 +67,11 @@ export struct BubuConstellationView {
 
   // 首页式紧凑星盘高度（对照 iOS starboardHeight）。
   private starboardHeight(): number {
-    return Math.max(300, Math.min(370, 260 + this.shown().length * 5));
+    const compact = this.boardW <= 0 || this.boardW < 1500;
+    const minH = compact ? 240 : 260;
+    const maxH = compact ? 300 : 320;
+    const base = compact ? 210 : 230;
+    return Math.max(minH, Math.min(maxH, base + this.shown().length * 4));
   }
 
   // 锚点布局：前 10 用模板比例；超出部分用黄金角螺旋错落填充。对照 iOS layout()。
@@ -105,28 +123,29 @@ export struct BubuConstellationView {
     for (let i = 0; i < shown.length; i++) {
       if (this.isAchieved(shown[i]) && i < positions.length) { litPts.push(positions[i]); }
     }
-    if (litPts.length >= 2) {
+    const linePts: Pt[] = litPts.length > 7 ? litPts.slice(litPts.length - 7) : litPts;
+    if (linePts.length >= 2) {
       // 底层粗描边（浅粉，0.55 透明）
-      c.lineWidth = 6;
+      c.lineWidth = 4;
       c.lineCap = 'round';
       c.lineJoin = 'round';
       c.strokeStyle = '#8CFFC2D6';
       c.beginPath();
-      for (let k = 0; k < litPts.length; k++) {
-        if (k === 0) { c.moveTo(litPts[k].x, litPts[k].y); } else { c.lineTo(litPts[k].x, litPts[k].y); }
+      for (let k = 0; k < linePts.length; k++) {
+        if (k === 0) { c.moveTo(linePts[k].x, linePts[k].y); } else { c.lineTo(linePts[k].x, linePts[k].y); }
       }
       c.stroke();
       // 上层渐变细线（primary → lav）
       const grad: CanvasGradient = c.createLinearGradient(
-        litPts[0].x, litPts[0].y,
-        litPts[litPts.length - 1].x, litPts[litPts.length - 1].y);
+        linePts[0].x, linePts[0].y,
+        linePts[linePts.length - 1].x, linePts[linePts.length - 1].y);
       grad.addColorStop(0, BubuColor.primary);
       grad.addColorStop(1, BubuColor.lav);
-      c.lineWidth = 2.5;
+      c.lineWidth = 1.8;
       c.strokeStyle = grad;
       c.beginPath();
-      for (let k = 0; k < litPts.length; k++) {
-        if (k === 0) { c.moveTo(litPts[k].x, litPts[k].y); } else { c.lineTo(litPts[k].x, litPts[k].y); }
+      for (let k = 0; k < linePts.length; k++) {
+        if (k === 0) { c.moveTo(linePts[k].x, linePts[k].y); } else { c.lineTo(linePts[k].x, linePts[k].y); }
       }
       c.stroke();
     }
@@ -140,19 +159,19 @@ export struct BubuConstellationView {
       if (lit) {
         // 呼吸光晕（静态近似）
         c.save();
-        c.globalAlpha = 0.4;
+        c.globalAlpha = 0.34;
         c.fillStyle = col;
         c.beginPath();
-        c.arc(p.x, p.y, 27, 0, 6.2832);
+        c.arc(p.x, p.y, 24, 0, 6.2832);
         c.fill();
         c.restore();
         // 径向高光球
-        const rg: CanvasGradient = c.createRadialGradient(p.x - 5, p.y - 6, 1, p.x, p.y, 24);
+        const rg: CanvasGradient = c.createRadialGradient(p.x - 4, p.y - 5, 1, p.x, p.y, 21);
         rg.addColorStop(0, '#FFFFFF');
         rg.addColorStop(1, col);
         c.fillStyle = rg;
         c.beginPath();
-        c.arc(p.x, p.y, 24, 0, 6.2832);
+        c.arc(p.x, p.y, 21, 0, 6.2832);
         c.fill();
         c.lineWidth = 2;
         c.strokeStyle = '#FFFFFF';
@@ -166,14 +185,35 @@ export struct BubuConstellationView {
         c.strokeStyle = '#CCDBCCC2';
         c.stroke();
       }
-      // emoji（点亮彩色大字，未点亮灰小字）
       c.save();
-      c.globalAlpha = lit ? 1 : 0.45;
-      c.font = lit ? '22px sans-serif' : '15px sans-serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillText(m.emoji, p.x, p.y);
+      c.lineWidth = lit ? 1.8 : 1.4;
+      c.strokeStyle = lit ? '#FFFFFF' : BubuColor.secondaryText;
+      c.fillStyle = lit ? '#FFFFFF' : BubuColor.secondaryText;
+      c.globalAlpha = lit ? 0.96 : 0.68;
+      this.drawStarGlyph(c, p.x, p.y, lit ? 10 : 8, lit);
       c.restore();
+    }
+  }
+
+  private drawStarGlyph(c: CanvasRenderingContext2D, cx: number, cy: number, r: number, filled: boolean): void {
+    const inner = r * 0.46;
+    c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const radius = i % 2 === 0 ? r : inner;
+      const angle = -Math.PI / 2 + i * Math.PI / 5;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      if (i === 0) {
+        c.moveTo(x, y);
+      } else {
+        c.lineTo(x, y);
+      }
+    }
+    c.closePath();
+    if (filled) {
+      c.fill();
+    } else {
+      c.stroke();
     }
   }
 
@@ -195,24 +235,27 @@ export struct BubuConstellationView {
       Stack() {
         if (this.isAchieved(m) || this.shown().length <= 12) {
           Text(m.title)
-            .fontSize(11).fontWeight(FontWeight.Bold)
+            .fontSize(10).fontWeight(FontWeight.Bold)
             .fontColor(this.isAchieved(m) ? BubuColor.warmBrown : BubuColor.secondaryText)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width(78).textAlign(TextAlign.Center)
-            .margin({ top: 30 })
+            .width(66).textAlign(TextAlign.Center)
+            .margin({ top: 31 })
         }
       }
-      .width(78).height(60)
+      .width(76).height(62)
     }
-    .position(this.labelPos(idx))
-    .onClick(() => { this.onTapStar(m); })
-  }
+	    .position(this.labelPos(idx))
+	    .onClick(() => {
+	      BubuHaptics.selection();
+	      this.onTapStar(m);
+	    })
+	  }
 
   private labelPos(idx: number): Position {
     const positions: Pt[] = this.layout(this.shown().length);
     const p: Pt = idx < positions.length ? positions[idx] : { x: this.boardW / 2, y: this.boardH / 2 };
-    // 标签盒 78×60，命中区以星点为中心。
-    return { x: p.x - 39, y: p.y - 30 };
+    // 标签盒 76×62，命中区以星点为中心。
+    return { x: p.x - 38, y: p.y - 31 };
   }
 
   build() {
@@ -250,17 +293,22 @@ export struct BubuConstellationView {
               ]
             })
             .borderRadius(28)
-          Canvas(this.ctx)
-            .width('100%').height('100%')
-            .onReady(() => { this.draw(); })
-          this.starLabels()
+	          Canvas(this.ctx)
+	            .width('100%').height('100%')
+	            .onReady(() => {
+	              this.ready = true;
+	              this.draw();
+	            })
+	          this.starLabels()
           // 右上角闪烁星
           BubuSparkle({ starSize: 12, color: '#FFFFFF' })
             .position({ x: this.boardW - 26, y: 14 })
         }
-        .width('100%').height(this.starboardHeight())
-        .borderRadius(28).clip(true)
-        .onAreaChange((_o: Area, n: Area) => {
+	        .width('100%').height(this.starboardHeight())
+	        .borderRadius(28).clip(true)
+	        .scale({ x: this.boardBreath ? 1.008 : 1, y: this.boardBreath ? 1.008 : 1 })
+	        .animation(BubuMotion.breathe)
+	        .onAreaChange((_o: Area, n: Area) => {
           const w: number = n.width as number;
           const h: number = n.height as number;
           if (w > 0 && h > 0 && (Math.abs(w - this.boardW) > 0.5 || Math.abs(h - this.boardH) > 0.5)) {

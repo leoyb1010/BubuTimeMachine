@@ -35,7 +35,7 @@ struct BubuThemedBackground: View {
             }
             // 奶油马卡龙柔光氛围：几个模糊色球漂在背景上（静态、零每帧成本）。
             // 深色模式降透明度，避免抢内容。
-            BubuBlobBackground(tint: env.theme.theme.primary)
+            BubuBlobBackground(tint: env.theme.theme.primary, includeBase: false)
                 .opacity(scheme == .dark ? 0.35 : 1.0)
         }
         .bubuPaperTexture(env.theme.theme.paperTexture, isDark: scheme == .dark || env.isDarkTheme)

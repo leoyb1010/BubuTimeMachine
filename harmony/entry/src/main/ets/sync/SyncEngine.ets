@@ -87,6 +87,54 @@ export class SyncEngine {
     }
   }
 
+  // 手动从服务器补齐本机：清空增量游标后只拉远端，不先推本地。
+  // 用于新设备/重装/端间数量不一致时，把 iOS 已上传的数据完整拉回鸿蒙。
+  async pullServerToLocalNow(): Promise<string> {
+    const cfg = ServerConfig.shared;
+    if (!cfg.isConfigured) return '还没有登录服务器';
+    if (this.syncing) {
+      const idle = await this.waitForIdle(15000);
+      if (!idle) {
+        this.needsAnotherSync = true;
+        return '后台同步还在进行，请稍后再点一次';
+      }
+    }
+    this.syncing = true;
+    try {
+      const ok = await APIClient.shared.ping();
+      if (!ok) return '服务器连接失败，请检查网络和服务器地址';
+      const authed = await APIClient.shared.authenticate();
+      if (!authed) return '账号或密码验证失败，请重新登录服务器账号';
+      await this.resetCursors();
+      await this.pullRemote();
+      await this.downloadMissingFiles();
+      hilog.info(DOMAIN, 'Bubu', '服务器数据已补齐到本机');
+      return '服务器数据已同步到本机';
+    } catch (e) {
+      const text = SyncEngine.errorText(e);
+      hilog.error(DOMAIN, 'Bubu', `从服务器拉取失败: ${text}`);
+      return `同步失败：${text}`;
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  private async waitForIdle(timeoutMs: number): Promise<boolean> {
+    const started = Date.now();
+    while (this.syncing && Date.now() - started < timeoutMs) {
+      await new Promise<void>((resolve) => {
+        setTimeout(() => { resolve(); }, 250);
+      });
+    }
+    return !this.syncing;
+  }
+
+  private static errorText(e: Object): string {
+    if (e instanceof Error) return e.message;
+    const text = JSON.stringify(e);
+    return text.length > 0 ? text : '未知错误';
+  }
+
   // 一轮：ping → 登录 → 推本地 → 拉远端 → 补下缺失文件（对照 iOS connectAndSync）。
   private async connectAndSync(): Promise<void> {
     const ok = await APIClient.shared.ping();
@@ -577,7 +625,7 @@ export class SyncEngine {
       await this.setCursor(collection, new Date(startedMs - SyncEngine.cursorOverlapMs).toISOString());
     } catch (e) {
       // 瞬时拉取失败不报红：游标不推进，下轮自动补拉（对照 iOS pull 的 catch 软失败）。
-      hilog.warn(DOMAIN, 'Bubu', `拉取 ${collection} 失败，下轮补拉`);
+      hilog.warn(DOMAIN, 'Bubu', `拉取 ${collection} 失败，下轮补拉: ${JSON.stringify(e)}`);
     }
   }
 
@@ -620,10 +668,14 @@ export class SyncEngine {
     return [];
   }
 
+  private static recordLocalId(r: Record<string, Object>): string | undefined {
+    return SyncEngine.rStr(r, 'localId') ?? SyncEngine.rStr(r, 'id');
+  }
+
   // —— Entry 合并（对照 iOS mergeRemoteEntry：synced 才覆盖，避免踩本地草稿）——
   private async pullEntries(): Promise<void> {
     await this.pullCollection('entries', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const existing = await this.findEntry(localId);
       if (existing) {
@@ -688,7 +740,7 @@ export class SyncEngine {
   // —— Media 合并（对照 iOS mergeRemoteMedia：需对应 Entry 存在）——
   private async pullMedia(): Promise<void> {
     await this.pullCollection('media', async (r: Record<string, Object>): Promise<void> => {
-      const mediaId = SyncEngine.rStr(r, 'localId');
+      const mediaId = SyncEngine.recordLocalId(r);
       const entryLocalId = SyncEngine.rStr(r, 'entryLocalId');
       if (mediaId === undefined || entryLocalId === undefined) return;
       const existingList = await AppDatabase.shared.fetchMediaForEntry(entryLocalId);
@@ -740,7 +792,7 @@ export class SyncEngine {
   // —— Milestone 合并 ——
   private async pullMilestones(): Promise<void> {
     await this.pullCollection('milestones', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const list = await AppDatabase.shared.fetchMilestones();
       const ex = list.find((x) => x.id === localId);
@@ -779,7 +831,7 @@ export class SyncEngine {
   // —— FirstTime 合并 ——
   private async pullFirstTimes(): Promise<void> {
     await this.pullCollection('firsttimes', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const list = await AppDatabase.shared.fetchFirstTimes();
       const ex = list.find((x) => x.id === localId);
@@ -814,7 +866,7 @@ export class SyncEngine {
   // —— FamilyMember 合并 ——
   private async pullFamilyMembers(): Promise<void> {
     await this.pullCollection('members', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const list = await AppDatabase.shared.fetchMembers();
       const ex = list.find((x) => x.id === localId);
@@ -850,7 +902,7 @@ export class SyncEngine {
   // —— ChildProfile 合并（远端头像变更：更新 URL 并清本地名，下轮 downloadMissingFiles 重新落地）——
   private async pullChildProfile(): Promise<void> {
     await this.pullCollection('childprofile', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const ex = await AppDatabase.shared.fetchChildProfile();
       if (ex && ex.id === localId) {
@@ -887,7 +939,7 @@ export class SyncEngine {
   // —— HealthRecord 合并 ——
   private async pullHealthRecords(): Promise<void> {
     await this.pullCollection('healthrecords', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const list = await AppDatabase.shared.fetchHealth();
       const ex = list.find((x) => x.id === localId);
@@ -935,7 +987,7 @@ export class SyncEngine {
   // —— VaccineRecord 合并（防复活：在删除队列内的 remoteId 不重新合并，对照 iOS mergeRemoteVaccine）——
   private async pullVaccineRecords(): Promise<void> {
     await this.pullCollection('vaccinerecords', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const remoteId = SyncEngine.rStr(r, 'id');
       if (remoteId !== undefined) {
@@ -982,7 +1034,7 @@ export class SyncEngine {
   // —— GrowthMeasurement 合并 ——
   private async pullGrowthMeasurements(): Promise<void> {
     await this.pullCollection('growthmeasurements', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const list = await AppDatabase.shared.fetchGrowth();
       const ex = list.find((x) => x.id === localId);
@@ -1018,7 +1070,7 @@ export class SyncEngine {
   // —— Comment 合并（需对应 Entry 存在）——
   private async pullComments(): Promise<void> {
     await this.pullCollection('comments', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       const entryLocalId = SyncEngine.rStr(r, 'entryLocalId');
       if (localId === undefined || entryLocalId === undefined) return;
       const list = await AppDatabase.shared.fetchCommentsForEntry(entryLocalId);
@@ -1062,7 +1114,7 @@ export class SyncEngine {
   // —— VoiceNote 合并（需对应 Entry 存在）——
   private async pullVoiceNotes(): Promise<void> {
     await this.pullCollection('voicenotes', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       const entryLocalId = SyncEngine.rStr(r, 'entryLocalId');
       if (localId === undefined || entryLocalId === undefined) return;
       const list = await AppDatabase.shared.fetchVoiceForEntry(entryLocalId);
@@ -1100,7 +1152,7 @@ export class SyncEngine {
   // —— TimeCapsule 合并（拉回后确保本地有加密 blob，对照 iOS ensureLocalCapsuleBlob）——
   private async pullTimeCapsules(): Promise<void> {
     await this.pullCollection('timecapsules', async (r: Record<string, Object>): Promise<void> => {
-      const localId = SyncEngine.rStr(r, 'localId');
+      const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       const list = await AppDatabase.shared.fetchCapsules();
       const ex = list.find((x) => x.id === localId);
@@ -1231,6 +1283,22 @@ export class SyncEngine {
     }
     if (!this.cursorStore) return;
     await this.cursorStore.put(`cursor_${collection}`, iso);
+    await this.cursorStore.flush();
+  }
+
+  private async resetCursors(): Promise<void> {
+    if (!this.cursorStore && this.appContext) {
+      this.cursorStore = await preferences.getPreferences(this.appContext, 'bubu_sync_cursor');
+    }
+    if (!this.cursorStore) return;
+    const collections: string[] = [
+      'entries', 'media', 'milestones', 'firsttimes', 'members', 'childprofile',
+      'healthrecords', 'vaccinerecords', 'growthmeasurements', 'comments',
+      'voicenotes', 'timecapsules'
+    ];
+    for (const c of collections) {
+      await this.cursorStore.put(`cursor_${c}`, '');
+    }
     await this.cursorStore.flush();
   }
 }

@@ -43,11 +43,13 @@ export class ServerConfig {
   }
 
   get isConfigured(): boolean {
-    return this.baseURLString.length > 0 && this.accountEmail.length > 0 && this.accountPassword.length > 0;
+    return this.cleanString(this.baseURLString).length > 0
+      && this.cleanString(this.accountEmail).length > 0
+      && this.cleanString(this.accountPassword).length > 0;
   }
 
   get isAIConfigured(): boolean {
-    return this.aiEnabled && this.aiBaseURLString.length > 0;
+    return this.aiEnabled && this.cleanString(this.aiBaseURLString).length > 0;
   }
 
   async setRole(role: FamilyRole): Promise<void> {
@@ -78,17 +80,19 @@ export class ServerConfig {
 
   private async getStr(key: string, def: string): Promise<string> {
     if (!this.store) return def;
-    return (await this.store.get(key, def)) as string;
+    const value = await this.store.get(key, def);
+    return this.cleanString(value, def);
   }
 
   private async getBool(key: string, def: boolean): Promise<boolean> {
     if (!this.store) return def;
-    return (await this.store.get(key, def)) as boolean;
+    const value = await this.store.get(key, def);
+    return typeof value === 'boolean' ? value : def;
   }
 
   private async put(key: string, value: string): Promise<void> {
     if (!this.store) return;
-    await this.store.put(key, value);
+    await this.store.put(key, this.cleanString(value));
     await this.store.flush();
   }
 
@@ -96,5 +100,9 @@ export class ServerConfig {
     if (!this.store) return;
     await this.store.put(key, value);
     await this.store.flush();
+  }
+
+  private cleanString(value: Object | string | null | undefined, def: string = ''): string {
+    return typeof value === 'string' ? value.trim() : def;
   }
 }

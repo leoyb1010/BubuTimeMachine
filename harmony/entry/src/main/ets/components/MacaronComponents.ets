@@ -28,11 +28,14 @@ export struct BubuBlob {
 @Component
 export struct BubuBlobBackground {
   tint: string = BubuColor.primary;
+  includeBase: boolean = true;
 
   build() {
     Stack() {
       // 奶油底
-      Column().width('100%').height('100%').backgroundColor(BubuColor.background)
+      if (this.includeBase) {
+        Column().width('100%').height('100%').backgroundColor(BubuColor.background)
+      }
       // 几个色球，按比例定位（用 RelativeContainer 太重，这里用 position 百分比近似）
       BubuBlob({ color: BubuColor.peach, blobSize: 280, blobOpacity: 0.45 })
         .position({ x: '4%', y: '6%' })
