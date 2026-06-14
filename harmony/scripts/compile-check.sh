@@ -12,8 +12,9 @@ export JAVA_HOME="/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home"
 export PATH="$JAVA_HOME/bin:$NODE_HOME/bin:$DEVECO/ohpm/bin:$DEVECO/hvigor/bin:$PATH"
 export NODE_OPTIONS="--max-old-space-size=8192"
 OUT="$(./hvigorw assembleHap -p product=default --no-daemon 2>&1)"
-echo "$OUT" | grep -E "ArkTS Compiler Error|does not meet|CompileArkTS|Failed :entry|TS[0-9]+|error:" 
-if echo "$OUT" | grep -q "Finished :entry:default@CompileArkTS"; then
+echo "$OUT" | grep -E "ArkTS Compiler Error|does not meet|Failed :entry|TS[0-9]+|error:|ERROR: 105|ERROR: 103" | grep -v "signingConfig"
+# PASS if the build completed (CompileArkTS Finished or UP-TO-DATE, and no ArkTS compiler error).
+if echo "$OUT" | grep -qE "BUILD SUCCESSFUL" && ! echo "$OUT" | grep -q "ArkTS Compiler Error"; then
   echo "==> ARKTS_COMPILE: PASS"
   exit 0
 else
