@@ -15,29 +15,39 @@ nonisolated enum BubuTheme {
             })
         }
 
-        /// 主色：温暖的珊瑚粉；深色模式下保持粉色按钮识别度。
+        /// 主色：奶油马卡龙 rose（#F2789F）；深色模式保持识别度。
         static let primary = dynamic(
-            light: UIColor(red: 0.95, green: 0.55, blue: 0.62, alpha: 1),
-            dark: UIColor(red: 1.00, green: 0.48, blue: 0.60, alpha: 1)
+            light: UIColor(red: 0.949, green: 0.471, blue: 0.624, alpha: 1),   // #F2789F
+            dark: UIColor(red: 1.00, green: 0.52, blue: 0.66, alpha: 1)
         )
-        /// 辅助：奶油底 / 深色柔棕底。
+        /// 强调深色端 deeprose（#E15C86）：主按钮渐变尾色 / 凸起记录键。
+        static let deepRose = dynamic(
+            light: UIColor(red: 0.882, green: 0.361, blue: 0.525, alpha: 1),   // #E15C86
+            dark: UIColor(red: 0.95, green: 0.42, blue: 0.58, alpha: 1)
+        )
+        /// 辅助：奶油底 cream（#FFF7F1）/ 深色柔棕底。
         static let cream = dynamic(
-            light: UIColor(red: 0.99, green: 0.97, blue: 0.94, alpha: 1),
+            light: UIColor(red: 1.000, green: 0.969, blue: 0.945, alpha: 1),   // #FFF7F1
             dark: UIColor(red: 0.19, green: 0.16, blue: 0.15, alpha: 1)
         )
-        /// 暖棕（文字/标题）。深色模式用暖米白，避免系统自动白字撞浅背景。
+        /// 次奶油底 cream2（#FCEDE4）：选中态 / 嵌套层底。
+        static let cream2 = dynamic(
+            light: UIColor(red: 0.988, green: 0.929, blue: 0.894, alpha: 1),   // #FCEDE4
+            dark: UIColor(red: 0.24, green: 0.20, blue: 0.18, alpha: 1)
+        )
+        /// 暖棕（文字/标题）ink（#5A3D34）。深色用暖米白。
         static let warmBrown = dynamic(
-            light: UIColor(red: 0.36, green: 0.30, blue: 0.27, alpha: 1),
+            light: UIColor(red: 0.353, green: 0.239, blue: 0.204, alpha: 1),   // #5A3D34
             dark: UIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
         )
-        /// 柔和次要文字。
+        /// 柔和次要文字 ink2（#A98D82）。
         static let secondaryText = dynamic(
-            light: UIColor(red: 0.55, green: 0.50, blue: 0.47, alpha: 1),
+            light: UIColor(red: 0.663, green: 0.553, blue: 0.510, alpha: 1),   // #A98D82
             dark: UIColor(red: 0.73, green: 0.66, blue: 0.60, alpha: 1)
         )
-        /// 页面背景。
+        /// 页面背景（奶油基底，略带粉调）。
         static let background = dynamic(
-            light: UIColor(red: 0.98, green: 0.96, blue: 0.93, alpha: 1),
+            light: UIColor(red: 1.000, green: 0.969, blue: 0.945, alpha: 1),   // #FFF7F1
             dark: UIColor(red: 0.10, green: 0.085, blue: 0.08, alpha: 1)
         )
         /// 卡片底。
@@ -79,22 +89,50 @@ nonisolated enum BubuTheme {
             light: UIColor(red: 0.36, green: 0.55, blue: 0.80, alpha: 1),
             dark: UIColor(red: 0.50, green: 0.68, blue: 0.92, alpha: 1)
         )
+
+        // MARK: 马卡龙副色板（记忆色相 / 渐变 / 星座盘星点）
+        static let peach  = SwiftUI.Color(red: 1.000, green: 0.827, blue: 0.745) // #FFD3BE
+        static let pink   = SwiftUI.Color(red: 1.000, green: 0.761, blue: 0.839) // #FFC2D6
+        static let lav    = SwiftUI.Color(red: 0.863, green: 0.788, blue: 1.000) // #DCC9FF
+        static let mint   = SwiftUI.Color(red: 0.749, green: 0.922, blue: 0.827) // #BFEBD3
+        static let butter = SwiftUI.Color(red: 1.000, green: 0.886, blue: 0.627) // #FFE2A0
+        static let sky    = SwiftUI.Color(red: 0.769, green: 0.894, blue: 1.000) // #C4E4FF
+
+        /// 由色相（0–360）生成一抹柔和马卡龙色，用于按记忆/里程碑上色（对照设计稿 HUE()）。
+        static func hue(_ h: Double, lightness: Double = 0.86, saturation: Double = 0.90) -> SwiftUI.Color {
+            SwiftUI.Color(hue: (h.truncatingRemainder(dividingBy: 360)) / 360.0,
+                          saturation: saturation, brightness: lightness)
+        }
     }
 
-    // MARK: 字号阶梯（偏大，适老）
+    // MARK: 字号阶梯（偏大，适老；马卡龙加重标题字）
     enum Font {
-        static let hugeTitle = SwiftUI.Font.system(size: 34, weight: .bold, design: .rounded)
-        static let title = SwiftUI.Font.system(size: 26, weight: .bold, design: .rounded)
-        static let headline = SwiftUI.Font.system(size: 21, weight: .semibold, design: .rounded)
+        static let hugeTitle = SwiftUI.Font.system(size: 34, weight: .heavy, design: .rounded)
+        static let title = SwiftUI.Font.system(size: 26, weight: .heavy, design: .rounded)
+        static let headline = SwiftUI.Font.system(size: 21, weight: .bold, design: .rounded)
         static let body = SwiftUI.Font.system(size: 18, weight: .regular, design: .rounded)
-        static let caption = SwiftUI.Font.system(size: 15, weight: .regular, design: .rounded)
+        static let caption = SwiftUI.Font.system(size: 15, weight: .medium, design: .rounded)
     }
 
-    // MARK: 圆角
+    // MARK: 圆角（马卡龙更圆润）
     enum Radius {
-        static let card: CGFloat = 22
+        static let card: CGFloat = 28
         static let button: CGFloat = 28
-        static let small: CGFloat = 14
+        static let small: CGFloat = 16
+    }
+
+    // MARK: 马卡龙渐变（主按钮 / Hero / 凸起键）
+    enum Gradient {
+        /// 主按钮：rose → deeprose。
+        static var primaryButton: LinearGradient {
+            LinearGradient(colors: [Color.primary, Color.deepRose],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        /// Hero 卡：peach → pink → lav。
+        static var hero: LinearGradient {
+            LinearGradient(colors: [Color.peach, Color.pink, Color.lav],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 
     // MARK: 间距
@@ -115,8 +153,9 @@ nonisolated enum BubuTheme {
 
 // MARK: - 阴影修饰
 extension View {
-    /// 柔和卡片阴影。深色模式下阴影更轻，主要靠卡片色和描边分层。
+    /// 柔和卡片阴影（马卡龙暖玫瑰投影，比纯黑更通透柔和）。
     nonisolated func bubuCardShadow() -> some View {
-        shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 4)
+        shadow(color: SwiftUI.Color(red: 0.71, green: 0.47, blue: 0.43).opacity(0.20),
+               radius: 14, x: 0, y: 8)
     }
 }
