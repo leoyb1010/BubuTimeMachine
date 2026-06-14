@@ -1,7 +1,7 @@
 import { relationalStore } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord } from '../models/Models';
+import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord, Comment, VoiceMemo, FirstTime, GrowthMovie, PendingDeletion, FeedEvent } from '../models/Models';
 import { SyncState } from '../models/Enums';
 
 const DOMAIN = 0x0000;
@@ -34,10 +34,12 @@ export class AppDatabase {
       happenedAt INTEGER NOT NULL, locationName TEXT, latitude REAL, longitude REAL,
       authorRole TEXT NOT NULL, moodRaw TEXT, syncState TEXT NOT NULL,
       isArchived INTEGER NOT NULL DEFAULT 0, editedAt INTEGER, createdAt INTEGER NOT NULL)`);
-    // Media
+    // Media（对照 iOS Media：含时长/尺寸/上传进度/syncState）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS media (
       id TEXT PRIMARY KEY, remoteId TEXT, entryId TEXT NOT NULL, typeRaw TEXT NOT NULL,
-      localFileName TEXT, remoteURL TEXT, thumbnailFileName TEXT, aiTags TEXT, createdAt INTEGER NOT NULL)`);
+      localFileName TEXT, remoteURL TEXT, thumbnailFileName TEXT,
+      durationSeconds REAL, width INTEGER, height INTEGER, uploadProgress REAL NOT NULL DEFAULT 0,
+      syncState TEXT NOT NULL DEFAULT 'local', aiTags TEXT, createdAt INTEGER NOT NULL)`);
     // ChildProfile
     await s.executeSql(`CREATE TABLE IF NOT EXISTS child_profile (
       id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, birthday INTEGER NOT NULL,
@@ -64,23 +66,50 @@ export class AppDatabase {
     await s.executeSql(`CREATE TABLE IF NOT EXISTS feed_event (
       id TEXT PRIMARY KEY, kind TEXT NOT NULL, actorRole TEXT NOT NULL, summary TEXT NOT NULL,
       targetLocalId TEXT, happenedAt INTEGER NOT NULL)`);
-    // VoiceNote
+    // VoiceNote（对照 iOS VoiceNote：含 transcript / syncState）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS voice_note (
       id TEXT PRIMARY KEY, remoteId TEXT, entryId TEXT NOT NULL, localFileName TEXT, remoteURL TEXT,
-      durationSeconds INTEGER NOT NULL, authorRole TEXT NOT NULL, waveformSamples TEXT, createdAt INTEGER NOT NULL)`);
+      durationSeconds INTEGER NOT NULL, transcript TEXT, authorRole TEXT NOT NULL,
+      waveformSamples TEXT, syncState TEXT NOT NULL DEFAULT 'local', createdAt INTEGER NOT NULL)`);
     // FamilyMember
     await s.executeSql(`CREATE TABLE IF NOT EXISTS family_member (
       id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, relation TEXT NOT NULL,
       avatarEmoji TEXT NOT NULL, themeColorHex TEXT NOT NULL, isPrimary INTEGER NOT NULL DEFAULT 0,
       syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
-    // GrowthMeasurement
+    // GrowthMeasurement（对照 iOS：含 note/source/updatedAt）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS growth_measurement (
       id TEXT PRIMARY KEY, remoteId TEXT, measuredAt INTEGER NOT NULL, heightCm REAL, weightKg REAL,
-      headCircumferenceCm REAL, syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
-    // VaccineRecord
+      headCircumferenceCm REAL, note TEXT, source TEXT NOT NULL DEFAULT 'manual',
+      syncState TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL DEFAULT 0)`);
+    // VaccineRecord（对照 iOS：vaccineName/doseId/injectedAt/hospital/injectionSite/source/updatedAt）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS vaccine_record (
-      id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, doseLabel TEXT, scheduledAt INTEGER,
-      administeredAt INTEGER, note TEXT, syncState TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+      id TEXT PRIMARY KEY, remoteId TEXT, doseId TEXT, vaccineName TEXT NOT NULL, doseLabel TEXT,
+      injectedAt INTEGER NOT NULL DEFAULT 0, hospital TEXT, injectionSite TEXT, reaction TEXT, note TEXT,
+      source TEXT NOT NULL DEFAULT 'manual', syncState TEXT NOT NULL, createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL DEFAULT 0)`);
+    // Comment（家人合奏：文字 / 语音补充）
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS comment (
+      id TEXT PRIMARY KEY, remoteId TEXT, entryId TEXT NOT NULL, authorRole TEXT NOT NULL,
+      text TEXT, voiceFileName TEXT, remoteURL TEXT, voiceDuration REAL NOT NULL DEFAULT 0,
+      voiceWaveform TEXT, syncState TEXT NOT NULL DEFAULT 'local', createdAt INTEGER NOT NULL)`);
+    // VoiceMemo（成长之声：按岁横切归档）
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS voice_memo (
+      id TEXT PRIMARY KEY, remoteId TEXT, kindRaw TEXT NOT NULL, localFileName TEXT, remoteURL TEXT,
+      transcript TEXT, ageYears INTEGER, recordedAt INTEGER NOT NULL, durationSeconds REAL,
+      syncState TEXT NOT NULL DEFAULT 'local', createdAt INTEGER NOT NULL)`);
+    // FirstTime（人生第一次）
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS first_time (
+      id TEXT PRIMARY KEY, remoteId TEXT, what TEXT NOT NULL, detectedByAI INTEGER NOT NULL DEFAULT 0,
+      confirmedByParent INTEGER NOT NULL DEFAULT 0, ceremonyPlayed INTEGER NOT NULL DEFAULT 0,
+      happenedAt INTEGER NOT NULL, entryId TEXT, syncState TEXT NOT NULL DEFAULT 'local',
+      createdAt INTEGER NOT NULL)`);
+    // GrowthMovie（年度成长电影）
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS growth_movie (
+      id TEXT PRIMARY KEY, remoteId TEXT, year INTEGER NOT NULL, remoteURL TEXT,
+      status TEXT NOT NULL DEFAULT 'pending', narrationScript TEXT, createdAt INTEGER NOT NULL)`);
+    // PendingDeletion（待同步删除队列）
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS pending_deletion (
+      id TEXT PRIMARY KEY, collection TEXT NOT NULL, remoteId TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
     await this.addColumnIfMissing('time_capsule', 'letterText', 'TEXT');
   }
 
@@ -97,9 +126,10 @@ export class AppDatabase {
     const v: relationalStore.ValuesBucket = {
       id: g.id, remoteId: g.remoteId ?? null, measuredAt: g.measuredAt,
       heightCm: g.heightCm ?? null, weightKg: g.weightKg ?? null,
-      headCircumferenceCm: g.headCircumferenceCm ?? null, syncState: g.syncState, createdAt: g.createdAt
+      headCircumferenceCm: g.headCircumferenceCm ?? null, note: g.note ?? null, source: g.source,
+      syncState: g.syncState, createdAt: g.createdAt, updatedAt: g.updatedAt
     };
-    await this.store!.insert('growth_measurement', v);
+    await this.store!.insert('growth_measurement', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchGrowth(): Promise<GrowthMeasurement[]> {
@@ -110,12 +140,16 @@ export class AppDatabase {
     while (rs.goToNextRow()) {
       out.push({
         id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
         measuredAt: rs.getLong(rs.getColumnIndex('measuredAt')),
         heightCm: AppDatabase.optNum(rs, 'heightCm'),
         weightKg: AppDatabase.optNum(rs, 'weightKg'),
         headCircumferenceCm: AppDatabase.optNum(rs, 'headCircumferenceCm'),
+        note: AppDatabase.optStr(rs, 'note'),
+        source: rs.getString(rs.getColumnIndex('source')),
         syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
-        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt')),
+        updatedAt: rs.getLong(rs.getColumnIndex('updatedAt'))
       });
     }
     rs.close();
@@ -125,46 +159,54 @@ export class AppDatabase {
   // —— VaccineRecord ——
   async insertVaccine(v: VaccineRecord): Promise<void> {
     const bucket: relationalStore.ValuesBucket = {
-      id: v.id, remoteId: v.remoteId ?? null, name: v.name, doseLabel: v.doseLabel ?? null,
-      scheduledAt: v.scheduledAt ?? null, administeredAt: v.administeredAt ?? null,
-      note: v.note ?? null, syncState: v.syncState, createdAt: v.createdAt
+      id: v.id, remoteId: v.remoteId ?? null, doseId: v.doseId ?? null, vaccineName: v.vaccineName,
+      doseLabel: v.doseLabel ?? null, injectedAt: v.injectedAt, hospital: v.hospital ?? null,
+      injectionSite: v.injectionSite ?? null, reaction: v.reaction ?? null, note: v.note ?? null,
+      source: v.source, syncState: v.syncState, createdAt: v.createdAt, updatedAt: v.updatedAt
     };
-    await this.store!.insert('vaccine_record', bucket);
+    await this.store!.insert('vaccine_record', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchVaccines(): Promise<VaccineRecord[]> {
     const pred = new relationalStore.RdbPredicates('vaccine_record');
-    pred.orderByAsc('scheduledAt');
+    pred.orderByAsc('injectedAt');
     const rs = await this.store!.query(pred);
     const out: VaccineRecord[] = [];
     while (rs.goToNextRow()) {
       out.push({
         id: rs.getString(rs.getColumnIndex('id')),
-        name: rs.getString(rs.getColumnIndex('name')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        doseId: AppDatabase.optStr(rs, 'doseId'),
+        vaccineName: rs.getString(rs.getColumnIndex('vaccineName')),
         doseLabel: AppDatabase.optStr(rs, 'doseLabel'),
-        scheduledAt: AppDatabase.optNum(rs, 'scheduledAt'),
-        administeredAt: AppDatabase.optNum(rs, 'administeredAt'),
+        injectedAt: rs.getLong(rs.getColumnIndex('injectedAt')),
+        hospital: AppDatabase.optStr(rs, 'hospital'),
+        injectionSite: AppDatabase.optStr(rs, 'injectionSite'),
+        reaction: AppDatabase.optStr(rs, 'reaction'),
         note: AppDatabase.optStr(rs, 'note'),
+        source: rs.getString(rs.getColumnIndex('source')),
         syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
-        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt')),
+        updatedAt: rs.getLong(rs.getColumnIndex('updatedAt'))
       });
     }
     rs.close();
     return out;
   }
 
-  async markVaccineDone(id: string): Promise<void> {
+  async deleteVaccine(id: string): Promise<void> {
     const pred = new relationalStore.RdbPredicates('vaccine_record');
     pred.equalTo('id', id);
-    await this.store!.update({ administeredAt: Date.now(), syncState: SyncState.local }, pred);
+    await this.store!.delete(pred);
   }
 
   // —— VoiceNote ——
   async insertVoiceNote(v: VoiceNote): Promise<void> {
     const bucket: relationalStore.ValuesBucket = {
       id: v.id, remoteId: v.remoteId ?? null, entryId: v.entryId, localFileName: v.localFileName ?? null,
-      remoteURL: v.remoteURL ?? null, durationSeconds: v.durationSeconds, authorRole: v.authorRole,
-      waveformSamples: JSON.stringify(v.waveformSamples), createdAt: v.createdAt
+      remoteURL: v.remoteURL ?? null, durationSeconds: v.durationSeconds, transcript: v.transcript ?? null,
+      authorRole: v.authorRole, waveformSamples: JSON.stringify(v.waveformSamples),
+      syncState: v.syncState, createdAt: v.createdAt
     };
     await this.store!.insert('voice_note', bucket);
   }
@@ -175,13 +217,18 @@ export class AppDatabase {
     const rs = await this.store!.query(pred);
     const out: VoiceNote[] = [];
     while (rs.goToNextRow()) {
+      const wf = AppDatabase.optStr(rs, 'waveformSamples');
       out.push({
         id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
         entryId: rs.getString(rs.getColumnIndex('entryId')),
         localFileName: AppDatabase.optStr(rs, 'localFileName'),
+        remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
         durationSeconds: rs.getLong(rs.getColumnIndex('durationSeconds')),
+        transcript: AppDatabase.optStr(rs, 'transcript'),
         authorRole: rs.getString(rs.getColumnIndex('authorRole')),
-        waveformSamples: [],
+        waveformSamples: wf ? JSON.parse(wf) as number[] : [],
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
         createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
       });
     }
@@ -273,9 +320,31 @@ export class AppDatabase {
     const v: relationalStore.ValuesBucket = {
       id: m.id, remoteId: m.remoteId ?? null, entryId: m.entryId, typeRaw: m.typeRaw,
       localFileName: m.localFileName ?? null, remoteURL: m.remoteURL ?? null,
-      thumbnailFileName: m.thumbnailFileName ?? null, aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
+      thumbnailFileName: m.thumbnailFileName ?? null, durationSeconds: m.durationSeconds ?? null,
+      width: m.width ?? null, height: m.height ?? null, uploadProgress: m.uploadProgress,
+      syncState: m.syncState, aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
     };
     await this.store!.insert('media', v);
+  }
+
+  private static rowToMedia(rs: relationalStore.ResultSet): Media {
+    const tagsStr = AppDatabase.optStr(rs, 'aiTags');
+    return {
+      id: rs.getString(rs.getColumnIndex('id')),
+      remoteId: AppDatabase.optStr(rs, 'remoteId'),
+      entryId: rs.getString(rs.getColumnIndex('entryId')),
+      typeRaw: rs.getString(rs.getColumnIndex('typeRaw')),
+      localFileName: AppDatabase.optStr(rs, 'localFileName'),
+      remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
+      thumbnailFileName: AppDatabase.optStr(rs, 'thumbnailFileName'),
+      durationSeconds: AppDatabase.optNum(rs, 'durationSeconds'),
+      width: AppDatabase.optNum(rs, 'width'),
+      height: AppDatabase.optNum(rs, 'height'),
+      uploadProgress: AppDatabase.optNum(rs, 'uploadProgress') ?? 0,
+      syncState: (AppDatabase.optStr(rs, 'syncState') ?? SyncState.local) as SyncState,
+      aiTags: tagsStr ? JSON.parse(tagsStr) as string[] : [],
+      createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+    };
   }
 
   async fetchMediaForEntry(entryId: string): Promise<Media[]> {
@@ -283,20 +352,7 @@ export class AppDatabase {
     pred.equalTo('entryId', entryId);
     const rs = await this.store!.query(pred);
     const out: Media[] = [];
-    while (rs.goToNextRow()) {
-      const tagsStr = AppDatabase.optStr(rs, 'aiTags');
-      out.push({
-        id: rs.getString(rs.getColumnIndex('id')),
-        remoteId: AppDatabase.optStr(rs, 'remoteId'),
-        entryId: rs.getString(rs.getColumnIndex('entryId')),
-        typeRaw: rs.getString(rs.getColumnIndex('typeRaw')),
-        localFileName: AppDatabase.optStr(rs, 'localFileName'),
-        remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
-        thumbnailFileName: AppDatabase.optStr(rs, 'thumbnailFileName'),
-        aiTags: tagsStr ? JSON.parse(tagsStr) as string[] : [],
-        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
-      });
-    }
+    while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
     rs.close();
     return out;
   }
@@ -308,16 +364,17 @@ export class AppDatabase {
     pred.orderByDesc('createdAt');
     const rs = await this.store!.query(pred);
     const out: Media[] = [];
-    while (rs.goToNextRow()) {
-      out.push({
-        id: rs.getString(rs.getColumnIndex('id')),
-        entryId: rs.getString(rs.getColumnIndex('entryId')),
-        typeRaw: rs.getString(rs.getColumnIndex('typeRaw')),
-        localFileName: AppDatabase.optStr(rs, 'localFileName'),
-        aiTags: [],
-        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
-      });
-    }
+    while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
+    rs.close();
+    return out;
+  }
+
+  async fetchAllMedia(): Promise<Media[]> {
+    const pred = new relationalStore.RdbPredicates('media');
+    pred.orderByDesc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: Media[] = [];
+    while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
     rs.close();
     return out;
   }
@@ -477,6 +534,233 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+  }
+
+  // —— Comment（家人合奏）——
+  async insertComment(c: Comment): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: c.id, remoteId: c.remoteId ?? null, entryId: c.entryId, authorRole: c.authorRole,
+      text: c.text ?? null, voiceFileName: c.voiceFileName ?? null, remoteURL: c.remoteURL ?? null,
+      voiceDuration: c.voiceDuration, voiceWaveform: JSON.stringify(c.voiceWaveform),
+      syncState: c.syncState, createdAt: c.createdAt
+    };
+    await this.store!.insert('comment', v);
+  }
+
+  async fetchCommentsForEntry(entryId: string): Promise<Comment[]> {
+    const pred = new relationalStore.RdbPredicates('comment');
+    pred.equalTo('entryId', entryId);
+    pred.orderByAsc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: Comment[] = [];
+    while (rs.goToNextRow()) {
+      const wf = AppDatabase.optStr(rs, 'voiceWaveform');
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        entryId: rs.getString(rs.getColumnIndex('entryId')),
+        authorRole: rs.getString(rs.getColumnIndex('authorRole')),
+        text: AppDatabase.optStr(rs, 'text'),
+        voiceFileName: AppDatabase.optStr(rs, 'voiceFileName'),
+        remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
+        voiceDuration: AppDatabase.optNum(rs, 'voiceDuration') ?? 0,
+        voiceWaveform: wf ? JSON.parse(wf) as number[] : [],
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— VoiceMemo（成长之声）——
+  async insertVoiceMemo(m: VoiceMemo): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: m.id, remoteId: m.remoteId ?? null, kindRaw: m.kindRaw, localFileName: m.localFileName ?? null,
+      remoteURL: m.remoteURL ?? null, transcript: m.transcript ?? null, ageYears: m.ageYears ?? null,
+      recordedAt: m.recordedAt, durationSeconds: m.durationSeconds ?? null,
+      syncState: m.syncState, createdAt: m.createdAt
+    };
+    await this.store!.insert('voice_memo', v);
+  }
+
+  async fetchVoiceMemos(): Promise<VoiceMemo[]> {
+    const pred = new relationalStore.RdbPredicates('voice_memo');
+    pred.orderByDesc('recordedAt');
+    const rs = await this.store!.query(pred);
+    const out: VoiceMemo[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        kindRaw: rs.getString(rs.getColumnIndex('kindRaw')),
+        localFileName: AppDatabase.optStr(rs, 'localFileName'),
+        remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
+        transcript: AppDatabase.optStr(rs, 'transcript'),
+        ageYears: AppDatabase.optNum(rs, 'ageYears'),
+        recordedAt: rs.getLong(rs.getColumnIndex('recordedAt')),
+        durationSeconds: AppDatabase.optNum(rs, 'durationSeconds'),
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— FirstTime（人生第一次）——
+  async insertFirstTime(f: FirstTime): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: f.id, remoteId: f.remoteId ?? null, what: f.what, detectedByAI: f.detectedByAI ? 1 : 0,
+      confirmedByParent: f.confirmedByParent ? 1 : 0, ceremonyPlayed: f.ceremonyPlayed ? 1 : 0,
+      happenedAt: f.happenedAt, entryId: f.entryId ?? null, syncState: f.syncState, createdAt: f.createdAt
+    };
+    await this.store!.insert('first_time', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+  }
+
+  async fetchFirstTimes(): Promise<FirstTime[]> {
+    const pred = new relationalStore.RdbPredicates('first_time');
+    pred.orderByDesc('happenedAt');
+    const rs = await this.store!.query(pred);
+    const out: FirstTime[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        what: rs.getString(rs.getColumnIndex('what')),
+        detectedByAI: rs.getLong(rs.getColumnIndex('detectedByAI')) === 1,
+        confirmedByParent: rs.getLong(rs.getColumnIndex('confirmedByParent')) === 1,
+        ceremonyPlayed: rs.getLong(rs.getColumnIndex('ceremonyPlayed')) === 1,
+        happenedAt: rs.getLong(rs.getColumnIndex('happenedAt')),
+        entryId: AppDatabase.optStr(rs, 'entryId'),
+        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— GrowthMovie（年度成长电影）——
+  async upsertGrowthMovie(g: GrowthMovie): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: g.id, remoteId: g.remoteId ?? null, year: g.year, remoteURL: g.remoteURL ?? null,
+      status: g.status, narrationScript: g.narrationScript ?? null, createdAt: g.createdAt
+    };
+    await this.store!.insert('growth_movie', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+  }
+
+  async fetchGrowthMovies(): Promise<GrowthMovie[]> {
+    const pred = new relationalStore.RdbPredicates('growth_movie');
+    pred.orderByDesc('year');
+    const rs = await this.store!.query(pred);
+    const out: GrowthMovie[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        remoteId: AppDatabase.optStr(rs, 'remoteId'),
+        year: rs.getLong(rs.getColumnIndex('year')),
+        remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
+        status: rs.getString(rs.getColumnIndex('status')),
+        narrationScript: AppDatabase.optStr(rs, 'narrationScript'),
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— PendingDeletion（待同步删除队列）——
+  async enqueueDeletion(d: PendingDeletion): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: d.id, collection: d.collection, remoteId: d.remoteId, createdAt: d.createdAt
+    };
+    await this.store!.insert('pending_deletion', v);
+  }
+
+  async fetchPendingDeletions(): Promise<PendingDeletion[]> {
+    const pred = new relationalStore.RdbPredicates('pending_deletion');
+    pred.orderByAsc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: PendingDeletion[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        collection: rs.getString(rs.getColumnIndex('collection')),
+        remoteId: rs.getString(rs.getColumnIndex('remoteId')),
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  async dequeueDeletion(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('pending_deletion');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  // —— FeedEvent（家庭动态）——
+  async insertFeedEvent(f: FeedEvent): Promise<void> {
+    const v: relationalStore.ValuesBucket = {
+      id: f.id, kind: f.kind, actorRole: f.actorRole, summary: f.summary,
+      targetLocalId: f.targetLocalId ?? null, happenedAt: f.happenedAt
+    };
+    await this.store!.insert('feed_event', v);
+  }
+
+  async fetchFeedEvents(limit: number = 100): Promise<FeedEvent[]> {
+    const pred = new relationalStore.RdbPredicates('feed_event');
+    pred.orderByDesc('happenedAt');
+    pred.limitAs(limit);
+    const rs = await this.store!.query(pred);
+    const out: FeedEvent[] = [];
+    while (rs.goToNextRow()) {
+      out.push({
+        id: rs.getString(rs.getColumnIndex('id')),
+        kind: rs.getString(rs.getColumnIndex('kind')),
+        actorRole: rs.getString(rs.getColumnIndex('actorRole')),
+        summary: rs.getString(rs.getColumnIndex('summary')),
+        targetLocalId: AppDatabase.optStr(rs, 'targetLocalId'),
+        happenedAt: rs.getLong(rs.getColumnIndex('happenedAt')),
+        syncState: SyncState.synced,
+        createdAt: rs.getLong(rs.getColumnIndex('happenedAt'))
+      });
+    }
+    rs.close();
+    return out;
+  }
+
+  // —— 通用：更新 Entry 任意字段 / 删除 ——
+  async updateEntryFields(id: string, fields: relationalStore.ValuesBucket): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('entry');
+    pred.equalTo('id', id);
+    await this.store!.update(fields, pred);
+  }
+
+  async deleteEntryHard(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('entry');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async updateMilestoneFields(id: string, fields: relationalStore.ValuesBucket): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('milestone');
+    pred.equalTo('id', id);
+    await this.store!.update(fields, pred);
+  }
+
+  async deleteCapsule(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('time_capsule');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async deleteHealth(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('health_record');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
   }
 
   get raw(): relationalStore.RdbStore | null {

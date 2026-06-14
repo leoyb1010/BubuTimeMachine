@@ -34,7 +34,7 @@ export enum FamilyRole {
 
 export const ALL_FAMILY_ROLES: FamilyRole[] = [FamilyRole.papa, FamilyRole.mama, FamilyRole.grandma];
 
-// 心情标签（与 iOS Mood 一致；emoji 对照见 moodEmoji）
+// 心情标签（与 iOS Mood 一致，20 种；emoji 对照见 moodEmoji）
 export enum Mood {
   happy = '开心',
   calm = '平静',
@@ -53,7 +53,121 @@ export enum Mood {
   cuddly = '黏人',
   sick = '不舒服',
   playful = '爱玩',
-  focused = '认真'
+  focused = '认真',
+  shy = '害羞',
+  love = '被爱'
+}
+
+export const ALL_MOODS: Mood[] = [
+  Mood.happy, Mood.calm, Mood.naughty, Mood.proud, Mood.curious, Mood.sleepy,
+  Mood.grievance, Mood.milestone, Mood.eating, Mood.laughing, Mood.crying, Mood.angry,
+  Mood.surprised, Mood.brave, Mood.cuddly, Mood.sick, Mood.playful, Mood.focused,
+  Mood.shy, Mood.love
+];
+
+export function moodEmoji(m: Mood | undefined): string {
+  switch (m) {
+    case Mood.happy: return '😄';
+    case Mood.calm: return '😌';
+    case Mood.naughty: return '😜';
+    case Mood.proud: return '🥹';
+    case Mood.curious: return '🤔';
+    case Mood.sleepy: return '😴';
+    case Mood.grievance: return '🥺';
+    case Mood.milestone: return '🌟';
+    case Mood.eating: return '😋';
+    case Mood.laughing: return '🤣';
+    case Mood.crying: return '😭';
+    case Mood.angry: return '😤';
+    case Mood.surprised: return '😮';
+    case Mood.brave: return '💪';
+    case Mood.cuddly: return '🤗';
+    case Mood.sick: return '🤒';
+    case Mood.playful: return '🧸';
+    case Mood.focused: return '👀';
+    case Mood.shy: return '🫣';
+    case Mood.love: return '💗';
+    default: return '📝';
+  }
+}
+
+// 关系称谓（成员系统，对照 iOS Relation）
+export enum Relation {
+  papa = '爸爸',
+  mama = '妈妈',
+  grandma = '姥姥',
+  grandpa = '姥爷',
+  yeye = '爷爷',
+  nainai = '奶奶',
+  other = '家人'
+}
+
+export const ALL_RELATIONS: Relation[] = [
+  Relation.papa, Relation.mama, Relation.grandma, Relation.grandpa,
+  Relation.yeye, Relation.nainai, Relation.other
+];
+
+export function relationDefaultEmoji(r: Relation): string {
+  switch (r) {
+    case Relation.papa: return '👨';
+    case Relation.mama: return '👩';
+    case Relation.grandma: return '👵';
+    case Relation.grandpa: return '👴';
+    case Relation.yeye: return '👴';
+    case Relation.nainai: return '👵';
+    case Relation.other: return '🙂';
+    default: return '🙂';
+  }
+}
+
+export function relationDefaultColorHex(r: Relation): string {
+  switch (r) {
+    case Relation.papa: return '#5B8DEF';
+    case Relation.mama: return '#F28C9E';
+    case Relation.grandma: return '#F2B705';
+    case Relation.grandpa: return '#7BB662';
+    case Relation.yeye: return '#8E7CC3';
+    case Relation.nainai: return '#E08D79';
+    case Relation.other: return '#9AA0A6';
+    default: return '#9AA0A6';
+  }
+}
+
+// 家庭动态类型（对照 iOS FeedEventKind）
+export enum FeedEventKind {
+  entryCreated = 'entryCreated',
+  entryArchived = 'entryArchived',
+  commentAdded = 'commentAdded',
+  voiceAdded = 'voiceAdded',
+  milestoneLit = 'milestoneLit',
+  healthRecorded = 'healthRecorded',
+  firstTimeConfirmed = 'firstTimeConfirmed'
+}
+
+export function feedEventTitle(k: FeedEventKind): string {
+  switch (k) {
+    case FeedEventKind.entryCreated: return '瞬间';
+    case FeedEventKind.entryArchived: return '删除';
+    case FeedEventKind.commentAdded: return '评论';
+    case FeedEventKind.voiceAdded: return '语音';
+    case FeedEventKind.milestoneLit: return '里程碑';
+    case FeedEventKind.healthRecorded: return '健康';
+    case FeedEventKind.firstTimeConfirmed: return '第一次';
+    default: return '动态';
+  }
+}
+
+export function feedEventEmoji(k: FeedEventKind): string {
+  switch (k) {
+    case FeedEventKind.entryCreated: return '💖';
+    case FeedEventKind.entryArchived: return '🗑️';
+    case FeedEventKind.commentAdded: return '💬';
+    case FeedEventKind.voiceAdded: return '🎙️';
+    case FeedEventKind.milestoneLit: return '⭐';
+    case FeedEventKind.healthRecorded: return '🩺';
+    case FeedEventKind.firstTimeConfirmed: return '✨';
+    default: return '💖';
+  }
 }
 
 // 健康记录类型（对照 iOS HealthRecordKind）
@@ -97,29 +211,5 @@ export function healthKindMeta(k: HealthRecordKind): HealthKindMeta {
       return { title: '体检护理', emoji: '🩺', placeholder: '如：身高体重、疫苗、牙齿护理', heroSubtitle: '记录身高、体重、疫苗、牙齿和医生建议。' };
     default:
       return { title: '记录', emoji: '📝', placeholder: '', heroSubtitle: '' };
-  }
-}
-
-export function moodEmoji(m: Mood | undefined): string {
-  switch (m) {
-    case Mood.happy: return '😄';
-    case Mood.calm: return '😌';
-    case Mood.naughty: return '😜';
-    case Mood.proud: return '😎';
-    case Mood.curious: return '🤔';
-    case Mood.sleepy: return '😴';
-    case Mood.grievance: return '🥺';
-    case Mood.milestone: return '🌟';
-    case Mood.eating: return '😋';
-    case Mood.laughing: return '🤣';
-    case Mood.crying: return '😭';
-    case Mood.angry: return '😣';
-    case Mood.surprised: return '😲';
-    case Mood.brave: return '💪';
-    case Mood.cuddly: return '🤗';
-    case Mood.sick: return '🤒';
-    case Mood.playful: return '🤸';
-    case Mood.focused: return '🧐';
-    default: return '📝';
   }
 }

@@ -2,7 +2,7 @@
 // ArkTS 用 interface 描述行结构；持久化由 AppDatabase(RelationalStore) 负责。
 // 字段命名与 iOS / 服务端 DTO 对齐，保证同步兼容。
 
-import { SyncState, MediaType } from './Enums';
+import { SyncState } from './Enums';
 
 // Entry：核心聚合根（一次「记录此刻」= 一个 Entry）
 export interface Entry {
@@ -23,7 +23,7 @@ export interface Entry {
   createdAt: number;
 }
 
-// Media：照片/视频/音频
+// Media：照片/视频/音频（对照 iOS Media，含时长/尺寸/上传进度）
 export interface Media {
   id: string;
   remoteId?: string;
@@ -32,6 +32,11 @@ export interface Media {
   localFileName?: string;
   remoteURL?: string;
   thumbnailFileName?: string;
+  durationSeconds?: number;   // 视频/音频时长
+  width?: number;
+  height?: number;
+  uploadProgress: number;     // 0...1
+  syncState: SyncState;
   aiTags: string[];
   createdAt: number;
 }
@@ -118,7 +123,7 @@ export interface HealthRecord {
   createdAt: number;
 }
 
-// VoiceNote：语音记录
+// VoiceNote：语音记录（附在 Entry 上）
 export interface VoiceNote {
   id: string;
   remoteId?: string;
@@ -126,18 +131,44 @@ export interface VoiceNote {
   localFileName?: string;
   remoteURL?: string;
   durationSeconds: number;
+  transcript?: string;
   authorRole: string;
   waveformSamples: number[];
+  syncState: SyncState;
   createdAt: number;
 }
 
-// Comment：家人合奏多视角补充
+// VoiceMemo：成长之声（按年龄横切归档她的声音 / 家人对她说的话）
+export interface VoiceMemo {
+  id: string;
+  remoteId?: string;
+  kindRaw: string;            // childVoice / familyVoice
+  localFileName?: string;
+  remoteURL?: string;
+  transcript?: string;
+  ageYears?: number;
+  recordedAt: number;
+  durationSeconds?: number;
+  syncState: SyncState;
+  createdAt: number;
+}
+
+export enum VoiceMemoKind {
+  childVoice = 'childVoice',
+  familyVoice = 'familyVoice'
+}
+
+// Comment：家人合奏多视角补充（可文字可语音）
 export interface Comment {
   id: string;
   remoteId?: string;
   entryId: string;
   authorRole: string;
-  text: string;
+  text?: string;
+  voiceFileName?: string;
+  remoteURL?: string;
+  voiceDuration: number;
+  voiceWaveform: number[];
   syncState: SyncState;
   createdAt: number;
 }
@@ -150,21 +181,25 @@ export interface FeedEvent {
   summary: string;
   targetLocalId?: string;
   happenedAt: number;
+  syncState: SyncState;
+  createdAt: number;
 }
 
-// FirstTime：第一次
+// FirstTime：人生第一次
 export interface FirstTime {
   id: string;
   remoteId?: string;
   what: string;
   detectedByAI: boolean;
   confirmedByParent: boolean;
+  ceremonyPlayed: boolean;
   happenedAt: number;
   entryId?: string;
+  syncState: SyncState;
   createdAt: number;
 }
 
-// GrowthMeasurement：成长测量（身高/体重）
+// GrowthMeasurement：成长测量（身高/体重/头围，结构化）
 export interface GrowthMeasurement {
   id: string;
   remoteId?: string;
@@ -172,19 +207,53 @@ export interface GrowthMeasurement {
   heightCm?: number;
   weightKg?: number;
   headCircumferenceCm?: number;
+  note?: string;
+  source: string;             // manual / ai / checkup
   syncState: SyncState;
   createdAt: number;
+  updatedAt: number;
 }
 
-// VaccineRecord：疫苗
+// VaccineRecord：疫苗接种记录（结构化）
 export interface VaccineRecord {
   id: string;
   remoteId?: string;
-  name: string;
+  doseId?: string;            // 对应 VaccineDose.schedule 的剂次 id
+  vaccineName: string;
   doseLabel?: string;
-  scheduledAt?: number;
-  administeredAt?: number;
+  injectedAt: number;
+  hospital?: string;
+  injectionSite?: string;
+  reaction?: string;
   note?: string;
+  source: string;             // manual / ai / migration
   syncState: SyncState;
   createdAt: number;
+  updatedAt: number;
+}
+
+// GrowthMovie：年度成长电影
+export interface GrowthMovie {
+  id: string;
+  remoteId?: string;
+  year: number;               // 对应哪一岁
+  remoteURL?: string;
+  status: string;             // pending / generating / ready / failed
+  narrationScript?: string;
+  createdAt: number;
+}
+
+// PendingDeletion：待同步删除队列
+export interface PendingDeletion {
+  id: string;
+  collection: string;         // PocketBase collection 名
+  remoteId: string;
+  createdAt: number;
+}
+
+// MilestoneTemplate：里程碑预设模板
+export interface MilestoneTemplate {
+  title: string;
+  category: string;
+  emoji: string;
 }

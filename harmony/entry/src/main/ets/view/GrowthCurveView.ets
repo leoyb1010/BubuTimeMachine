@@ -145,8 +145,10 @@ export struct GrowthCurveView {
       measuredAt: now,
       heightCm: isNaN(h) ? undefined : h,
       weightKg: isNaN(w) ? undefined : w,
+      source: 'manual',
       syncState: SyncState.local,
-      createdAt: now
+      createdAt: now,
+      updatedAt: now
     };
     await AppDatabase.shared.insertGrowth(g);
     this.showAdd = false;

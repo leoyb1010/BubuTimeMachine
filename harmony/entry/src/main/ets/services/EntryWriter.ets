@@ -66,6 +66,8 @@ export class EntryWriter {
         entryId: id,
         typeRaw: MediaType.photo,
         localFileName: photoFileName,
+        uploadProgress: 0,
+        syncState: SyncState.local,
         aiTags: [],
         createdAt: now
       };
@@ -80,6 +82,7 @@ export class EntryWriter {
         durationSeconds: voiceDuration ?? 0,
         authorRole: role,
         waveformSamples: [],
+        syncState: SyncState.local,
         createdAt: now
       };
       await AppDatabase.shared.insertVoiceNote(voice);
