@@ -93,8 +93,10 @@ export struct BubuStoryView {
   private chapterCard(ch: StoryChapter, index: number) {
     Row({ space: 14 }) {
       // 倾斜小图（对照 iOS rotationEffect ±3°）
-      dreamPhoto(ch.hue, 64, 12, ch.emoji)
-        .rotate({ angle: index % 2 === 0 ? -3 : 3 })
+      Stack() {
+        dreamPhoto(ch.hue, 64, 12, ch.emoji)
+      }
+      .rotate({ angle: index % 2 === 0 ? -3 : 3 })
       Column({ space: 3 }) {
         Text(`${chapterNoText(ch)}${ch.ageText.length === 0 ? '' : ` · ${ch.ageText}`}`)
           .fontSize(11.5).fontWeight(FontWeight.Bold).fontColor(BubuColor.deepRose)

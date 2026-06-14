@@ -5,6 +5,8 @@ import { FirstPersonDiaryView } from './FirstPersonDiaryView';
 import { GrowthMovieView } from './GrowthMovieView';
 import { FamilyEnsembleView } from './FamilyEnsembleView';
 import { GrowthReportView } from './GrowthReportView';
+import { BubuStoryView } from './BubuStoryView';
+import { CapsuleView } from './CapsuleView';
 
 // MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
 // 自托管 AI 的创作中心：成长绘本 / 未来胶囊 / 第一人称日记 / 成长电影 / 家人合奏 / 成长报告。
@@ -42,9 +44,35 @@ export struct AIStudioView {
       FamilyEnsembleView({ onBack: (): void => { this.route = ''; } })
     } else if (this.route === 'report') {
       GrowthReportView({ onBack: (): void => { this.route = ''; } })
+    } else if (this.route === 'story') {
+      // 成长绘本（对照 iOS BubuStoryView 翻页绘本）
+      Column() {
+        this.subBackBar('布布的成长绘本')
+        BubuStoryView()
+      }.width('100%').height('100%').backgroundColor(BubuColor.background)
+    } else if (this.route === 'capsule') {
+      // 未来胶囊（对照 iOS CapsuleHomeView，收进魔法屋）
+      Column() {
+        this.subBackBar('未来胶囊')
+        CapsuleView()
+      }.width('100%').height('100%').backgroundColor(BubuColor.background)
     } else {
       this.homePage()
     }
+  }
+
+  // 子页返回栏（对照 iOS navigationTitle + 返回）。
+  @Builder
+  subBackBar(title: string) {
+    Row({ space: 8 }) {
+      Text('‹ 返回').fontSize(BubuFont.body).fontColor(BubuColor.primary)
+        .onClick(() => { this.route = ''; })
+      Blank()
+      Text(title).fontSize(BubuFont.body).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+      Blank()
+      Text('   ').fontSize(BubuFont.body)
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 })
   }
 
   @Builder
@@ -143,6 +171,7 @@ export struct AIStudioView {
     })
     .borderRadius(BubuRadius.card)
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
+    .onClick(() => { this.route = 'story'; })
   }
 
   // 未来胶囊卡（lav→sky 信封；对照 iOS capsuleCard）。
@@ -182,6 +211,7 @@ export struct AIStudioView {
     .borderRadius(24)
     .border({ width: 1, color: '#99FFFFFF' })
     .shadow({ radius: 12, color: '#38DCC9FF', offsetY: 6 })
+    .onClick(() => { this.route = 'capsule'; })
   }
 
   // 创作能力 2×2 宫格（对照 iOS creativeGrid 的 LazyVGrid）。

@@ -430,7 +430,12 @@ export struct NaturalCaptureReviewSheet {
     const trimmed = raw.trim();
     const fields: Record<string, JSONValue> = item.fields;
     if (trimmed.length === 0) {
-      delete fields[key];
+      // ArkTS 不支持 delete：重建一个不含该 key 的 record（语义同 iOS 的「移除字段」）。
+      const rebuilt: Record<string, JSONValue> = {};
+      for (const k of Object.keys(fields)) {
+        if (k !== key) rebuilt[k] = fields[k];
+      }
+      item.fields = rebuilt;
     } else {
       const num = Number(trimmed);
       fields[key] = Number.isNaN(num) ? jvString(trimmed) : jvNumber(num);

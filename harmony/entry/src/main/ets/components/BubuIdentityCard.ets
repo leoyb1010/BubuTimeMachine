@@ -61,13 +61,19 @@ export struct BubuIdentityCard {
   }
 
   build() {
-    Stack({ alignment: Alignment.TopEnd }) {
+    Stack() {
       // 正/背面叠放（iOS ZStack + opacity 切换；背面预旋 180°）。
       Stack() {
-        this.frontFace()
-          .opacity(this.flipped ? 0 : 1)
-        this.backFace()
-          .opacity(this.flipped ? 1 : 0)
+        Column() {
+          this.frontFace()
+        }
+        .width('100%')
+        .opacity(this.flipped ? 0 : 1)
+        Column() {
+          this.backFace()
+        }
+        .width('100%')
+        .opacity(this.flipped ? 1 : 0)
       }
       .width('100%')
 
@@ -78,6 +84,7 @@ export struct BubuIdentityCard {
         .fill('#2EFFFFFF')
         .offset({ x: 28, y: 36 })
     }
+    .alignContent(Alignment.TopEnd)
     .width('100%')
     .clip(true)
     // 奶油马卡龙渐变（peach → pink → lav → white）。
@@ -178,7 +185,7 @@ export struct BubuIdentityCard {
 
   @Builder
   avatarBlock() {
-    Stack({ alignment: Alignment.BottomEnd }) {
+    Stack() {
       Stack() {
         if (this.avatarSrc().length > 0) {
           Image(this.avatarSrc())
@@ -200,6 +207,7 @@ export struct BubuIdentityCard {
         .backgroundColor(BubuColor.primary).borderRadius(100)
         .offset({ x: 6, y: 6 })
     }
+    .alignContent(Alignment.BottomEnd)
     .onClick(() => { this.flip(); })
   }
 

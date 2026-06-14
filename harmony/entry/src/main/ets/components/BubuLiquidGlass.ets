@@ -29,3 +29,20 @@ export function bubuGlassStack() {
   .backgroundBlurStyle(BlurStyle.Thin)
   .border({ width: 1, color: '#76FFFFFF' })
 }
+
+// 可跨文件复用的玻璃容器（@Extend 在本 ArkUI 版本不能跨文件链用，故另提供 @Component 包裹）。
+// 用法：BubuGlassPanel() { 内容 }
+@Component
+export struct BubuGlassPanel {
+  @BuilderParam content: () => void;
+  thick: boolean = false;
+
+  build() {
+    Column() {
+      this.content()
+    }
+    .borderRadius(this.thick ? 32 : BubuRadius.card)
+    .backgroundBlurStyle(this.thick ? BlurStyle.Regular : BlurStyle.Thin)
+    .border({ width: 1, color: '#76FFFFFF' })
+  }
+}

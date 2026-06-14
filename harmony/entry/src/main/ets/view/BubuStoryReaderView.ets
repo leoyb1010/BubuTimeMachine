@@ -92,8 +92,10 @@ export struct BubuStoryReaderView {
     Scroll() {
       Column() {
         // 大图（梦幻照片占位，对照 iOS BubuDreamPhoto 150pt）
-        dreamPhoto(ch.hue, 150, 30, ch.emoji)
-          .margin({ top: 14, bottom: 22 })
+        Stack() {
+          dreamPhoto(ch.hue, 150, 30, ch.emoji)
+        }
+        .margin({ top: 14, bottom: 22 })
 
         Text(`${chapterNoText(ch)}${ch.ageText.length === 0 ? '' : ` · ${ch.ageText}`}`)
           .fontSize(13).fontWeight(FontWeight.Bolder).fontColor('#E6FFFFFF')

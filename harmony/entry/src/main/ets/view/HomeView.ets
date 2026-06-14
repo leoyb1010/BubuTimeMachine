@@ -5,7 +5,7 @@ import { ServerConfig } from '../services/ServerConfig';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor, BubuFont, BubuRadius, BubuShadow } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
-import { IdentityCard } from './IdentityCard';
+import { BubuIdentityCard } from '../components/BubuIdentityCard';
 import { ChildProfileView } from './ChildProfileView';
 import { HealthHomeView } from './HealthHomeView';
 import { SettingsView } from './SettingsView';
@@ -281,7 +281,7 @@ export struct HomeView {
   @Builder
   identityCardTop() {
     if (this.profile) {
-      IdentityCard({ profile: this.profile! })
+      BubuIdentityCard({ profile: this.profile! })
       Text('编辑布布资料')
         .fontSize(12)
         .fontColor(BubuColor.primary)
