@@ -33,13 +33,17 @@ struct BubuProvider: TimelineProvider {
 
 // MARK: - 配色（与主 App 同源暖色，不引入 App 的 BubuTheme 以保持 widget 轻量）
 private enum WidgetPalette {
-    static let primary = Color(red: 0.95, green: 0.55, blue: 0.62)     // 珊瑚粉
-    static let roseDeep = Color(red: 0.73, green: 0.29, blue: 0.39)
-    static let honey = Color(red: 0.96, green: 0.62, blue: 0.20)
-    static let mint = Color(red: 0.37, green: 0.66, blue: 0.58)
-    static let warmBrown = Color(red: 0.36, green: 0.28, blue: 0.24)
-    static let cream = Color(red: 0.99, green: 0.96, blue: 0.92)
-    static let secondary = Color(red: 0.55, green: 0.50, blue: 0.47)
+    // 奶油马卡龙（与主 App BubuTheme 对齐）
+    static let primary = Color(red: 0.949, green: 0.471, blue: 0.624)  // rose #F2789F
+    static let roseDeep = Color(red: 0.882, green: 0.361, blue: 0.525) // deeprose #E15C86
+    static let peach = Color(red: 1.000, green: 0.827, blue: 0.745)    // #FFD3BE
+    static let pink = Color(red: 1.000, green: 0.761, blue: 0.839)     // #FFC2D6
+    static let lav = Color(red: 0.863, green: 0.788, blue: 1.000)      // #DCC9FF
+    static let honey = Color(red: 1.000, green: 0.886, blue: 0.627)    // butter
+    static let mint = Color(red: 0.749, green: 0.922, blue: 0.827)
+    static let warmBrown = Color(red: 0.353, green: 0.239, blue: 0.204) // ink #5A3D34
+    static let cream = Color(red: 1.000, green: 0.969, blue: 0.945)    // #FFF7F1
+    static let secondary = Color(red: 0.663, green: 0.553, blue: 0.510) // ink2
 }
 
 // MARK: - 布布圆形头像（无头像时回退到吉祥物表情）
@@ -92,10 +96,12 @@ struct BubuAvatar: View {
 private extension View {
     func bubuWidgetBackground() -> some View {
         self.containerBackground(for: .widget) {
+            // 奶油马卡龙：peach → pink → lav 柔粉渐变（与 App 身份卡同源）
             LinearGradient(
-                colors: [Color(red: 1.0, green: 0.98, blue: 0.96),
-                         Color(red: 1.0, green: 0.94, blue: 0.95),
-                         Color(red: 0.99, green: 0.91, blue: 0.93)],
+                colors: [WidgetPalette.peach.opacity(0.55),
+                         WidgetPalette.pink.opacity(0.45),
+                         WidgetPalette.lav.opacity(0.45),
+                         WidgetPalette.cream],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
         }

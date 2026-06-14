@@ -78,7 +78,16 @@ struct SettingsView: View {
                 syncBadge
             }
             .padding(16)
-            .background(env.themedCard, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .background(
+                LinearGradient(colors: [BubuTheme.Color.peach.opacity(0.40),
+                                        BubuTheme.Color.pink.opacity(0.32),
+                                        BubuTheme.Color.lav.opacity(0.32)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
+            )
+            .overlay(alignment: .topTrailing) {
+                BubuSparkle(size: 12, color: .white.opacity(0.9)).padding(14)
+            }
             .bubuCardShadow()
         }
         .buttonStyle(.plain)
