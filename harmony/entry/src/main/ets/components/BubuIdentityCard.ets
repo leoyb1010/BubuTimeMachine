@@ -185,7 +185,7 @@ export struct BubuIdentityCard {
             .objectFit(ImageFit.Cover)
             .width('100%').height('100%')
         } else {
-          BubuMascotBadge({ size: 82, expression: BubuExpression.happy })
+          BubuMascotBadge({ badgeSize: 82, expression: BubuExpression.happy })
         }
       }
       .width(90).height(96)

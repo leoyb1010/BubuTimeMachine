@@ -67,7 +67,7 @@ export struct MediaThumbnail {
   }
 
   build() {
-    Stack({ alignment: Alignment.BottomStart }) {
+    Stack() {
       if (this.imageSrc().length > 0) {
         Image(this.imageSrc())
           .objectFit(ImageFit.Cover)
@@ -95,6 +95,7 @@ export struct MediaThumbnail {
           .margin(8)
       }
     }
+    .alignContent(Alignment.BottomStart)
     .clip(true)
     .borderRadius(this.cornerRadius)
   }

@@ -23,9 +23,9 @@ export struct MediaGalleryViewer {
   }
 
   build() {
-    Stack({ alignment: Alignment.TopEnd }) {
+    Stack() {
       // 底层：黑底 + 媒体分页
-      Stack({ alignment: Alignment.Center }) {
+      Stack() {
         if (this.mediaItems.length === 0) {
           // iOS ContentUnavailableView
           Column({ space: 12 }) {
@@ -48,6 +48,7 @@ export struct MediaGalleryViewer {
           .onChange((index: number) => { this.selectedIndex = index; })
         }
       }
+      .alignContent(Alignment.Center)
       .width('100%')
       .height('100%')
       .backgroundColor(Color.Black)
@@ -95,6 +96,7 @@ export struct MediaGalleryViewer {
       .width('100%')
       .height('100%')
     }
+    .alignContent(Alignment.TopEnd)
     .width('100%')
     .height('100%')
   }

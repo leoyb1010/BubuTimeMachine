@@ -84,7 +84,7 @@ function expressionEmoji(e: BubuExpression): string {
 // 显示单张布布表情贴纸（绝不显示整张合集）。expression 优先；否则按 mood 自动选；都没有则默认开心。
 @Component
 export struct BubuMascotBadge {
-  @Prop size: number = 54;
+  @Prop badgeSize: number = 54;
   @Prop expression?: BubuExpression;
   @Prop mood?: Mood;
 
@@ -98,13 +98,13 @@ export struct BubuMascotBadge {
     // 故以 emoji 兜底渲染（按表情语义）。资源就绪后可改为 Image($r('app.media.<assetName>'))。
     Stack() {
       Text(expressionEmoji(this.resolved()))
-        .fontSize(this.size * 0.6)
+        .fontSize(this.badgeSize * 0.6)
         .textAlign(TextAlign.Center)
     }
-    .width(this.size)
-    .height(this.size)
+    .width(this.badgeSize)
+    .height(this.badgeSize)
     .backgroundColor(BubuColor.cream)
-    .borderRadius(this.size * 0.24)
+    .borderRadius(this.badgeSize * 0.24)
     // logo 质感白描边
     .border({ width: 2, color: '#E6FFFFFF' })
     .shadow({ radius: 8, color: '#2EF28C9E', offsetY: 3 })
