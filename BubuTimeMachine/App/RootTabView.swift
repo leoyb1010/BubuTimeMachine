@@ -20,6 +20,7 @@ struct RootTabView: View {
 
                 NavigationStack {
                     TimelineView()
+                        .safeAreaPadding(.bottom, 84)
                 }
                 .tabItem { Label("时光", systemImage: "clock.fill") }
                 .tag(1)
@@ -27,6 +28,7 @@ struct RootTabView: View {
 
                 NavigationStack {
                     MilestonesHomeView()
+                        .safeAreaPadding(.bottom, 84)
                 }
                 .tabItem { Label("里程碑", systemImage: "star.fill") }
                 .tag(2)
@@ -34,6 +36,7 @@ struct RootTabView: View {
 
                 NavigationStack {
                     AIStudioHomeView()
+                        .safeAreaPadding(.bottom, 84)
                 }
                 .tabItem { Label("布布的故事", systemImage: "wand.and.stars.inverse") }
                 .tag(3)
@@ -41,6 +44,7 @@ struct RootTabView: View {
 
                 NavigationStack {
                     CapsuleHomeView()
+                        .safeAreaPadding(.bottom, 84)
                 }
                 .tabItem { Label("时间胶囊", systemImage: "envelope.fill") }
                 .tag(4)
