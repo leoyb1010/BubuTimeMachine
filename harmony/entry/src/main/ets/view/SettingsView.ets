@@ -8,6 +8,11 @@ import { AccountView } from './AccountView';
 import { WhatsNewView } from './WhatsNewView';
 import { ChildProfileView } from './ChildProfileView';
 import { HealthHomeView } from './HealthHomeView';
+import { VoiceArchiveView } from './VoiceArchiveView';
+import { ThemeSettingsView } from './ThemeSettingsView';
+import { YearbookView } from './YearbookView';
+import { ExportView } from './ExportView';
+import { AdvancedSettingsView } from './AdvancedSettingsView';
 import { promptAction } from '@kit.ArkUI';
 
 @Extend(Row)
@@ -34,6 +39,10 @@ export struct SettingsView {
   @State showProfile: boolean = false;
   @State showHealth: boolean = false;
   @State showAdvanced: boolean = false;
+  @State showVoiceArchive: boolean = false;
+  @State showTheme: boolean = false;
+  @State showYearbook: boolean = false;
+  @State showExport: boolean = false;
   @State statusText: string = '';
 
   aboutToAppear(): void {
@@ -61,6 +70,14 @@ export struct SettingsView {
       this.healthPage()
     } else if (this.showAdvanced) {
       this.advancedPage()
+    } else if (this.showVoiceArchive) {
+      this.voiceArchivePage()
+    } else if (this.showTheme) {
+      this.themePage()
+    } else if (this.showYearbook) {
+      this.yearbookPage()
+    } else if (this.showExport) {
+      this.exportPage()
     } else {
       this.mainPage()
     }
@@ -235,6 +252,7 @@ export struct SettingsView {
 
         this.bubuGroup()
         this.familyGroup()
+        this.appearanceGroup()
         this.dataGroup()
         this.advancedGroup()
         this.aboutGroup()
@@ -257,13 +275,23 @@ export struct SettingsView {
 
   @Builder
   advancedPage() {
+    AdvancedSettingsView({ onClose: () => { this.showAdvanced = false; this.aboutToAppear(); } })
+  }
+
+  @Builder
+  voiceArchivePage() {
+    VoiceArchiveView({ onClose: () => { this.showVoiceArchive = false; } })
+  }
+
+  @Builder
+  themePage() {
     Column() {
       Row({ space: 12 }) {
         Button('返回')
           .backgroundColor('#F3F3F3')
           .fontColor(BubuColor.warmBrown)
-          .onClick(() => { this.showAdvanced = false; })
-        Text('服务器与 AI 配置')
+          .onClick(() => { this.showTheme = false; })
+        Text('主题与外观')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor(BubuColor.warmBrown)
@@ -271,70 +299,20 @@ export struct SettingsView {
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 12, bottom: 8 })
-
-      Scroll() {
-        Column({ space: 14 }) {
-          this.infoRow('远端服务器', '🏠', '已内置，与 iOS 1.2.0 一致', '正常')
-          Row() {
-            Text('地址').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            TextInput({ text: $$this.baseURL, placeholder: ServerConfig.baseURLPlaceholder }).layoutWeight(1).textAlign(TextAlign.End)
-          }.settingRow()
-          Row() {
-            Text('用户名/账号').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            TextInput({ text: $$this.email, placeholder: 'username@bubu.family' }).layoutWeight(1).textAlign(TextAlign.End)
-          }.settingRow()
-          Row() {
-            Text('密码').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            TextInput({ text: $$this.password, placeholder: '密码' }).type(InputType.Password).layoutWeight(1).textAlign(TextAlign.End)
-          }.settingRow()
-          Row() {
-            Text('当前身份').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            Select(ALL_FAMILY_ROLES.map((r): SelectOption => ({ value: r })))
-              .selected(this.roleIndex)
-              .value(ALL_FAMILY_ROLES[this.roleIndex])
-              .onSelect((i: number) => { this.roleIndex = i; })
-          }.settingRow()
-          Row() {
-            Text('布布名字').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            TextInput({ text: $$this.childName }).width(160).textAlign(TextAlign.End)
-          }.settingRow()
-
-          Text('AI 助手').fontSize(13).fontColor(BubuColor.secondaryText).width('100%').margin({ top: 8 })
-          Row() {
-            Text('启用 AI').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            Toggle({ type: ToggleType.Switch, isOn: this.aiEnabled })
-              .onChange((v: boolean) => { this.aiEnabled = v; })
-          }.settingRow()
-          Row() {
-            Text('AI 地址').fontSize(15).fontColor(BubuColor.warmBrown)
-            Blank()
-            TextInput({ text: $$this.aiBaseURL, placeholder: ServerConfig.aiBaseURLPlaceholder }).layoutWeight(1).textAlign(TextAlign.End)
-          }.settingRow()
-
-          Button('保存并立即同步')
-            .width('100%').backgroundColor(BubuColor.primary).margin({ top: 12 })
-            .onClick(() => { this.saveAndSync(); })
-
-          if (this.statusText.length > 0) {
-            Text(this.statusText)
-              .fontSize(12)
-              .fontColor(BubuColor.primary)
-              .width('100%')
-              .textAlign(TextAlign.Center)
-          }
-        }
-        .padding(16)
-        .width('100%')
-      }
-      .layoutWeight(1)
+      ThemeSettingsView()
+        .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(BubuColor.cream)
+  }
+
+  @Builder
+  yearbookPage() {
+    YearbookView({ onClose: () => { this.showYearbook = false; } })
+  }
+
+  @Builder
+  exportPage() {
+    ExportView({ onClose: () => { this.showExport = false; } })
   }
 
   @Builder
@@ -348,6 +326,7 @@ export struct SettingsView {
         .padding({ left: 6 })
       Column({ space: 0 }) {
         this.navRow('布布的档案', '👧', '生日、性别、血型、头像和首页背景', () => { this.showProfile = true; })
+        this.navRow('成长之声', '🎙️', '按一岁一岁收好布布的声音和家人寄语', () => { this.showVoiceArchive = true; })
         this.navRow('健康记录', '🩺', '餐食、零食、营养补充、睡眠和不舒服', () => { this.showHealth = true; })
       }
       .width('100%')
@@ -380,6 +359,26 @@ export struct SettingsView {
   }
 
   @Builder
+  appearanceGroup() {
+    Column({ space: 10 }) {
+      Text('外观')
+        .fontSize(13)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.secondaryText)
+        .width('100%')
+        .padding({ left: 6 })
+      Column({ space: 0 }) {
+        this.navRow('主题与外观', '🎨', '马卡龙主题配色与首页背景', () => { this.showTheme = true; })
+      }
+      .width('100%')
+      .padding({ top: 4, bottom: 4 })
+      .backgroundColor(BubuColor.card)
+      .borderRadius(20)
+    }
+    .width('100%')
+  }
+
+  @Builder
   dataGroup() {
     Column({ space: 10 }) {
       Text('数据')
@@ -390,6 +389,8 @@ export struct SettingsView {
         .padding({ left: 6 })
       Column({ space: 0 }) {
         this.infoRow('备份健康度', '🛡️', ServerConfig.shared.isConfigured ? '已连接家里的服务器' : '离线也能用，登录后自动同步', ServerConfig.shared.isConfigured ? '已配置' : '未登录')
+        this.navRow('做一本 PDF 年册', '📖', '把布布的一年做成可打印的书', () => { this.showYearbook = true; })
+        this.navRow('导出布布的全量档案', '💾', '网页 + 全部媒体，永久离线可读', () => { this.showExport = true; })
       }
       .width('100%')
       .padding({ top: 4, bottom: 4 })

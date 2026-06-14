@@ -165,7 +165,7 @@ export class ThumbnailProvider {
   private setCache(key: string, value: image.PixelMap): void {
     if (this.cache.size >= ThumbnailProvider.maxEntries) {
       // 粗略 LRU：删最早插入的一项。
-      const firstKey = this.cache.keys().next().value;
+      const firstKey: string | undefined = this.cache.keys().next().value as string | undefined;
       if (firstKey !== undefined) {
         const old = this.cache.get(firstKey);
         this.cache.delete(firstKey);

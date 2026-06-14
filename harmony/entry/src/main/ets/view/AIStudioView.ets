@@ -1,234 +1,248 @@
-import { Entry, HealthRecord, Milestone, FamilyMember, TimeCapsule, ChildProfile } from '../models/Models';
-import { AppDatabase } from '../data/AppDatabase';
-import { BubuColor } from '../theme/BubuTheme';
-import { promptAction } from '@kit.ArkUI';
+import { BubuColor, BubuFont, BubuRadius, BubuShadow, bubuCardCol } from '../theme/BubuTheme';
+import { BubuMascotBadge } from '../components/BubuMascotBadge';
+import { BubuExpression } from '../theme/BubuExpression';
+import { FirstPersonDiaryView } from './FirstPersonDiaryView';
+import { GrowthMovieView } from './GrowthMovieView';
+import { FamilyEnsembleView } from './FamilyEnsembleView';
+import { GrowthReportView } from './GrowthReportView';
 
-// MARK: - 布布的故事 / AI Studio（对照 iOS AIStudioHomeView）
-// 入口卡：成长电影 / 第一人称日记 / 成长报告。对接现有 FastAPI（AIService）。
-interface StudioEntry {
-  emoji: string;
+// MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
+// 自托管 AI 的创作中心：成长绘本 / 未来胶囊 / 第一人称日记 / 成长电影 / 家人合奏 / 成长报告。
+// RootPage 把本组件直接作为「故事」Tab 渲染（无 NavPathStack），故内部用 @State route 就地切换子页。
+
+// 魔法屋四块创作能力（对照 iOS creativeGrid 的 capabilityTile）。
+interface CapabilityTile {
+  icon: string;       // iOS 用 SF Symbol；此处 emoji 兜底
   title: string;
   subtitle: string;
-  kind: string;
+  tint: string;       // 背景渐变副色
+  route: string;      // diary / movie / ensemble / report
 }
 
-const STUDIO_ITEMS: StudioEntry[] = [
-  { emoji: '🎬', title: '成长电影', subtitle: '把这一年的瞬间拼成一部小电影', kind: 'movie' },
-  { emoji: '📖', title: '第一人称日记', subtitle: '用布布的口吻，把记录改写成日记', kind: 'diary' },
-  { emoji: '📊', title: '成长报告', subtitle: '阶段性回顾布布的点滴变化', kind: 'report' },
-  { emoji: '👨‍👩‍👧', title: '家庭合奏', subtitle: '把全家的多视角补充汇成一段故事', kind: 'ensemble' }
+const CAPABILITY_TILES: CapabilityTile[] = [
+  { icon: '💬', title: '第一人称日记', subtitle: '改写成布布的话', tint: BubuColor.pink, route: 'diary' },
+  { icon: '🎞️', title: '成长电影', subtitle: '精选照片成短片', tint: BubuColor.sky, route: 'movie' },
+  { icon: '👨‍👩‍👧', title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' },
+  { icon: '📈', title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' }
 ];
 
 @Component
 export struct AIStudioView {
-  @State entries: Entry[] = [];
-  @State healthRecords: HealthRecord[] = [];
-  @State milestones: Milestone[] = [];
-  @State members: FamilyMember[] = [];
-  @State capsules: TimeCapsule[] = [];
-  @State profile: ChildProfile | null = null;
-  @State photoCount: number = 0;
-  @State selectedKind: string = '';
-  @State generatedTitle: string = '';
-  @State generatedBody: string = '';
-
-  aboutToAppear(): void { this.reload(); }
-
-  private async reload(): Promise<void> {
-    this.profile = await AppDatabase.shared.fetchChildProfile();
-    this.entries = await AppDatabase.shared.fetchEntries(false) ?? [];
-    this.healthRecords = await AppDatabase.shared.fetchHealth() ?? [];
-    this.milestones = await AppDatabase.shared.fetchMilestones() ?? [];
-    this.members = await AppDatabase.shared.fetchMembers() ?? [];
-    this.capsules = await AppDatabase.shared.fetchCapsules() ?? [];
-    this.photoCount = (await AppDatabase.shared.fetchAllPhotos() ?? []).length;
-  }
+  // 当前子页路由（空 = 魔法屋首页）。对照 iOS NavigationLink 的目的地。
+  @State private route: string = '';
+  // 主题主色（对照 iOS env.theme.theme.primary）。
+  private theme: string = BubuColor.primary;
 
   build() {
-    if (this.selectedKind.length > 0) {
-      this.detailPanel()
+    if (this.route === 'diary') {
+      FirstPersonDiaryView({ onBack: (): void => { this.route = ''; } })
+    } else if (this.route === 'movie') {
+      GrowthMovieView({ onBack: (): void => { this.route = ''; } })
+    } else if (this.route === 'ensemble') {
+      FamilyEnsembleView({ onBack: (): void => { this.route = ''; } })
+    } else if (this.route === 'report') {
+      GrowthReportView({ onBack: (): void => { this.route = ''; } })
     } else {
-      this.mainPage()
+      this.homePage()
     }
   }
 
   @Builder
-  mainPage() {
+  homePage() {
     Scroll() {
-      Column({ space: 16 }) {
-        Text('布布的故事')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown).width('100%')
-        Text('由 AI 把布布的点滴，讲成值得收藏的故事')
-          .fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
+      Column({ space: 18 }) {
+        this.banner()
+        this.storybookCard()
+        this.capsuleCard()
 
-        ForEach(STUDIO_ITEMS, (it: StudioEntry) => {
-          Row({ space: 14 }) {
-            Text(it.emoji).fontSize(34)
-            Column() {
-              Text(it.title).fontSize(16).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown)
-              Text(it.subtitle).fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2)
-            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-            Text('›').fontSize(22).fontColor(BubuColor.secondaryText)
-          }
-          .width('100%').padding(16)
-          .backgroundColor(BubuColor.card).borderRadius(16)
-          .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-          .onClick(() => { this.openStudioItem(it); })
-        }, (it: StudioEntry) => it.title)
-
-        Text('需在设置里连上家里的 AI 服务后生成')
-          .fontSize(11).fontColor(BubuColor.secondaryText).margin({ top: 8 })
-      }
-      .padding(16).width('100%')
-    }
-    .backgroundColor(BubuColor.cream).width('100%').height('100%')
-  }
-
-  @Builder
-  detailPanel() {
-    Scroll() {
-      Column({ space: 16 }) {
-        Row({ space: 12 }) {
-          Button('返回')
-            .backgroundColor('#F3F3F3')
-            .fontColor(BubuColor.warmBrown)
-            .onClick(() => { this.selectedKind = ''; })
-          Text(this.currentTitle())
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(BubuColor.warmBrown)
-          Blank()
-        }.width('100%')
-
-        Column({ space: 10 }) {
-          Text(this.currentEmoji()).fontSize(56)
-          Text(this.generatedTitle)
-            .fontSize(18)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(BubuColor.warmBrown)
-            .width('100%')
-            .textAlign(TextAlign.Center)
-          Text(this.materialSummary())
-            .fontSize(12)
-            .fontColor(BubuColor.secondaryText)
-            .width('100%')
-            .textAlign(TextAlign.Center)
-        }
-        .width('100%')
-        .padding(18)
-        .backgroundColor(BubuColor.card)
-        .borderRadius(18)
-
-        Text(this.generatedBody)
-          .fontSize(16)
-          .fontColor(BubuColor.warmBrown)
-          .lineHeight(28)
+        // 「布布的魔法屋」分组标题（对照 iOS caption.semibold）。
+        Text('布布的魔法屋')
+          .fontSize(BubuFont.caption)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(BubuColor.secondaryText)
           .width('100%')
-          .padding(18)
-          .backgroundColor('#FFFFFFCC')
-          .borderRadius(18)
+          .margin({ left: 6, top: 2 })
 
-        Button('重新生成预览')
-          .width('100%')
-          .backgroundColor(BubuColor.primary)
-          .onClick(() => {
-            this.generatePreview(this.selectedKind);
-            promptAction.showToast({ message: '已重新整理预览' });
-          })
+        this.creativeGrid()
       }
       .padding(16)
       .width('100%')
     }
-    .backgroundColor(BubuColor.cream).width('100%').height('100%')
+    .backgroundColor(BubuColor.background)
+    .width('100%')
+    .height('100%')
   }
 
-  private openStudioItem(it: StudioEntry): void {
-    this.selectedKind = it.kind;
-    this.generatePreview(it.kind);
-  }
-
-  private currentItem(): StudioEntry {
-    for (const it of STUDIO_ITEMS) {
-      if (it.kind === this.selectedKind) return it;
+  // 顶部 banner（对照 iOS banner：主色渐变 + 布布画画表情）。
+  @Builder
+  banner() {
+    Row({ space: 12 }) {
+      BubuMascotBadge({ badgeSize: 58, expression: BubuExpression.drawing })
+      Column({ space: 4 }) {
+        Text('布布的魔法屋')
+          .fontSize(BubuFont.title)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FFFFFF')
+        Text('故事、电影、报告和未来胶囊')
+          .fontSize(BubuFont.caption)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .maxLines(1)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
     }
-    return STUDIO_ITEMS[0];
+    .width('100%')
+    .padding(20)
+    .linearGradient({
+      angle: 135,
+      colors: [[this.theme, 0.0], ['#BFF28C9E', 1.0]]
+    })
+    .borderRadius(BubuRadius.card)
+    .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
   }
 
-  private currentTitle(): string {
-    return this.currentItem().title;
-  }
+  // 成长绘本主卡（butter→peach→pink；对照 iOS storybookCard）。
+  // NOTE: iOS 点进 BubuStoryView（翻页绘本），不在本切片范围内，暂作占位无跳转。
+  @Builder
+  storybookCard() {
+    Row({ space: 14 }) {
+      // iOS BubuDreamPhoto 梦境照片占位，此处简化为渐变方块 + 装饰符号。
+      Stack() {
+        Text('✦').fontSize(26).fontColor('#FFFFFF')
+      }
+      .width(60)
+      .height(72)
+      .linearGradient({ angle: 135, colors: [[BubuColor.peach, 0.0], [BubuColor.pink, 1.0]] })
+      .borderRadius(16)
+      .border({ width: 3, color: '#FFFFFF' })
+      .rotate({ angle: -4 })
+      .shadow({ radius: 6, color: '#29000000', offsetY: 3 })
 
-  private currentEmoji(): string {
-    return this.currentItem().emoji;
-  }
+      Column({ space: 4 }) {
+        Text('成长绘本')
+          .fontSize(19)
+          .fontWeight(FontWeight.Bolder)
+          .fontColor('#FFFFFF')
+        Text('由你记录的点滴，自动编织成可翻页的故事')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#F2FFFFFF')
+          .maxLines(2)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
 
-  private materialSummary(): string {
-    return `${this.entryList().length} 条记录 · ${this.photoCount} 张照片 · ${this.healthList().length} 条健康记录 · ${this.achievedMilestones().length} 个里程碑`;
-  }
-
-  private entryList(): Entry[] {
-    return this.entries ?? [];
-  }
-
-  private healthList(): HealthRecord[] {
-    return this.healthRecords ?? [];
-  }
-
-  private milestoneList(): Milestone[] {
-    return this.milestones ?? [];
-  }
-
-  private memberList(): FamilyMember[] {
-    return this.members ?? [];
-  }
-
-  private capsuleList(): TimeCapsule[] {
-    return this.capsules ?? [];
-  }
-
-  private achievedMilestones(): Milestone[] {
-    return this.milestoneList().filter(m => m.happenedAt !== undefined && m.happenedAt !== null);
-  }
-
-  private latestNote(): string {
-    for (const e of this.entryList()) {
-      if (e.note && e.note.length > 0) return e.note;
+      Text('›').fontSize(18).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
     }
-    return '';
+    .width('100%')
+    .padding(18)
+    .linearGradient({
+      angle: 135,
+      colors: [[BubuColor.butter, 0.0], [BubuColor.peach, 0.5], [BubuColor.pink, 1.0]]
+    })
+    .borderRadius(BubuRadius.card)
+    .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
   }
 
-  private childName(): string {
-    return this.profile ? this.profile!.name : '布布';
+  // 未来胶囊卡（lav→sky 信封；对照 iOS capsuleCard）。
+  // NOTE: iOS 点进 CapsuleHomeView，本 App 的胶囊 Tab 已单列（RootPage 第 5 个 Tab），此处作视觉占位无跳转。
+  @Builder
+  capsuleCard() {
+    Row({ space: 14 }) {
+      Stack() {
+        Text('✉️').fontSize(26)
+      }
+      .width(60)
+      .height(60)
+      .linearGradient({ angle: 135, colors: [[BubuColor.lav, 0.0], [BubuColor.sky, 1.0]] })
+      .borderRadius(18)
+      .border({ width: 2, color: '#B3FFFFFF' })
+      .shadow({ radius: 10, color: '#59DCC9FF', offsetY: 5 })
+
+      Column({ space: 4 }) {
+        Text('未来胶囊')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bolder)
+          .fontColor(BubuColor.warmBrown)
+        Text('把今天的话，寄给未来的布布')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(BubuColor.secondaryText)
+          .maxLines(1)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text('›').fontSize(15).fontWeight(FontWeight.Bolder).fontColor(BubuColor.secondaryText)
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor('#F2FFFFFF')
+    .borderRadius(24)
+    .border({ width: 1, color: '#99FFFFFF' })
+    .shadow({ radius: 12, color: '#38DCC9FF', offsetY: 6 })
   }
 
-  private generatePreview(kind: string): void {
-    const child = this.childName();
-    if (kind === 'movie') {
-      this.generatedTitle = this.photoCount > 0 ? '电影草稿素材已就绪' : '先补几张照片再生成电影';
-      this.generatedBody = this.photoCount > 0
-        ? `已按时间线找到 ${this.photoCount} 张照片和 ${this.entryList().length} 条记录。下一步可以把照片按月份串起来，片头使用「${child} 的成长电影」，字幕从记录文字里提取。`
-        : `成长电影需要真实照片做素材。先回到「记录此刻」加照片，照片墙里出现素材后，这里就能生成电影草稿。`;
-      return;
+  // 创作能力 2×2 宫格（对照 iOS creativeGrid 的 LazyVGrid）。
+  @Builder
+  creativeGrid() {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        this.capabilityTile(CAPABILITY_TILES[0])
+        this.capabilityTile(CAPABILITY_TILES[1])
+      }.width('100%')
+      Row({ space: 10 }) {
+        this.capabilityTile(CAPABILITY_TILES[2])
+        this.capabilityTile(CAPABILITY_TILES[3])
+      }.width('100%')
     }
+    .width('100%')
+  }
 
-    if (kind === 'diary') {
-      const note = this.latestNote();
-      this.generatedTitle = note.length > 0 ? '布布的日记预览' : '还没有可改写的记录';
-      this.generatedBody = note.length > 0
-        ? `我是${child}。今天家人帮我记下了这一刻：「${note}」。等我长大再看见这句话，就会知道这一天也被好好收藏着。`
-        : `先在「记录此刻」写下一句父母视角的话，这里会把它整理成${child}的第一人称日记。`;
-      return;
+  // 单块创作能力磁贴（对照 iOS capabilityTile：图标徽 + 标题 + 副标题，渐变卡）。
+  @Builder
+  capabilityTile(tile: CapabilityTile) {
+    Column({ space: 8 }) {
+      Row() {
+        Stack() {
+          Text(tile.icon).fontSize(17)
+        }
+        .width(36)
+        .height(36)
+        .backgroundColor(tile.tint)
+        .opacity(0.72)
+        .borderRadius(13)
+        Blank()
+        Text('›').fontSize(13).fontWeight(FontWeight.Bolder).fontColor(BubuColor.secondaryText).opacity(0.72)
+      }
+      .width('100%')
+
+      Blank()
+
+      Text(tile.title)
+        .fontSize(15)
+        .fontWeight(FontWeight.Bolder)
+        .fontColor(BubuColor.warmBrown)
+        .maxLines(1)
+      Text(tile.subtitle)
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(BubuColor.secondaryText)
+        .maxLines(1)
     }
-
-    if (kind === 'report') {
-      this.generatedTitle = '成长报告预览';
-      this.generatedBody = `这份档案目前收到了 ${this.entryList().length} 条瞬间、${this.photoCount} 张照片、${this.healthList().length} 条照护记录、${this.achievedMilestones().length} 个已点亮里程碑和 ${this.capsuleList().length} 封时间胶囊。这里先做整理，不替${child}下发育结论。`;
-      return;
-    }
-
-    this.generatedTitle = this.memberList().length > 0 ? '家庭合奏预览' : '先添加家庭成员';
-    this.generatedBody = this.memberList().length > 0
-      ? `已经有 ${this.memberList().length} 位家人加入档案。家庭合奏会把不同家人留下的记录、补充和时间线放在一起，整理成一段完整故事。`
-      : `去首页右上角设置里添加家庭成员后，这里会按爸爸、妈妈、姥姥等不同视角整理故事。`;
+    .alignItems(HorizontalAlign.Start)
+    .layoutWeight(1)
+    .height(112)
+    .padding(13)
+    .linearGradient({
+      angle: 135,
+      colors: [['#FAFFFFFF', 0.0], [tile.tint, 1.0]]
+    })
+    .borderRadius(24)
+    .border({ width: 1, color: '#9EFFFFFF' })
+    .shadow({ radius: 12, color: '#38B57870', offsetY: 7 })
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
+    .onClick(() => { this.route = tile.route; })
   }
 }

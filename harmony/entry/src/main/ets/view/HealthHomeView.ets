@@ -1,20 +1,20 @@
-import { util } from '@kit.ArkTS';
 import { HealthRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
-import { SyncState, HealthRecordKind, ALL_HEALTH_KINDS, healthKindMeta } from '../models/Enums';
+import { HealthRecordKind, ALL_HEALTH_KINDS, healthKindMeta } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
+import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { GrowthCurveView } from './GrowthCurveView';
-import { promptAction } from '@kit.ArkUI';
+import { VaccineView } from './VaccineView';
+import { HealthRecordSheet, HealthDraftUtil } from './HealthRecordSheet';
 
-// MARK: - 布布健康（对照 iOS HealthHomeView）
-// 7 类快速记录入口（餐食/零食/营养/喝水/睡眠/不舒服/体检）+ 今日 + 最近列表。
+// MARK: - 布布健康（对照 iOS Features/Health/HealthHomeView.swift）
+// 顶部说明卡 + 成长曲线/疫苗入口 + 7 类快速记录入口 + 今天 + 最近记录 + 免责声明。
 @Component
 export struct HealthHomeView {
   @State records: HealthRecord[] = [];
   @State composingKind: HealthRecordKind | null = null;
-  @State draftTitle: string = '';
-  @State draftDetail: string = '';
   @State showGrowth: boolean = false;
+  @State showVaccine: boolean = false;
 
   aboutToAppear(): void { this.reload(); }
 
@@ -29,67 +29,110 @@ export struct HealthHomeView {
   private todayRecordList(): HealthRecord[] {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    return this.recordList().filter(r => r.recordedAt >= start.getTime());
+    return this.recordList().filter((r: HealthRecord) => r.recordedAt >= start.getTime());
+  }
+
+  // 今日喝水累计（传给记录表的喝水录入器）。
+  private todayWaterTotal(): number {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    let total = 0;
+    for (const r of this.recordList()) {
+      if (r.kind === HealthRecordKind.water && r.recordedAt >= start.getTime() && r.amountValue !== undefined && r.amountValue !== null) {
+        total += r.amountValue;
+      }
+    }
+    return total;
   }
 
   build() {
     if (this.showGrowth) {
       Column() {
-        this.panelHeader('成长曲线')
-        GrowthCurveView()
-          .layoutWeight(1)
-      }
-      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+        this.panelHeader('成长曲线', () => { this.showGrowth = false; })
+        GrowthCurveView().layoutWeight(1)
+      }.width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.showVaccine) {
+      Column() {
+        this.panelHeader('疫苗接种', () => { this.showVaccine = false; })
+        VaccineView().layoutWeight(1)
+      }.width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.composingKind !== null) {
-      this.recordPanel()
+      HealthRecordSheet({
+        kind: this.composingKind,
+        todayWaterTotal: this.todayWaterTotal(),
+        onDone: () => { this.composingKind = null; this.reload(); },
+        onCancel: () => { this.composingKind = null; }
+      })
     } else {
       this.mainPage()
     }
   }
 
   @Builder
+  panelHeader(title: string, onBack: () => void) {
+    Row({ space: 12 }) {
+      Button('返回').backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown).onClick(onBack)
+      Text(title).fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+      Blank()
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 })
+  }
+
+  @Builder
   mainPage() {
     Scroll() {
       Column({ space: 16 }) {
-        Row() {
-          Text('布布健康')
-            .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-          Blank()
-          Button('📈 成长曲线').backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
-            .onClick(() => { this.showGrowth = true; })
+        // 顶部说明卡（对照 iOS header）
+        Column({ space: 8 }) {
+          Text('❤️ 餐食、零食、营养补充都记在这里')
+            .fontSize(17).fontWeight(FontWeight.Bold).fontColor(BubuColor.primary).width('100%')
+          Text('这是家庭照护记录，不替代医生建议。它帮你看见布布每天吃了什么、睡得怎样、有没有不舒服。')
+            .fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
+        }
+        .width('100%').padding(16).backgroundColor(BubuColor.card).borderRadius(20)
+
+        // 成长曲线 / 疫苗接种入口（对照 iOS insightLinks）
+        Row({ space: 10 }) {
+          this.insightTile('📈', '成长曲线', '身高·体重·头围', () => { this.showGrowth = true; })
+          this.insightTile('💉', '疫苗接种', '按月龄排期打卡', () => { this.showVaccine = true; })
         }.width('100%')
 
-        // 7 类入口网格
+        // 7 类快速记录入口（对照 iOS quickActions）
         Grid() {
           ForEach(ALL_HEALTH_KINDS, (k: HealthRecordKind) => {
-            GridItem() {
-              this.kindCard(k)
-            }
+            GridItem() { this.kindCard(k) }
           }, (k: HealthRecordKind) => k)
-        }
-        .columnsTemplate('1fr 1fr')
-        .columnsGap(12).rowsGap(12)
-        .height(360)
+        }.columnsTemplate('1fr 1fr').columnsGap(10).rowsGap(10).height(280)
 
-        // 今日
-        if (this.todayRecordList().length > 0) {
-          Text('今天').fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown).width('100%')
-          ForEach(this.todayRecordList(), (r: HealthRecord) => {
+        // 今天（对照 iOS todaySection）
+        Row({ space: 6 }) {
+          Text('☀️ 今天').fontSize(17).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+        }.width('100%').margin({ top: 8 })
+        if (this.todayRecordList().length === 0) {
+          Text('今天还没有健康记录。可以先记一顿餐食或一次喝水。')
+            .fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
+        } else {
+          ForEach(this.todayRecordList().slice(0, 6), (r: HealthRecord) => {
             this.recordRow(r)
-          }, (r: HealthRecord) => r.id)
+          }, (r: HealthRecord) => r.id + '_today')
         }
 
-        // 最近
-        if (this.recordList().length > 0) {
-          Text('最近').fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-            .width('100%').margin({ top: 8 })
-          ForEach(this.recordList().slice(0, 20), (r: HealthRecord) => {
+        // 最近记录（对照 iOS recentSection）
+        Row({ space: 6 }) {
+          Text('🕐 最近记录').fontSize(17).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+        }.width('100%').margin({ top: 8 })
+        if (this.recordList().length === 0) {
+          Text('点上面的卡片，记录布布的第一条健康吧')
+            .fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
+        } else {
+          ForEach(this.recordList().slice(0, 12), (r: HealthRecord) => {
             this.recordRow(r)
           }, (r: HealthRecord) => r.id + '_recent')
-        } else {
-          Text('点上面的卡片，记录布布的第一条健康吧')
-            .fontSize(13).fontColor(BubuColor.secondaryText).margin({ top: 20 })
         }
+
+        // 免责声明（对照 iOS disclaimer）
+        Text('如果出现持续发热、过敏、精神状态异常等情况，请及时咨询医生。这里的记录主要用于家庭观察和复盘。')
+          .fontSize(12).fontColor(BubuColor.secondaryText).width('100%').margin({ top: 4 })
       }
       .padding(16).width('100%')
     }
@@ -97,97 +140,83 @@ export struct HealthHomeView {
   }
 
   @Builder
-  panelHeader(title: string) {
-    Row({ space: 12 }) {
-      Button('返回')
-        .backgroundColor('#F3F3F3')
-        .fontColor(BubuColor.warmBrown)
-        .onClick(() => {
-          this.showGrowth = false;
-          this.composingKind = null;
-        })
-      Text(title)
-        .fontSize(20)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(BubuColor.warmBrown)
-      Blank()
+  insightTile(emoji: string, title: string, subtitle: string, onTap: () => void) {
+    Column({ space: 8 }) {
+      Text(emoji).fontSize(22)
+      Text(title).fontSize(15).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+      Text(subtitle).fontSize(12).fontColor(BubuColor.secondaryText)
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+    .padding(14).backgroundColor(BubuColor.card).borderRadius(20)
+    .onClick(onTap)
   }
 
   @Builder
   kindCard(k: HealthRecordKind) {
-    Column({ space: 6 }) {
-      Text(healthKindMeta(k).emoji).fontSize(30)
-      Text(healthKindMeta(k).title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown)
-      Text(healthKindMeta(k).placeholder).fontSize(10).fontColor(BubuColor.secondaryText)
-        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+    Row({ space: 10 }) {
+      Text(healthKindMeta(k).emoji).fontSize(26)
+      Column({ space: 2 }) {
+        Text(healthKindMeta(k).title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown)
+        Text(healthKindMeta(k).placeholder).fontSize(11).fontColor(BubuColor.secondaryText)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
     }
-    .width('100%').padding(14).justifyContent(FlexAlign.Center)
-    .backgroundColor(BubuColor.card).borderRadius(16)
-    .onClick(() => {
-      this.draftTitle = '';
-      this.draftDetail = '';
-      this.composingKind = k;
-    })
+    .width('100%').padding(12).backgroundColor(BubuColor.card).borderRadius(16)
+    .onClick(() => { this.composingKind = k; })
   }
 
   @Builder
   recordRow(r: HealthRecord) {
-    Row({ space: 10 }) {
-      Text(healthKindMeta(r.kind as HealthRecordKind).emoji).fontSize(26)
-      Column() {
-        Text(r.title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown)
+    Row({ space: 12 }) {
+      Stack() {
+        Text(healthKindMeta(r.kind as HealthRecordKind).emoji).fontSize(24)
+      }.width(42).height(42).backgroundColor('#1AF28C9E').borderRadius(21)
+      Column({ space: 3 }) {
+        Text(r.title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(BubuColor.warmBrown).width('100%')
+        // 类型 · 时间 · 数值摘要（对照 iOS）
+        Text(this.metaLine(r)).fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
+        // 标签
+        if (r.tags && r.tags.length > 0) {
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(r.tags.slice(0, 5), (tag: string) => {
+              Text(tag).fontSize(11).fontWeight(FontWeight.Medium).fontColor(BubuColor.primary)
+                .backgroundColor('#1AF28C9E').borderRadius(20)
+                .padding({ left: 8, right: 8, top: 3, bottom: 3 }).margin({ right: 6, bottom: 4 })
+            }, (tag: string) => tag)
+          }.width('100%')
+        }
         if (r.detail && r.detail.length > 0) {
-          Text(r.detail).fontSize(12).fontColor(BubuColor.secondaryText).maxLines(1)
+          Text(r.detail).fontSize(13).fontColor(BubuColor.secondaryText).width('100%')
+        }
+        if (r.reaction && r.reaction.length > 0) {
+          Text(`反应：${r.reaction}`).fontSize(13).fontColor(BubuColor.primary).width('100%')
         }
       }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Text(this.timeText(r.recordedAt)).fontSize(11).fontColor(BubuColor.secondaryText)
     }
-    .width('100%').padding(12)
-    .backgroundColor(BubuColor.card).borderRadius(14)
+    .width('100%').padding(12).backgroundColor(BubuColor.card).borderRadius(16)
+    .alignItems(VerticalAlign.Top)
   }
 
-  @Builder
-  recordPanel() {
-    Column({ space: 14 }) {
-      this.panelHeader(this.composingKind ? `记录${healthKindMeta(this.composingKind).title}` : '健康记录')
-      Text(this.composingKind ? `记录${healthKindMeta(this.composingKind).title}` : '')
-        .fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-      TextInput({ text: $$this.draftTitle, placeholder: this.composingKind ? healthKindMeta(this.composingKind).placeholder : '' })
-        .height(48).backgroundColor('#F3F3F3').borderRadius(10)
-      TextArea({ text: $$this.draftDetail, placeholder: '补充说明（选填）' })
-        .height(100).backgroundColor('#F3F3F3').borderRadius(10)
-      Button('保存').width('100%').backgroundColor(BubuColor.primary)
-        .onClick(() => { this.save(); })
+  // 类型 · 时间 · 数值摘要行。
+  private metaLine(r: HealthRecord): string {
+    const parts: string[] = [healthKindMeta(r.kind as HealthRecordKind).title, BubuDateFormat.shortTime(new Date(r.recordedAt))];
+    const amount = this.amountSummary(r);
+    if (amount) parts.push(amount);
+    return parts.join(' · ');
+  }
+
+  // 数值摘要（对照 iOS amountSummary）。
+  private amountSummary(r: HealthRecord): string | null {
+    if (r.amountText && r.amountText.length > 0) return r.amountText;
+    if (r.kind === HealthRecordKind.sleep && r.startAt !== undefined && r.endAt !== undefined && r.endAt > r.startAt) {
+      return HealthDraftUtil.durationText(r.startAt, r.endAt);
     }
-    .padding(20).width('100%').height('100%').backgroundColor(BubuColor.cream)
-  }
-
-  private async save(): Promise<void> {
-    const kind = this.composingKind;
-    if (!kind) return;
-    const title = this.draftTitle.trim().length === 0 ? healthKindMeta(kind).title : this.draftTitle.trim();
-    const now = Date.now();
-    const rec: HealthRecord = {
-      id: util.generateRandomUUID(true),
-      kind: kind,
-      title: title,
-      detail: this.draftDetail.trim().length === 0 ? undefined : this.draftDetail.trim(),
-      recordedAt: now,
-      tags: [],
-      syncState: SyncState.local,
-      createdAt: now
-    };
-    await AppDatabase.shared.insertHealth(rec);
-    this.composingKind = null;
-    await this.reload();
-    promptAction.showToast({ message: '已经收好啦 🌟' });
-  }
-
-  private timeText(ms: number): string {
-    const d = new Date(ms);
-    return `${d.getMonth() + 1}.${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    if (r.amountValue !== undefined && r.amountValue !== null && r.amountUnit) {
+      return `${HealthDraftUtil.cleanAmount(r.amountValue)}${r.amountUnit}`;
+    }
+    if (r.temperatureCelsius !== undefined && r.temperatureCelsius !== null) {
+      return `${r.temperatureCelsius.toFixed(1)}℃`;
+    }
+    return null;
   }
 }
