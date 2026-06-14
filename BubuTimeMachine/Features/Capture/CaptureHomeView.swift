@@ -21,6 +21,9 @@ struct CaptureHomeView: View {
     @State private var model: CaptureModel?
     @State private var firstTimeSuggestion: String?
     @State private var firstTimeEntryID: UUID?
+    @State private var showNaturalCapture = false
+    @State private var naturalCaptureButtonOffset: CGSize = .zero
+    @GestureState private var naturalCaptureButtonDrag: CGSize = .zero
 
     /// 缩略图 → 详情页的 iOS 18+ 缩放共享元素转场（与 TimelineView 同一套做法）。
     @Namespace private var zoomNS
@@ -46,7 +49,6 @@ struct CaptureHomeView: View {
                     primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
                     dashboardGridTop           // ③ 紧凑四宫格：星座/成长/故事/健康
                     recentMomentsSection       // ⑤ 最近时光（行卡）
-                    NaturalCaptureBar()        // —— 以下为延伸区：自然记录 / 回忆 / 同步状态 ——
                     onThisDaySection
                     saveHealthStrip
                     // 给底部悬浮玻璃 Tab 栏留出空间
@@ -56,9 +58,14 @@ struct CaptureHomeView: View {
                 .padding(.top, 8)
             }
             // 详情页转场移到此处（而非 RootTabView），以便与本页 zoomNS 配对实现缩放共享元素转场。
-            .navigationDestination(for: Entry.self) { entry in
-                EntryDetailView(entry: entry)
-                    .navigationTransition(.zoom(sourceID: entry.id, in: zoomNS))
+            .navigationDestination(for: UUID.self) { entryID in
+                if let entry = entries.first(where: { $0.id == entryID }) {
+                    EntryDetailView(entry: entry)
+                        .navigationTransition(.zoom(sourceID: entryID, in: zoomNS))
+                } else {
+                    ContentUnavailableView("这条时光暂时找不到", systemImage: "clock.badge.questionmark")
+                        .background(BubuTheme.Color.background.ignoresSafeArea())
+                }
             }
 
             if let model {
@@ -69,6 +76,8 @@ struct CaptureHomeView: View {
                     }
                 if model.savedFlash { savedToast }
             }
+
+            naturalCaptureFloatingButton
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -96,6 +105,9 @@ struct CaptureHomeView: View {
             Button("不是", role: .cancel) { firstTimeSuggestion = nil }
         } message: {
             Text(firstTimeSuggestion ?? "")
+        }
+        .sheet(isPresented: $showNaturalCapture) {
+            NaturalCapturePanel()
         }
     }
 
@@ -385,7 +397,7 @@ struct CaptureHomeView: View {
         ], spacing: 10) {
             NavigationLink { MilestonesHomeView() } label: { constellationTile }
                 .buttonStyle(.plain)
-            NavigationLink { HealthHomeView() } label: { growthTile }
+            NavigationLink { GrowthCurveView() } label: { growthTile }
                 .buttonStyle(.plain)
             NavigationLink { BubuStoryView() } label: { storyTile }
                 .buttonStyle(.plain)
@@ -397,8 +409,8 @@ struct CaptureHomeView: View {
     }
 
     private var constellationTile: some View {
-        compactTileSurface(contentPadding: 14) {
-            HStack(alignment: .top, spacing: 8) {
+        compactTileSurface(centered: true, contentPadding: 12) {
+            HStack(alignment: .center, spacing: 8) {
                 ZStack {
                     Circle().fill(BubuTheme.Color.pink.opacity(0.38)).frame(width: 34, height: 34)
                     Image(systemName: "sparkles")
@@ -416,8 +428,8 @@ struct CaptureHomeView: View {
                 }
                 Spacer(minLength: 0)
             }
-            BubuMiniConstellation(done: max(1, litMilestoneCount), height: 34)
-                .frame(height: 34)
+            BubuMiniConstellation(done: max(1, litMilestoneCount), height: 42)
+                .frame(height: 42)
         }
     }
 
@@ -671,7 +683,7 @@ struct CaptureHomeView: View {
                     }
                 }
                 ForEach(entries.prefix(2)) { entry in
-                    NavigationLink(value: entry) { momentRow(entry) }
+                    NavigationLink(value: entry.id) { momentRow(entry) }
                         .buttonStyle(.plain)
                         .matchedTransitionSource(id: entry.id, in: zoomNS)
                 }
@@ -806,7 +818,7 @@ struct CaptureHomeView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(memories) { entry in
-                            NavigationLink(value: entry) {
+                            NavigationLink(value: entry.id) {
                                 onThisDayCard(entry)
                             }
                             .buttonStyle(.plain)
@@ -936,5 +948,112 @@ struct CaptureHomeView: View {
         }
         .padding(.top, 8)
         .transition(.scale(scale: 0.5, anchor: .top).combined(with: .opacity))
+    }
+
+    private var naturalCaptureFloatingButton: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                Button {
+                    showNaturalCapture = true
+                } label: {
+                    NaturalCaptureFloatingBubble()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("一句话智能记录")
+                .offset(CGSize(width: naturalCaptureButtonOffset.width + naturalCaptureButtonDrag.width,
+                               height: naturalCaptureButtonOffset.height + naturalCaptureButtonDrag.height))
+                .gesture(
+                    DragGesture(minimumDistance: 4)
+                        .updating($naturalCaptureButtonDrag) { value, state, _ in
+                            state = value.translation
+                        }
+                        .onEnded { value in
+                            naturalCaptureButtonOffset.width += value.translation.width
+                            naturalCaptureButtonOffset.height += value.translation.height
+                        }
+                )
+                .padding(.trailing, 18)
+                .padding(.bottom, 98)
+            }
+        }
+        .allowsHitTesting(true)
+    }
+}
+
+private struct NaturalCaptureFloatingBubble: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var breathing = false
+    @State private var sparkle = false
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Circle()
+                .fill(
+                    RadialGradient(colors: [
+                        .white.opacity(0.96),
+                        BubuTheme.Color.pink.opacity(0.96),
+                        BubuTheme.Color.lav.opacity(0.88)
+                    ], center: .topLeading, startRadius: 4, endRadius: 62)
+                )
+                .frame(width: 66, height: 66)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.82), lineWidth: 2)
+                }
+                .shadow(color: BubuTheme.Color.deepRose.opacity(0.28), radius: 16, y: 8)
+
+            Circle()
+                .fill(BubuTheme.Color.primary.opacity(0.20))
+                .frame(width: breathing ? 82 : 68, height: breathing ? 82 : 68)
+                .blur(radius: 10)
+                .opacity(breathing ? 0.42 : 0.20)
+                .zIndex(-1)
+
+            BubuMascotBadge(size: 43, expression: .drawing)
+                .offset(x: -7, y: -9)
+                .scaleEffect(breathing ? 1.03 : 0.98)
+
+            BubuStarShape()
+                .fill(BubuTheme.Color.butter)
+                .frame(width: 13, height: 13)
+                .rotationEffect(.degrees(sparkle ? 18 : -12))
+                .offset(x: -47, y: -46)
+                .opacity(sparkle ? 1 : 0.55)
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 12, weight: .black))
+                .foregroundStyle(.white)
+                .offset(x: -6, y: -51)
+                .scaleEffect(sparkle ? 1.12 : 0.82)
+
+            Text("AI")
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(BubuTheme.Gradient.primaryButton, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.75), lineWidth: 1))
+                .shadow(color: BubuTheme.Color.deepRose.opacity(0.28), radius: 5, y: 2)
+                .offset(x: 4, y: 2)
+        }
+        .frame(width: 76, height: 76)
+        .contentShape(Circle())
+        .scaleEffect(breathing ? 1.02 : 0.98)
+        .offset(y: breathing ? -2 : 2)
+        .onAppear {
+            guard !reduceMotion else {
+                breathing = true
+                sparkle = true
+                return
+            }
+            withAnimation(.easeInOut(duration: 1.55).repeatForever(autoreverses: true)) {
+                breathing = true
+            }
+            withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true).delay(0.15)) {
+                sparkle = true
+            }
+        }
     }
 }

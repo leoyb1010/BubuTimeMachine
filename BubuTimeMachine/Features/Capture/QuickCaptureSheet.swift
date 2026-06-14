@@ -18,6 +18,7 @@ struct QuickCaptureSheet: View {
     @State private var cameraAlert: CameraAlert?
     @State private var highlightedTarget: CaptureTarget?
     @State private var requestingCamera = false
+    @State private var showNaturalCapture = false
 
     private var theme: Color { env.theme.theme.primary }
 
@@ -30,6 +31,7 @@ struct QuickCaptureSheet: View {
                     ScrollView {
                         VStack(spacing: BubuTheme.Spacing.item) {
                             introCard
+                            naturalCaptureEntry
                             primaryActions(proxy: proxy)
 
                             if !model.selectedPreviews.isEmpty {
@@ -99,6 +101,9 @@ struct QuickCaptureSheet: View {
                 }
                 .ignoresSafeArea()
             }
+            .sheet(isPresented: $showNaturalCapture) {
+                NaturalCapturePanel()
+            }
             .navigationTitle("记录此刻")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: model.pickedItems) { _, _ in
@@ -142,6 +147,42 @@ struct QuickCaptureSheet: View {
         .padding()
         .background(BubuTheme.Color.card.opacity(0.86), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
+    }
+
+    private var naturalCaptureEntry: some View {
+        Button {
+            showNaturalCapture = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(BubuTheme.Gradient.primaryButton, in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("一句话智能记录")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("身高、体重、餐睡、里程碑都能识别")
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.84)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.60), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("打开一句话智能记录")
     }
 
     private func primaryActions(proxy: ScrollViewProxy) -> some View {

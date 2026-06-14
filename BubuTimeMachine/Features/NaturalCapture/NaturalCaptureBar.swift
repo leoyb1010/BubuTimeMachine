@@ -228,3 +228,28 @@ private struct ReviewPayload: Identifiable {
     let result: NaturalCaptureResult
     let originalText: String
 }
+
+// MARK: - 悬浮入口弹层
+struct NaturalCapturePanel: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                NaturalCaptureBar()
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .background(BubuThemedBackground().ignoresSafeArea())
+            .navigationTitle("一句话智能记录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.height(230), .medium])
+        .presentationDragIndicator(.visible)
+    }
+}

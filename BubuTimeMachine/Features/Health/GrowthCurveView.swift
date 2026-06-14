@@ -11,6 +11,10 @@ struct GrowthCurveView: View {
 
     @State private var metric: WHOGrowthStandard.Metric = .height
 
+    init(initialMetric: WHOGrowthStandard.Metric = .height) {
+        _metric = State(initialValue: initialMetric)
+    }
+
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
 

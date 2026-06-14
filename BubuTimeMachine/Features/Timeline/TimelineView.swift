@@ -90,9 +90,14 @@ struct TimelineView: View {
             }
             .padding()
         }
-        .navigationDestination(for: Entry.self) { entry in
-            EntryDetailView(entry: entry)
-                .navigationTransition(.zoom(sourceID: entry.id, in: zoomNS))
+        .navigationDestination(for: UUID.self) { entryID in
+            if let entry = entries.first(where: { $0.id == entryID }) {
+                EntryDetailView(entry: entry)
+                    .navigationTransition(.zoom(sourceID: entryID, in: zoomNS))
+            } else {
+                ContentUnavailableView("这条时光暂时找不到", systemImage: "clock.badge.questionmark")
+                    .background(BubuTheme.Color.background.ignoresSafeArea())
+            }
         }
     }
 
@@ -105,12 +110,14 @@ struct TimelineView: View {
                 .overlay(Circle().stroke(.white, lineWidth: 3))
                 .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
                 .padding(.top, 16)
-            NavigationLink(value: entry) {
+            NavigationLink(value: entry.id) {
                 bigPhotoCard(entry)
             }
             .buttonStyle(.plain)
             .matchedTransitionSource(id: entry.id, in: zoomNS)
             .entranceEffect(index: entranceIndex(sectionIndex: sectionIndex, entryId: entry.id))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .contextMenu {
                 Button(role: .destructive) { entryPendingDelete = entry } label: {
                     Label("删除记录", systemImage: "trash")

@@ -94,7 +94,7 @@ struct OnThisDayView: View {
                 emptyYear(row.year)
             } else {
                 ForEach(row.entries) { entry in
-                    NavigationLink(value: entry) { memoryRow(entry) }
+                    NavigationLink(value: entry.id) { memoryRow(entry) }
                         .buttonStyle(.plain)
                 }
             }

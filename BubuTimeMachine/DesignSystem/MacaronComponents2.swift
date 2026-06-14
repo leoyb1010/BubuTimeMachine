@@ -116,6 +116,7 @@ struct BubuMiniConstellation: View {
         .init(x: 30, y: 70), .init(x: 58, y: 74), .init(x: 82, y: 38)
     ]
     private let hues: [Double] = [20, 330, 50, 270, 150, 200]
+    private let motifs = ["♥", "🐶", "🧸", "✿", "★", "🐾"]
 
     var body: some View {
         GeometryReader { geo in
@@ -140,11 +141,17 @@ struct BubuMiniConstellation: View {
                     ZStack {
                         if on {
                             Circle().fill(BubuTheme.Color.hue(hues[i % hues.count]))
-                                .frame(width: 18 * scale, height: 18 * scale)
-                                .opacity(0.4)
+                                .frame(width: 21 * scale, height: 21 * scale)
+                                .opacity(0.34)
                         }
-                        Circle().fill(on ? BubuTheme.Color.deepRose : Color(white: 0.86))
-                            .frame(width: (on ? 9 : 5) * scale, height: (on ? 9 : 5) * scale)
+                        Text(motifs[i % motifs.count])
+                            .font(.system(size: (on ? 13 : 9) * scale, weight: .black, design: .rounded))
+                            .foregroundStyle(on ? BubuTheme.Color.deepRose : BubuTheme.Color.secondaryText.opacity(0.36))
+                            .frame(width: (on ? 23 : 14) * scale, height: (on ? 23 : 14) * scale)
+                            .background(.white.opacity(on ? 0.72 : 0.30), in: Circle())
+                            .overlay {
+                                Circle().stroke(on ? .white.opacity(0.88) : .clear, lineWidth: 1 * scale)
+                            }
                     }
                     .position(c)
                 }

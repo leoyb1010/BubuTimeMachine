@@ -60,12 +60,23 @@ struct MediaGalleryViewer: View {
                 Spacer()
 
                 if mediaItems.count > 1 {
-                    Text("\(selectedIndex + 1) / \(mediaItems.count)")
+                    Text("\(selectedIndex + 1) / \(mediaItems.count) · 左右滑动")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(.black.opacity(0.42), in: Capsule())
+                        .padding(.bottom, 18)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if mediaItems.count == 1 {
+                    Text("双击或捏合可放大")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.86))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.36), in: Capsule())
                         .padding(.bottom, 18)
                 }
             }
