@@ -19,18 +19,24 @@ struct BubuThemedBackground: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Group {
-            if scheme == .dark {
-                BubuTheme.Color.background
-            } else {
-                switch env.theme.theme.backgroundStyle {
-                case .solid(let hex):
-                    Color(hex: hex)
-                case .gradient(let a, let b):
-                    LinearGradient(colors: [Color(hex: a), Color(hex: b)],
-                                   startPoint: .top, endPoint: .bottom)
+        ZStack {
+            Group {
+                if scheme == .dark {
+                    BubuTheme.Color.background
+                } else {
+                    switch env.theme.theme.backgroundStyle {
+                    case .solid(let hex):
+                        Color(hex: hex)
+                    case .gradient(let a, let b):
+                        LinearGradient(colors: [Color(hex: a), Color(hex: b)],
+                                       startPoint: .top, endPoint: .bottom)
+                    }
                 }
             }
+            // 奶油马卡龙柔光氛围：几个模糊色球漂在背景上（静态、零每帧成本）。
+            // 深色模式降透明度，避免抢内容。
+            BubuBlobBackground(tint: env.theme.theme.primary)
+                .opacity(scheme == .dark ? 0.35 : 1.0)
         }
         .bubuPaperTexture(env.theme.theme.paperTexture, isDark: scheme == .dark || env.isDarkTheme)
     }

@@ -40,9 +40,22 @@ struct BubuIdentityCard: View {
         .background(cardBackground)
         .overlay(alignment: .topTrailing) {
             Circle()
-                .fill(theme.primary.opacity(0.10))
+                .fill(.white.opacity(0.18))
                 .frame(width: 96, height: 96)
                 .offset(x: 28, y: 36)
+        }
+        // 马卡龙闪烁小星点缀（仅正面、低频）
+        .overlay(alignment: .topTrailing) {
+            if !isFlipped {
+                BubuSparkle(size: 15, color: .white.opacity(0.95))
+                    .offset(x: -18, y: 16)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if !isFlipped {
+                BubuSparkle(size: 10, color: .white.opacity(0.8), delay: 0.7)
+                    .offset(x: 18, y: 30)
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay {
@@ -285,11 +298,13 @@ struct BubuIdentityCard: View {
     }
 
     private var cardBackground: some ShapeStyle {
+        // 奶油马卡龙：peach → pink → lav 柔粉渐变（对照设计稿 Hero 卡）。
         LinearGradient(
             colors: [
-                BubuTheme.Color.card.opacity(0.86),
-                theme.primary.opacity(0.10),
-                .white.opacity(0.34)
+                BubuTheme.Color.peach.opacity(0.55),
+                BubuTheme.Color.pink.opacity(0.45),
+                BubuTheme.Color.lav.opacity(0.45),
+                .white.opacity(0.30)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing

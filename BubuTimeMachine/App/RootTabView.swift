@@ -7,40 +7,51 @@ struct RootTabView: View {
     @State private var selection = 0
 
     var body: some View {
-        TabView(selection: $selection) {
-            NavigationStack {
-                // Entry 详情的 navigationDestination 已下沉到 CaptureHomeView，
-                // 以便与该页的 zoomNS 配对实现缩放共享元素转场。
-                CaptureHomeView(openTimeline: { selection = 1 })
-            }
-            .tabItem { Label("记录此刻", systemImage: "heart.circle.fill") }
-            .tag(0)
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selection) {
+                NavigationStack {
+                    // Entry 详情的 navigationDestination 已下沉到 CaptureHomeView，
+                    // 以便与该页的 zoomNS 配对实现缩放共享元素转场。
+                    CaptureHomeView(openTimeline: { selection = 1 })
+                }
+                .tabItem { Label("记录此刻", systemImage: "heart.circle.fill") }
+                .tag(0)
+                .toolbar(.hidden, for: .tabBar)
 
-            NavigationStack {
-                TimelineView()
-            }
-            .tabItem { Label("时光", systemImage: "clock.fill") }
-            .tag(1)
+                NavigationStack {
+                    TimelineView()
+                }
+                .tabItem { Label("时光", systemImage: "clock.fill") }
+                .tag(1)
+                .toolbar(.hidden, for: .tabBar)
 
-            NavigationStack {
-                MilestonesHomeView()
-            }
-            .tabItem { Label("里程碑", systemImage: "star.fill") }
-            .tag(2)
+                NavigationStack {
+                    MilestonesHomeView()
+                }
+                .tabItem { Label("里程碑", systemImage: "star.fill") }
+                .tag(2)
+                .toolbar(.hidden, for: .tabBar)
 
-            NavigationStack {
-                AIStudioHomeView()
-            }
-            .tabItem { Label("布布的故事", systemImage: "wand.and.stars.inverse") }
-            .tag(3)
+                NavigationStack {
+                    AIStudioHomeView()
+                }
+                .tabItem { Label("布布的故事", systemImage: "wand.and.stars.inverse") }
+                .tag(3)
+                .toolbar(.hidden, for: .tabBar)
 
-            NavigationStack {
-                CapsuleHomeView()
+                NavigationStack {
+                    CapsuleHomeView()
+                }
+                .tabItem { Label("时间胶囊", systemImage: "envelope.fill") }
+                .tag(4)
+                .toolbar(.hidden, for: .tabBar)
             }
-            .tabItem { Label("时间胶囊", systemImage: "envelope.fill") }
-            .tag(4)
+            .tint(env.theme.theme.tabTint)
+
+            // 奶油马卡龙玻璃胶囊底栏（外观替换，路由仍由 selection 驱动，跳转逻辑不变）
+            BubuGlassTabBar(selection: $selection, tint: env.theme.theme.primary, onCenterTap: {})
         }
-        .tint(env.theme.theme.tabTint)
+        .ignoresSafeArea(.keyboard)
         .onAppear {
             #if DEBUG
             if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),

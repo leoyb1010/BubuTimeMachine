@@ -35,6 +35,7 @@ struct CaptureHomeView: View {
                 // 布局原则：主操作「记录此刻」必须首屏完整露出——紧跟输入条；
                 // 同步状态条属于次要信息，下移到统计行之后；行距 14 紧凑但不拥挤。
                 VStack(spacing: 14) {
+                    greetingRow
                     ageHeader
                     NaturalCaptureBar()
                     recordButton
@@ -44,7 +45,8 @@ struct CaptureHomeView: View {
                     healthEntryCard
                     dailyQuestionCard
                     recentStrip
-                    Spacer(minLength: 24)
+                    // 给底部悬浮玻璃 Tab 栏留出空间
+                    Spacer(minLength: 110)
                 }
                 .padding()
             }
@@ -159,6 +161,41 @@ struct CaptureHomeView: View {
     }
 
     // MARK: 年龄头部（布布个人身份卡）
+
+    @ViewBuilder
+    // 顶部问候行（纯展示，对照设计稿「☀︎ 早安呀 + 名字 + 年龄」）
+    private var greetingRow: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(greetingText) 呀")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                if let profile {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(profile.name)
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(theme.primary)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding(.top, 4)
+    }
+
+    private var greetingText: String {
+        let h = Calendar.current.component(.hour, from: .now)
+        switch h {
+        case 5..<11: return "☀︎ 早安"
+        case 11..<14: return "🍚 中午好"
+        case 14..<18: return "🌤 下午好"
+        case 18..<23: return "🌙 晚上好"
+        default: return "💤 夜深了"
+        }
+    }
 
     @ViewBuilder
     private var ageHeader: some View {
