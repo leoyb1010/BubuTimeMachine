@@ -86,30 +86,8 @@ final class AppEnvironment {
     /// 小组件不直接依赖主 App 进程。把它需要的档案/头像/最近照片写入 App Group defaults，
     /// 避免 WidgetKit 进程直接打开 SwiftData store 失败时显示空白。
     func refreshWidgetSnapshot(context: ModelContext) {
-        guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return }
-        var recentPhoto: String?
-        var descriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\.happenedAt, order: .reverse)]
-        )
-        descriptor.fetchLimit = 12
-        if let entries = try? context.fetch(descriptor) {
-            outer: for entry in entries {
-                for media in entry.media where media.type == .photo {
-                    if let fileName = media.localFileName {
-                        recentPhoto = fileName
-                        break outer
-                    }
-                }
-            }
-        }
-        SharedDefaults.saveWidgetSnapshot(SharedWidgetSnapshot(
-            name: profile.name,
-            birthday: profile.birthday,
-            recentPhotoFileName: recentPhoto,
-            avatarFileName: profile.avatarMediaFileName,
-            updatedAt: .now
-        ))
+        guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
+        SharedDefaults.saveWidgetSnapshot(snapshot)
     }
 
     /// 订阅后台缩略图补齐：把生成的缩略图文件名回填进 SwiftData 的 `Media.thumbnailFileName`，

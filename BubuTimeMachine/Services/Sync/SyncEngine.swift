@@ -226,30 +226,8 @@ final class SyncEngine {
     }
 
     private func refreshWidgetSnapshot(_ context: ModelContext) {
-        guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return }
-        var recentPhoto: String?
-        var descriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\.happenedAt, order: .reverse)]
-        )
-        descriptor.fetchLimit = 12
-        if let entries = try? context.fetch(descriptor) {
-            outer: for entry in entries {
-                for media in entry.media where media.type == .photo {
-                    if let fileName = media.localFileName {
-                        recentPhoto = fileName
-                        break outer
-                    }
-                }
-            }
-        }
-        SharedDefaults.saveWidgetSnapshot(SharedWidgetSnapshot(
-            name: profile.name,
-            birthday: profile.birthday,
-            recentPhotoFileName: recentPhoto,
-            avatarFileName: profile.avatarMediaFileName,
-            updatedAt: .now
-        ))
+        guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
+        SharedDefaults.saveWidgetSnapshot(snapshot)
         WidgetRefresher.reload()
     }
 

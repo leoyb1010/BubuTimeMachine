@@ -14,17 +14,61 @@ struct BubuSnapshot: Sendable {
     var recentPhotoFileName: String?
     /// 布布头像本地文件名（小组件圆形头像），可空。
     var avatarFileName: String?
+    var photoFileNames: [String]
+    var recentEntryTitle: String
+    var recentEntryNote: String
+    var recentEntryDate: Date?
+    var recentMoodEmoji: String?
+    var latestHeightText: String
+    var latestWeightText: String
+    var achievedMilestoneCount: Int
+    var totalMilestoneCount: Int
+    var latestMilestoneTitle: String?
+    var latestMilestoneEmoji: String?
+    var nextMilestoneTitle: String
+    var nextMilestoneEmoji: String
+    var monthlyPhotoCount: Int
+    var totalEntryCount: Int
+    var totalPhotoCount: Int
+    var idNumber: String
     /// 小组件渲染用头像数据。只从 App Group 文件读取，读不到时 UI 会自动兜底。
     var avatarImageData: Data?
     /// 最近照片数据，用于大尺寸小组件增加内容密度。读不到不影响主内容。
     var recentPhotoImageData: Data?
+    var photoImageData: [Data]
+
+    var milestoneProgress: Double {
+        guard totalMilestoneCount > 0 else { return 0 }
+        return min(1, Double(achievedMilestoneCount) / Double(totalMilestoneCount))
+    }
+
+    var milestoneProgressText: String {
+        totalMilestoneCount > 0 ? "\(achievedMilestoneCount)/\(totalMilestoneCount)" : "0/0"
+    }
 
     /// 无档案时的占位。
     static let placeholder = BubuSnapshot(
         name: "布布", birthday: nil, ageText: "等你记录",
         daysSinceBirth: 0, daysUntilBirthday: 0, hasProfile: false,
         recentPhotoFileName: nil, avatarFileName: nil,
-        avatarImageData: nil, recentPhotoImageData: nil
+        photoFileNames: [],
+        recentEntryTitle: "今日时光",
+        recentEntryNote: "打开 App 记录一句话，桌面也会慢慢变丰富",
+        recentEntryDate: nil,
+        recentMoodEmoji: nil,
+        latestHeightText: "-- cm",
+        latestWeightText: "-- kg",
+        achievedMilestoneCount: 0,
+        totalMilestoneCount: 0,
+        latestMilestoneTitle: nil,
+        latestMilestoneEmoji: nil,
+        nextMilestoneTitle: "记录新的第一次",
+        nextMilestoneEmoji: "✨",
+        monthlyPhotoCount: 0,
+        totalEntryCount: 0,
+        totalPhotoCount: 0,
+        idNumber: SharedWidgetSnapshot.defaultIDNumber,
+        avatarImageData: nil, recentPhotoImageData: nil, photoImageData: []
     )
 
     /// 预览/骨架用的样例。
@@ -32,7 +76,24 @@ struct BubuSnapshot: Sendable {
         name: "布布", birthday: Calendar.current.date(byAdding: .month, value: -23, to: .now),
         ageText: "1岁11个月", daysSinceBirth: 709, daysUntilBirthday: 23,
         hasProfile: true, recentPhotoFileName: nil, avatarFileName: nil,
-        avatarImageData: nil, recentPhotoImageData: nil
+        photoFileNames: [],
+        recentEntryTitle: "今天会拍手啦",
+        recentEntryNote: "午睡醒来冲大家笑，还跟着音乐轻轻拍手",
+        recentEntryDate: .now,
+        recentMoodEmoji: "😄",
+        latestHeightText: "82.4 cm",
+        latestWeightText: "11.2 kg",
+        achievedMilestoneCount: 28,
+        totalMilestoneCount: 88,
+        latestMilestoneTitle: "第一次拍手",
+        latestMilestoneEmoji: "👏",
+        nextMilestoneTitle: "第一次说完整句子",
+        nextMilestoneEmoji: "💬",
+        monthlyPhotoCount: 12,
+        totalEntryCount: 186,
+        totalPhotoCount: 342,
+        idNumber: SharedWidgetSnapshot.defaultIDNumber,
+        avatarImageData: nil, recentPhotoImageData: nil, photoImageData: []
     )
 }
 
@@ -60,9 +121,43 @@ enum BubuWidgetData {
             hasProfile: birthday != nil,
             recentPhotoFileName: shared.recentPhotoFileName,
             avatarFileName: shared.avatarFileName,
+            photoFileNames: shared.photoFileNames ?? shared.recentPhotoFileName.map { [$0] } ?? [],
+            recentEntryTitle: fallback(shared.recentEntryTitle, "今日时光"),
+            recentEntryNote: fallback(shared.recentEntryNote, "记录一句话，桌面也会慢慢变丰富"),
+            recentEntryDate: shared.recentEntryDate,
+            recentMoodEmoji: shared.recentMoodEmoji,
+            latestHeightText: measurementText(shared.latestHeightCm, unit: "cm"),
+            latestWeightText: measurementText(shared.latestWeightKg, unit: "kg"),
+            achievedMilestoneCount: max(0, shared.achievedMilestoneCount ?? 0),
+            totalMilestoneCount: max(0, shared.totalMilestoneCount ?? 0),
+            latestMilestoneTitle: shared.latestMilestoneTitle,
+            latestMilestoneEmoji: shared.latestMilestoneEmoji,
+            nextMilestoneTitle: fallback(shared.nextMilestoneTitle ?? shared.latestMilestoneTitle, "记录新的第一次"),
+            nextMilestoneEmoji: shared.nextMilestoneEmoji ?? shared.latestMilestoneEmoji ?? "✨",
+            monthlyPhotoCount: max(0, shared.monthlyPhotoCount ?? 0),
+            totalEntryCount: max(0, shared.totalEntryCount ?? 0),
+            totalPhotoCount: max(0, shared.totalPhotoCount ?? 0),
+            idNumber: fallback(shared.idNumber, SharedWidgetSnapshot.defaultIDNumber),
             avatarImageData: imageData(fileName: shared.avatarFileName),
-            recentPhotoImageData: imageData(fileName: shared.recentPhotoFileName)
+            recentPhotoImageData: imageData(fileName: shared.recentPhotoFileName),
+            photoImageData: (shared.photoFileNames ?? shared.recentPhotoFileName.map { [$0] } ?? [])
+                .compactMap { imageData(fileName: $0) }
         )
+    }
+
+    private static func fallback(_ value: String?, _ fallback: String) -> String {
+        guard let value else { return fallback }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private static func measurementText(_ value: Double?, unit: String) -> String {
+        guard let value else { return "-- \(unit)" }
+        let rounded = (value * 10).rounded() / 10
+        if rounded.truncatingRemainder(dividingBy: 1) == 0 {
+            return "\(Int(rounded)) \(unit)"
+        }
+        return String(format: "%.1f %@", rounded, unit)
     }
 
     private static func imageData(fileName: String?) -> Data? {
