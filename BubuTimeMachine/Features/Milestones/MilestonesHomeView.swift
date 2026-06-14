@@ -15,6 +15,7 @@ struct MilestonesHomeView: View {
     @State private var detailFor: Milestone?
     @State private var searchText = ""
     @State private var selectedCategory = "全部"
+    @State private var isConstellation = false   // 展示方式：奖章墙 / 成长星座
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -42,8 +43,15 @@ struct MilestonesHomeView: View {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 progressHeader
                 filters
-                if !achieved.isEmpty { achievedWall }
-                if !pending.isEmpty { pendingWall }
+                if isConstellation {
+                    // 成长星座视图（复用同一份筛选后的里程碑）
+                    BubuConstellationView(milestones: filteredMilestones, primary: theme) { m in
+                        detailFor = m
+                    }
+                } else {
+                    if !achieved.isEmpty { achievedWall }
+                    if !pending.isEmpty { pendingWall }
+                }
                 if milestones.isEmpty { emptyState }
             }
             .padding()
@@ -51,6 +59,14 @@ struct MilestonesHomeView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("里程碑")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isConstellation.toggle() }
+                } label: {
+                    Image(systemName: isConstellation ? "square.grid.2x2.fill" : "sparkles")
+                }
+                .accessibilityLabel(isConstellation ? "切换到奖章墙" : "切换到成长星座")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { showCustom = true } label: { Label("自定义里程碑", systemImage: "star.bubble") }
