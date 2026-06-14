@@ -71,7 +71,8 @@ struct BubuSparkle: View {
             .fill(color)
             .frame(width: size, height: size)
             .opacity(animated && !reduceMotion ? (on ? 1 : 0.35) : 0.9)
-            .scaleEffect(animated && !reduceMotion ? (on ? 1 : 0.7) : 1)
+            .scaleEffect(animated && !reduceMotion ? (on ? 1.1 : 0.7) : 1)
+            .rotationEffect(.degrees(animated && !reduceMotion ? (on ? 20 : 0) : 0))  // 贴合 macTwinkle
             .onAppear {
                 guard animated, !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true).delay(delay)) {

@@ -65,25 +65,20 @@ struct TimelineView: View {
             LazyVStack(alignment: .leading, spacing: BubuTheme.Spacing.section, pinnedViews: [.sectionHeaders]) {
                 ForEach(Array(sections.enumerated()), id: \.element.key) { sectionIndex, section in
                     Section {
-                        ForEach(section.entries) { entry in
-                            NavigationLink(value: entry) {
-                                TimelineEntryCard(entry: entry, mediaStore: env.mediaStore)
-                            }
-                            .buttonStyle(.plain)
-                            .matchedTransitionSource(id: entry.id, in: zoomNS)
-                            .entranceEffect(index: entranceIndex(sectionIndex: sectionIndex, entryId: entry.id))
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    entryPendingDelete = entry
-                                } label: {
-                                    Label("删除记录", systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    entryPendingDelete = entry
-                                } label: {
-                                    Label("删除", systemImage: "trash")
+                        // 虚线竖轴 + hue 圆点（对照设计稿 MacTimeline）
+                        ZStack(alignment: .topLeading) {
+                            // 竖向虚线（落在圆点中心 x ≈ 15）
+                            Rectangle()
+                                .fill(BubuTheme.Color.peach)
+                                .frame(width: 2)
+                                .frame(maxHeight: .infinity)
+                                .padding(.leading, 14)
+                                .padding(.vertical, 18)
+                                .opacity(0.55)
+
+                            LazyVStack(alignment: .leading, spacing: 16) {
+                                ForEach(section.entries) { entry in
+                                    timelineRow(entry, sectionIndex: sectionIndex)
                                 }
                             }
                         }
@@ -98,6 +93,88 @@ struct TimelineView: View {
             EntryDetailView(entry: entry)
                 .navigationTransition(.zoom(sourceID: entry.id, in: zoomNS))
         }
+    }
+
+    // 单条：左侧 hue 圆点 + 右侧大图卡片
+    private func timelineRow(_ entry: Entry, sectionIndex: Int) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Circle()
+                .fill(BubuTheme.Color.hue(Double(abs(entry.id.hashValue) % 360), lightness: 0.78))
+                .frame(width: 14, height: 14)
+                .overlay(Circle().stroke(.white, lineWidth: 3))
+                .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                .padding(.top, 16)
+            NavigationLink(value: entry) {
+                bigPhotoCard(entry)
+            }
+            .buttonStyle(.plain)
+            .matchedTransitionSource(id: entry.id, in: zoomNS)
+            .entranceEffect(index: entranceIndex(sectionIndex: sectionIndex, entryId: entry.id))
+            .contextMenu {
+                Button(role: .destructive) { entryPendingDelete = entry } label: {
+                    Label("删除记录", systemImage: "trash")
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { entryPendingDelete = entry } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    // 大图卡片：顶部 hue 占位/真实图（带日期标）+ 标题正文 + tag 行
+    private func bigPhotoCard(_ entry: Entry) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let media = entry.media.first {
+                        MediaThumbnail(media: media, mediaStore: env.mediaStore)
+                    } else {
+                        BubuDreamPhoto(hue: Double(abs(entry.id.hashValue) % 360), height: 132,
+                                       cornerRadius: 0, motif: entry.mood?.emoji ?? "◡")
+                    }
+                }
+                .frame(height: 132)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+                Text("\(BubuDateFormat.monthDay(entry.happenedAt)) · \(BubuDateFormat.shortTime(entry.happenedAt))")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                    .padding(.horizontal, 14).padding(.bottom, 10)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.title?.isEmpty == false ? entry.title! :
+                        (entry.note?.isEmpty == false ? entry.note! : "记录此刻"))
+                    .font(.system(size: 15.5, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .lineLimit(1)
+                if let note = entry.note, !note.isEmpty {
+                    Text(note)
+                        .font(.system(size: 12.5, weight: .regular, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(2)
+                }
+                HStack(spacing: 6) {
+                    if let mood = entry.mood {
+                        BubuTag(text: "\(mood.emoji) \(mood.rawValue)")
+                    }
+                    if let ft = entry.firstTime?.what, !ft.isEmpty {
+                        BubuTag(text: "第一次 · \(ft)", background: BubuTheme.Color.pink.opacity(0.5),
+                                foreground: BubuTheme.Color.deepRose)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 4)
+            }
+            .padding(14)
+        }
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .bubuCardShadow()
     }
 
     /// 月份 + 年龄锚点：翻旧记录时「布布多大」比日期更有感。

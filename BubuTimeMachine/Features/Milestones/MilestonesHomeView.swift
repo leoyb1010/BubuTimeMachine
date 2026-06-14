@@ -96,22 +96,39 @@ struct MilestonesHomeView: View {
         }
     }
 
+    // 进度卡：lav→pink 渐变 + 进度环（对照设计稿 MacMilestones 进度卡）
     private var progressHeader: some View {
         let total = milestones.count
         let done = achieved.count
-        return VStack(spacing: 12) {
-            Text("\(done) / \(max(total, 1)) 个里程碑")
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .foregroundStyle(BubuTheme.Color.warmBrown)
-            ProgressView(value: Double(done), total: Double(max(total, 1)))
-                .tint(theme)
-            Text("每一个第一次，都值得被郑重记住")
-                .font(BubuTheme.Font.caption)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
+        return HStack(spacing: 16) {
+            ZStack {
+                BubuProgressRing(value: done, total: max(total, 1), size: 60, stroke: 7,
+                                 color: .white, track: .white.opacity(0.4))
+                Text("\(done)")
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("已点亮 \(done) / \(max(total, 1)) 颗星")
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+                Text("还有 \(max(0, total - done)) 颗等你点亮 ♡")
+                    .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.95))
+            }
+            Spacer(minLength: 0)
         }
-        .padding()
+        .padding(16)
         .frame(maxWidth: .infinity)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .background(
+            LinearGradient(colors: [BubuTheme.Color.lav, BubuTheme.Color.pink],
+                           startPoint: .leading, endPoint: .trailing),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+        )
+        .overlay(alignment: .topTrailing) {
+            BubuSparkle(size: 13, color: .white.opacity(0.95)).padding(14)
+        }
         .bubuCardShadow()
     }
 

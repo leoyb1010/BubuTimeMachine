@@ -13,6 +13,9 @@ struct CaptureHomeView: View {
     @Query private var profiles: [ChildProfile]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
+    @Query private var milestones: [Milestone]
+    @Query(sort: \GrowthMeasurement.measuredAt, order: .reverse)
+    private var measurements: [GrowthMeasurement]
 
     @State private var model: CaptureModel?
     @State private var firstTimeSuggestion: String?
@@ -34,17 +37,21 @@ struct CaptureHomeView: View {
             ScrollView {
                 // 布局原则：主操作「记录此刻」必须首屏完整露出——紧跟输入条；
                 // 同步状态条属于次要信息，下移到统计行之后；行距 14 紧凑但不拥挤。
+                // 严格照搬设计稿 MacHome 的卡片拼贴节奏：
+                // 问候 → Hero 相遇卡 → 双卡①(星座+身高体重) → 布布故事横幅 → 双卡②(相册+记录) → 最近时光。
+                // 现有功能(健康/今日一问/那年今日/同步)作为下方延伸区保留，不删任何入口。
                 VStack(spacing: 14) {
                     greetingRow
-                    heroMeetingCard        // 大渐变 Hero 卡（相遇第N天，对照设计稿）
-                    NaturalCaptureBar()
-                    dashboardGrid          // 双卡网格：成长星座迷你 + 统计
-                    recordButton
-                    healthEntryCard
+                    identityCardTop            // ① 布布身份卡（可翻面看性别/血型/出生地）
+                    dashboardGridTop           // ② 双卡：成长星座迷你 ‖ 身高体重 bar
+                    storyBanner                // ③ 布布的故事 butter→peach 横幅
+                    dashboardGridBottom        // ④ 双卡：相册叠放 ‖ 记录此刻虚线
+                    recentMomentsSection       // ⑤ 最近时光（行卡）
+                    NaturalCaptureBar()        // —— 以下为现有功能延伸区，全部保留 ——
                     onThisDaySection
+                    healthEntryCard
                     dailyQuestionCard
                     saveHealthStrip
-                    recentStrip
                     // 给底部悬浮玻璃 Tab 栏留出空间
                     Spacer(minLength: 110)
                 }
@@ -197,79 +204,53 @@ struct CaptureHomeView: View {
         }
     }
 
-    // MARK: 大渐变 Hero 卡（对照设计稿：头像 + 相遇第N天 大数字）
+    // MARK: 布布身份卡（顶部主卡，可翻面看性别/血型/出生地——用户指定保留）
 
     @ViewBuilder
-    private var heroMeetingCard: some View {
+    private var identityCardTop: some View {
         if let profile {
+            BubuIdentityCard(profile: profile, theme: theme, mediaStore: env.mediaStore)
+        } else {
+            // 无档案：引导建档（保证空态也好看，不留空白）
             NavigationLink { ChildProfileView() } label: {
-                HStack(spacing: 16) {
-                    heroAvatar(profile)
+                HStack(spacing: 14) {
+                    BubuMascotBadge(size: 56, expression: .happy)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("和你相遇的第")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.95))
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("\(AgeCalculator.daysSinceBirth(birthday: profile.birthday))")
-                                .font(.system(size: 46, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                                .contentTransition(.numericText())
-                            Text("天").font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.95))
-                        }
-                        Text("慢慢长大，慢慢相遇 ♡")
-                            .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.95))
+                        Text("建立布布的档案")
+                            .font(.system(size: 18, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("填上生日，就能看到「相遇第几天」啦 ♡")
+                            .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
                     Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(BubuTheme.Color.secondaryText)
                 }
-                .padding(20)
+                .padding(18)
                 .frame(maxWidth: .infinity)
-                .background(BubuTheme.Gradient.hero, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    BubuSparkle(size: 15, color: .white.opacity(0.95)).padding(18)
-                }
-                .overlay(alignment: .trailing) {
-                    BubuSparkle(size: 10, color: .white.opacity(0.8), delay: 0.7).padding(.trailing, 30)
-                }
+                .background(BubuTheme.Gradient.hero, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .bubuCardShadow()
             }
             .buttonStyle(.plain)
         }
     }
 
-    @ViewBuilder
-    private func heroAvatar(_ profile: ChildProfile) -> some View {
-        Group {
-            if let name = profile.avatarMediaFileName,
-               let data = env.mediaStore.data(forMedia: name),
-               let ui = UIImage(data: data) {
-                Image(uiImage: ui).resizable().scaledToFill()
-            } else {
-                ZStack {
-                    BubuTheme.Color.cream
-                    BubuMascotBadge(size: 56, expression: .happy)
-                }
-            }
-        }
-        .frame(width: 88, height: 88)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.7), lineWidth: 3))
-        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
-    }
+    // MARK: 双卡① — 成长星座迷你 ‖ 身高体重 bar（对照设计稿 MacHome 第一组双卡）
 
-    // MARK: 双卡网格（成长星座迷你预览 + 统计）
+    private var litMilestoneCount: Int { milestones.filter(\.isAchieved).count }
+    private var latestHeight: Double? { measurements.compactMap(\.heightCm).first }
+    private var latestWeight: Double? { measurements.compactMap(\.weightKg).first }
 
-    private var dashboardGrid: some View {
+    private var dashboardGridTop: some View {
         HStack(spacing: 12) {
-            // 成长星座入口卡
+            // 成长星座入口卡（迷你星座预览）
             NavigationLink { MilestonesHomeView() } label: {
                 VStack(alignment: .leading, spacing: 8) {
-                    miniConstellation
+                    BubuMiniConstellation(done: max(1, litMilestoneCount))
                     Text("成长星座")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("点亮布布的每个第一次")
+                    Text("已点亮 \(litMilestoneCount) / \(milestones.count) 颗星")
                         .font(.system(size: 11.5, weight: .medium, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(1)
@@ -279,14 +260,114 @@ struct CaptureHomeView: View {
             }
             .buttonStyle(.plain)
 
-            // 相册卡
+            // 身高体重卡（→ 成长数据）
+            NavigationLink { HealthHomeView() } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        growthStat(title: "身高", value: latestHeight, unit: "cm")
+                        growthStat(title: "体重", value: latestWeight, unit: "kg")
+                    }
+                    growthBars
+                        .padding(.top, 10)
+                    Text("记录布布的长大 ↗")
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .bubuMacaronCard(padding: 16)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func growthStat(title: String, value: Double?, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(value.map { String(format: $0 == $0.rounded() ? "%.0f" : "%.1f", $0) } ?? "—")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(unit).font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // 设计稿那组渐升 bar（装饰；末柱用主色）
+    private var growthBars: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            ForEach(Array([40, 55, 62, 70, 76, 88, 100].enumerated()), id: \.offset) { i, h in
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(i == 6 ? BubuTheme.Color.primary : BubuTheme.Color.peach)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 38 * CGFloat(h) / 100)
+            }
+        }
+        .frame(height: 38)
+    }
+
+    // MARK: 布布的故事横幅（butter→peach，对照设计稿 MacHome 故事卡）
+
+    private var storyBanner: some View {
+        NavigationLink { BubuStoryView() } label: {
+            HStack(spacing: 14) {
+                // 倾斜书卡
+                BubuDreamPhoto(hue: 18, height: 84, cornerRadius: 14, motif: "✦")
+                    .frame(width: 70)
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white, lineWidth: 3))
+                    .rotationEffect(.degrees(-4))
+                    .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("布布的故事 · 成长绘本")
+                        .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.deepRose)
+                    Text(storyHeadline)
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .lineLimit(1)
+                    Text("由你记录的点滴，自动编织成故事")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color(red: 0.54, green: 0.42, blue: 0.33))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(BubuTheme.Color.deepRose)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.peach],
+                               startPoint: .leading, endPoint: .trailing),
+                in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+            )
+            .bubuCardShadow()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var storyHeadline: String {
+        let n = milestones.filter { $0.isAchieved && ($0.detail?.isEmpty == false) }.count
+        return n > 0 ? "已写到第 \(min(n, 99)) 篇" : "翻开第一页"
+    }
+
+    // MARK: 双卡② — 相册叠放 ‖ 记录此刻虚线（对照设计稿 MacHome 第二组双卡）
+
+    private var dashboardGridBottom: some View {
+        HStack(spacing: 12) {
+            // 相册卡（多图）
             NavigationLink { AlbumHomeView() } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
-                        BubuDreamPhoto(hue: 150, height: 52, cornerRadius: 12, motif: "✿")
+                        BubuDreamPhoto(hue: 150, height: 56, cornerRadius: 12, motif: "✿")
                         VStack(spacing: 6) {
-                            BubuDreamPhoto(hue: 335, height: 23, cornerRadius: 8, motif: "")
-                            BubuDreamPhoto(hue: 200, height: 23, cornerRadius: 8, motif: "")
+                            BubuDreamPhoto(hue: 335, height: 25, cornerRadius: 9, motif: "")
+                            BubuDreamPhoto(hue: 200, height: 25, cornerRadius: 9, motif: "")
                         }
                     }
                     Text("相册 · \(totalPhotos) 张")
@@ -300,55 +381,98 @@ struct CaptureHomeView: View {
                 .bubuMacaronCard(padding: 14)
             }
             .buttonStyle(.plain)
-        }
-    }
 
-    // 迷你星座装饰（5 颗小星 + 连线）
-    private var miniConstellation: some View {
-        Canvas { ctx, size in
-            let pts: [CGPoint] = [
-                CGPoint(x: size.width * 0.18, y: size.height * 0.30),
-                CGPoint(x: size.width * 0.45, y: size.height * 0.18),
-                CGPoint(x: size.width * 0.72, y: size.height * 0.34),
-                CGPoint(x: size.width * 0.58, y: size.height * 0.70),
-                CGPoint(x: size.width * 0.28, y: size.height * 0.66),
-            ]
-            var path = Path()
-            path.addLines(pts)
-            ctx.stroke(path, with: .color(theme.primary.opacity(0.45)),
-                       style: StrokeStyle(lineWidth: 1, dash: [1, 4]))
-            for (i, p) in pts.enumerated() {
-                let r: CGFloat = i < 3 ? 4.5 : 3
-                let c = i < 3 ? theme.primary : BubuTheme.Color.secondaryText.opacity(0.5)
-                ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r*2, height: r*2)), with: .color(c))
-            }
-        }
-        .frame(height: 56)
-    }
-
-    @ViewBuilder
-    private var ageHeader: some View {
-        if let profile {
-            NavigationLink {
-                ChildProfileView()
-            } label: {
-                BubuIdentityCard(profile: profile,
-                                 theme: theme,
-                                 mediaStore: env.mediaStore)
+            // 记录此刻虚线卡
+            Button { model?.startQuickCapture() } label: {
+                VStack(spacing: 8) {
+                    ZStack {
+                        Circle().fill(BubuTheme.Color.cream2).frame(width: 46, height: 46)
+                        Image(systemName: "plus")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(BubuTheme.Color.deepRose)
+                    }
+                    Text("记录此刻")
+                        .font(.system(size: 13.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("留住今天的布布")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 130)
+                .background(
+                    LinearGradient(colors: [BubuTheme.Color.card, BubuTheme.Color.cream2],
+                                   startPoint: .top, endPoint: .bottom),
+                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
+                        .strokeBorder(BubuTheme.Color.peach, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                )
             }
             .buttonStyle(.plain)
-            .padding(.top, 6)
-        } else {
-            VStack(spacing: 12) {
-                Image("BubuLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 82, height: 82)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: theme.primary.opacity(0.18), radius: 10, y: 4)
-                Text("布布时光机").font(BubuTheme.Font.hugeTitle)
+        }
+    }
+
+    // MARK: 最近时光（行卡，对照设计稿 MacMomentRow）
+
+    @ViewBuilder
+    private var recentMomentsSection: some View {
+        if !entries.isEmpty {
+            VStack(spacing: 10) {
+                HStack {
+                    Text("最近时光")
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Spacer()
+                    Button { openTimeline?() } label: {
+                        Text("查看全部 ›")
+                            .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.primary)
+                    }
+                }
+                ForEach(entries.prefix(2)) { entry in
+                    NavigationLink(value: entry) { momentRow(entry) }
+                        .buttonStyle(.plain)
+                        .matchedTransitionSource(id: entry.id, in: zoomNS)
+                }
             }
         }
+    }
+
+    private func momentRow(_ entry: Entry) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if let media = entry.media.first {
+                    MediaThumbnail(media: media, mediaStore: env.mediaStore)
+                } else {
+                    BubuDreamPhoto(hue: Double(abs(entry.id.hashValue) % 360), height: 64,
+                                   cornerRadius: 16, motif: entry.mood?.emoji ?? "◡")
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(BubuDateFormat.monthDay(entry.happenedAt))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.primary)
+                Text(entry.note?.isEmpty == false ? entry.note! : "记录此刻")
+                    .font(.system(size: 14.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .lineLimit(1)
+                if let mood = entry.mood {
+                    Text("\(mood.emoji) \(mood.rawValue)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .bubuCardShadow()
     }
 
     // MARK: 保存健康度
@@ -413,47 +537,6 @@ struct CaptureHomeView: View {
         case .online:
             return env.syncEngine.pendingCount == 0 ? "已和家里服务器同步" : "\(env.syncEngine.pendingCount) 项正在等待同步"
         }
-    }
-
-    // MARK: 统计行
-
-    /// 三张统计卡都可点：瞬间 → 时光轴；照片 → 照片墙；生日 → 倒计时页。
-    private var statRow: some View {
-        HStack(spacing: 12) {
-            Button { openTimeline?() } label: {
-                statCard(value: "\(entries.count)", label: "个瞬间", icon: "sparkles")
-            }
-            .buttonStyle(.plain)
-
-            NavigationLink { AlbumHomeView() } label: {
-                statCard(value: "\(totalPhotos)", label: "张照片", icon: "photo.stack")
-            }
-            .buttonStyle(.plain)
-
-            if let profile {
-                NavigationLink { BirthdayCountdownView() } label: {
-                    statCard(value: "\(AgeCalculator.daysUntilNextBirthday(birthday: profile.birthday))",
-                             label: "天后生日", icon: "gift")
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func statCard(value: String, label: String, icon: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(theme.primary)
-            Text(value).font(.system(size: 22, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .foregroundStyle(BubuTheme.Color.warmBrown)
-            Text(label).font(.system(size: 12)).foregroundStyle(BubuTheme.Color.secondaryText)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        // iOS 26 glassEffect 自带景深，去掉冗余的额外阴影（既省合成又更贴近原生质感）。
-        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
     }
 
     private var totalPhotos: Int {
@@ -598,80 +681,6 @@ struct CaptureHomeView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: 大记录按钮
-
-    private var recordButton: some View {
-        Button {
-            model?.startQuickCapture()
-        } label: {
-            HStack(spacing: 0) {
-                BubuMascotBadge(size: 82, expression: .travel)
-                    .padding(.leading, 4)
-                    .zIndex(1)
-
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(BubuTheme.Copy.recordNow)
-                            .font(.system(size: 25, weight: .bold, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text("拍照、写一句、说给布布听")
-                            .font(BubuTheme.Font.caption)
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
-                    }
-                    Spacer()
-                    Image(systemName: "heart.circle.fill")
-                        .font(.system(size: 32, weight: .semibold))
-                        .foregroundStyle(theme.primary)
-                }
-                .padding(.vertical, 16)
-                .padding(.leading, 20)
-                .padding(.trailing, 18)
-                .background(homeSurface, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .bubuGlassSurface(cornerRadius: 30, tint: theme.primary, interactive: true)
-                .overlay(alignment: .leading) {
-                    BubuSpeechTail()
-                        .fill(homeSurface)
-                        .frame(width: 18, height: 26)
-                        .offset(x: -10)
-                }
-                .bubuCardShadow()
-                .padding(.leading, -6)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("记录此刻，可以拍照、写一句或说给布布听")
-    }
-
-    // MARK: 最近精选
-
-    @ViewBuilder
-    private var recentStrip: some View {
-        if !entries.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("最近的瞬间", systemImage: "clock")
-                    .font(BubuTheme.Font.headline)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(entries.prefix(8)) { entry in
-                            NavigationLink(value: entry) {
-                                if let media = entry.media.first {
-                                    MediaThumbnail(media: media, mediaStore: env.mediaStore)
-                                        .frame(width: 96, height: 96)
-                                } else {
-                                    BubuMascotBadge(size: 96, mood: entry.mood)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .matchedTransitionSource(id: entry.id, in: zoomNS)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     /// 保存成功：布布「耶」贴纸弹入 + 成功触觉（haptic 在 CaptureModel.flashSaved 触发）。
     private var savedToast: some View {
         VStack {
@@ -691,15 +700,3 @@ struct CaptureHomeView: View {
     }
 }
 
-private struct BubuSpeechTail: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.midY),
-                          control: CGPoint(x: rect.minX + rect.width * 0.35, y: rect.minY + rect.height * 0.18))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY),
-                          control: CGPoint(x: rect.minX + rect.width * 0.35, y: rect.maxY - rect.height * 0.18))
-        path.closeSubpath()
-        return path
-    }
-}

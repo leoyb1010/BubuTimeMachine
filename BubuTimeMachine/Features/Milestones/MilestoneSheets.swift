@@ -99,9 +99,53 @@ struct MilestoneEditSheet: View {
     private var theme: Color { env.theme.theme.primary }
     private let emojiChoices = ["🌟","🍼","👣","🗣️","🦷","🚶","🏃","🎂","🥄","🚽","📚","🎨","🎵","💪","🧩","🌈"]
 
+    // 已点亮详情头：hue 渐变 + 迸发星点 + macStarPop 图标 + 解锁信息（对照设计稿 MacMilestoneDetail）
+    @ViewBuilder
+    private var achievedHeader: some View {
+        let hue = Double(abs((milestone?.title ?? title).hashValue) % 360)
+        VStack(spacing: 0) {
+            ZStack {
+                BubuBurst(radius: 96)
+                ZStack {
+                    Circle().fill(.white.opacity(0.85)).frame(width: 96, height: 96)
+                        .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+                    Text(milestone?.emoji ?? emoji).font(.system(size: 44))
+                }
+                .modifier(StarPop())
+            }
+            .frame(height: 120)
+            Text(milestone?.title ?? title)
+                .font(.system(size: 22, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.14), radius: 4, y: 2)
+            if let m = milestone, let d = m.happenedAt {
+                Text("解锁于 \(BubuDateFormat.yearMonthDay(d))\(m.ageDescription.map { " · \($0)" } ?? "")")
+                    .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .padding(.horizontal, 14).padding(.vertical, 5)
+                    .background(.white.opacity(0.85), in: Capsule())
+                    .padding(.top, 8)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .background(
+            LinearGradient(colors: [BubuTheme.Color.hue(hue, lightness: 0.84),
+                                    BubuTheme.Color.hue((hue + 45).truncatingRemainder(dividingBy: 360), lightness: 0.80)],
+                           startPoint: .top, endPoint: .bottom)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .padding(.bottom, 4)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                if milestone?.isAchieved == true {
+                    achievedHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
                 Section("里程碑") {
                     TextField("如：第一次自己走路", text: $title)
                     Picker("分类", selection: $category) {
@@ -203,5 +247,19 @@ struct MilestoneEditSheet: View {
     private func deleteMilestone() {
         if let m = milestone { context.delete(m); try? context.save() }
         dismiss()
+    }
+}
+
+// macStarPop：0 → 1.18 → 1 的弹出（reduceMotion 时不动）。
+private struct StarPop: ViewModifier {
+    @State private var scale: CGFloat = 0.0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(reduceMotion ? 1 : scale)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.55).delay(0.1)) { scale = 1 }
+            }
     }
 }

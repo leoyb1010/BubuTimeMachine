@@ -115,22 +115,33 @@ struct AlbumHomeView: View {
 
     private func featuredCard(_ album: SystemAlbum) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                if let cover = album.cover {
-                    MediaThumbnail(media: cover.media, mediaStore: env.mediaStore,
-                                   cornerRadius: 18, size: .card)
-                } else {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(theme.opacity(0.10))
-                        .overlay {
-                            Image(systemName: album.icon)
-                                .font(.system(size: 30))
-                                .foregroundStyle(theme)
-                        }
+            // 叠放卡片效果（对照设计稿 MacAlbum：上方两条错位白边像叠着的相片）
+            ZStack(alignment: .top) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.white.opacity(0.6))
+                    .frame(width: 134, height: 16).offset(y: -5)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.white.opacity(0.8))
+                    .frame(width: 142, height: 16).offset(y: -2)
+                ZStack {
+                    if let cover = album.cover {
+                        MediaThumbnail(media: cover.media, mediaStore: env.mediaStore,
+                                       cornerRadius: 18, size: .card)
+                    } else {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(theme.opacity(0.10))
+                            .overlay {
+                                Image(systemName: album.icon)
+                                    .font(.system(size: 30))
+                                    .foregroundStyle(theme)
+                            }
+                    }
                 }
+                .frame(width: 150, height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .bubuCardShadow()
             }
-            .frame(width: 150, height: 150)
-            .clipped()
+            .frame(width: 150, height: 155)
 
             HStack(spacing: 5) {
                 Image(systemName: album.icon)
