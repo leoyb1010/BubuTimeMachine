@@ -3,6 +3,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { AppDatabase } from '../data/AppDatabase';
 import { SyncEngine } from '../sync/SyncEngine';
+import { VaccineLegacyMigrator } from '../sync/VaccineLegacyMigrator';
 import { MediaStore } from '../services/MediaStore';
 import { ServerConfig } from '../services/ServerConfig';
 
@@ -25,6 +26,8 @@ export default class EntryAbility extends UIAbility {
       await AppDatabase.shared.initialize(this.context);
       MediaStore.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
+      await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences
+      await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `初始化失败: ${JSON.stringify(e)}`);
     }
