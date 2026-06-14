@@ -15,7 +15,7 @@ struct MilestonesHomeView: View {
     @State private var detailFor: Milestone?
     @State private var searchText = ""
     @State private var selectedCategory = "全部"
-    @State private var isConstellation = false   // 展示方式：奖章墙 / 成长星座
+    @State private var isConstellation = true   // 展示方式：成长星座 / 奖章墙
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -56,8 +56,9 @@ struct MilestonesHomeView: View {
             }
             .padding()
         }
-        .background(BubuTheme.Color.background.ignoresSafeArea())
+        .background(BubuThemedBackground().ignoresSafeArea())
         .navigationTitle("里程碑")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -167,7 +168,7 @@ struct MilestonesHomeView: View {
             Label("已点亮", systemImage: "star.fill").font(BubuTheme.Font.headline).foregroundStyle(theme)
                 // 点亮新里程碑时星标弹跳一下（交互/数据驱动，非持续动画）。
                 .symbolEffect(.bounce, value: achieved.count)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                 ForEach(achieved) { milestone in
                     medallion(milestone, lit: true)
                         .onTapGesture { detailFor = milestone }
@@ -184,7 +185,7 @@ struct MilestonesHomeView: View {
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                 ForEach(pending) { milestone in
                     medallion(milestone, lit: false)
                         .onTapGesture { detailFor = milestone }
@@ -196,10 +197,10 @@ struct MilestonesHomeView: View {
     private func medallion(_ milestone: Milestone, lit: Bool) -> some View {
         VStack(spacing: 8) {
             Text(milestone.emoji)
-                .font(.system(size: 38))
+                .font(.system(size: 28))
                 .grayscale(lit ? 0 : 1)
                 .opacity(lit ? 1 : 0.45)
-                .frame(width: 72, height: 72)
+                .frame(width: 54, height: 54)
                 .background(
                     Circle().fill(lit ? theme.opacity(0.15) : BubuTheme.Color.softFill)
                 )
@@ -211,7 +212,7 @@ struct MilestonesHomeView: View {
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
 
     private var emptyState: some View {

@@ -15,23 +15,29 @@ struct BubuConstellationView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // 星座只画已点亮的（错落有致、不乱）；未点亮的去奖章墙/列表看。
-    private var shown: [Milestone] { milestones.filter(\.isAchieved) }
+    // 星盘显示一部分未点亮星，避免 0 点亮时空白；已点亮星保持发光并连线。
+    private var achieved: [Milestone] { milestones.filter(\.isAchieved) }
+    private var shown: [Milestone] {
+        let maxStars = 18
+        let lit = Array(achieved.prefix(maxStars))
+        let locked = milestones.filter { !$0.isAchieved }
+        return Array((lit + locked).prefix(maxStars))
+    }
     private var totalCount: Int { milestones.count }
 
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("✦ 已点亮 \(shown.count) / \(totalCount) 颗星")
+                Text("✦ 已点亮 \(achieved.count) / \(totalCount) 颗星")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
-                Text("还有 \(max(0, totalCount - shown.count)) 颗等你点亮 ♡")
+                Text("还有 \(max(0, totalCount - achieved.count)) 颗等你点亮 ♡")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
 
-            if shown.isEmpty {
+            if milestones.isEmpty {
                 VStack(spacing: 8) {
                     Text("✦").font(.system(size: 40)).foregroundStyle(primary.opacity(0.5))
                     Text("还没有点亮的星")
@@ -48,9 +54,9 @@ struct BubuConstellationView: View {
             GeometryReader { geo in
                 let positions = layout(count: shown.count, in: geo.size)
                 ZStack {
-                    constellationLines(positions: positions)
+                    constellationLines(positions: positions, milestones: shown)
                     ForEach(Array(shown.enumerated()), id: \.element.id) { idx, m in
-                        starView(m, index: idx)
+                        starView(m, index: idx, dense: shown.count > 12)
                             .position(positions.indices.contains(idx) ? positions[idx] : CGPoint(x: geo.size.width/2, y: geo.size.height/2))
                     }
                 }
@@ -84,9 +90,8 @@ struct BubuConstellationView: View {
     ]
 
     private var starboardHeight: CGFloat {
-        // 锚点是 540 画布比例；按数量伸缩，最少 380，多了加高可滚动。
-        let extra = max(0, shown.count - Self.anchorTemplate.count)
-        return min(900, 380 + CGFloat((shown.count <= 10 ? shown.count : 10)) * 14 + CGFloat(extra) * 40)
+        // 首页式紧凑星盘：信息够看，但不把底栏附近空间全部吃掉。
+        max(300, min(370, 260 + CGFloat(shown.count) * 5))
     }
 
     // 锚点布局：前 10 用模板比例；超出部分用黄金角螺旋错落填充。
@@ -111,11 +116,14 @@ struct BubuConstellationView: View {
     }
 
     @ViewBuilder
-    private func constellationLines(positions: [CGPoint]) -> some View {
+    private func constellationLines(positions: [CGPoint], milestones: [Milestone]) -> some View {
         // 已点亮的星顺序连线：底层浅粉粗描边 + 上层 rose→lav 渐变细线（对照设计稿双层 path）。
-        if positions.count >= 2 {
+        let litPositions = zip(positions, milestones).compactMap { point, milestone in
+            milestone.isAchieved ? point : nil
+        }
+        if litPositions.count >= 2 {
             let path = Path { p in
-                for (k, pt) in positions.enumerated() {
+                for (k, pt) in litPositions.enumerated() {
                     if k == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
                 }
             }
@@ -130,20 +138,23 @@ struct BubuConstellationView: View {
         }
     }
 
-    private func starView(_ m: Milestone, index: Int) -> some View {
+    private func starView(_ m: Milestone, index: Int, dense: Bool) -> some View {
         let starColor = BubuTheme.Color.hue(Double((abs(m.title.hashValue) % 360)), lightness: 0.82)
         return Button { onTapStar(m) } label: {
             VStack(spacing: 6) {
-                ConstellationStar(emoji: m.emoji, color: starColor, index: index,
+                ConstellationStar(emoji: m.emoji, color: starColor, index: index, lit: m.isAchieved,
                                   reduceMotion: reduceMotion)
-                Text(m.title)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                    .lineLimit(1).frame(width: 78)
-                    .shadow(color: BubuTheme.Color.cream.opacity(0.95), radius: 3)
+                if m.isAchieved || !dense {
+                    Text(m.title)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(m.isAchieved ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
+                        .lineLimit(1).frame(width: 78)
+                        .shadow(color: BubuTheme.Color.cream.opacity(0.95), radius: 3)
+                }
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(m.title)
     }
 }
 
@@ -152,6 +163,7 @@ private struct ConstellationStar: View {
     let emoji: String
     let color: Color
     let index: Int
+    let lit: Bool
     let reduceMotion: Bool
 
     @State private var popped = false
@@ -160,18 +172,25 @@ private struct ConstellationStar: View {
     var body: some View {
         ZStack {
             // 呼吸光晕
-            Circle().fill(color)
-                .frame(width: 54, height: 54)
-                .blur(radius: 6)
-                .opacity(halo ? 0.6 : 0.32)
-                .scaleEffect(halo ? 1.18 : 0.9)
+            if lit {
+                Circle().fill(color)
+                    .frame(width: 54, height: 54)
+                    .blur(radius: 6)
+                    .opacity(halo ? 0.6 : 0.32)
+                    .scaleEffect(halo ? 1.18 : 0.9)
+            }
             Circle()
-                .fill(RadialGradient(colors: [.white, color],
-                                     center: .init(x: 0.38, y: 0.32), startRadius: 1, endRadius: 28))
-                .frame(width: 48, height: 48)
-                .overlay(Circle().stroke(.white, lineWidth: 2))
-                .overlay(Text(emoji).font(.system(size: 22)))
-                .shadow(color: color.opacity(0.6), radius: 6, y: 3)
+                .fill(lit
+                      ? AnyShapeStyle(RadialGradient(colors: [.white, color],
+                                                     center: .init(x: 0.38, y: 0.32),
+                                                     startRadius: 1,
+                                                     endRadius: 28))
+                      : AnyShapeStyle(BubuTheme.Color.softFill))
+                .frame(width: lit ? 48 : 34, height: lit ? 48 : 34)
+                .overlay(Circle().stroke(lit ? .white : BubuTheme.Color.hairline.opacity(0.8),
+                                         lineWidth: lit ? 2 : 1))
+                .overlay(Text(emoji).font(.system(size: lit ? 22 : 15)).grayscale(lit ? 0 : 1).opacity(lit ? 1 : 0.45))
+                .shadow(color: lit ? color.opacity(0.6) : .clear, radius: 6, y: 3)
         }
         .scaleEffect(reduceMotion ? 1 : (popped ? 1 : 0))
         .opacity(reduceMotion ? 1 : (popped ? 1 : 0))
@@ -180,9 +199,11 @@ private struct ConstellationStar: View {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.12 + Double(index) * 0.06)) {
                 popped = true
             }
-            withAnimation(.easeInOut(duration: 2.4 + Double(index % 5) * 0.2)
-                .repeatForever(autoreverses: true).delay(Double(index) * 0.1)) {
-                halo = true
+            if lit {
+                withAnimation(.easeInOut(duration: 2.4 + Double(index % 5) * 0.2)
+                    .repeatForever(autoreverses: true).delay(Double(index) * 0.1)) {
+                    halo = true
+                }
             }
         }
     }

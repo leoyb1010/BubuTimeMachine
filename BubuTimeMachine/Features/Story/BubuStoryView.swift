@@ -32,7 +32,7 @@ struct BubuStoryView: View {
             .padding(.horizontal, 18)
             .padding(.top, 8)
         }
-        .background(BubuBlobBackground().ignoresSafeArea())
+        .background(BubuThemedBackground().ignoresSafeArea())
         .navigationTitle("布布的故事")
         .navigationBarTitleDisplayMode(.inline)
     }

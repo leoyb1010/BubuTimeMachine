@@ -19,8 +19,8 @@ struct BubuIdentityCard: View {
         "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天"
     }
 
-    private var shortID: String {
-        String(profile.id.uuidString.prefix(8)).uppercased()
+    private var cardNo: String {
+        "BUBU20240522"
     }
 
     /// 生日月：与 AppIconManager.apply(isBirthdayMonth:) 同一条规则，图标与卡片徽章联动。
@@ -81,23 +81,27 @@ struct BubuIdentityCard: View {
         VStack(spacing: 0) {
             clipBar
 
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
                 avatarBlock
                     .onTapGesture { flip() }
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 1) {
                             Text("BUBU IDENTITY")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
                                 .tracking(1.4)
                                 .foregroundStyle(theme.primary.opacity(0.72))
 
                             Text(profile.name)
-                                .font(.system(size: 27, weight: .black, design: .rounded))
+                                .font(.system(size: 23, weight: .black, design: .rounded))
                                 .foregroundStyle(BubuTheme.Color.warmBrown)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.6)
+                            Text("中文名 · \(profile.name)")
+                                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                .foregroundStyle(theme.primary.opacity(0.80))
+                                .lineLimit(1)
                         }
 
                         Spacer()
@@ -115,11 +119,11 @@ struct BubuIdentityCard: View {
                     HStack(spacing: 8) {
                         barcode
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("ID NO. \(shortID)")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            Text("No.\(cardNo)")
+                                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                             Text("小小探险家 · 家庭认证")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                                 .foregroundStyle(theme.primary)
                         }
                         Spacer()
@@ -127,7 +131,9 @@ struct BubuIdentityCard: View {
                     .padding(.top, 2)
                 }
             }
-            .padding(13)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
         }
     }
 
@@ -195,7 +201,7 @@ struct BubuIdentityCard: View {
         HStack {
             Capsule()
                 .fill(.white.opacity(0.64))
-                .frame(width: 54, height: 7)
+                .frame(width: 48, height: 6)
                 .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
             Spacer()
             if isBirthdayMonth {
@@ -216,7 +222,7 @@ struct BubuIdentityCard: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, 9)
+        .padding(.top, 5)
     }
 
     @ViewBuilder
@@ -230,14 +236,14 @@ struct BubuIdentityCard: View {
                         .resizable()
                         .scaledToFill()
                 } else {
-                    BubuMascotBadge(size: 80, expression: .happy)
+                    BubuMascotBadge(size: 82, expression: .happy)
                 }
             }
-            .frame(width: 84, height: 100)
-            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .frame(width: 90, height: 96)
+            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(.white.opacity(0.65), lineWidth: 1)
             }
 
@@ -252,12 +258,12 @@ struct BubuIdentityCard: View {
     }
 
     private var infoGrid: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(spacing: 5) {
+            HStack(spacing: 6) {
                 idChip(title: "AGE", value: ageText)
                 idChip(title: "DAY", value: daysText)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 idChip(title: "BIRTH", value: BubuDateFormat.shortDate(profile.birthday))
                 idChip(title: "FROM", value: profile.birthPlace?.isEmpty == false ? profile.birthPlace! : "地球小站")
             }
@@ -270,7 +276,7 @@ struct BubuIdentityCard: View {
                 .font(.system(size: 9, weight: .black, design: .rounded))
                 .foregroundStyle(theme.primary.opacity(0.70))
             Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -278,8 +284,8 @@ struct BubuIdentityCard: View {
                 .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -289,11 +295,11 @@ struct BubuIdentityCard: View {
                 RoundedRectangle(cornerRadius: 1)
                     .fill(BubuTheme.Color.warmBrown.opacity(idx.isMultiple(of: 3) ? 0.55 : 0.28))
                     .frame(width: idx.isMultiple(of: 4) ? 3 : 2,
-                           height: CGFloat([12, 18, 9, 15, 20, 11][idx % 6]))
+                           height: CGFloat([10, 15, 8, 13, 17, 9][idx % 6]))
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
         .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 

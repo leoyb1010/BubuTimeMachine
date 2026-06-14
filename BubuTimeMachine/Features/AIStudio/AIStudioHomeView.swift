@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - AI 工坊
+// MARK: - 布布的魔法屋
 /// 自托管 AI 的创作中心。当前为完整可玩的 Mock 工作流；
 /// 正式部署接入真实 LLM 后，UI 与交互不变。
 struct AIStudioHomeView: View {
@@ -13,43 +13,23 @@ struct AIStudioHomeView: View {
                 banner
 
                 storybookCard      // 成长绘本（把里程碑编织成翻页故事）
+                capsuleCard        // 时间胶囊收入魔法屋，底栏不再单独占位
 
-                Text("智能创作")
+                Text("布布的魔法屋")
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .padding(.leading, 6)
                     .padding(.top, 2)
 
-                capabilityCard(
-                    icon: "text.book.closed.fill",
-                    title: "第一人称日记",
-                    subtitle: "改写成布布的话",
-                    destination: AnyView(FirstPersonDiaryView()))
-
-                capabilityCard(
-                    icon: "film.stack.fill",
-                    title: "年度成长电影",
-                    subtitle: "精选照片成短片",
-                    destination: AnyView(GrowthMovieView()))
-
-                capabilityCard(
-                    icon: "person.3.sequence.fill",
-                    title: "家人合奏",
-                    subtitle: "合成完整故事",
-                    destination: AnyView(FamilyEnsembleView()))
-
-                capabilityCard(
-                    icon: "chart.line.uptrend.xyaxis",
-                    title: "成长报告",
-                    subtitle: "整理成长变化",
-                    destination: AnyView(GrowthReportView()))
+                creativeGrid
 
                 Spacer(minLength: 30)
             }
             .padding()
         }
         .background(background.ignoresSafeArea())
-        .navigationTitle("布布的故事")
+        .navigationTitle("布布的魔法屋")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     @ViewBuilder
@@ -62,8 +42,8 @@ struct AIStudioHomeView: View {
             HStack {
                 BubuMascotBadge(size: 58, expression: .drawing)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("布布的故事").font(BubuTheme.Font.title)
-                    Text("把瞬间变成故事")
+                    Text("布布的魔法屋").font(BubuTheme.Font.title)
+                    Text("故事、电影、报告和未来胶囊")
                         .font(BubuTheme.Font.caption.weight(.semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -116,6 +96,135 @@ struct AIStudioHomeView: View {
                 BubuSparkle(size: 13, color: .white.opacity(0.95)).padding(14)
             }
             .bubuCardShadow()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var capsuleCard: some View {
+        NavigationLink {
+            CapsuleHomeView()
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(LinearGradient(colors: [BubuTheme.Color.lav, BubuTheme.Color.sky],
+                                             startPoint: .topLeading,
+                                             endPoint: .bottomTrailing))
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 60, height: 60)
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.7), lineWidth: 2))
+                .shadow(color: BubuTheme.Color.lav.opacity(0.35), radius: 10, y: 5)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("未来胶囊")
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("把今天的话，寄给未来的布布")
+                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(.white.opacity(0.60), lineWidth: 1)
+            }
+            .shadow(color: BubuTheme.Color.lav.opacity(0.22), radius: 12, y: 6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var creativeGrid: some View {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ], spacing: 10) {
+            capabilityTile(icon: "quote.bubble.fill",
+                           title: "第一人称日记",
+                           subtitle: "改写成布布的话",
+                           tint: BubuTheme.Color.pink) {
+                FirstPersonDiaryView()
+            }
+            capabilityTile(icon: "film.stack.fill",
+                           title: "成长电影",
+                           subtitle: "精选照片成短片",
+                           tint: BubuTheme.Color.sky) {
+                GrowthMovieView()
+            }
+            capabilityTile(icon: "person.3.sequence.fill",
+                           title: "家人合奏",
+                           subtitle: "合成完整故事",
+                           tint: BubuTheme.Color.mint) {
+                FamilyEnsembleView()
+            }
+            capabilityTile(icon: "chart.line.uptrend.xyaxis",
+                           title: "成长报告",
+                           subtitle: "整理成长变化",
+                           tint: BubuTheme.Color.butter) {
+                GrowthReportView()
+            }
+        }
+    }
+
+    private func capabilityTile<Destination: View>(
+        icon: String,
+        title: String,
+        subtitle: String,
+        tint: Color,
+        @ViewBuilder destination: @escaping () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(BubuTheme.Color.deepRose)
+                        .frame(width: 36, height: 36)
+                        .background(tint.opacity(0.72), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.72))
+                }
+                Spacer(minLength: 0)
+                Text(title)
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                Text(subtitle)
+                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.86)
+            }
+            .padding(13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 112)
+            .background(
+                LinearGradient(colors: [BubuTheme.Color.card.opacity(0.98), tint.opacity(0.22)],
+                               startPoint: .topLeading,
+                               endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(.white.opacity(0.62), lineWidth: 1)
+            }
+            .shadow(color: tint.opacity(0.22), radius: 12, y: 7)
         }
         .buttonStyle(.plain)
     }

@@ -33,6 +33,7 @@ struct TimelineView: View {
             }
         }
         .navigationTitle("时光轴")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "找找布布的记录")
         .onChange(of: searchText) { _, _ in rebuildSections() }
         .onAppear { rebuildSectionsIfNeeded() }

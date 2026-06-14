@@ -109,6 +109,7 @@ struct BubuStarShape: Shape {
 struct BubuMiniConstellation: View {
     /// 已点亮颗数（决定连线长度与亮点数）。
     var done: Int = 8
+    var height: CGFloat = 64
     /// 锚点（设计稿 96×96 viewBox 的比例坐标）
     private let pts: [CGPoint] = [
         .init(x: 14, y: 46), .init(x: 40, y: 26), .init(x: 66, y: 50),
@@ -149,7 +150,7 @@ struct BubuMiniConstellation: View {
                 }
             }
         }
-        .frame(height: 64)
+        .frame(height: height)
     }
 
     private func scaled(_ p: CGPoint, _ s: CGFloat) -> CGPoint {
