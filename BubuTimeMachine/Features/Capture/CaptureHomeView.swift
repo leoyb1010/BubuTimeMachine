@@ -36,14 +36,14 @@ struct CaptureHomeView: View {
                 // 同步状态条属于次要信息，下移到统计行之后；行距 14 紧凑但不拥挤。
                 VStack(spacing: 14) {
                     greetingRow
-                    ageHeader
+                    heroMeetingCard        // 大渐变 Hero 卡（相遇第N天，对照设计稿）
                     NaturalCaptureBar()
+                    dashboardGrid          // 双卡网格：成长星座迷你 + 统计
                     recordButton
-                    statRow
-                    saveHealthStrip
-                    onThisDaySection
                     healthEntryCard
+                    onThisDaySection
                     dailyQuestionCard
+                    saveHealthStrip
                     recentStrip
                     // 给底部悬浮玻璃 Tab 栏留出空间
                     Spacer(minLength: 110)
@@ -195,6 +195,135 @@ struct CaptureHomeView: View {
         case 18..<23: return "🌙 晚上好"
         default: return "💤 夜深了"
         }
+    }
+
+    // MARK: 大渐变 Hero 卡（对照设计稿：头像 + 相遇第N天 大数字）
+
+    @ViewBuilder
+    private var heroMeetingCard: some View {
+        if let profile {
+            NavigationLink { ChildProfileView() } label: {
+                HStack(spacing: 16) {
+                    heroAvatar(profile)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("和你相遇的第")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.95))
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text("\(AgeCalculator.daysSinceBirth(birthday: profile.birthday))")
+                                .font(.system(size: 46, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                                .contentTransition(.numericText())
+                            Text("天").font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.95))
+                        }
+                        Text("慢慢长大，慢慢相遇 ♡")
+                            .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.95))
+                    }
+                    Spacer()
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity)
+                .background(BubuTheme.Gradient.hero, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    BubuSparkle(size: 15, color: .white.opacity(0.95)).padding(18)
+                }
+                .overlay(alignment: .trailing) {
+                    BubuSparkle(size: 10, color: .white.opacity(0.8), delay: 0.7).padding(.trailing, 30)
+                }
+                .bubuCardShadow()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func heroAvatar(_ profile: ChildProfile) -> some View {
+        Group {
+            if let name = profile.avatarMediaFileName,
+               let data = env.mediaStore.data(forMedia: name),
+               let ui = UIImage(data: data) {
+                Image(uiImage: ui).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    BubuTheme.Color.cream
+                    BubuMascotBadge(size: 56, expression: .happy)
+                }
+            }
+        }
+        .frame(width: 88, height: 88)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.7), lineWidth: 3))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+    }
+
+    // MARK: 双卡网格（成长星座迷你预览 + 统计）
+
+    private var dashboardGrid: some View {
+        HStack(spacing: 12) {
+            // 成长星座入口卡
+            NavigationLink { MilestonesHomeView() } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    miniConstellation
+                    Text("成长星座")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("点亮布布的每个第一次")
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .bubuMacaronCard(padding: 16)
+            }
+            .buttonStyle(.plain)
+
+            // 相册卡
+            NavigationLink { AlbumHomeView() } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        BubuDreamPhoto(hue: 150, height: 52, cornerRadius: 12, motif: "✿")
+                        VStack(spacing: 6) {
+                            BubuDreamPhoto(hue: 335, height: 23, cornerRadius: 8, motif: "")
+                            BubuDreamPhoto(hue: 200, height: 23, cornerRadius: 8, motif: "")
+                        }
+                    }
+                    Text("相册 · \(totalPhotos) 张")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("\(entries.count) 个瞬间")
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .bubuMacaronCard(padding: 14)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // 迷你星座装饰（5 颗小星 + 连线）
+    private var miniConstellation: some View {
+        Canvas { ctx, size in
+            let pts: [CGPoint] = [
+                CGPoint(x: size.width * 0.18, y: size.height * 0.30),
+                CGPoint(x: size.width * 0.45, y: size.height * 0.18),
+                CGPoint(x: size.width * 0.72, y: size.height * 0.34),
+                CGPoint(x: size.width * 0.58, y: size.height * 0.70),
+                CGPoint(x: size.width * 0.28, y: size.height * 0.66),
+            ]
+            var path = Path()
+            path.addLines(pts)
+            ctx.stroke(path, with: .color(theme.primary.opacity(0.45)),
+                       style: StrokeStyle(lineWidth: 1, dash: [1, 4]))
+            for (i, p) in pts.enumerated() {
+                let r: CGFloat = i < 3 ? 4.5 : 3
+                let c = i < 3 ? theme.primary : BubuTheme.Color.secondaryText.opacity(0.5)
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r*2, height: r*2)), with: .color(c))
+            }
+        }
+        .frame(height: 56)
     }
 
     @ViewBuilder

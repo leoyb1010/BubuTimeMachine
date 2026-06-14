@@ -13,32 +13,42 @@ struct BubuConstellationView: View {
     let primary: Color
     var onTapStar: (Milestone) -> Void
 
-    @State private var onlyLit = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var lit: [Milestone] { milestones.filter(\.isAchieved) }
-    private var shown: [Milestone] { onlyLit ? lit : milestones }
+    // 星座只画已点亮的（错落有致、不乱）；未点亮的去奖章墙/列表看。
+    private var shown: [Milestone] { milestones.filter(\.isAchieved) }
+    private var totalCount: Int { milestones.count }
 
     var body: some View {
         VStack(spacing: 12) {
-            // 顶部：只看已点亮开关
             HStack {
-                Text("✦ 已点亮 \(lit.count) / \(milestones.count) 颗星")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                Text("✦ 已点亮 \(shown.count) / \(totalCount) 颗星")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
-                Toggle("", isOn: $onlyLit).labelsHidden().tint(primary)
-                Text("只看亮的").font(.system(size: 12, weight: .medium, design: .rounded))
+                Text("还有 \(max(0, totalCount - shown.count)) 颗等你点亮 ♡")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
 
+            if shown.isEmpty {
+                VStack(spacing: 8) {
+                    Text("✦").font(.system(size: 40)).foregroundStyle(primary.opacity(0.5))
+                    Text("还没有点亮的星")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("去「奖章墙」点亮布布的第一次，这里就会升起一颗星")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 40)
+            } else {
             // 星盘
             GeometryReader { geo in
                 let positions = layout(count: shown.count, in: geo.size)
                 ZStack {
-                    // 连线：把已点亮的星按出现顺序连起来
                     constellationLines(positions: positions)
-                    // 星
                     ForEach(Array(shown.enumerated()), id: \.element.id) { idx, m in
                         starView(m, index: idx)
                             .position(positions.indices.contains(idx) ? positions[idx] : CGPoint(x: geo.size.width/2, y: geo.size.height/2))
@@ -60,6 +70,7 @@ struct BubuConstellationView: View {
             Text("轻点亮起的星星，回到那一刻 ♡")
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
         }
     }
 
