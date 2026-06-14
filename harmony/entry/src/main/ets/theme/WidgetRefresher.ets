@@ -6,6 +6,8 @@
 //       若拿不到 formId（无已添加卡片），静默跳过——与 iOS 行为一致（无卡片则无操作）。
 
 import { formProvider, formBindingData } from '@kit.FormKit';
+import { preferences } from '@kit.ArkData';
+import { common } from '@kit.AbilityKit';
 
 export class WidgetRefresher {
   /// 已添加卡片的 formId 清单（由 BubuFormAbility.onAddForm/onRemoveForm 维护）。
@@ -19,6 +21,20 @@ export class WidgetRefresher {
 
   static unregister(formId: string): void {
     WidgetRefresher.formIds = WidgetRefresher.formIds.filter(id => id !== formId);
+  }
+
+  /// 把首页档案快照写到卡片可读的 Preferences（对照 iOS refreshWidgetSnapshot 写 App Group）。
+  /// 卡片侧 BubuFormAbility.buildData 从同一个 'bubu_widget' 读 birthday / childName。
+  static publishSnapshot(context: common.UIAbilityContext, birthdayMs: number, childName: string): void {
+    try {
+      const opt: preferences.Options = { name: 'bubu_widget' };
+      const store = preferences.getPreferencesSync(context, opt);
+      store.putSync('birthday', birthdayMs);
+      store.putSync('childName', childName);
+      store.flush();
+    } catch (e) {
+      // 卡片快照非关键路径，失败静默。
+    }
   }
 
   /// 触发所有已添加卡片重载（对照 iOS reloadAllTimelines）。

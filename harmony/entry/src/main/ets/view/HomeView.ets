@@ -42,6 +42,12 @@ export struct HomeView {
   @State pendingSyncCount: number = 0;
   // 快速记录业务模型（对照 iOS @State model: CaptureModel?）。
   @State model: CaptureModel = new CaptureModel(ServerConfig.shared.currentRole);
+  // 底栏中央「记录」键触发计数（对照 iOS quickCaptureTrigger）。RootPage 自增 → 打开快速记录。
+  @Link @Watch('onCaptureSignal') captureSignal: number;
+
+  private onCaptureSignal(): void {
+    if (this.captureSignal > 0) this.startQuickCapture();
+  }
 
   aboutToAppear(): void {
     this.reload();

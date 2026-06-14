@@ -40,10 +40,12 @@
     ],
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.GET_NETWORK_INFO" },
       { "name": "ohos.permission.MICROPHONE", "reason": "$string:perm_mic", "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       { "name": "ohos.permission.CAMERA", "reason": "$string:perm_camera", "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       { "name": "ohos.permission.READ_IMAGEVIDEO", "reason": "$string:perm_photos", "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:perm_location", "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } }
+      { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:perm_location", "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.PUBLISH_AGENT_REMINDER" }
     ]
   }
 }
