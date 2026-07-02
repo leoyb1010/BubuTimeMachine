@@ -138,9 +138,10 @@ enum BubuWidgetData {
             totalEntryCount: max(0, shared.totalEntryCount ?? 0),
             totalPhotoCount: max(0, shared.totalPhotoCount ?? 0),
             idNumber: fallback(shared.idNumber, SharedWidgetSnapshot.defaultIDNumber),
-            avatarImageData: imageData(fileName: shared.avatarFileName),
+            avatarImageData: imageData(fileName: shared.avatarFileName, allowOriginalFallback: true),
             recentPhotoImageData: imageData(fileName: shared.recentPhotoFileName),
             photoImageData: (shared.photoFileNames ?? shared.recentPhotoFileName.map { [$0] } ?? [])
+                .prefix(Self.maxPhotoDataCount)
                 .compactMap { imageData(fileName: $0) }
         )
     }
@@ -160,7 +161,16 @@ enum BubuWidgetData {
         return String(format: "%.1f %@", rounded, unit)
     }
 
-    private static func imageData(fileName: String?) -> Data? {
+    /// 单张图片进内存的上限：WidgetKit 渲染进程约 30MB 总预算，大尺寸时光款会同时读 3 张，
+    /// 必须把每张压到很小才不会撞红线导致小组件空白。缩略图本就 <1MB，2MB 已宽裕。
+    private static let maxImageBytes = 2 * 1_048_576
+    /// 大尺寸最多同时读的照片张数。
+    static let maxPhotoDataCount = 3
+
+    /// 读一张图片给小组件用。
+    /// - 照片默认只认缩略图目录（原图动辄十几 MB，回退读原图正是撞内存红线、小组件空白的根因）。
+    /// - 仅头像允许回退原图（头像文件很小，且需要清晰）。
+    private static func imageData(fileName: String?, allowOriginalFallback: Bool = false) -> Data? {
         guard let fileName,
               !fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
@@ -171,6 +181,7 @@ enum BubuWidgetData {
             return data
         }
 
+        guard allowOriginalFallback else { return nil }
         let mediaURL = BubuStorage.mediaDirectory.appendingPathComponent(fileName)
         return boundedData(from: mediaURL)
     }
@@ -180,7 +191,7 @@ enum BubuWidgetData {
         guard fm.fileExists(atPath: url.path) else { return nil }
         if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
            let byteCount = values.fileSize,
-           byteCount > 18 * 1_048_576 {
+           byteCount > maxImageBytes {
             return nil
         }
         return try? Data(contentsOf: url, options: [.mappedIfSafe])

@@ -4,6 +4,7 @@ import SwiftUI
 /// 4 个页面 Tab + 中央记录键。时间胶囊收入「布布的魔法屋」，底栏保持轻量。
 struct RootTabView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(BubuRouter.self) private var router
     @State private var selection = 0
     @State private var quickCaptureTrigger = 0
 
@@ -61,8 +62,24 @@ struct RootTabView: View {
                let t = Int(ProcessInfo.processInfo.arguments[i + 1]) {
                 selection = min(max(t, 0), 3)
             }
+            // 联调：-uitest-openurl bubu://moment 直接走深链路由，绕过系统 openurl 确认框。
+            if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-openurl"),
+               i + 1 < ProcessInfo.processInfo.arguments.count,
+               let url = URL(string: ProcessInfo.processInfo.arguments[i + 1]) {
+                router.handle(url)
+            }
             #endif
+            consumePendingRoute()
         }
+        // 小组件点击时 App 已在前台的情况：onOpenURL 更新 pendingTab，这里响应切 Tab。
+        .onChange(of: router.pendingTab) { _, _ in consumePendingRoute() }
+    }
+
+    /// 消费一次待处理的深链目标 Tab（消费后置回 nil，避免重复触发）。
+    private func consumePendingRoute() {
+        guard let tab = router.pendingTab else { return }
+        selection = min(max(tab, 0), 3)
+        router.pendingTab = nil
     }
 
     private var tabBarSpacer: some View {

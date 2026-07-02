@@ -11,6 +11,8 @@ struct BubuTimeMachineApp: App {
 
     /// 全局依赖容器。@State 持有，保证生命周期与 App 一致。
     @State private var env = AppEnvironment()
+    /// 桌面小组件 / 通知 deep link 路由。
+    @State private var router = BubuRouter()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -36,7 +38,9 @@ struct BubuTimeMachineApp: App {
         WindowGroup {
             RootView()
                 .environment(env)
+                .environment(router)
                 .tint(env.theme.theme.primary)
+                .onOpenURL { router.handle($0) }
                 .task {
                     #if DEBUG
                     seedForUITestingIfNeeded()

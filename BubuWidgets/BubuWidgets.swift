@@ -71,6 +71,8 @@ struct BubuAvatar: View {
         .clipShape(Circle())
         .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
         .shadow(color: WidgetPalette.primary.opacity(0.25), radius: 4, y: 2)
+        // 染色模式下把头像作为强调元素，避免整卡被单色化后失去焦点。
+        .widgetAccentable()
     }
 
     static func downsampledImage(from data: Data?, maxPixel: CGFloat) -> UIImage? {
@@ -93,18 +95,33 @@ struct BubuAvatar: View {
 }
 
 // MARK: - 暖色卡片渐变背景（统一各 family）
+private struct BubuWidgetBackground: ViewModifier {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    func body(content: Content) -> some View {
+        content.containerBackground(for: .widget) {
+            switch renderingMode {
+            case .fullColor:
+                // 桌面全彩：奶油马卡龙 peach → pink → lav 柔粉渐变（与 App 身份卡同源）
+                LinearGradient(
+                    colors: [WidgetPalette.peach.opacity(0.55),
+                             WidgetPalette.pink.opacity(0.45),
+                             WidgetPalette.lav.opacity(0.45),
+                             WidgetPalette.cream],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            default:
+                // 染色(tinted)/vibrant：系统会把内容单色化，渐变会糊成一坨——改用极淡的中性底，
+                // 让系统的染色算法只作用在前景文字/图标上，保持清爽可读。
+                Color.white.opacity(0.06)
+            }
+        }
+    }
+}
+
 private extension View {
     func bubuWidgetBackground() -> some View {
-        self.containerBackground(for: .widget) {
-            // 奶油马卡龙：peach → pink → lav 柔粉渐变（与 App 身份卡同源）
-            LinearGradient(
-                colors: [WidgetPalette.peach.opacity(0.55),
-                         WidgetPalette.pink.opacity(0.45),
-                         WidgetPalette.lav.opacity(0.45),
-                         WidgetPalette.cream],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        }
+        modifier(BubuWidgetBackground())
     }
 }
 
@@ -112,6 +129,15 @@ private enum BubuWidgetStyle {
     case identity
     case moment
     case growth
+
+    /// 点击小组件跳转到 App 对应页面的 deep link（App 端 BubuRoute 解析）。
+    var deepLink: URL {
+        switch self {
+        case .identity: return URL(string: "bubu://identity")!
+        case .moment: return URL(string: "bubu://moment")!
+        case .growth: return URL(string: "bubu://growth")!
+        }
+    }
 }
 
 private struct BubuInfoChip: View {
@@ -470,33 +496,28 @@ private struct BubuIdentityLargeView: View {
     }
 }
 
-// MARK: - 今日时光
+// MARK: - 今日时光（整图沉浸版式：照片作 containerBackground 铺满，此处只放前景白字）
 private struct BubuMomentSmallView: View {
     let snapshot: BubuSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            BubuPhotoTile(imageData: snapshot.recentPhotoImageData, cornerRadius: 18)
-                .frame(height: 64)
-                .clipped()
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Text(snapshot.recentMoodEmoji ?? "✨")
-                        .font(.system(size: 13))
-                    Text(dateText)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundColor(WidgetPalette.primary)
-                        .lineLimit(1)
-                }
-                Text(snapshot.recentEntryTitle.isEmpty ? "今日时光" : snapshot.recentEntryTitle)
-                    .font(.system(size: 14, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.warmBrown)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.6)
-            }
-            .padding(.horizontal, 4)
+        VStack(alignment: .leading, spacing: 3) {
             Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                Text(snapshot.recentMoodEmoji ?? "✨").font(.system(size: 13))
+                Text(dateText)
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .foregroundColor(.white.opacity(0.92))
+            }
+            Text(snapshot.recentEntryTitle.isEmpty ? "今日时光" : snapshot.recentEntryTitle)
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.62)
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding(13)
     }
 
     private var dateText: String {
@@ -508,29 +529,42 @@ private struct BubuMomentMediumView: View {
     let snapshot: BubuSnapshot
 
     var body: some View {
-        HStack(spacing: 10) {
-            BubuPhotoTile(imageData: snapshot.recentPhotoImageData)
-                .frame(width: 106, height: 118)
-                .clipped()
-            VStack(alignment: .leading, spacing: 7) {
-                BubuMomentHeader(snapshot: snapshot, compact: true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(snapshot.recentEntryTitle)
-                        .font(.system(size: 18, weight: .black, design: .rounded))
-                        .foregroundColor(WidgetPalette.warmBrown)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.62)
-                    Text(snapshot.recentEntryNote)
-                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                        .foregroundColor(WidgetPalette.secondary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.68)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .layoutPriority(1)
-                BubuMomentStatsRow(snapshot: snapshot)
+        VStack(alignment: .leading, spacing: 5) {
+            Spacer(minLength: 0)
+            HStack(spacing: 5) {
+                Text(snapshot.recentMoodEmoji ?? "✨").font(.system(size: 14))
+                Text(dateText)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                Spacer(minLength: 0)
+                Text(snapshot.name)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(.white.opacity(0.22), in: Capsule())
+            }
+            Text(snapshot.recentEntryTitle.isEmpty ? "今日时光" : snapshot.recentEntryTitle)
+                .font(.system(size: 20, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+            if !snapshot.recentEntryNote.isEmpty {
+                Text(snapshot.recentEntryNote)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.88))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding(15)
+    }
+
+    private var dateText: String {
+        (snapshot.recentEntryDate ?? .now).formatted(.dateTime.month().day())
     }
 }
 
@@ -764,24 +798,63 @@ private struct BubuWidgetEntryView: View {
     var style: BubuWidgetStyle
 
     var body: some View {
-        switch family {
-        case .systemSmall:
-            BubuSmallView(snapshot: entry.snapshot, style: style)
-                .padding(14)
-                .bubuWidgetBackground()
-        case .systemMedium:
-            BubuMediumView(snapshot: entry.snapshot, style: style)
-                .padding(15)
-                .bubuWidgetBackground()
-        case .systemLarge:
-            BubuLargeView(snapshot: entry.snapshot, style: style)
-                .padding(17)
-                .bubuWidgetBackground()
-        default:
-            BubuSmallView(snapshot: entry.snapshot, style: style)
-                .padding(14)
-                .bubuWidgetBackground()
+        content.widgetURL(style.deepLink)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        // 今日时光 S/M 走整图沉浸：照片自带 containerBackground、出血到边缘、不加内边距。
+        if style == .moment, family == .systemSmall {
+            BubuMomentSmallView(snapshot: entry.snapshot)
+                .immersiveContainerBackground(imageData: entry.snapshot.recentPhotoImageData)
+        } else if style == .moment, family == .systemMedium {
+            BubuMomentMediumView(snapshot: entry.snapshot)
+                .immersiveContainerBackground(imageData: entry.snapshot.recentPhotoImageData)
+        } else {
+            switch family {
+            case .systemSmall:
+                BubuSmallView(snapshot: entry.snapshot, style: style)
+                    .padding(14).bubuWidgetBackground()
+            case .systemMedium:
+                BubuMediumView(snapshot: entry.snapshot, style: style)
+                    .padding(15).bubuWidgetBackground()
+            case .systemLarge:
+                BubuLargeView(snapshot: entry.snapshot, style: style)
+                    .padding(17).bubuWidgetBackground()
+            default:
+                BubuSmallView(snapshot: entry.snapshot, style: style)
+                    .padding(14).bubuWidgetBackground()
+            }
         }
+    }
+}
+
+// MARK: - 整图沉浸容器背景（照片出血铺满 + 底部渐变蒙版）
+private struct ImmersiveContainerBackground: ViewModifier {
+    let imageData: Data?
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    func body(content: Content) -> some View {
+        content.containerBackground(for: .widget) {
+            ZStack {
+                if let image = BubuAvatar.downsampledImage(from: imageData, maxPixel: 900),
+                   renderingMode == .fullColor {
+                    Image(uiImage: image).resizable().scaledToFill()
+                    LinearGradient(colors: [.clear, .clear, .black.opacity(0.3), .black.opacity(0.72)],
+                                   startPoint: .top, endPoint: .bottom)
+                } else {
+                    LinearGradient(colors: [WidgetPalette.peach.opacity(0.7), WidgetPalette.pink.opacity(0.6), WidgetPalette.lav.opacity(0.55)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                    LinearGradient(colors: [.clear, .black.opacity(0.24)], startPoint: .top, endPoint: .bottom)
+                }
+            }
+        }
+    }
+}
+
+private extension View {
+    func immersiveContainerBackground(imageData: Data?) -> some View {
+        modifier(ImmersiveContainerBackground(imageData: imageData))
     }
 }
 
@@ -828,6 +901,77 @@ struct BubuGrowthWidget: Widget {
     }
 }
 
+// MARK: - 锁屏 / StandBy accessory 系列（家长最高频看一眼的位置）
+private struct BubuAccessoryView: View {
+    @Environment(\.widgetFamily) private var family
+    let snapshot: BubuSnapshot
+
+    var body: some View {
+        switch family {
+        case .accessoryCircular:
+            // 生日倒计时环：外圈进度 + 中间天数。
+            ZStack {
+                AccessoryWidgetBackground()
+                Gauge(value: birthdayProgress) {
+                    Image(systemName: "birthday.cake.fill")
+                } currentValueLabel: {
+                    Text(snapshot.hasProfile ? "\(snapshot.daysUntilBirthday)" : "--")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                }
+                .gaugeStyle(.accessoryCircular)
+            }
+            .widgetURL(BubuWidgetStyle.identity.deepLink)
+
+        case .accessoryRectangular:
+            VStack(alignment: .leading, spacing: 2) {
+                Text(snapshot.name)
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .widgetAccentable()
+                Text(snapshot.hasProfile ? "\(snapshot.ageText) · 第 \(snapshot.daysSinceBirth) 天" : "打开 App 建立档案")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                if snapshot.hasProfile {
+                    Text("🎂 还有 \(snapshot.daysUntilBirthday) 天生日")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .widgetURL(BubuWidgetStyle.identity.deepLink)
+
+        case .accessoryInline:
+            // 锁屏顶部一行。
+            if snapshot.hasProfile {
+                Label("布布 \(snapshot.ageText) · 生日 \(snapshot.daysUntilBirthday) 天", systemImage: "sparkles")
+            } else {
+                Label("打开布布时光机建立档案", systemImage: "sparkles")
+            }
+
+        default:
+            Text(snapshot.name)
+        }
+    }
+
+    /// 生日倒计时进度（越接近生日环越满）。
+    private var birthdayProgress: Double {
+        guard snapshot.hasProfile else { return 0 }
+        let days = Double(snapshot.daysUntilBirthday)
+        return max(0, min(1, (365 - days) / 365))
+    }
+}
+
+struct BubuAccessoryWidget: Widget {
+    let kind = "BubuAccessoryWidget"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
+            BubuAccessoryView(snapshot: entry.snapshot)
+                .containerBackground(for: .widget) { Color.clear }
+        }
+        .configurationDisplayName("布布锁屏")
+        .description("锁屏上的年龄、陪伴天数和生日倒计时。")
+        .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
+    }
+}
+
 // MARK: - Bundle
 @main
 struct BubuWidgetsBundle: WidgetBundle {
@@ -835,6 +979,7 @@ struct BubuWidgetsBundle: WidgetBundle {
         BubuWidget()
         BubuMomentWidget()
         BubuGrowthWidget()
+        BubuAccessoryWidget()
         BubuLiveActivity()
         BubuRecordControl()
     }
