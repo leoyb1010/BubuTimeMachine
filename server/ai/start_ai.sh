@@ -15,7 +15,11 @@ if [ ! -d .venv ]; then
   echo "📦 创建虚拟环境并安装依赖…"
   python3 -m venv .venv
   ./.venv/bin/pip install --quiet --upgrade pip
-  ./.venv/bin/pip install --quiet -r requirements.txt
+  REQ_FILE="requirements.txt"
+  if [ -f requirements.lock.txt ]; then
+    REQ_FILE="requirements.lock.txt"
+  fi
+  ./.venv/bin/pip install --quiet -r "${REQ_FILE}"
 fi
 
 PORT="${AI_PORT:-8000}"

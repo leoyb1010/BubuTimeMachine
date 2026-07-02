@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bubu.pocketbase</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd /Users/leoyuan/Desktop/leoworkspace/BubuTimeMachine/server/pocketbase &amp;&amp; ./start_pocketbase.sh /Volumes/BubuSSD/pb_data</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/leoyuan/Library/Logs/BubuTimeMachine/pocketbase.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/leoyuan/Library/Logs/BubuTimeMachine/pocketbase.err.log</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/leoyuan/Desktop/leoworkspace/BubuTimeMachine/server/pocketbase</string>
+</dict>
+</plist>

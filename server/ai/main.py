@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import time
 from collections import Counter, defaultdict, deque
 from datetime import datetime
@@ -27,9 +28,14 @@ from threading import Lock
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from llm import LLMClient, LLMError
+
+logging.basicConfig(
+    level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 app = FastAPI(title="布布时光机 AI 服务", version="1.2.0")
 
@@ -65,37 +71,38 @@ _rate_buckets: dict[str, deque] = defaultdict(deque)
 def _check_rate(client_ip: str) -> None:
     now = time.monotonic()
     with _rate_lock:
+        for ip, bucket in list(_rate_buckets.items()):
+            while bucket and now - bucket[0] > 60:
+                bucket.popleft()
+            if not bucket:
+                del _rate_buckets[ip]
         bucket = _rate_buckets[client_ip]
-        while bucket and now - bucket[0] > 60:
-            bucket.popleft()
         if len(bucket) >= _RATE_LIMIT:
             raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试。")
         bucket.append(now)
-        # 防止 IP 维度字典无上限增长（公网长期运行）：顺手清掉已空的桶
-        if len(_rate_buckets) > 1024:
-            for ip in [ip for ip, b in _rate_buckets.items() if not b]:
-                del _rate_buckets[ip]
 
 
 def require_api_key(request: Request,
                     x_api_key: Optional[str] = Header(default=None)) -> None:
     """业务路由必须带 X-API-Key。未配置 AI_API_KEY 时拒绝服务（fail-closed），
     防止把无鉴权服务误暴露到公网。"""
+    _check_rate(request.client.host if request.client else "unknown")
     if not _API_KEY:
         raise HTTPException(status_code=503,
                             detail="服务端未配置 AI_API_KEY，请在 .env 设置后重启。")
-    if x_api_key != _API_KEY:
+    if not secrets.compare_digest(x_api_key or "", _API_KEY):
+        logger.warning("unauthorized request path=%s ip=%s",
+                       request.url.path, request.client.host if request.client else "unknown")
         raise HTTPException(status_code=401, detail="鉴权失败：X-API-Key 不正确。")
-    _check_rate(request.client.host if request.client else "unknown")
 
 
 # ---------- 请求/响应模型 ----------
 
 class RewriteReq(BaseModel):
-    note: str
-    child_name: str = "布布"
-    mood: Optional[str] = None
-    age_description: Optional[str] = None
+    note: str = Field(..., max_length=4000)
+    child_name: str = Field("布布", max_length=40)
+    mood: Optional[str] = Field(default=None, max_length=80)
+    age_description: Optional[str] = Field(default=None, max_length=80)
 
 
 class RewriteResp(BaseModel):
@@ -103,9 +110,9 @@ class RewriteResp(BaseModel):
 
 
 class ClassifyReq(BaseModel):
-    note: Optional[str] = None
-    tags: list[str] = []
-    location_name: Optional[str] = None
+    note: Optional[str] = Field(default=None, max_length=4000)
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    location_name: Optional[str] = Field(default=None, max_length=120)
 
 
 class ClassifyResp(BaseModel):
@@ -116,9 +123,9 @@ class ClassifyResp(BaseModel):
 
 
 class DetectFirstReq(BaseModel):
-    tags: list[str] = []
-    note: Optional[str] = None
-    child_name: str = "布布"
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    note: Optional[str] = Field(default=None, max_length=4000)
+    child_name: str = Field("布布", max_length=40)
 
 
 class DetectFirstResp(BaseModel):
@@ -128,9 +135,9 @@ class DetectFirstResp(BaseModel):
 
 
 class MovieReq(BaseModel):
-    child_name: str = "布布"
+    child_name: str = Field("布布", max_length=40)
     year: int
-    highlights: list[str] = []   # 该岁的若干记录摘要
+    highlights: list[str] = Field(default_factory=list, max_length=200)   # 该岁的若干记录摘要
 
 
 class MovieResp(BaseModel):
@@ -236,9 +243,9 @@ def movie_narration(req: MovieReq):
 # ---------- 一句话自然语言 → 结构化记录 ----------
 
 class NaturalParseReq(BaseModel):
-    text: str
-    childName: str = "布布"
-    timezone: str = "Asia/Shanghai"
+    text: str = Field(..., max_length=3000)
+    childName: str = Field("布布", max_length=40)
+    timezone: str = Field("Asia/Shanghai", max_length=80)
     referenceDate: datetime
 
 
@@ -410,8 +417,16 @@ input: {req.text}
 
 
 @app.post("/transcribe", dependencies=[Depends(require_api_key)])
-async def transcribe(file: UploadFile = File(...)):
+async def transcribe(request: Request, file: UploadFile = File(...)):
     """语音转写。需安装 faster-whisper（见 requirements）；未装则返回 501。"""
+    limit = 52_428_800  # 50MB 上限，防止公网恶意大文件耗尽 CPU/磁盘
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > limit:
+                raise HTTPException(status_code=413, detail="音频文件太大（上限 50MB）。")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Content-Length 不正确。")
     try:
         from transcribe import transcribe_audio
     except Exception:
@@ -419,9 +434,17 @@ async def transcribe(file: UploadFile = File(...)):
             status_code=501,
             detail="转写功能未启用：请在服务器安装 faster-whisper（pip install faster-whisper）。",
         )
-    data = await file.read()
-    if len(data) > 52_428_800:  # 50MB 上限，防止公网恶意大文件耗尽 CPU/磁盘
-        raise HTTPException(status_code=413, detail="音频文件太大（上限 50MB）。")
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="音频文件太大（上限 50MB）。")
+        chunks.append(chunk)
+    data = b"".join(chunks)
     try:
         text = transcribe_audio(data, file.filename or "audio.m4a")
     except Exception as e:  # noqa: BLE001

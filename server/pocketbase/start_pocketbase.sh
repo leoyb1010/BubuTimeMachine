@@ -9,6 +9,7 @@ cd "$(dirname "$0")"
 
 DATA_DIR="${1:-./pb_data}"
 PB_BIN="./pocketbase"
+PB_HTTP_ADDR="${PB_HTTP_ADDR:-127.0.0.1:8090}"
 
 if [ ! -x "$PB_BIN" ]; then
   echo "❌ 未找到 pocketbase 可执行文件。"
@@ -22,8 +23,9 @@ mkdir -p pb_migrations
 cp -f migrations/*.js pb_migrations/ 2>/dev/null || true
 
 echo "📦 数据目录：$DATA_DIR"
-echo "🚀 启动 PocketBase，管理后台： http://0.0.0.0:8090/_/"
+echo "🚀 启动 PocketBase，管理后台： http://$PB_HTTP_ADDR/_/"
 echo "   首次启动请在后台创建管理员账号，并新建一个家庭登录用户（members 用）。"
 
-# --http 0.0.0.0 让同一 Tailscale 网络的 iPhone 可访问
-exec "$PB_BIN" serve --http="0.0.0.0:8090" --dir="$DATA_DIR" --migrationsDir="./pb_migrations"
+# 默认只监听本机；需要 Tailscale 访问时显式传入：
+#   PB_HTTP_ADDR="<tailscale-ip>:8090" ./start_pocketbase.sh /path/to/pb_data
+exec "$PB_BIN" serve --http="$PB_HTTP_ADDR" --dir="$DATA_DIR" --migrationsDir="./pb_migrations"

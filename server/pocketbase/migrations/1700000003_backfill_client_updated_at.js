@@ -15,11 +15,16 @@ migrate((app) => {
     try { collection = app.findCollectionByNameOrId(name) } catch (e) { continue }
     if (!collection.fields.getByName('clientUpdatedAt')) { continue }
 
-    const records = app.findRecordsByFilter(name, '', '', 5000, 0)
-    for (const record of records) {
-      if (record.getString('clientUpdatedAt') !== '') { continue }
-      record.set('clientUpdatedAt', now)
-      app.save(record)
+    let offset = 0
+    while (true) {
+      const records = app.findRecordsByFilter(name, '', '', 500, offset)
+      if (!records.length) { break }
+      for (const record of records) {
+        if (record.getString('clientUpdatedAt') !== '') { continue }
+        record.set('clientUpdatedAt', now)
+        app.save(record)
+      }
+      offset += records.length
     }
   }
 }, (app) => {

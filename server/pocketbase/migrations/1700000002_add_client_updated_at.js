@@ -18,12 +18,17 @@ migrate((app) => {
       app.save(collection)
     }
 
-    const records = app.findRecordsByFilter(name, '', '', 5000, 0)
-    for (const record of records) {
-      if (record.get('clientUpdatedAt')) { continue }
-      const stamp = new DateTime()
-      record.set('clientUpdatedAt', stamp)
-      app.save(record)
+    let offset = 0
+    while (true) {
+      const records = app.findRecordsByFilter(name, '', '', 500, offset)
+      if (!records.length) { break }
+      for (const record of records) {
+        if (record.get('clientUpdatedAt')) { continue }
+        const stamp = new DateTime()
+        record.set('clientUpdatedAt', stamp)
+        app.save(record)
+      }
+      offset += records.length
     }
   }
 }, (app) => {

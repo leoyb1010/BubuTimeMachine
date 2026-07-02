@@ -4,6 +4,7 @@
 
 migrate((app) => {
   const authRule = '@request.auth.id != ""'
+  if (safeFind(app, 'timecapsules')) { return }
 
   const collection = new Collection({
     type: 'base',
@@ -26,6 +27,10 @@ migrate((app) => {
   })
 
   app.save(collection)
+
+  function safeFind(app, name) {
+    try { return app.findCollectionByNameOrId(name) } catch (e) { return null }
+  }
 }, (app) => {
-  try { app.delete(app.findCollectionByNameOrId('timecapsules')) } catch (e) {}
+  // No-op: timecapsules is part of the initial schema on current cold starts.
 })

@@ -34,13 +34,18 @@ class LLMClient:
                  temperature: float = 0.8) -> str:
         if not self.is_configured:
             raise LLMError("未配置 DEEPSEEK_API_KEY")
-        # 首选模型，失败兜底
+        # 只对瞬时错误兜底。401/402/403 等配置、鉴权、额度问题必须保留真实错误，
+        # 否则排障时会被“首选与兜底模型均调用失败”抹平。
+        errors: list[str] = []
         for model in (self.model, self.fallback_model):
             try:
                 return self._chat(model, system, user, max_tokens, temperature)
-            except LLMError:
-                continue
-        raise LLMError("首选与兜底模型均调用失败")
+            except LLMError as exc:
+                message = str(exc)
+                errors.append(f"{model}: {message}")
+                if not _can_try_fallback(message):
+                    raise
+        raise LLMError("首选与兜底模型均调用失败：" + "；".join(errors))
 
     def complete_json(self, system: str, user: str, max_tokens: int = 300) -> dict[str, Any]:
         raw = self.complete(system, user, max_tokens=max_tokens, temperature=0.3)
@@ -93,3 +98,13 @@ def _extract_json(text: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             pass
     return {}
+
+
+def _can_try_fallback(message: str) -> bool:
+    if message.startswith("网络错误"):
+        return True
+    match = re.match(r"LLM (\d+):", message)
+    if not match:
+        return False
+    code = int(match.group(1))
+    return code == 429 or 500 <= code <= 599
