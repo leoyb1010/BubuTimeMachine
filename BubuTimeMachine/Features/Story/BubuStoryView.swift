@@ -27,7 +27,8 @@ struct BubuStoryView: View {
                             NavigationLink {
                                 BubuStoryReaderView(chapters: chapters, startIndex: idx)
                             } label: {
-                                chapterCard(ch, entry: pickedEntries[safe: idx], index: idx)
+                                // 按 entryId 精确配对（不靠下标：并列时间的记录排序顺序可能与章节顺序不一致）
+                                chapterCard(ch, entry: pickedEntries.first { $0.id == ch.entryId }, index: idx)
                             }
                             .buttonStyle(.plain)
                         }
@@ -127,12 +128,5 @@ struct BubuStoryView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 50)
-    }
-}
-
-// 安全下标（越界返回 nil），供章节与记录一一对应取用。
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }

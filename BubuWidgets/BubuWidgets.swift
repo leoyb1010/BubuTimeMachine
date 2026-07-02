@@ -143,6 +143,23 @@ private enum BubuWidgetStyle {
     static let recordLink = URL(string: "bubu://record")!
 }
 
+/// 「＋记一笔」小圆钮：Link 优先于 widgetURL，点它直达快速记录（仅中/大尺寸可用 Link）。
+private struct BubuPlusLink: View {
+    var size: CGFloat = 26
+
+    var body: some View {
+        Link(destination: BubuWidgetStyle.recordLink) {
+            Image(systemName: "plus")
+                .font(.system(size: size * 0.46, weight: .black))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(WidgetPalette.primary, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 1.5))
+                .shadow(color: WidgetPalette.primary.opacity(0.3), radius: 3, y: 1)
+        }
+    }
+}
+
 private struct BubuInfoChip: View {
     let title: String
     let value: String
@@ -459,10 +476,14 @@ private struct BubuIdentityMediumView: View {
                     BubuInfoChip(title: "AGE", value: snapshot.ageText, tint: WidgetPalette.roseDeep)
                     BubuInfoChip(title: "DAY", value: snapshot.hasProfile ? "第 \(snapshot.daysSinceBirth) 天" : "待同步", tint: WidgetPalette.mint)
                 }
-                Text("No.\(snapshot.idNumber)")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.secondary)
-                    .lineLimit(1)
+                HStack {
+                    Text("No.\(snapshot.idNumber)")
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    BubuPlusLink(size: 24)
+                }
             }
         }
     }
@@ -486,6 +507,7 @@ private struct BubuIdentityLargeView: View {
                         .minimumScaleFactor(0.65)
                 }
                 Spacer()
+                BubuPlusLink(size: 26)
                 Text("ACTIVE")
                     .font(.system(size: 10, weight: .black, design: .rounded))
                     .foregroundColor(.white)
@@ -605,7 +627,10 @@ private struct BubuMomentLargeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            BubuMomentHeader(snapshot: snapshot)
+            HStack(spacing: 8) {
+                BubuMomentHeader(snapshot: snapshot)
+                BubuPlusLink(size: 24)
+            }
             Text(snapshot.recentEntryTitle)
                 .font(.system(size: 22, weight: .black, design: .rounded))
                 .foregroundColor(WidgetPalette.warmBrown)
@@ -707,10 +732,13 @@ private struct BubuGrowthMediumView: View {
                     .font(.system(size: 17, weight: .black, design: .rounded))
                     .foregroundColor(WidgetPalette.warmBrown)
                     .lineLimit(1)
-                Text("第 \(snapshot.daysSinceBirth) 天")
-                    .font(.system(size: 11, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.primary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text("第 \(snapshot.daysSinceBirth) 天")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.primary)
+                        .lineLimit(1)
+                    BubuPlusLink(size: 22)
+                }
             }
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
@@ -734,9 +762,7 @@ private struct BubuGrowthLargeView: View {
             HStack {
                 BubuDayHeader(snapshot: snapshot)
                 Spacer()
-                Image(systemName: "sparkles")
-                    .font(.system(size: 22, weight: .black))
-                    .foregroundColor(WidgetPalette.primary)
+                BubuPlusLink(size: 26)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -832,19 +858,11 @@ private struct BubuWidgetEntryView: View {
     var body: some View {
         content
             .widgetURL(style.deepLink)
-            // 中/大尺寸右上角「＋记一笔」：Link 优先于 widgetURL，点它直达记录，点其余区域跳对应页。
+            // 沉浸式时光中尺寸：右上角是照片空区，「＋记一笔」用 overlay 悬浮。
+            // 其余版式的「＋」内嵌在各自布局的空位里（见各 View），避免盖住生日徽章/ACTIVE/数据 pill。
             .overlay(alignment: .topTrailing) {
-                if family == .systemMedium || family == .systemLarge {
-                    Link(destination: BubuWidgetStyle.recordLink) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .black))
-                            .foregroundStyle(.white)
-                            .frame(width: 28, height: 28)
-                            .background(WidgetPalette.primary, in: Circle())
-                            .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 1.5))
-                            .shadow(color: WidgetPalette.primary.opacity(0.3), radius: 3, y: 1)
-                    }
-                    .padding(10)
+                if style == .moment, family == .systemMedium {
+                    BubuPlusLink().padding(10)
                 }
             }
     }
@@ -1027,11 +1045,14 @@ private struct BubuAccessoryView: View {
 
         case .accessoryInline:
             // 锁屏顶部一行。
-            if snapshot.hasProfile {
-                Label("布布 \(snapshot.ageText) · 生日 \(snapshot.daysUntilBirthday) 天", systemImage: "sparkles")
-            } else {
-                Label("打开布布时光机建立档案", systemImage: "sparkles")
+            Group {
+                if snapshot.hasProfile {
+                    Label("\(snapshot.name) \(snapshot.ageText) · 生日 \(snapshot.daysUntilBirthday) 天", systemImage: "sparkles")
+                } else {
+                    Label("打开布布时光机建立档案", systemImage: "sparkles")
+                }
             }
+            .widgetURL(BubuWidgetStyle.identity.deepLink)
 
         default:
             Text(snapshot.name)
