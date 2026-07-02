@@ -731,6 +731,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         ]
         if let v = dto.familyId { body["familyId"] = v }
         if let v = dto.authorUserId { body["authorUserId"] = v }
+        if let v = dto.inStorybook { body["inStorybook"] = v }
         addSyncTimestamp(to: &body)
         return body
     }
@@ -755,6 +756,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             authorRole: obj["authorRole"] as? String ?? fallback?.authorRole ?? "",
             mood: obj["mood"] as? String ?? fallback?.mood,
             isArchived: obj["isArchived"] as? Bool ?? fallback?.isArchived ?? false,
+            inStorybook: obj["inStorybook"] as? Bool ?? fallback?.inStorybook,
             editedAt: date("editedAt") ?? fallback?.editedAt,
             createdAt: date("createdAt") ?? fallback?.createdAt ?? .now
         )

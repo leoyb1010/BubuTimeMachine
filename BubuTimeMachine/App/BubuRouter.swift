@@ -8,11 +8,14 @@ import SwiftUI
 final class BubuRouter {
     /// 待处理的目标 Tab（被 RootTabView 消费后置回 nil）。
     var pendingTab: Int?
+    /// 待触发「快速记录」信号（小组件/控件按钮打开 App 后直达记录，被首页消费后置回 false）。
+    var pendingQuickCapture = false
 
     /// 解析 deep link。识别不了的 URL 安全忽略（不跳转、不崩）。
     func handle(_ url: URL) {
         guard url.scheme == BubuRoute.scheme, let route = BubuRoute(host: url.host) else { return }
         pendingTab = route.tabIndex
+        if route == .record { pendingQuickCapture = true }
     }
 }
 
@@ -21,6 +24,7 @@ enum BubuRoute: String {
     case identity   // 身份卡 → 首页
     case moment     // 今日时光 → 时光轴
     case growth     // 成长一览 → 里程碑
+    case record     // 记一笔 → 首页并拉起快速记录
 
     static let scheme = "bubu"
 
@@ -32,7 +36,7 @@ enum BubuRoute: String {
     /// 对应 RootTabView 的 selection。
     var tabIndex: Int {
         switch self {
-        case .identity: return 0
+        case .identity, .record: return 0
         case .moment: return 1
         case .growth: return 2
         }

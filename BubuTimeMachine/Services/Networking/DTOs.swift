@@ -27,6 +27,7 @@ struct EntryDTO: Codable, Sendable {
     var authorRole: String
     var mood: String?
     var isArchived: Bool
+    var inStorybook: Bool?          // 收进成长绘本（可选：服务端无此字段时本地保留，不阻断同步）
     var editedAt: Date?
     var createdAt: Date
 }

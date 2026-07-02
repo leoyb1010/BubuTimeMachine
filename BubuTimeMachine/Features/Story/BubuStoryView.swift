@@ -5,9 +5,15 @@ import SwiftData
 /// 对照设计稿 MacStory：butter→peach→pink 大横幅 +「共 N 章」+ 倾斜书卡列表。
 /// 章节由已达成里程碑实时编织（StoryChapterBuilder），点进翻页阅读器。
 struct BubuStoryView: View {
-    @Query private var milestones: [Milestone]
+    // 绘本来源 = 你的记录。收进绘本的记录按发生时间排序。
+    @Query(filter: #Predicate<Entry> { $0.inStorybook && !$0.isArchived },
+           sort: \Entry.happenedAt, order: .forward)
+    private var pickedEntries: [Entry]
+    @Query private var profiles: [ChildProfile]
+    @Environment(AppEnvironment.self) private var env
 
-    private var chapters: [StoryChapter] { StoryChapterBuilder.chapters(from: milestones) }
+    private var birthday: Date? { profiles.first?.birthday }
+    private var chapters: [StoryChapter] { StoryChapterBuilder.chapters(from: pickedEntries, birthday: birthday) }
 
     var body: some View {
         ScrollView {
@@ -17,11 +23,11 @@ struct BubuStoryView: View {
                     emptyState
                 } else {
                     VStack(spacing: 14) {
-                        ForEach(Array(chapters.enumerated()), id: \.element.id) { idx, ch in
+                        ForEach(Array(zip(chapters.indices, chapters)), id: \.1.id) { idx, ch in
                             NavigationLink {
                                 BubuStoryReaderView(chapters: chapters, startIndex: idx)
                             } label: {
-                                chapterCard(ch, index: idx)
+                                chapterCard(ch, entry: pickedEntries[safe: idx], index: idx)
                             }
                             .buttonStyle(.plain)
                         }
@@ -67,11 +73,11 @@ struct BubuStoryView: View {
         .bubuCardShadow()
     }
 
-    // 倾斜书卡
-    private func chapterCard(_ ch: StoryChapter, index: Int) -> some View {
+    // 倾斜书卡：优先真实照片，无照片走渐变兜底
+    private func chapterCard(_ ch: StoryChapter, entry: Entry?, index: Int) -> some View {
         HStack(spacing: 14) {
-            BubuDreamPhoto(hue: ch.hue, height: 80, cornerRadius: 12, motif: ch.emoji)
-                .frame(width: 64)
+            chapterCover(ch, entry: entry)
+                .frame(width: 64, height: 80)
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white, lineWidth: 3))
                 .rotationEffect(.degrees(index % 2 == 0 ? -3 : 3))
                 .shadow(color: .black.opacity(0.16), radius: 7, y: 4)
@@ -98,18 +104,35 @@ struct BubuStoryView: View {
         .bubuCardShadow()
     }
 
+    /// 章节封面：记录里有照片就用真实照片，否则渐变兜底。
+    @ViewBuilder
+    private func chapterCover(_ ch: StoryChapter, entry: Entry?) -> some View {
+        if let photo = entry?.media.first(where: { $0.type == .photo }) {
+            MediaThumbnail(media: photo, mediaStore: env.mediaStore, cornerRadius: 12, size: .card)
+        } else {
+            BubuDreamPhoto(hue: ch.hue, height: 80, cornerRadius: 12, motif: ch.emoji)
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Text("✦").font(.system(size: 44)).foregroundStyle(BubuTheme.Color.peach)
             Text("绘本还是空白的")
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
-            Text("去「里程碑」点亮布布的第一次，\n并写下那一天的故事，这里就会长出第一章")
+            Text("在「时光」里选中喜欢的记录，\n点「收进绘本」，这里就会长出一章一章的故事")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 50)
+    }
+}
+
+// 安全下标（越界返回 nil），供章节与记录一一对应取用。
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

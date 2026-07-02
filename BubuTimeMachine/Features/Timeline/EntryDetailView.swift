@@ -18,6 +18,7 @@ struct EntryDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var appendMediaStatus: String?
     @State private var showReactionPicker = false
+    @State private var storybookToast: String?
 
     private var profile: ChildProfile? { profiles.first }
     private var sortedMedia: [Media] {
@@ -76,12 +77,33 @@ struct EntryDetailView: View {
                 .fontWeight(.semibold)
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    toggleStorybook()
+                } label: {
+                    Image(systemName: entry.inStorybook ? "book.fill" : "book")
+                        .foregroundStyle(entry.inStorybook ? BubuTheme.Color.deepRose : BubuTheme.Color.warmBrown)
+                }
+                .accessibilityLabel(entry.inStorybook ? "移出绘本" : "收进绘本")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button(role: .destructive) {
                     showDeleteConfirm = true
                 } label: {
                     Image(systemName: "trash")
                 }
                 .accessibilityLabel("删除记录")
+            }
+        }
+        .overlay(alignment: .top) {
+            if let storybookToast {
+                Text(storybookToast)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16).padding(.vertical, 9)
+                    .background(BubuTheme.Color.deepRose, in: Capsule())
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .onChange(of: appendPick) { _, items in Task { await appendMedia(items) } }
@@ -499,6 +521,24 @@ struct EntryDetailView: View {
     private func markEntryDirty() {
         entry.editedAt = .now
         entry.syncState = .local
+    }
+
+    /// 收进 / 移出成长绘本：切换标记、落库并同步，弹一条轻提示。
+    private func toggleStorybook() {
+        entry.inStorybook.toggle()
+        markEntryDirty()
+        try? context.save()
+        env.syncEngine.syncNow()
+        BubuHaptics.tapLight()
+        withAnimation(.smooth) {
+            storybookToast = entry.inStorybook ? "已收进绘本 📖" : "已移出绘本"
+        }
+        let shown = storybookToast
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation(.smooth) {
+                if storybookToast == shown { storybookToast = nil }
+            }
+        }
     }
 
     private func refreshWidgets() {

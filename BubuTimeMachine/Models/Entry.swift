@@ -18,6 +18,7 @@ final class Entry {
     var moodRaw: String?              // 心情标签（开心/平静/调皮/委屈…）
     var syncStateRaw: String = SyncState.local.rawValue
     var isArchived: Bool = false      // 软删除：永不物理丢失
+    var inStorybook: Bool = false     // 用户主动收进「成长绘本」的记录（由你在时光轴/详情勾选）
     var editedAt: Date?               // 最后编辑时间（已上传内容可改可补充）
     var createdAt: Date
 

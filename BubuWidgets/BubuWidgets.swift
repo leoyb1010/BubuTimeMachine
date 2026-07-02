@@ -138,6 +138,9 @@ private enum BubuWidgetStyle {
         case .growth: return URL(string: "bubu://growth")!
         }
     }
+
+    /// 「＋记一笔」快捷 Link：打开 App 并直接拉起快速记录。
+    static let recordLink = URL(string: "bubu://record")!
 }
 
 private struct BubuInfoChip: View {
@@ -367,25 +370,54 @@ private struct BubuDayHeader: View {
 // MARK: - 身份陪伴
 private struct BubuIdentitySmallView: View {
     let snapshot: BubuSnapshot
+    /// 生日前 7 天（含当天）进入生日强调态。
+    private var birthdayWeek: Bool { snapshot.hasProfile && snapshot.daysUntilBirthday <= 7 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             BubuDayHeader(snapshot: snapshot, compact: true)
             Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("陪伴第")
-                    .font(.system(size: 11, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.secondary)
-                Text(snapshot.hasProfile ? "\(snapshot.daysSinceBirth)" : "--")
-                    .font(.system(size: 37, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.warmBrown)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                Text("天")
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundColor(WidgetPalette.primary)
+            if birthdayWeek {
+                birthdayEmphasis
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("陪伴第")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.secondary)
+                    Text(snapshot.hasProfile ? "\(snapshot.daysSinceBirth)" : "--")
+                        .font(.system(size: 37, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
+                    Text("天")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundColor(WidgetPalette.primary)
+                }
             }
             BubuProgressStars(snapshot: snapshot, compact: true)
+        }
+    }
+
+    /// 生日周强调：突出「还有 N 天生日」。
+    private var birthdayEmphasis: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: "birthday.cake.fill")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundColor(WidgetPalette.primary)
+                Text(snapshot.daysUntilBirthday == 0 ? "生日快乐" : "生日倒计时")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundColor(WidgetPalette.roseDeep)
+            }
+            Text(snapshot.daysUntilBirthday == 0 ? "🎂" : "\(snapshot.daysUntilBirthday)")
+                .font(.system(size: 37, weight: .black, design: .rounded))
+                .foregroundColor(WidgetPalette.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .contentTransition(.numericText())
+            Text(snapshot.daysUntilBirthday == 0 ? "今天是布布的生日" : "天后就是生日啦")
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundColor(WidgetPalette.roseDeep)
         }
     }
 }
@@ -798,7 +830,23 @@ private struct BubuWidgetEntryView: View {
     var style: BubuWidgetStyle
 
     var body: some View {
-        content.widgetURL(style.deepLink)
+        content
+            .widgetURL(style.deepLink)
+            // 中/大尺寸右上角「＋记一笔」：Link 优先于 widgetURL，点它直达记录，点其余区域跳对应页。
+            .overlay(alignment: .topTrailing) {
+                if family == .systemMedium || family == .systemLarge {
+                    Link(destination: BubuWidgetStyle.recordLink) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(WidgetPalette.primary, in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 1.5))
+                            .shadow(color: WidgetPalette.primary.opacity(0.3), radius: 3, y: 1)
+                    }
+                    .padding(10)
+                }
+            }
     }
 
     @ViewBuilder
@@ -818,6 +866,11 @@ private struct BubuWidgetEntryView: View {
             case .systemMedium:
                 BubuMediumView(snapshot: entry.snapshot, style: style)
                     .padding(15).bubuWidgetBackground()
+            case .systemLarge where style == .identity:
+                // 身份卡大尺寸：头像柔焦铺底 + 暖色蒙版，比纯渐变更有「相框」质感，信息仍清晰。
+                BubuLargeView(snapshot: entry.snapshot, style: style)
+                    .padding(17)
+                    .softPhotoBackground(imageData: entry.snapshot.avatarImageData)
             case .systemLarge:
                 BubuLargeView(snapshot: entry.snapshot, style: style)
                     .padding(17).bubuWidgetBackground()
@@ -855,6 +908,40 @@ private struct ImmersiveContainerBackground: ViewModifier {
 private extension View {
     func immersiveContainerBackground(imageData: Data?) -> some View {
         modifier(ImmersiveContainerBackground(imageData: imageData))
+    }
+    func softPhotoBackground(imageData: Data?) -> some View {
+        modifier(SoftPhotoBackground(imageData: imageData))
+    }
+}
+
+// MARK: - 柔焦照片铺底（身份卡大尺寸：头像放大模糊 + 暖色蒙版，信息层仍清晰）
+private struct SoftPhotoBackground: ViewModifier {
+    let imageData: Data?
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    func body(content: Content) -> some View {
+        content.containerBackground(for: .widget) {
+            ZStack {
+                if let image = BubuAvatar.downsampledImage(from: imageData, maxPixel: 400),
+                   renderingMode == .fullColor {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: 28)
+                        .opacity(0.55)
+                    // 暖色蒙版：压住模糊照片，保证上层白卡片信息对比度。
+                    LinearGradient(
+                        colors: [WidgetPalette.cream.opacity(0.82), WidgetPalette.peach.opacity(0.7), WidgetPalette.pink.opacity(0.6)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                } else {
+                    LinearGradient(
+                        colors: [WidgetPalette.peach.opacity(0.55), WidgetPalette.pink.opacity(0.45), WidgetPalette.lav.opacity(0.45), WidgetPalette.cream],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                }
+            }
+        }
     }
 }
 

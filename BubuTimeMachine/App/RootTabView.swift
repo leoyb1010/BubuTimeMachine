@@ -75,11 +75,21 @@ struct RootTabView: View {
         .onChange(of: router.pendingTab) { _, _ in consumePendingRoute() }
     }
 
-    /// 消费一次待处理的深链目标 Tab（消费后置回 nil，避免重复触发）。
+    /// 消费一次待处理的深链目标 Tab / 快速记录信号（消费后置回，避免重复触发）。
     private func consumePendingRoute() {
-        guard let tab = router.pendingTab else { return }
-        selection = min(max(tab, 0), 3)
-        router.pendingTab = nil
+        if let tab = router.pendingTab {
+            selection = min(max(tab, 0), 3)
+            router.pendingTab = nil
+        }
+        if router.pendingQuickCapture {
+            selection = 0
+            router.pendingQuickCapture = false
+            // 延迟一拍：确保首页已切换并注册好 onChange 监听后再拉起记录（冷启动 deep link 时机安全）。
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                quickCaptureTrigger += 1
+            }
+        }
     }
 
     private var tabBarSpacer: some View {

@@ -72,8 +72,9 @@ struct BubuStoryReaderView: View {
     // 正文页
     private var page: some View {
         VStack(spacing: 0) {
-            BubuDreamPhoto(hue: chapter.hue, height: 150, cornerRadius: 30, motif: chapter.emoji)
-                .frame(width: 150)
+            StoryCover(chapter: chapter)
+                .frame(width: 150, height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).stroke(.white.opacity(0.6), lineWidth: 6))
                 .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
                 .padding(.top, 14)
@@ -154,6 +155,35 @@ struct BubuStoryReaderView: View {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { flipping = false }
         }
+    }
+}
+
+// 章节封面：有真实照片就显示照片，否则渐变兜底。
+private struct StoryCover: View {
+    let chapter: StoryChapter
+    @Environment(AppEnvironment.self) private var env
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                BubuDreamPhoto(hue: chapter.hue, height: 150, cornerRadius: 30, motif: chapter.emoji)
+            }
+        }
+        .task(id: chapter.id) { await load() }
+    }
+
+    private func load() async {
+        guard let fileName = chapter.photoFileName else { image = nil; return }
+        image = await env.thumbnails.image(
+            mediaId: chapter.entryId,
+            thumbnailFileName: fileName,
+            localFileName: fileName,
+            isPhoto: true,
+            size: .detail
+        )
     }
 }
 

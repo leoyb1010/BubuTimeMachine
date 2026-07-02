@@ -1254,7 +1254,8 @@ final class SyncEngine {
             happenedAt: entry.happenedAt, locationName: entry.locationName,
             latitude: entry.latitude, longitude: entry.longitude,
             authorRole: entry.authorRole, mood: entry.moodRaw,
-            isArchived: entry.isArchived, editedAt: entry.editedAt, createdAt: entry.createdAt)
+            isArchived: entry.isArchived, inStorybook: entry.inStorybook,
+            editedAt: entry.editedAt, createdAt: entry.createdAt)
     }
 
     private static func remoteEntryWins(_ dto: EntryDTO, over entry: Entry) -> Bool {
@@ -1541,6 +1542,8 @@ final class SyncEngine {
         entry.authorRole = dto.authorRole
         entry.moodRaw = dto.mood
         entry.isArchived = dto.isArchived
+        // 仅当远端明确带了 inStorybook 才覆盖，服务端无此字段时保留本地勾选（不被同步抹掉）。
+        if let inStorybook = dto.inStorybook { entry.inStorybook = inStorybook }
         entry.editedAt = dto.editedAt
     }
 }
