@@ -43,6 +43,7 @@ export struct HomeView {
   @State healthCount: number = 0;
   @State milestoneTotal: number = 0;
   @State milestoneDoneCount: number = 0;
+  @State storyChapterCount: number = 0;
   @State pendingSyncCount: number = 0;
   @State growthMeasurements: GrowthMeasurement[] = [];
   // 快速记录业务模型（对照 iOS @State model: CaptureModel?）。
@@ -117,6 +118,7 @@ export struct HomeView {
     this.growthMeasurements = growth;
     this.milestoneTotal = milestones.length;
     this.milestoneDoneCount = milestones.filter(m => m.happenedAt !== undefined).length;
+    this.storyChapterCount = milestones.filter(m => m.happenedAt !== undefined && (m.detail ?? '').trim().length > 0).length;
     this.pendingSyncCount =
       this.entries.filter(e => e.syncState !== SyncState.synced).length +
       health.filter(h => h.syncState !== SyncState.synced).length +
@@ -472,10 +474,10 @@ export struct HomeView {
       .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.96 })
       .onClick(() => { this.startQuickCapture(); })
 
-      this.quickDockButton(BubuIconName.photo, '相册', `${this.photoCount} 张`, BubuColor.mint, () => {
+      this.quickDockButton(BubuIconName.photo, '相册', BubuColor.mint, () => {
         this.navigate(HomeRoute.album);
       })
-      this.quickDockButton(BubuIconName.health, '健康', '餐睡', BubuColor.sky, () => {
+      this.quickDockButton(BubuIconName.health, '健康', BubuColor.sky, () => {
         this.navigate(HomeRoute.health);
       })
     }
@@ -483,7 +485,7 @@ export struct HomeView {
   }
 
   @Builder
-  quickDockButton(iconName: string, title: string, subtitle: string, tint: string, action: () => void) {
+  quickDockButton(iconName: string, title: string, tint: string, action: () => void) {
     Column({ space: 3 }) {
       BubuIconBadge({
         name: iconName,
@@ -498,7 +500,7 @@ export struct HomeView {
         .fontSize(this.isCompact() ? 10 : 11)
         .fontWeight(FontWeight.Bold)
         .fontColor(BubuColor.warmBrown)
-      Text(subtitle)
+      Text(title === '相册' ? `${this.photoCount} 张` : '餐睡')
         .fontSize(this.isCompact() ? 8 : 9)
         .fontColor(BubuColor.secondaryText)
         .maxLines(1)
@@ -599,8 +601,8 @@ export struct HomeView {
   growthTile() {
     Column({ space: this.isCompact() ? 4 : 6 }) {
       Row({ space: 6 }) {
-        this.growthStat('身高', this.latestGrowthValue('height'), 'cm')
-        this.growthStat('体重', this.latestGrowthValue('weight'), 'kg')
+        this.growthStat('身高', 'height', 'cm')
+        this.growthStat('体重', 'weight', 'kg')
       }.width('100%')
       // 渐升 bar（装饰，对照 iOS growthBars）。
       Row({ space: 4 }) {
@@ -632,13 +634,13 @@ export struct HomeView {
   }
 
   @Builder
-  growthStat(title: string, value: string, unit: string) {
+  growthStat(title: string, kind: 'height' | 'weight', unit: string) {
     Column({ space: 1 }) {
       Text(title)
         .fontSize(11)
         .fontColor(BubuColor.secondaryText)
       Row({ space: 1 }) {
-        Text(value)
+        Text(this.latestGrowthValue(kind))
           .fontSize(this.isCompact() ? 17 : 19)
           .fontWeight(FontWeight.Bolder)
           .fontColor(BubuColor.warmBrown)
@@ -748,7 +750,7 @@ export struct HomeView {
   }
 
   private storyHeadline(): string {
-    return this.milestoneDoneCount > 0 ? `已写到第 ${Math.min(this.milestoneDoneCount, 99)} 篇` : '翻开第一页';
+    return this.storyChapterCount > 0 ? `已写到第 ${Math.min(this.storyChapterCount, 99)} 篇` : '翻开第一页';
   }
 
   // MARK: 最近时光（行卡，对照 iOS recentMomentsSection）

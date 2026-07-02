@@ -42,8 +42,8 @@ export class EntryWriter {
     return id;
   }
 
-  // 带照片/语音的记录：文件名为已落沙盒的相对名。voiceFileName/voiceDuration 可选。
-  static async entryWithPhoto(note: string, photoFileName: string | null, role: FamilyRole,
+  // 带照片/视频/语音的记录：文件名为已落沙盒的相对名。voiceFileName/voiceDuration 可选。
+  static async entryWithPhoto(note: string, photoFileName: string | string[] | null, role: FamilyRole,
                               mood?: Mood, voiceFileName?: string | null, voiceDuration?: number,
                               videoFileNames: string[] = []): Promise<string> {
     const now = Date.now();
@@ -61,12 +61,15 @@ export class EntryWriter {
     };
     await AppDatabase.shared.insertEntry(entry);
 
-    if (photoFileName) {
+    const photoFileNames: string[] = Array.isArray(photoFileName)
+      ? photoFileName
+      : (photoFileName ? [photoFileName] : []);
+    for (const name of photoFileNames) {
       const media: Media = {
         id: util.generateRandomUUID(true),
         entryId: id,
         typeRaw: MediaType.photo,
-        localFileName: photoFileName,
+        localFileName: name,
         uploadProgress: 0,
         syncState: SyncState.local,
         aiTags: [],

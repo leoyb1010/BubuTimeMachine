@@ -8,10 +8,8 @@ import { promptAction } from '@kit.ArkUI';
 export struct AccountView {
   onDone?: () => void;
 
-  @State isRegister: boolean = false;
   @State username: string = '';
   @State password: string = '';
-  @State familyCode: string = '';
   @State roleIndex: number = 1;
   @State busy: boolean = false;
   @State errorText: string = '';
@@ -37,28 +35,16 @@ export struct AccountView {
           .fontSize(12)
           .fontColor(BubuColor.secondaryText)
 
-        Row({ space: 8 }) {
-          this.modeButton('登录', false)
-          this.modeButton('注册', true)
-        }
-        .width('100%')
-
         Column({ space: 12 }) {
           TextInput({ text: $$this.username, placeholder: '用户名（如 yuanbo）' })
             .height(48)
             .backgroundColor('#F3F3F3')
             .borderRadius(10)
-          TextInput({ text: $$this.password, placeholder: '密码（至少 6 位）' })
+          TextInput({ text: $$this.password, placeholder: '密码' })
             .height(48)
             .backgroundColor('#F3F3F3')
             .borderRadius(10)
             .type(InputType.Password)
-          if (this.isRegister) {
-            TextInput({ text: $$this.familyCode, placeholder: '家庭码' })
-              .height(48)
-              .backgroundColor('#F3F3F3')
-              .borderRadius(10)
-          }
           Row() {
             Text('我是').fontSize(15).fontColor(BubuColor.warmBrown)
             Blank()
@@ -82,7 +68,7 @@ export struct AccountView {
             .width('100%')
         }
 
-        Button(this.busy ? '处理中…' : (this.isRegister ? '注册并登录' : '登录'))
+        Button(this.busy ? '处理中…' : '登录')
           .width('100%')
           .backgroundColor(BubuColor.primary)
           .enabled(!this.busy)
@@ -104,29 +90,13 @@ export struct AccountView {
     .height('100%')
   }
 
-  @Builder
-  modeButton(title: string, isRegister: boolean) {
-    Button(title)
-      .layoutWeight(1)
-      .backgroundColor(this.isRegister === isRegister ? BubuColor.primary : '#F3F3F3')
-      .fontColor(this.isRegister === isRegister ? Color.White : BubuColor.warmBrown)
-      .onClick(() => {
-        this.isRegister = isRegister;
-        this.errorText = '';
-      })
-  }
-
   private async submit(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.errorText = '';
     const role = ALL_FAMILY_ROLES[Math.max(0, Math.min(this.roleIndex, ALL_FAMILY_ROLES.length - 1))] as FamilyRole;
     try {
-      if (this.isRegister) {
-        await this.service.register(this.username, this.password, this.familyCode, role);
-      } else {
-        await this.service.login(this.username, this.password, role);
-      }
+      await this.service.login(this.username, this.password, role);
       promptAction.showToast({ message: '已登录，开始同步' });
       if (this.onDone) this.onDone();
     } catch (e) {

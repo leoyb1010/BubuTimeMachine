@@ -15,6 +15,7 @@ import { Reaction, ReactionUtil, ReactionSummary, ReactionRow, ReactionPicker, A
 import { promptAction } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 import { relationalStore } from '@kit.ArkData';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 
 // MARK: - 记录详情（对照 iOS Features/Timeline/EntryDetailView.swift）
 // 已上传内容不再只读：可改文字/心情、追加语音、家人多视角补充、点亲亲。
@@ -196,20 +197,34 @@ export struct EntryDetailView {
     }
   }
 
-  // MARK: 追加照片按钮（对照 iOS appendPhotoButton；切片无系统相册选择器，给占位提示）
+  // MARK: 追加照片/视频按钮（对照 iOS appendPhotoButton）
   @Builder
   appendPhotoButton() {
-    // NOTE: iOS 用 PhotosPicker 追加照片/视频。本切片未接入 HarmonyOS PhotoPicker，
-    // 此处保留按钮形态与文案，点击提示后续可接 photoAccessHelper。
     Row({ space: 8 }) {
-      Text('🖼').fontSize(18)
-      Text('再添加照片/视频').fontSize(18).fontColor(this.theme())
+      this.appendMediaAction('追加照片', '🖼', false)
+      this.appendMediaAction('追加视频', '🎞', true)
     }
-    .width('100%').justifyContent(FlexAlign.Center)
-    .padding({ top: 12, bottom: 12 })
+    .width('100%')
+  }
+
+  @Builder
+  appendMediaAction(title: string, icon: string, video: boolean) {
+    Row({ space: 8 }) {
+      Text(icon).fontSize(16)
+      Text(title)
+        .fontSize(15)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(this.theme())
+      Blank()
+    }
+    .layoutWeight(1)
+    .height(46)
+    .padding({ left: 12, right: 12 })
+    .justifyContent(FlexAlign.Center)
     .backgroundColor('#14F28C9E')
     .borderRadius(BubuRadius.small)
-    .onClick(() => { promptAction.showToast({ message: '在手机上可从相册追加照片' }); })
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.97 })
+    .onClick(() => { this.pickAppendMedia(video); })
   }
 
   // MARK: 亲一下（反应）条（对照 iOS reactionSection）
@@ -358,7 +373,7 @@ export struct EntryDetailView {
     }
   }
 
-  // MARK: 布布第一人称占位（对照 iOS firstPersonPlaceholder）
+  // MARK: 布布第一人称提示（对照 iOS firstPersonPlaceholder）
   @Builder
   firstPersonPlaceholder() {
     Row({ space: 10 }) {
@@ -373,7 +388,6 @@ export struct EntryDetailView {
           .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Text('›').fontSize(16).fontColor(BubuColor.secondaryText)
     }
     .width('100%')
     .padding(12)
@@ -471,6 +485,7 @@ export struct EntryDetailView {
     const store = AppDatabase.shared.raw;
     if (store) {
       for (const c of mineReactions) {
+        await AppDatabase.shared.enqueueRemoteDeletion('comments', c.remoteId);
         const pred = new relationalStore.RdbPredicates('comment');
         pred.equalTo('id', c.id);
         await store.delete(pred);
@@ -505,6 +520,7 @@ export struct EntryDetailView {
   }
 
   private async deleteMedia(m: Media): Promise<void> {
+    await AppDatabase.shared.enqueueRemoteDeletion('media', m.remoteId);
     MediaStore.shared.deleteLocalFiles(m.localFileName, m.thumbnailFileName);
     const store = AppDatabase.shared.raw;
     if (store) {
@@ -517,6 +533,7 @@ export struct EntryDetailView {
   }
 
   private async deleteVoice(v: VoiceNote): Promise<void> {
+    await AppDatabase.shared.enqueueRemoteDeletion('voicenotes', v.remoteId);
     if (v.localFileName) MediaStore.shared.deleteLocalFiles(v.localFileName);
     const store = AppDatabase.shared.raw;
     if (store) {
@@ -554,6 +571,57 @@ export struct EntryDetailView {
     await AppDatabase.shared.insertFeedEvent(event);
     await AppDatabase.shared.updateEntryFields(this.entry.id, { editedAt: now, syncState: SyncState.local });
     await this.load();
+  }
+
+  private async pickAppendMedia(video: boolean): Promise<void> {
+    try {
+      const picker = new photoAccessHelper.PhotoViewPicker();
+      const opt = new photoAccessHelper.PhotoSelectOptions();
+      opt.MIMEType = video ? photoAccessHelper.PhotoViewMIMETypes.VIDEO_TYPE : photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      opt.maxSelectNumber = 9;
+      const res = await picker.select(opt);
+      if (!res.photoUris || res.photoUris.length === 0) return;
+      const now = Date.now();
+      let count = 0;
+      for (const uri of res.photoUris) {
+        const fileName = video
+          ? MediaStore.shared.importFile(uri, this.videoExtension(uri))
+          : MediaStore.shared.copyIntoStore(uri, this.imageExtension(uri));
+        if (!fileName) continue;
+        const media: Media = {
+          id: util.generateRandomUUID(true),
+          entryId: this.entry.id,
+          typeRaw: video ? MediaType.video : MediaType.photo,
+          localFileName: fileName,
+          uploadProgress: 0,
+          syncState: SyncState.local,
+          aiTags: [],
+          createdAt: now + count
+        };
+        await AppDatabase.shared.insertMedia(media);
+        count += 1;
+      }
+      await AppDatabase.shared.updateEntryFields(this.entry.id, { editedAt: now, syncState: SyncState.local });
+      await this.load();
+      promptAction.showToast({ message: count > 0 ? `已追加 ${count} 个媒体` : '媒体读取失败' });
+    } catch (e) {
+      promptAction.showToast({ message: '已取消' });
+    }
+  }
+
+  private imageExtension(uri: string): string {
+    const lower = uri.toLowerCase();
+    if (lower.endsWith('.png')) return 'png';
+    if (lower.endsWith('.heic')) return 'heic';
+    if (lower.endsWith('.gif')) return 'gif';
+    return 'jpg';
+  }
+
+  private videoExtension(uri: string): string {
+    const lower = uri.toLowerCase();
+    if (lower.endsWith('.mov')) return 'mov';
+    if (lower.endsWith('.m4v')) return 'm4v';
+    return 'mp4';
   }
 
   // 删除记录（对照 iOS deleteEntry：软删除 + entryArchived FeedEvent + dismiss）。

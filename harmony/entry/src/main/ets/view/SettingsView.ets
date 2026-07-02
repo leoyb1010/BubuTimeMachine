@@ -349,7 +349,7 @@ export struct SettingsView {
         .width('100%')
         .padding({ left: 6 })
       Column({ space: 0 }) {
-        this.navRow('家人登录', '👤', ServerConfig.shared.isConfigured ? '切换账号或退出当前账号' : '用户名 + 家庭码加入', () => { this.showAccount = true; })
+        this.navRow('家人登录', '👤', ServerConfig.shared.isConfigured ? '切换账号或退出当前账号' : '用家里服务器账号登录', () => { this.showAccount = true; })
         this.navRow('家庭成员', '👨‍👩‍👧', '管理家人的名字、关系和头像', () => { this.showMembers = true; })
       }
       .width('100%')

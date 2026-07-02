@@ -5,6 +5,7 @@ import { AppDatabase } from '../data/AppDatabase';
 import { Entry, ChildProfile, Media, Milestone, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, Comment } from '../models/Models';
 import { ServerConfig } from '../services/ServerConfig';
 import { MediaStore } from '../services/MediaStore';
+import { APIClient } from '../services/APIClient';
 import { IOS_BASELINE_IMPORT_VERSION, IOS_BASELINE_JSON } from './IosBaselineData';
 
 const DOMAIN = 0x0000;
@@ -121,7 +122,7 @@ export class IosBaselineImporter {
   }
 
   private static async markServerBaselineReady(store: preferences.Preferences): Promise<void> {
-    const futureCursor = '2099-01-01T00:00:00.000Z';
+    const futureCursor = APIClient.syncTimestampString(new Date(Date.UTC(2099, 0, 1, 0, 0, 0, 0)));
     const collections: string[] = [
       'entries',
       'media',

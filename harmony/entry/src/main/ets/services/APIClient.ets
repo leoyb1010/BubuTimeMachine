@@ -2,6 +2,8 @@ import { http } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { request } from '@kit.BasicServicesKit';
+import type { common } from '@kit.AbilityKit';
 import { ServerConfig } from './ServerConfig';
 import { AuthResponse, UploadedFileResult } from './DTOs';
 
@@ -14,18 +16,55 @@ interface FormField {
 }
 
 // MARK: - PocketBase 网络客户端（对照 iOS PocketBaseClient.swift）
-// 复用你现有的自托管 PocketBase：密码鉴权 + collection 增量拉取/upsert + 文件上传 + 下载 + 删除。
+// 复用你现有的自托管 PocketBase：密码鉴权 + collection 增量拉取/upsert + 文件上传 + 下载 + 软删除。
 // 全部走 REST/JSON，与 iOS / 服务端协议一致。
 // 幂等：以 localId 为去重键，upsert 先查后建/更新。
 // 离线优先：所有失败都抛错，由 SyncEngine 决定保留本地、稍后重试。
 export class APIClient {
   static readonly shared = new APIClient();
   private token: string = '';
+  private currentUserId: string = '';
+  private currentFamilyId: string = '';
+  private fileToken: string = '';
+  private fileTokenExpiresAt: number = 0;
+  private appContext: common.UIAbilityContext | null = null;
 
   private constructor() {}
 
+  initialize(context: common.UIAbilityContext): void {
+    this.appContext = context;
+  }
+
   private get baseURL(): string {
     return ServerConfig.shared.baseURLString.replace(/\/+$/, '');
+  }
+
+  static syncTimestampString(date: Date = new Date()): string {
+    const year = date.getUTCFullYear();
+    const month = APIClient.pad2(date.getUTCMonth() + 1);
+    const day = APIClient.pad2(date.getUTCDate());
+    const hour = APIClient.pad2(date.getUTCHours());
+    const minute = APIClient.pad2(date.getUTCMinutes());
+    const second = APIClient.pad2(date.getUTCSeconds());
+    const ms = APIClient.pad3(date.getUTCMilliseconds());
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}.${ms}Z`;
+  }
+
+  private static normalizeSyncTimestamp(value: string): string {
+    if (value.indexOf('T') < 0) return value;
+    const parsed = new Date(value);
+    const ms = parsed.getTime();
+    return ms === ms ? APIClient.syncTimestampString(parsed) : value;
+  }
+
+  private static pad2(value: number): string {
+    return value < 10 ? `0${value}` : `${value}`;
+  }
+
+  private static pad3(value: number): string {
+    if (value < 10) return `00${value}`;
+    if (value < 100) return `0${value}`;
+    return `${value}`;
   }
 
   // MARK: 鉴权 ----------------------------------------------------------------
@@ -42,6 +81,10 @@ export class APIClient {
         const resp = await this.request('POST', '/api/collections/users/auth-with-password', body, false);
         const auth = JSON.parse(resp) as AuthResponse;
         this.token = auth.token;
+        this.currentUserId = auth.record?.id ?? '';
+        this.currentFamilyId = auth.record?.familyId ?? '';
+        this.fileToken = '';
+        this.fileTokenExpiresAt = 0;
         if (this.token.length > 0) {
           if (cfg.accountEmail !== identity) {
             cfg.accountEmail = identity;
@@ -55,6 +98,10 @@ export class APIClient {
     }
     hilog.error(DOMAIN, 'Bubu', `登录失败: ${JSON.stringify(lastError)}`);
     this.token = '';
+    this.currentUserId = '';
+    this.currentFamilyId = '';
+    this.fileToken = '';
+    this.fileTokenExpiresAt = 0;
     return false;
   }
 
@@ -103,7 +150,8 @@ export class APIClient {
   async upsert(collection: string, localId: string, body: Record<string, Object>): Promise<Record<string, Object>> {
     const existing = await this.findByLocalId(collection, localId);
     body['localId'] = localId;
-    body['clientUpdatedAt'] = new Date().toISOString();
+    body['clientUpdatedAt'] = APIClient.syncTimestampString();
+    body = this.activeRecordBody(body);
     if (existing) {
       const id = existing['id'] as string;
       const resp = await this.request('PATCH', `/api/collections/${collection}/records/${id}`, JSON.stringify(body), true);
@@ -123,13 +171,17 @@ export class APIClient {
       let path = `/api/collections/${collection}/records?perPage=200&page=${page}&sort=clientUpdatedAt`;
       if (sinceISO) {
         // 注意：PocketBase filter 用单引号包裹，转义单引号杜绝注入面（对照 iOS filterEscape）
-        const filter = encodeURIComponent(`(clientUpdatedAt>'${APIClient.filterEscape(sinceISO)}')`);
+        const sinceFilter = APIClient.normalizeSyncTimestamp(sinceISO);
+        const filter = encodeURIComponent(`(clientUpdatedAt>'${APIClient.filterEscape(sinceFilter)}')`);
         path += `&filter=${filter}`;
       }
       const resp = await this.request('GET', path, undefined, true);
       const parsed = JSON.parse(resp) as Record<string, Object>;
       const items = (parsed['items'] as Record<string, Object>[] | undefined) ?? [];
-      for (const it of items) all.push(it);
+      for (const it of items) {
+        if (it['isDeleted'] === true) continue;
+        all.push(it);
+      }
       const totalPages = (parsed['totalPages'] as number | undefined) ?? 1;
       if (page >= totalPages || items.length === 0) break;
       page += 1;
@@ -137,9 +189,15 @@ export class APIClient {
     return all;
   }
 
-  // 删除一条记录（对照 iOS delete(collection:id:)）。取消打卡/误录删除用，避免下轮拉取复活。
+  // 删除一条记录：服务端保留 tombstone，不再物理删除。
   async deleteRecord(collection: string, id: string): Promise<void> {
-    await this.request('DELETE', `/api/collections/${collection}/records/${id}`, undefined, true);
+    const body: Record<string, Object> = {
+      'isDeleted': true,
+      'deletedAt': new Date().toISOString(),
+      'clientUpdatedAt': APIClient.syncTimestampString()
+    };
+    if (this.currentUserId.length > 0) body['deletedByUserId'] = this.currentUserId;
+    await this.request('PATCH', `/api/collections/${collection}/records/${id}`, JSON.stringify(body), true);
   }
 
   // 按 localId 查 remoteId（对照 iOS findRecord）。供 SyncEngine 上传前定位记录。
@@ -192,7 +250,8 @@ export class APIClient {
 
     // 组装普通字段：补 localId + clientUpdatedAt（对照 iOS addSyncTimestamp）。
     fields['localId'] = localId;
-    fields['clientUpdatedAt'] = new Date().toISOString();
+    fields['clientUpdatedAt'] = APIClient.syncTimestampString();
+    fields = this.activeRecordFields(fields);
     const formData: Array<FormField> = [];
     const keys = Object.keys(fields).sort();
     for (const k of keys) {
@@ -276,11 +335,17 @@ export class APIClient {
   async downloadFile(remoteURL: string, destPath: string): Promise<string> {
     if (remoteURL.length === 0) throw new Error('文件地址不正确');
     const tokenStr = await this.ensureToken();
+    const accessURL = await this.fileAccessURL(remoteURL);
+    const header: Record<string, string> = {};
+    if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
+    try {
+      return await this.downloadFileViaTask(accessURL, destPath, header);
+    } catch (taskError) {
+      hilog.warn(DOMAIN, 'Bubu', `系统下载失败，回退 HTTP 下载: ${APIClient.errorText(taskError)}`);
+    }
     const req = http.createHttp();
     try {
-      const header: Record<string, string> = {};
-      if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
-      const resp = await req.request(remoteURL, {
+      const resp = await req.request(accessURL, {
         method: http.RequestMethod.GET,
         header: header,
         expectDataType: http.HttpDataType.ARRAY_BUFFER,
@@ -297,6 +362,77 @@ export class APIClient {
     } finally {
       req.destroy();
     }
+  }
+
+  private async downloadFileViaTask(accessURL: string, destPath: string,
+                                    header: Record<string, string>): Promise<string> {
+    if (!this.appContext) throw new Error('缺少下载上下文');
+    try {
+      if (fileIo.accessSync(destPath)) fileIo.unlinkSync(destPath);
+    } catch (e) {}
+    const task = await request.downloadFile(this.appContext, {
+      url: accessURL,
+      filePath: destPath,
+      header: header,
+      enableMetered: true,
+      enableRoaming: true,
+      background: false,
+      title: 'Bubu media'
+    });
+    return await new Promise<string>((resolve, reject) => {
+      let finished = false;
+      const complete = () => {
+        if (finished) return;
+        finished = true;
+        try {
+          const size = fileIo.statSync(destPath).size;
+          if (size <= 0) {
+            reject(new Error('下载文件为空'));
+          } else {
+            resolve(destPath);
+          }
+        } catch (e) {
+          reject(new Error(`下载完成但文件不可读: ${APIClient.errorText(e)}`));
+        }
+      };
+      const fail = (err: number) => {
+        if (finished) return;
+        finished = true;
+        reject(new Error(`下载任务失败 ${err}`));
+      };
+      task.on('complete', complete);
+      task.on('fail', fail);
+      setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        reject(new Error('下载任务超时'));
+      }, 300000);
+    });
+  }
+
+  private static errorText(e: Object): string {
+    if (e instanceof Error) return e.message;
+    const text = JSON.stringify(e);
+    return text.length > 0 ? text : '未知错误';
+  }
+
+  private async fileAccessURL(remoteURL: string): Promise<string> {
+    const token = await this.ensureFileToken();
+    if (token.length === 0) return remoteURL;
+    const sep = remoteURL.indexOf('?') >= 0 ? '&' : '?';
+    return `${remoteURL}${sep}token=${encodeURIComponent(token)}`;
+  }
+
+  private async ensureFileToken(): Promise<string> {
+    const now = Date.now();
+    if (this.fileToken.length > 0 && this.fileTokenExpiresAt > now) return this.fileToken;
+    const resp = await this.request('POST', '/api/files/token', undefined, true);
+    const parsed = JSON.parse(resp) as Record<string, Object>;
+    const token = parsed['token'] as string | undefined;
+    if (!token || token.length === 0) throw new Error('文件访问令牌响应异常');
+    this.fileToken = token;
+    this.fileTokenExpiresAt = now + 100000;
+    return token;
   }
 
   // MARK: 连接测试（对照 iOS ping）-------------------------------------------
@@ -319,6 +455,28 @@ export class APIClient {
   }
 
   // MARK: - 私有辅助 ----------------------------------------------------------
+
+  private activeRecordBody(body: Record<string, Object>): Record<string, Object> {
+    if (body['isDeleted'] === undefined) body['isDeleted'] = false;
+    if (body['authorUserId'] === undefined && this.currentUserId.length > 0) {
+      body['authorUserId'] = this.currentUserId;
+    }
+    if (body['familyId'] === undefined && this.currentFamilyId.length > 0) {
+      body['familyId'] = this.currentFamilyId;
+    }
+    return body;
+  }
+
+  private activeRecordFields(fields: Record<string, string>): Record<string, string> {
+    if (fields['isDeleted'] === undefined) fields['isDeleted'] = 'false';
+    if (fields['authorUserId'] === undefined && this.currentUserId.length > 0) {
+      fields['authorUserId'] = this.currentUserId;
+    }
+    if (fields['familyId'] === undefined && this.currentFamilyId.length > 0) {
+      fields['familyId'] = this.currentFamilyId;
+    }
+    return fields;
+  }
 
   // PocketBase filter 字符串里的单引号转义，杜绝注入面（对照 iOS filterEscape）。
   private static filterEscape(value: string): string {
@@ -344,7 +502,7 @@ export class APIClient {
   private async request(method: string, path: string, body: string | undefined, auth: boolean): Promise<string> {
     const req = http.createHttp();
     try {
-      const header: Record<string, string> = { 'Content-Type': 'application/json' };
+      const header: Record<string, string> = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
       if (auth && this.token.length > 0) header['Authorization'] = this.authHeader(this.token);
       const methodEnum = method === 'POST' ? http.RequestMethod.POST
         : method === 'PATCH' ? http.RequestMethod.PATCH
@@ -361,6 +519,10 @@ export class APIClient {
       if (code === 401 || code === 403) {
         // token 过期：清缓存，由上层下次 ensureToken 重登（对照 iOS unauthorized 处理）
         this.token = '';
+        this.currentUserId = '';
+        this.currentFamilyId = '';
+        this.fileToken = '';
+        this.fileTokenExpiresAt = 0;
         throw new Error(`HTTP ${code}: unauthorized`);
       }
       if (code < 200 || code >= 300) {

@@ -294,6 +294,7 @@ export struct CapsuleView {
   }
 
   private async deleteCapsule(c: TimeCapsule): Promise<void> {
+    await AppDatabase.shared.enqueueRemoteDeletion('timecapsules', c.remoteId);
     await AppDatabase.shared.deleteCapsule(c.id);
     await this.reload();
     promptAction.showToast({ message: '已删除' });

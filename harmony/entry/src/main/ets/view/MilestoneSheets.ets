@@ -3,7 +3,6 @@
 // 由 MilestonesView 用 @State show + Stack 叠加呈现（顶部带「取消 / 保存」工具条）。
 
 import { util } from '@kit.ArkTS';
-import { relationalStore } from '@kit.ArkData';
 import { Milestone, MilestoneTemplate, ChildProfile } from '../models/Models';
 import { MILESTONE_CATEGORIES, MILESTONE_PRESETS } from '../models/MilestoneTemplates';
 import { SyncState } from '../models/Enums';
@@ -186,11 +185,8 @@ export struct MilestoneEditSheet {
   private async deleteMilestone(): Promise<void> {
     const m: Milestone | null = this.milestone;
     if (m !== null) {
-      // NOTE: AppDatabase 暂未暴露 deleteMilestone；用 updateMilestoneFields 标记归档式删除前，
-      //       此处直接清空标题不可行。为忠实「删除」语义，调用底层 update 将其移出展示由父层 reload。
-      //       当前以软删除占位：把 syncState 置 local 并交父层处理（父层可据需要扩展真正删除）。
-      const fields: relationalStore.ValuesBucket = { syncState: SyncState.local };
-      await AppDatabase.shared.updateMilestoneFields(m.id, fields);
+      await AppDatabase.shared.enqueueRemoteDeletion('milestones', m.remoteId);
+      await AppDatabase.shared.deleteMilestone(m.id);
     }
     this.onDeleted();
   }

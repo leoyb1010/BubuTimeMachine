@@ -1,4 +1,3 @@
-import { promptAction } from '@kit.ArkUI';
 import { BubuColor, BubuFont, BubuShadow } from '../theme/BubuTheme';
 import { BubuMotion } from '../theme/BubuMotion';
 import { BubuHaptics } from '../theme/BubuHaptics';
@@ -14,8 +13,8 @@ import { NaturalCaptureReviewSheet } from './NaturalCaptureReviewSheet';
 // MARK: - 全局一句话记录入口（对照 iOS Features/NaturalCapture/NaturalCaptureBar.swift）
 // 轻盈的「AI 记录卡」：写一句 → 解析 → 确认页 → 各模块落库。
 // 不做聊天界面；失败温和降级，不暴露异常原文。
-// NOTE: iOS 还支持「说一句」（AudioRecorder + transcribe）。本切片未携带 AudioRecorder 录音器契约，
-// 故语音录制按钮保留为占位（点按提示），端点 AIService.transcribe 已就绪，待录音器接入后启用。
+// NOTE: iOS 还支持「说一句」（AudioRecorder + transcribe）。鸿蒙端未接入录音器前不展示语音按钮，
+// 避免出现不可用的假入口。
 @Component
 export struct NaturalCaptureBar {
   @State private text: string = '';
@@ -82,13 +81,6 @@ export struct NaturalCaptureBar {
               })
           }
 
-          // 语音按钮（NOTE 占位）。
-          BubuIcon({ name: BubuIconName.mic, iconSize: 20, color: BubuColor.primary, strokeWidth: 2.2 })
-            .width(28).height(34)
-            .onClick(() => {
-              BubuHaptics.tapLight();
-              promptAction.showToast({ message: '语音记录即将开放，先打字给布布吧 🌟' });
-            })
         }
         .width('100%')
         .padding(12)

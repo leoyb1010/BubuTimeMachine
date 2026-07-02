@@ -132,6 +132,7 @@ export struct MembersView {
   }
 
   private async remove(m: FamilyMember): Promise<void> {
+    await AppDatabase.shared.enqueueRemoteDeletion('members', m.remoteId);
     await AppDatabase.shared.deleteMember(m.id);
     await this.reload();
   }

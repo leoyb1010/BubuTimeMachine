@@ -47,6 +47,7 @@ export struct QuickCaptureSheet {
             this.introCard()
             this.naturalCaptureEntry()
             this.primaryActions()
+            this.cameraShortcuts()
 
             if (this.model.selectedPreviews.length > 0) {
               this.selectedPreviewGrid()
@@ -216,8 +217,8 @@ export struct QuickCaptureSheet {
   @Builder
   primaryActions() {
     Row({ space: 8 }) {
-      this.actionCard('照片', BubuIconName.photo, '#61FFC2D6', () => { this.chooseMediaSource(false); })
-      this.actionCard('视频', BubuIconName.video, '#66DCC9FF', () => { this.chooseMediaSource(true); })
+      this.actionCard('照片', BubuIconName.photo, '#61FFC2D6', () => { this.pickPhotos(); })
+      this.actionCard('视频', BubuIconName.video, '#66DCC9FF', () => { this.pickVideos(); })
       this.actionCard('文字', BubuIconName.textBubble, '#66BFEBD2', () => {
         promptAction.showToast({ message: '在下方「写一句」里写下此刻' });
       })
@@ -226,6 +227,47 @@ export struct QuickCaptureSheet {
       })
     }
     .width('100%')
+  }
+
+  @Builder
+  cameraShortcuts() {
+    Row({ space: 10 }) {
+      this.cameraButton('拍照', BubuIconName.photo, '#FFF0F5', () => { this.requestCamera(false); })
+      this.cameraButton('录像', BubuIconName.video, '#F2EEFF', () => { this.requestCamera(true); })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  cameraButton(title: string, iconName: string, fill: string, action: () => void) {
+    Row({ space: 8 }) {
+      BubuIconBadge({
+        name: iconName,
+        badgeSize: 28,
+        iconSize: 15,
+        color: BubuColor.deepRose,
+        fill: fill,
+        radius: 14,
+        strokeWidth: 1.8
+      })
+      Text(title)
+        .fontSize(13)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.warmBrown)
+      Blank()
+    }
+    .layoutWeight(1)
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .backgroundColor('#CCFFFFFF')
+    .backgroundBlurStyle(BlurStyle.Thin)
+    .borderRadius(18)
+    .border({ width: 1, color: '#88FFFFFF' })
+    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.97 })
+    .onClick(() => {
+      BubuHaptics.selection();
+      action();
+    })
   }
 
   @Builder
@@ -291,7 +333,7 @@ export struct QuickCaptureSheet {
     .borderRadius(BubuRadius.card)
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.97 })
-    .onClick(() => { this.pickPhoto(); })
+    .onClick(() => { this.pickPhotos(); })
   }
 
   @Builder
@@ -313,10 +355,33 @@ export struct QuickCaptureSheet {
         ForEach(this.model.selectedPreviews, (preview: SelectedMediaPreview) => {
           GridItem() {
             Stack() {
-              Image(preview.uri)
+              if (preview.isVideo) {
+                Column({ space: 8 }) {
+                  BubuIconBadge({
+                    name: BubuIconName.video,
+                    badgeSize: 38,
+                    iconSize: 19,
+                    color: '#FFFFFF',
+                    fill: BubuColor.primary,
+                    radius: 19,
+                    strokeWidth: 1.8,
+                    filled: true
+                  })
+                  Text('视频')
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(BubuColor.warmBrown)
+                }
                 .width('100%').height(104)
-                .objectFit(ImageFit.Cover)
+                .justifyContent(FlexAlign.Center)
+                .backgroundColor('#F7EFFF')
                 .borderRadius(BubuRadius.small)
+              } else {
+                Image(preview.uri)
+                  .width('100%').height(104)
+                  .objectFit(ImageFit.Cover)
+                  .borderRadius(BubuRadius.small)
+              }
               Text('✕')
                 .fontSize(16)
                 .fontColor(Color.White)
@@ -485,56 +550,37 @@ export struct QuickCaptureSheet {
     .alignItems(HorizontalAlign.Start)
   }
 
-  // 系统相册选一张照片（对照 iOS PhotosPicker）。
-  private async pickPhoto(): Promise<void> {
+  // 系统相册选择照片（对照 iOS PhotosPicker）。
+  private async pickPhotos(): Promise<void> {
     try {
       const picker = new photoAccessHelper.PhotoViewPicker();
       const opt = new photoAccessHelper.PhotoSelectOptions();
       opt.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
-      opt.maxSelectNumber = 1;
+      opt.maxSelectNumber = 9;
       const res = await picker.select(opt);
       if (res.photoUris && res.photoUris.length > 0) {
-        this.model.addPhotoUri(res.photoUris[0]);
+        this.model.addPhotoUris(res.photoUris);
+        promptAction.showToast({ message: `已选择 ${res.photoUris.length} 张照片` });
       }
     } catch (e) {
       promptAction.showToast({ message: '已取消' });
     }
   }
 
-  private async pickVideo(): Promise<void> {
+  private async pickVideos(): Promise<void> {
     try {
       const picker = new photoAccessHelper.PhotoViewPicker();
       const opt = new photoAccessHelper.PhotoSelectOptions();
       opt.MIMEType = photoAccessHelper.PhotoViewMIMETypes.VIDEO_TYPE;
-      opt.maxSelectNumber = 1;
+      opt.maxSelectNumber = 9;
       const res = await picker.select(opt);
       if (res.photoUris && res.photoUris.length > 0) {
-        this.model.addVideoUri(res.photoUris[0]);
+        this.model.addVideoUris(res.photoUris);
+        promptAction.showToast({ message: `已选择 ${res.photoUris.length} 段视频` });
       }
     } catch (e) {
       promptAction.showToast({ message: '已取消' });
     }
-  }
-
-  private chooseMediaSource(video: boolean): void {
-    promptAction.showDialog({
-      title: video ? '添加视频' : '添加照片',
-      message: video ? '选择录像方式' : '选择照片来源',
-      buttons: [
-        { text: video ? '打开相机录像' : '打开相机拍照', color: BubuColor.primary },
-        { text: video ? '从本地选择视频' : '从本地选择照片', color: BubuColor.warmBrown }
-      ]
-    }).then((res) => {
-      if (res.index === 0) {
-        this.requestCamera(video);
-      } else if (res.index === 1) {
-        if (video) {
-          this.pickVideo();
-        } else {
-          this.pickPhoto();
-        }
-      }
-    });
   }
 
   // 拍照 / 录像（对照 iOS requestCamera）。

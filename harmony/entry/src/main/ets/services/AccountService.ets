@@ -3,7 +3,6 @@ import { FamilyRole } from '../models/Enums';
 import { ServerConfig } from './ServerConfig';
 
 export class AccountService {
-  static readonly familyCode: string = 'YUANCHENXI';
   private static readonly emailDomain: string = 'bubu.family';
 
   static emailFor(username: string): string {
@@ -30,8 +29,8 @@ export class AccountService {
 
   async login(username: string, password: string, role: FamilyRole): Promise<void> {
     const u = username.trim();
-    if (u.length === 0 || password.length < 6) {
-      throw new Error('用户名至少 1 位、密码至少 6 位');
+    if (ServerConfig.shared.baseURLString.trim().length === 0 || u.length === 0 || password.length < 8) {
+      throw new Error('请先填写服务器地址、用户名和至少 8 位密码');
     }
     let lastError: Error | null = null;
     for (const identity of AccountService.identityCandidates(u)) {
@@ -46,36 +45,8 @@ export class AccountService {
     throw lastError ?? new Error('登录失败，请确认用户名、密码和服务器地址');
   }
 
-  async register(username: string, password: string, familyCode: string, role: FamilyRole): Promise<void> {
-    if (familyCode.trim().toUpperCase() !== AccountService.familyCode) {
-      throw new Error('家庭码不对，问问家里人正确的家庭码');
-    }
-    const u = username.trim();
-    if (u.length === 0 || password.length < 6) {
-      throw new Error('用户名至少 1 位、密码至少 6 位');
-    }
-    const e = AccountService.emailFor(u);
-
-    const body = JSON.stringify({
-      email: e,
-      password: password,
-      passwordConfirm: password,
-      name: role
-    });
-    try {
-      await this.request('POST', '/api/collections/users/records', body);
-    } catch (e) {
-      // 与 iOS 一致：用户名已存在时，如果密码正确，直接当登录成功。
-      try {
-        const identity = await this.firstWorkingIdentity(u, password);
-        await this.persist(identity, password, role);
-        return;
-      } catch (authError) {
-        throw new Error('这个用户名已被注册，但密码不对。换个用户名，或用正确密码去「登录」。');
-      }
-    }
-    await this.authWithPassword(e, password);
-    await this.persist(e, password, role);
+  async register(_username: string, _password: string, _familyCode: string, _role: FamilyRole): Promise<void> {
+    throw new Error('家里服务器已关闭公开注册。请先在 PocketBase 后台创建账号，再用「登录」进入。');
   }
 
   async logout(): Promise<void> {
@@ -117,6 +88,7 @@ export class AccountService {
   private baseURL(): string {
     const configured = ServerConfig.shared.baseURLString.trim();
     const base = configured.length > 0 ? configured : ServerConfig.defaultBaseURL;
+    if (base.length === 0) throw new Error('请先填写服务器地址');
     return base.replace(/\/+$/, '');
   }
 

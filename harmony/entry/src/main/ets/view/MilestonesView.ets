@@ -25,7 +25,7 @@ export struct MilestonesView {
 
   @State private searchText: string = '';
   @State private selectedCategory: string = '全部';
-  @State private isConstellation: boolean = true;   // 展示方式：星盘视图 / 奖章墙
+  @State private isConstellation: boolean = false;   // 展示方式：星盘视图 / 奖章墙
 
   // 弹层状态（iOS .sheet → ArkUI @State + Stack 覆盖）
   @State private showPicker: boolean = false;
@@ -252,7 +252,6 @@ export struct MilestonesView {
     }
     .width('100%').padding({ left: 8, right: 8, top: 6 })
     .position({ x: 0, y: 0 })
-    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder
@@ -396,9 +395,18 @@ export struct MilestonesView {
         .fontColor(lit ? BubuColor.warmBrown : BubuColor.secondaryText)
         .maxLines(2).textAlign(TextAlign.Center)
     }
-    .width('100%').padding({ top: 6, bottom: 6 }).justifyContent(FlexAlign.Center)
+    .width('100%')
+    .height(102)
+    .padding({ top: 6, bottom: 6 })
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor(lit ? '#10F28C9E' : '#00000000')
+    .borderRadius(BubuRadius.small)
+    .hitTestBehavior(HitTestMode.Block)
     .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
-    .onClick(() => { this.detailFor = m; })
+    .onClick(() => {
+      BubuHaptics.selection();
+      this.detailFor = m;
+    })
   }
 
   // 空态（对照 iOS emptyState）
@@ -415,8 +423,10 @@ export struct MilestonesView {
   // —— 动作 ——
   // 批量添加预设（对照 iOS addSelected）
   private async addPresets(titles: string[]): Promise<void> {
+    const existingTitles = this.milestones.map((m: Milestone): string => m.title);
     for (const tpl of MILESTONE_PRESETS) {
       if (titles.indexOf(tpl.title) >= 0) {
+        if (existingTitles.indexOf(tpl.title) >= 0) continue;
         const m: Milestone = {
           id: util.generateRandomUUID(true),
           title: tpl.title, category: tpl.category, emoji: tpl.emoji,

@@ -186,6 +186,7 @@ export struct VaccineQuickLogSheet {
   private async deleteRecord(): Promise<void> {
     const r = this.existingRecord;
     if (!r) return;
+    await AppDatabase.shared.enqueueRemoteDeletion(r.source === 'health-fallback' ? 'healthrecords' : 'vaccinerecords', r.remoteId);
     await AppDatabase.shared.deleteVaccine(r.id);
     this.onDone();
   }

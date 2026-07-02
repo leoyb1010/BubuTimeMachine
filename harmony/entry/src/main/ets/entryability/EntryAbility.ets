@@ -6,6 +6,8 @@ import { SyncEngine } from '../sync/SyncEngine';
 import { VaccineLegacyMigrator } from '../sync/VaccineLegacyMigrator';
 import { MediaStore } from '../services/MediaStore';
 import { ServerConfig } from '../services/ServerConfig';
+import { APIClient } from '../services/APIClient';
+import { IosBaselineImporter } from '../bootstrap/IosBaselineImporter';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -25,7 +27,9 @@ export default class EntryAbility extends UIAbility {
     try {
       await AppDatabase.shared.initialize(this.context);
       MediaStore.shared.initialize(this.context);
+      APIClient.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
+      await IosBaselineImporter.runIfNeeded(this.context);
       await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences
       await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移
     } catch (e) {

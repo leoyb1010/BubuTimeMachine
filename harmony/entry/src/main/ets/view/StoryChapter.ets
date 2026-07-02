@@ -28,7 +28,8 @@ export class StoryChapterBuilder {
   /// 把里程碑编织成章节：仅取「已达成」的，按发生时间升序；正文优先 detail。
   static chapters(milestones: Milestone[]): StoryChapter[] {
     const achieved: Milestone[] = milestones
-      .filter((m: Milestone) => m.happenedAt !== undefined && m.happenedAt !== null)
+      .filter((m: Milestone) => m.happenedAt !== undefined && m.happenedAt !== null
+        && (m.detail ?? '').trim().length > 0)
       .sort((a: Milestone, b: Milestone) =>
         (a.happenedAt ?? 0) - (b.happenedAt ?? 0));
 

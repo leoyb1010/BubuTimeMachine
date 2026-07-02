@@ -261,6 +261,7 @@ export struct VaccineView {
   }
 
   private async deleteRecord(record: VaccineRecord): Promise<void> {
+    await AppDatabase.shared.enqueueRemoteDeletion(record.source === 'health-fallback' ? 'healthrecords' : 'vaccinerecords', record.remoteId);
     await AppDatabase.shared.deleteVaccine(record.id);
     await this.reload();
   }

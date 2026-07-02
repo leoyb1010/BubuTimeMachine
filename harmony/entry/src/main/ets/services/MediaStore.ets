@@ -77,6 +77,16 @@ export class MediaStore {
     return `${this.thumbDir}/${fileName}`;
   }
 
+  writeImportedMedia(fileName: string, data: ArrayBuffer): boolean {
+    if (this.baseDir.length === 0 || fileName.length === 0) return false;
+    return this.writeData(`${this.baseDir}/${fileName}`, data);
+  }
+
+  writeImportedThumbnail(fileName: string, data: ArrayBuffer): boolean {
+    if (this.thumbDir.length === 0 || fileName.length === 0) return false;
+    return this.writeData(`${this.thumbDir}/${fileName}`, data);
+  }
+
   // 应用 cache 目录（导出临时文件用，对照 iOS FileManager.temporaryDirectory）。
   cacheDir(): string {
     return this.cacheBase;

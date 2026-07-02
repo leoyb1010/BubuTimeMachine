@@ -8,13 +8,12 @@ export class ServerConfig {
   static readonly shared = new ServerConfig();
   static readonly versionName: string = '1.2.0';
   static readonly versionCode: string = '2026061312';
-  static readonly defaultBaseURL: string = 'https://bubu-api.leoyuan.top';
-  static readonly defaultAIBaseURL: string = 'https://bubu-ai.leoyuan.top';
+  static readonly defaultBaseURL: string = '';
+  static readonly defaultAIBaseURL: string = '';
   static readonly baseURLPlaceholder: string = 'https://你的服务器地址:8090';
   static readonly aiBaseURLPlaceholder: string = 'https://你的AI服务地址:8000';
   private store: preferences.Preferences | null = null;
 
-  // 默认值与 iOS 1.2.0 对齐：家庭内测版首装即可指向固定自托管服务。
   baseURLString: string = ServerConfig.defaultBaseURL;
   accountEmail: string = '';
   accountPassword: string = '';
@@ -22,7 +21,7 @@ export class ServerConfig {
   childName: string = '布布';
   aiBaseURLString: string = ServerConfig.defaultAIBaseURL;
   aiAPIKey: string = '';
-  aiEnabled: boolean = true;
+  aiEnabled: boolean = false;
 
   private constructor() {}
 
@@ -35,7 +34,7 @@ export class ServerConfig {
     this.childName = await this.getStr('childName', '布布');
     this.aiBaseURLString = await this.getStr('aiBaseURL', ServerConfig.defaultAIBaseURL);
     this.aiAPIKey = await this.getStr('aiAPIKey', '');
-    this.aiEnabled = await this.getBool('aiEnabled', true);
+    this.aiEnabled = await this.getBool('aiEnabled', false);
   }
 
   get currentRole(): FamilyRole {

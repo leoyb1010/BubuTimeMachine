@@ -34,7 +34,9 @@ export class CaptureModel {
 
   // 已选媒体（对照 iOS pickedItems / cameraPhotos / cameraVideos 汇总为预览列表）。
   selectedPreviews: SelectedMediaPreview[] = [];
-  // 落盘后的首张照片文件名（用于 EntryWriter.entryWithPhoto）。
+  // 落盘后的照片文件名（用于 EntryWriter.entryWithPhoto）。
+  pickedPhotoNames: string[] = [];
+  // 兼容旧字段：首张照片文件名。
   pickedPhotoName: string | null = null;
 
   // —— 语音（对照 iOS pendingVoice）——
@@ -71,6 +73,7 @@ export class CaptureModel {
     this.currentLocationName = null;
     this.locationError = null;
     this.selectedPreviews = [];
+    this.pickedPhotoNames = [];
     this.pickedPhotoName = null;
     this.pendingVoiceFileName = null;
     this.pendingVoiceDuration = 0;
@@ -88,16 +91,18 @@ export class CaptureModel {
   // 是否有可保存内容（媒体 / 文字 / 语音 任一即可，对照 iOS canSave）。
   canSave(): boolean {
     return this.selectedPreviews.length > 0 ||
+      this.pickedPhotoNames.length > 0 ||
       this.pickedPhotoName !== null ||
       this.trimmedNote().length > 0 ||
       this.pendingVoiceFileName !== null;
   }
 
-  // 选中系统相册一张照片 → 拷进沙盒，加入预览（对照 iOS persist(item:)）。
+  // 选中系统相册照片 → 拷进沙盒，加入预览（对照 iOS persist(item:)）。
   addPhotoUri(uri: string): void {
     const ext = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
     const name = MediaStore.shared.copyIntoStore(uri, ext);
     if (name) {
+      this.pickedPhotoNames = this.pickedPhotoNames.concat([name]);
       this.pickedPhotoName = name;
       const index = this.selectedPreviews.length;
       this.selectedPreviews = this.selectedPreviews.concat([{
@@ -112,8 +117,13 @@ export class CaptureModel {
     }
   }
 
-  // 加入一段录像预览（对照 iOS addCameraVideo）。
-  // NOTE: 视频写入未接入 EntryWriter，本切片仅做预览展示与 // NOTE 占位。
+  addPhotoUris(uris: string[]): void {
+    for (const uri of uris) {
+      this.addPhotoUri(uri);
+    }
+  }
+
+  // 加入一段录像预览（对照 iOS addCameraVideo），保存时写入 EntryWriter。
   addVideoUri(uri: string): void {
     const name = MediaStore.shared.importFile(uri, 'mp4');
     if (name) {
@@ -130,20 +140,30 @@ export class CaptureModel {
     }
   }
 
+  addVideoUris(uris: string[]): void {
+    for (const uri of uris) {
+      this.addVideoUri(uri);
+    }
+  }
+
   // 移除已选媒体（对照 iOS removePickedItem）。
   removePickedItem(index: number): void {
     const removed = this.selectedPreviews.find(p => p.index === index);
     if (removed && !removed.isVideo) {
-      this.pickedPhotoName = null;
+      this.pickedPhotoNames = this.pickedPhotoNames.filter((name: string) => name !== removed.fileName);
+      this.pickedPhotoName = this.pickedPhotoNames.length > 0 ? this.pickedPhotoNames[0] : null;
     }
     const remaining = this.selectedPreviews.filter(p => p.index !== index);
     // 重排索引（对照 iOS 重建 index）。
     this.selectedPreviews = remaining.map((p, i): SelectedMediaPreview => {
-      return { index: i, uri: p.uri, isVideo: p.isVideo, label: p.label };
+      return { index: i, uri: p.uri, isVideo: p.isVideo, label: p.label, fileName: p.fileName };
     });
     // 重排后首张照片重新认定。
     const firstPhoto = this.selectedPreviews.find(p => !p.isVideo && p.fileName !== undefined);
     this.pickedPhotoName = firstPhoto?.fileName ?? null;
+    this.pickedPhotoNames = this.selectedPreviews
+      .filter(p => !p.isVideo && p.fileName !== undefined)
+      .map(p => p.fileName!);
   }
 
   // 设置语音（对照 iOS pendingVoice）。
@@ -167,14 +187,18 @@ export class CaptureModel {
     this.isSaving = true;
     const noteText = this.trimmedNote();
     try {
-      const firstPhoto = this.selectedPreviews.find(p => !p.isVideo && p.fileName !== undefined);
-      const photoName = firstPhoto?.fileName ?? this.pickedPhotoName;
+      const photoNames = this.selectedPreviews
+        .filter(p => !p.isVideo && p.fileName !== undefined)
+        .map(p => p.fileName!);
+      if (photoNames.length === 0 && this.pickedPhotoName !== null) {
+        photoNames.push(this.pickedPhotoName);
+      }
       const videoNames = this.selectedPreviews
         .filter(p => p.isVideo && p.fileName !== undefined)
         .map(p => p.fileName!);
       const id = await EntryWriter.entryWithPhoto(
         noteText,
-        photoName,
+        photoNames,
         this.role,
         this.mood,
         this.pendingVoiceFileName,
@@ -182,7 +206,7 @@ export class CaptureModel {
         videoNames
       );
       this.lastSavedEntryID = id;
-      const mediaCount = (photoName ? 1 : 0) + videoNames.length;
+      const mediaCount = photoNames.length + videoNames.length;
       const mediaText = mediaCount > 0 ? ` · ${mediaCount} 个媒体` : '';
       const voiceText = this.pendingVoiceFileName ? ' · 1 段语音' : '';
       this.lastSavedSummary = `已保存到手机${mediaText}${voiceText}`;
@@ -190,6 +214,7 @@ export class CaptureModel {
       this.note = '';
       this.mood = undefined;
       this.selectedPreviews = [];
+      this.pickedPhotoNames = [];
       this.pickedPhotoName = null;
       this.clearPendingVoice();
       this.showQuickCapture = false;

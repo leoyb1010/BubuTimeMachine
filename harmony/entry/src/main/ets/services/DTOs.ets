@@ -181,6 +181,8 @@ export interface AuthToken {
   token: string;
   role: string;
   expiresAt?: string;
+  userId?: string;
+  familyId?: string;
 }
 
 export interface AuthResponse {
@@ -191,6 +193,7 @@ export interface AuthResponse {
 export interface AuthRecord {
   id: string;
   email: string;
+  familyId?: string;
 }
 
 // MARK: - 媒体上传请求（对照 iOS MediaUploadRequest）

@@ -1,6 +1,7 @@
 import { relationalStore } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
 import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord, Comment, VoiceMemo, FirstTime, GrowthMovie, PendingDeletion, FeedEvent } from '../models/Models';
 import { SyncState } from '../models/Enums';
 
@@ -331,6 +332,12 @@ export class AppDatabase {
     await this.store!.delete(pred);
   }
 
+  async deleteGrowth(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('growth_measurement');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
   // —— VoiceNote ——
   async insertVoiceNote(v: VoiceNote): Promise<void> {
     const bucket: relationalStore.ValuesBucket = {
@@ -633,6 +640,48 @@ export class AppDatabase {
     return out;
   }
 
+  async normalizeMilestonesByTitle(): Promise<number> {
+    const milestones = await this.fetchMilestones();
+    if (milestones.length <= 1) return 0;
+    const bestByTitle = new Map<string, Milestone>();
+    const duplicates: string[] = [];
+    for (const milestone of milestones) {
+      const title = milestone.title.trim();
+      if (title.length === 0) {
+        duplicates.push(milestone.id);
+        continue;
+      }
+      milestone.title = title;
+      const current = bestByTitle.get(title);
+      if (current === undefined) {
+        bestByTitle.set(title, milestone);
+      } else if (AppDatabase.milestoneRank(milestone) > AppDatabase.milestoneRank(current)) {
+        duplicates.push(current.id);
+        bestByTitle.set(title, milestone);
+      } else {
+        duplicates.push(milestone.id);
+      }
+    }
+    for (const item of bestByTitle.values()) {
+      item.syncState = SyncState.synced;
+      await this.upsertMilestone(item);
+    }
+    for (const id of duplicates) {
+      await this.deleteMilestone(id);
+    }
+    return duplicates.length;
+  }
+
+  private static milestoneRank(m: Milestone): number {
+    const detail = (m.detail ?? '').trim();
+    const achieved = m.happenedAt !== undefined ? 1000 : 0;
+    const hasDetail = detail.length > 0 ? 200 : 0;
+    const custom = m.isCustom ? 100 : 0;
+    const remote = (m.remoteId !== undefined && m.remoteId.length > 0) ? 20 : 0;
+    const ageDays = Math.floor(Math.max(0, Date.now() - m.createdAt) / 86400000);
+    return achieved + hasDetail + custom + remote + Math.min(19, ageDays);
+  }
+
   // —— TimeCapsule ——
   async insertCapsule(c: TimeCapsule): Promise<void> {
     const v: relationalStore.ValuesBucket = {
@@ -803,10 +852,24 @@ export class AppDatabase {
 
   // —— PendingDeletion（待同步删除队列）——
   async enqueueDeletion(d: PendingDeletion): Promise<void> {
+    const existing = await this.fetchPendingDeletions();
+    if (existing.some((item: PendingDeletion): boolean => item.collection === d.collection && item.remoteId === d.remoteId)) {
+      return;
+    }
     const v: relationalStore.ValuesBucket = {
       id: d.id, collection: d.collection, remoteId: d.remoteId, createdAt: d.createdAt
     };
     await this.store!.insert('pending_deletion', v);
+  }
+
+  async enqueueRemoteDeletion(collection: string, remoteId?: string): Promise<void> {
+    if (remoteId === undefined || remoteId.length === 0) return;
+    await this.enqueueDeletion({
+      id: util.generateRandomUUID(true),
+      collection: collection,
+      remoteId: remoteId,
+      createdAt: Date.now()
+    });
   }
 
   async fetchPendingDeletions(): Promise<PendingDeletion[]> {
@@ -871,7 +934,16 @@ export class AppDatabase {
   }
 
   async deleteEntryHard(id: string): Promise<void> {
+    await this.deleteRowsByColumn('media', 'entryId', id);
+    await this.deleteRowsByColumn('comment', 'entryId', id);
+    await this.deleteRowsByColumn('voice_note', 'entryId', id);
     const pred = new relationalStore.RdbPredicates('entry');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async deleteMedia(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('media');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
   }
@@ -880,6 +952,12 @@ export class AppDatabase {
     const pred = new relationalStore.RdbPredicates('milestone');
     pred.equalTo('id', id);
     await this.store!.update(fields, pred);
+  }
+
+  async deleteMilestone(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('milestone');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
   }
 
   async deleteCapsule(id: string): Promise<void> {
@@ -891,6 +969,42 @@ export class AppDatabase {
   async deleteHealth(id: string): Promise<void> {
     const pred = new relationalStore.RdbPredicates('health_record');
     pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async deleteFirstTime(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('first_time');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async clearServerBackedData(): Promise<void> {
+    const tables: string[] = [
+      'pending_deletion',
+      'feed_event',
+      'voice_memo',
+      'voice_note',
+      'comment',
+      'media',
+      'entry',
+      'first_time',
+      'milestone',
+      'time_capsule',
+      'health_record',
+      'growth_measurement',
+      'vaccine_record',
+      'family_member',
+      'child_profile',
+      'growth_movie'
+    ];
+    for (const table of tables) {
+      await this.store!.executeSql(`DELETE FROM ${table}`);
+    }
+  }
+
+  private async deleteRowsByColumn(table: string, column: string, value: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates(table);
+    pred.equalTo(column, value);
     await this.store!.delete(pred);
   }
 

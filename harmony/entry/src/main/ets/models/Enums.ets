@@ -25,14 +25,21 @@ export enum MediaType {
   audio = 'audio'
 }
 
-// 家庭角色（中文值，与 iOS 一致，用于署名/同步）
+// 家庭角色（中文值，与 iOS 一致，用于署名/同步；必须覆盖成员系统所有称谓）
 export enum FamilyRole {
   papa = '爸爸',
   mama = '妈妈',
-  grandma = '姥姥'
+  grandma = '姥姥',
+  grandpa = '姥爷',
+  yeye = '爷爷',
+  nainai = '奶奶',
+  other = '家人'
 }
 
-export const ALL_FAMILY_ROLES: FamilyRole[] = [FamilyRole.papa, FamilyRole.mama, FamilyRole.grandma];
+export const ALL_FAMILY_ROLES: FamilyRole[] = [
+  FamilyRole.papa, FamilyRole.mama, FamilyRole.grandma, FamilyRole.grandpa,
+  FamilyRole.yeye, FamilyRole.nainai, FamilyRole.other
+];
 
 // 心情标签（与 iOS Mood 一致，20 种；emoji 对照见 moodEmoji）
 export enum Mood {
