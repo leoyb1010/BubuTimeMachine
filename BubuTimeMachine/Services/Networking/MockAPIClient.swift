@@ -7,7 +7,7 @@ final class MockAPIClient: APIClient {
 
     func authenticate(role: String) async throws -> AuthToken {
         try? await Task.sleep(for: .milliseconds(200))
-        return AuthToken(token: "mock-token-\(role)", role: role, expiresAt: nil)
+        return AuthToken(token: "mock-token-\(role)", role: role, expiresAt: nil, userId: "mock-user", familyId: "mock-family")
     }
 
     func createEntry(_ dto: EntryDTO) async throws -> EntryDTO {
@@ -36,6 +36,7 @@ final class MockAPIClient: APIClient {
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO] { [] }
     func upsertVaccineRecord(_ dto: VaccineRecordDTO) async throws -> VaccineRecordDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchVaccineRecords(since: Date?) async throws -> [VaccineRecordDTO] { [] }
+    func deleteRecord(collection: String, remoteId: String) async throws {}
     func deleteVaccineRecord(remoteId: String) async throws {}
     func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO { var r = dto; r.id = "mock-\(dto.localId)"; return r }
     func fetchGrowthMeasurements(since: Date?) async throws -> [GrowthMeasurementDTO] { [] }
@@ -55,6 +56,12 @@ final class MockAPIClient: APIClient {
     }
     func deleteTimeCapsule(remoteId: String) async throws {}
     func downloadFile(from remoteURL: String) async throws -> Data { Data() }
+    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-mock-download-\(UUID().uuidString).bin")
+        try Data().write(to: url, options: .atomic)
+        return url
+    }
 
     private func mockUpload(id: UUID, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
         AsyncThrowingStream { continuation in

@@ -47,15 +47,30 @@ nonisolated struct MediaStore: Sendable {
     }
 
     /// 将外部文件（如 PhotosPicker 导出的视频）拷入沙盒，返回相对文件名。
-    func importFile(from sourceURL: URL, preferredExtension ext: String) throws -> String {
+    func importFile(from sourceURL: URL, preferredExtension ext: String, sniffImage: Bool = false) throws -> String {
         let fm = FileManager.default
-        let name = "\(UUID().uuidString).\(ext)"
+        let resolvedExt = sniffImage
+            ? (Self.sniffImageExtension(at: sourceURL) ?? Self.cleanExtension(ext, fallback: "jpg"))
+            : Self.cleanExtension(ext, fallback: "bin")
+        let name = "\(UUID().uuidString).\(resolvedExt)"
         let dest = mediaDir.appendingPathComponent(name)
         if fm.fileExists(atPath: dest.path) {
             try fm.removeItem(at: dest)
         }
         try fm.copyItem(at: sourceURL, to: dest)
         return name
+    }
+
+    static func sniffImageExtension(at url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: 32)) ?? Data()
+        return sniffImageExtension(data)
+    }
+
+    private static func cleanExtension(_ ext: String, fallback: String) -> String {
+        let allowed = ext.lowercased().filter { $0.isLetter || $0.isNumber }
+        return allowed.isEmpty ? fallback : String(allowed.prefix(12))
     }
 
     func importVideoForSync(from sourceURL: URL,

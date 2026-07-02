@@ -81,10 +81,14 @@ struct BubuLiveActivity: Widget {
                 .monospacedDigit()
         case .capsuleCountdown:
             if let unlock = context.attributes.unlockAt {
-                Text(timerInterval: Date.now...unlock, countsDown: true)
-                    .monospacedDigit()
+                if unlock > Date.now {
+                    Text(timerInterval: Date.now...unlock, countsDown: true)
+                        .monospacedDigit()
+                } else {
+                    Text("可开启")
+                }
             } else {
-                Text("—")
+                Text("未设置")
             }
         }
     }

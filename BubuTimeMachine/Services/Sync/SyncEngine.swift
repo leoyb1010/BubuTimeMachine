@@ -40,6 +40,7 @@ final class SyncEngine {
     private let mediaStore: MediaStore
     private var modelContext: ModelContext?
     private var syncTask: Task<Void, Never>?
+    private var activeSyncID: UUID?
     private var needsAnotherSync = false
     private var pollTimer: Timer?
 
@@ -64,6 +65,7 @@ final class SyncEngine {
 
     /// 设置变更后替换底层客户端并重连。
     func setClient(_ client: APIClient) {
+        activeSyncID = nil
         syncTask?.cancel()
         syncTask = nil
         pollTimer?.invalidate()
@@ -105,6 +107,43 @@ final class SyncEngine {
         scheduleSync()
     }
 
+    #if DEBUG
+    /// 一次性修复用：本机 iPhone 作为真相源，把除里程碑外的业务数据全部重新标为待上传。
+    /// 里程碑已用标题唯一策略单独修复，避免再次按 localId POST 造成重复。
+    func debugForceUploadAllLocalDataToCloud() async -> String {
+        guard let context = modelContext else { return "BUBU_FORCE_UPLOAD_FAILED no_context at=\(Date())" }
+        let entries = (try? context.fetch(FetchDescriptor<Entry>())) ?? []
+        let media = (try? context.fetch(FetchDescriptor<Media>())) ?? []
+        let firstTimes = (try? context.fetch(FetchDescriptor<FirstTime>())) ?? []
+        let members = (try? context.fetch(FetchDescriptor<FamilyMember>())) ?? []
+        let profiles = (try? context.fetch(FetchDescriptor<ChildProfile>())) ?? []
+        let health = (try? context.fetch(FetchDescriptor<HealthRecord>())) ?? []
+        let vaccines = (try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []
+        let growth = (try? context.fetch(FetchDescriptor<GrowthMeasurement>())) ?? []
+        let comments = (try? context.fetch(FetchDescriptor<Comment>())) ?? []
+        let notes = (try? context.fetch(FetchDescriptor<VoiceNote>())) ?? []
+        let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>())) ?? []
+        let capsules = (try? context.fetch(FetchDescriptor<TimeCapsule>())) ?? []
+
+        entries.forEach { $0.syncState = .local }
+        media.forEach { $0.syncState = .local; $0.uploadProgress = 0 }
+        firstTimes.forEach { $0.syncState = .local }
+        members.forEach { $0.syncState = .local }
+        profiles.forEach { $0.syncState = .local }
+        health.forEach { $0.syncState = .local }
+        vaccines.forEach { $0.syncState = .local }
+        growth.forEach { $0.syncState = .local }
+        comments.forEach { $0.syncState = .local }
+        notes.forEach { $0.syncState = .local }
+        memos.forEach { $0.syncState = .local }
+        capsules.forEach { $0.syncState = .local }
+
+        saveAndRefresh(context)
+        await connectAndSync()
+        return "BUBU_FORCE_UPLOAD_DONE entries=\(entries.count) media=\(media.count) firstTimes=\(firstTimes.count) members=\(members.count) profiles=\(profiles.count) health=\(health.count) vaccines=\(vaccines.count) growth=\(growth.count) comments=\(comments.count) voiceNotes=\(notes.count) voiceMemos=\(memos.count) capsules=\(capsules.count) failure=\(lastFailureReason ?? "none") at=\(Date())"
+    }
+    #endif
+
     // MARK: - 连接
 
     private func startPolling() {
@@ -123,9 +162,13 @@ final class SyncEngine {
             return
         }
         connectionState = .connecting
+        let runID = UUID()
+        activeSyncID = runID
         syncTask = Task { [weak self] in
             guard let self else { return }
             await self.connectAndSync()
+            guard self.activeSyncID == runID else { return }
+            self.activeSyncID = nil
             self.syncTask = nil
             if self.needsAnotherSync {
                 self.needsAnotherSync = false
@@ -137,6 +180,7 @@ final class SyncEngine {
     private func connectAndSync() async {
         beginSyncRun()
         let ok = (try? await apiClient.ping()) ?? false
+        guard !Task.isCancelled else { finalizeRun(); return }
         guard ok else {
             connectionState = .offline
             currentSyncLabel = nil
@@ -157,10 +201,13 @@ final class SyncEngine {
             finalizeRun()
             return
         }
+        guard !Task.isCancelled else { finalizeRun(); return }
         connectionState = .online
 
         await pushLocal()
+        guard !Task.isCancelled else { finalizeRun(); return }
         await pullRemote()
+        guard !Task.isCancelled else { finalizeRun(); return }
         if let context = modelContext {
             await downloadMissingFiles(context)
         }
@@ -188,6 +235,7 @@ final class SyncEngine {
 
     private func pushLocal() async {
         guard let context = modelContext else { return }
+        normalizeMilestonesByTitle(context)
         // 先消费删除队列：删除意图优先于数据推送，避免「先推后删」竞态
         await processPendingDeletions(context)
         // 取所有未同步（local/failed）的 Entry
@@ -199,6 +247,7 @@ final class SyncEngine {
         refreshPendingCount()
 
         for entry in locals {
+            guard !Task.isCancelled else { return }
             beginItem("同步记录")
             entry.syncState = .uploading
             saveAndRefresh(context)
@@ -237,6 +286,7 @@ final class SyncEngine {
         let deletions = (try? context.fetch(FetchDescriptor<PendingDeletion>(
             sortBy: [SortDescriptor(\.createdAt)]))) ?? []
         for deletion in deletions {
+            guard !Task.isCancelled else { return }
             beginItem("同步删除")
             do {
                 try await performRemoteDeletion(deletion)
@@ -254,15 +304,14 @@ final class SyncEngine {
     }
 
     private func performRemoteDeletion(_ deletion: PendingDeletion) async throws {
-        switch deletion.collection {
-        case "vaccinerecords":
-            try await apiClient.deleteVaccineRecord(remoteId: deletion.remoteId)
-        default:
-            // 未知集合：直接吞掉避免卡死队列（新增集合时这里要补 case）
-            #if DEBUG
-            print("[SyncEngine] 未知删除集合：", deletion.collection)
-            #endif
-        }
+        try await apiClient.deleteRecord(collection: deletion.collection, remoteId: deletion.remoteId)
+    }
+
+    private func isPendingDeletion(collection: String, remoteId: String?, context: ModelContext) -> Bool {
+        guard let remoteId, !remoteId.isEmpty else { return false }
+        let pendings = (try? context.fetch(FetchDescriptor<PendingDeletion>(
+            predicate: #Predicate { $0.collection == collection }))) ?? []
+        return pendings.contains { $0.remoteId == remoteId }
     }
 
     private func beginSyncRun() {
@@ -388,7 +437,14 @@ final class SyncEngine {
 
     private func pushLocalJSONObjects(_ context: ModelContext) async {
         let localMilestones = (try? context.fetch(FetchDescriptor<Milestone>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
-        for item in localMilestones {
+        // 预设占位符不上云：批量标记为已同步，循环外统一保存一次，避免 N 次 save + widget 刷新。
+        let placeholders = localMilestones.filter { Self.isLocalPresetPlaceholder($0) }
+        if !placeholders.isEmpty {
+            placeholders.forEach { $0.syncState = .synced }
+            saveAndRefresh(context)
+        }
+        for item in localMilestones where !Self.isLocalPresetPlaceholder(item) {
+            guard !Task.isCancelled else { return }
             beginItem("同步里程碑")
             do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertMilestone(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
             catch { item.syncState = .failed; recordFailure(error, item: "里程碑") }
@@ -397,6 +453,7 @@ final class SyncEngine {
         }
         let localFirstTimes = (try? context.fetch(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localFirstTimes {
+            guard !Task.isCancelled else { return }
             beginItem("同步第一次")
             do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertFirstTime(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
             catch { item.syncState = .failed; recordFailure(error, item: "第一次") }
@@ -405,6 +462,7 @@ final class SyncEngine {
         }
         let localMembers = (try? context.fetch(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localMembers {
+            guard !Task.isCancelled else { return }
             beginItem("同步家庭成员")
             do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertFamilyMember(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
             catch { item.syncState = .failed; recordFailure(error, item: "家庭成员") }
@@ -413,6 +471,7 @@ final class SyncEngine {
         }
         let localProfiles = (try? context.fetch(FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localProfiles {
+            guard !Task.isCancelled else { return }
             beginItem("同步布布档案")
             do {
                 item.syncState = .uploading
@@ -440,6 +499,7 @@ final class SyncEngine {
         }
         let localHealth = (try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localHealth {
+            guard !Task.isCancelled else { return }
             beginItem("同步健康记录")
             do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
             catch { item.syncState = .failed; recordFailure(error, item: "健康记录") }
@@ -448,19 +508,62 @@ final class SyncEngine {
         }
         let localVaccines = (try? context.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localVaccines {
+            guard !Task.isCancelled else { return }
             beginItem("同步疫苗记录")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertVaccineRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed; recordFailure(error, item: "疫苗记录") }
+            do {
+                item.syncState = .uploading
+                saveAndRefresh(context)
+                let saved = try await apiClient.upsertVaccineRecord(Self.makeDTO(item))
+                item.remoteId = saved.id
+                item.syncState = .synced
+            } catch {
+                if Self.isMissingOptionalServerCollection(error, item: "疫苗记录") {
+                    do {
+                        let saved = try await apiClient.upsertHealthRecord(Self.makeHealthFallbackDTO(item))
+                        item.remoteId = saved.id
+                        item.sourceRaw = "health-fallback"
+                        item.syncState = .synced
+                    } catch {
+                        item.syncState = .failed
+                        recordFailure(error, item: "疫苗记录")
+                    }
+                } else {
+                    item.syncState = .failed
+                    recordFailure(error, item: "疫苗记录")
+                }
+            }
             finishItem()
             saveAndRefresh(context)
         }
         let localGrowth = (try? context.fetch(FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localGrowth {
+            guard !Task.isCancelled else { return }
             beginItem("同步成长测量")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertGrowthMeasurement(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
-            catch { item.syncState = .failed; recordFailure(error, item: "成长测量") }
+            do {
+                item.syncState = .uploading
+                saveAndRefresh(context)
+                let saved = try await apiClient.upsertGrowthMeasurement(Self.makeDTO(item))
+                item.remoteId = saved.id
+                item.syncState = .synced
+            } catch {
+                if Self.isMissingOptionalServerCollection(error, item: "成长测量") {
+                    do {
+                        let saved = try await apiClient.upsertHealthRecord(Self.makeHealthFallbackDTO(item))
+                        item.remoteId = saved.id
+                        item.sourceRaw = "health-fallback"
+                        item.syncState = .synced
+                    } catch {
+                        item.syncState = .failed
+                        recordFailure(error, item: "成长测量")
+                    }
+                } else {
+                    item.syncState = .failed
+                    recordFailure(error, item: "成长测量")
+                }
+            }
             finishItem()
             saveAndRefresh(context)
+            refreshWidgetSnapshot(context)
         }
         await pushLocalFileObjects(context)
     }
@@ -468,6 +571,7 @@ final class SyncEngine {
     private func pushLocalFileObjects(_ context: ModelContext) async {
         let comments = (try? context.fetch(FetchDescriptor<Comment>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for comment in comments {
+            guard !Task.isCancelled else { return }
             beginItem("同步家人补充")
             do {
                 comment.syncState = .uploading
@@ -491,6 +595,7 @@ final class SyncEngine {
         }
         let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for note in notes {
+            guard !Task.isCancelled else { return }
             beginItem("同步记录语音")
             do {
                 note.syncState = .uploading
@@ -514,6 +619,7 @@ final class SyncEngine {
         }
         let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for memo in memos {
+            guard !Task.isCancelled else { return }
             beginItem("同步成长之声")
             do {
                 memo.syncState = .uploading
@@ -544,6 +650,7 @@ final class SyncEngine {
             })
         let mediaItems = (try? context.fetch(descriptor)) ?? []
         for media in mediaItems {
+            guard !Task.isCancelled else { return }
             beginItem(media.type == .video ? "同步视频" : "同步媒体")
             guard let entry = media.entry else {
                 media.syncState = .failed
@@ -604,6 +711,7 @@ final class SyncEngine {
             })
         let capsules = (try? context.fetch(descriptor)) ?? []
         for capsule in capsules {
+            guard !Task.isCancelled else { return }
             beginItem("同步时间胶囊")
             do {
                 capsule.syncState = .uploading
@@ -649,6 +757,10 @@ final class SyncEngine {
             merge: { await self.mergeRemoteMedia($0) }
         await pull("milestones") { try await self.apiClient.fetchMilestones(since: $0) }
             merge: { await self.mergeRemoteMilestone($0) }
+        if let context = modelContext {
+            normalizeMilestonesByTitle(context)
+            refreshWidgetSnapshot(context)
+        }
         await pull("firsttimes") { try await self.apiClient.fetchFirstTimes(since: $0) }
             merge: { await self.mergeRemoteFirstTime($0) }
         await pull("members") { try await self.apiClient.fetchFamilyMembers(since: $0) }
@@ -673,17 +785,36 @@ final class SyncEngine {
 
     private func pull<DTO>(_ collection: String,
                            fetch: (Date?) async throws -> [DTO],
-                           merge: (DTO) async -> Void) async {
+                           merge: (DTO) async -> Bool) async {
         let started = Date.now
         do {
             let items = try await fetch(cursor(for: collection))
-            for dto in items { await merge(dto) }
-            setCursor(started, for: collection)
-            lastSyncedAt = started
+            var fullyMerged = true
+            for dto in items {
+                guard !Task.isCancelled else { return }
+                if !(await merge(dto)) {
+                    fullyMerged = false
+                }
+            }
+            if fullyMerged {
+                setCursor(started, for: collection)
+                lastSyncedAt = started
+            } else {
+                softFailureThisRun = true
+            }
         } catch {
+            if Self.isMissingOptionalServerCollection(error, collection: collection) {
+                setCursor(started, for: collection)
+                return
+            }
             // 瞬时拉取失败不立刻报红：标记本轮软失败，游标不推进，下轮自动补拉。
             softFailureThisRun = true
         }
+    }
+
+    private static func isMissingOptionalServerCollection(_ error: Error, collection: String) -> Bool {
+        guard case APIError.server(let code, _) = error, code == 404 else { return false }
+        return collection == "vaccinerecords" || collection == "growthmeasurements"
     }
 
     // MARK: - 下载：把远端媒体/语音落到本地（离线优先对多设备同样成立）
@@ -693,14 +824,18 @@ final class SyncEngine {
         let media = (try? context.fetch(FetchDescriptor<Media>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
         for item in media.prefix(8) {
+            guard !Task.isCancelled else { return }
             guard let remoteURL = item.remoteURL else { continue }
             currentSyncLabel = item.type == .video ? "下载视频" : "下载照片"
             do {
-                let data = try await apiClient.downloadFile(from: remoteURL)
-                let ext = URL(string: remoteURL)?.pathExtension ?? ""
-                let fileName = try mediaStore.saveBlob(data, preferredExtension: ext.isEmpty ? "bin" : ext)
+                let fileName = try await downloadRemoteFile(
+                    remoteURL,
+                    preferredExtension: item.type == .video ? "mp4" : "jpg",
+                    sniffImage: item.type == .photo
+                )
                 item.localFileName = fileName
-                if item.type == .photo, let image = UIImage(data: data) {
+                if item.type == .photo,
+                   let image = ThumbnailProvider.downsample(url: mediaStore.mediaURL(for: fileName), maxPixel: 600) {
                     item.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
                 } else if item.type == .video {
                     item.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
@@ -715,10 +850,13 @@ final class SyncEngine {
         let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
         for note in notes.prefix(10) {
+            guard !Task.isCancelled else { return }
             guard let remoteURL = note.remoteURL else { continue }
             currentSyncLabel = "下载语音"
-            if let data = try? await apiClient.downloadFile(from: remoteURL) {
-                note.localFileName = try? mediaStore.saveBlob(data, preferredExtension: "m4a")
+            do {
+                note.localFileName = try await downloadRemoteFile(remoteURL, preferredExtension: "m4a")
+            } catch {
+                softFailureThisRun = true
             }
             try? context.save()
         }
@@ -726,10 +864,13 @@ final class SyncEngine {
         let comments = (try? context.fetch(FetchDescriptor<Comment>(
             predicate: #Predicate { $0.voiceFileName == nil && $0.remoteURL != nil }))) ?? []
         for comment in comments.prefix(10) {
+            guard !Task.isCancelled else { return }
             guard let remoteURL = comment.remoteURL else { continue }
             currentSyncLabel = "下载家人语音"
-            if let data = try? await apiClient.downloadFile(from: remoteURL) {
-                comment.voiceFileName = try? mediaStore.saveBlob(data, preferredExtension: "m4a")
+            do {
+                comment.voiceFileName = try await downloadRemoteFile(remoteURL, preferredExtension: "m4a")
+            } catch {
+                softFailureThisRun = true
             }
             try? context.save()
         }
@@ -737,10 +878,13 @@ final class SyncEngine {
         let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
         for memo in memos.prefix(10) {
+            guard !Task.isCancelled else { return }
             guard let remoteURL = memo.remoteURL else { continue }
             currentSyncLabel = "下载成长之声"
-            if let data = try? await apiClient.downloadFile(from: remoteURL) {
-                memo.localFileName = try? mediaStore.saveBlob(data, preferredExtension: "m4a")
+            do {
+                memo.localFileName = try await downloadRemoteFile(remoteURL, preferredExtension: "m4a")
+            } catch {
+                softFailureThisRun = true
             }
             try? context.save()
         }
@@ -748,20 +892,39 @@ final class SyncEngine {
         let profiles = (try? context.fetch(FetchDescriptor<ChildProfile>(
             predicate: #Predicate { $0.avatarMediaFileName == nil && $0.avatarRemoteURL != nil }))) ?? []
         for profile in profiles.prefix(2) {
+            guard !Task.isCancelled else { return }
             guard let remoteURL = profile.avatarRemoteURL else { continue }
             currentSyncLabel = "下载布布头像"
-            if let data = try? await apiClient.downloadFile(from: remoteURL) {
-                profile.avatarMediaFileName = try? mediaStore.savePhoto(data)
+            do {
+                profile.avatarMediaFileName = try await downloadRemoteFile(remoteURL, preferredExtension: "jpg", sniffImage: true)
+            } catch {
+                softFailureThisRun = true
             }
             try? context.save()
             refreshWidgetSnapshot(context)
         }
     }
 
+    private func downloadRemoteFile(_ remoteURL: String,
+                                    preferredExtension: String,
+                                    sniffImage: Bool = false) async throws -> String {
+        let tempURL = try await apiClient.downloadFileToTemporaryURL(from: remoteURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        let ext = Self.pathExtension(from: remoteURL, fallback: preferredExtension)
+        return try mediaStore.importFile(from: tempURL, preferredExtension: ext, sniffImage: sniffImage)
+    }
+
+    private static func pathExtension(from remoteURL: String, fallback: String) -> String {
+        guard let url = URL(string: remoteURL) else { return fallback }
+        let ext = url.pathExtension
+        return ext.isEmpty ? fallback : ext
+    }
+
     /// 把远端 Entry 合并进本地（按 localId 去重；远端较新则更新）。
-    private func mergeRemoteEntry(_ dto: EntryDTO) async {
+    private func mergeRemoteEntry(_ dto: EntryDTO) async -> Bool {
         guard let context = modelContext,
-              let localId = UUID(uuidString: dto.localId) else { return }
+              let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "entries", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
         let existing = try? context.fetch(descriptor).first
 
@@ -770,6 +933,12 @@ final class SyncEngine {
             if entry.syncState == .synced {
                 Self.apply(dto, to: entry)
                 entry.remoteId = dto.id
+            } else if Self.remoteEntryWins(dto, over: entry) {
+                Self.apply(dto, to: entry)
+                entry.remoteId = dto.id
+                entry.syncState = .synced
+            } else {
+                return false
             }
         } else {
             let entry = Entry(happenedAt: dto.happenedAt, authorRole: dto.authorRole, note: dto.note)
@@ -781,21 +950,25 @@ final class SyncEngine {
         }
         try? context.save()
         refreshWidgetSnapshot(context)
+        return true
     }
 
-    private func mergeRemoteMedia(_ dto: MediaDTO) async {
+    private func mergeRemoteMedia(_ dto: MediaDTO) async -> Bool {
         guard let context = modelContext,
               let mediaId = UUID(uuidString: dto.localId),
-              let entryId = UUID(uuidString: dto.entryLocalId) else { return }
+              let entryId = UUID(uuidString: dto.entryLocalId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "media", remoteId: dto.id, context: context) { return true }
         let mediaDescriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.id == mediaId })
         if let existing = try? context.fetch(mediaDescriptor).first {
             if existing.syncState == .synced {
                 Self.apply(dto, to: existing)
+            } else {
+                return false
             }
-            return
+            return true
         }
         let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-        guard let entry = try? context.fetch(entryDescriptor).first else { return }
+        guard let entry = try? context.fetch(entryDescriptor).first else { return false }
         let media = Media(type: MediaType(rawValue: dto.mediaType) ?? .photo, localFileName: nil)
         media.id = mediaId
         Self.apply(dto, to: media)
@@ -803,13 +976,22 @@ final class SyncEngine {
         media.syncState = .synced
         context.insert(media)
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteMilestone(_ dto: MilestoneDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteMilestone(_ dto: MilestoneDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        guard !Self.isRemotePresetPlaceholder(dto) else { return true }
+        if isPendingDeletion(collection: "milestones", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<Milestone>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
+        } else if let existingByTitle = findMilestone(title: dto.title, context: context) {
+            if existingByTitle.syncState == .synced {
+                Self.apply(dto, to: existingByTitle)
+                existingByTitle.remoteId = dto.id
+            } else { return false }
         } else {
             let item = Milestone(title: dto.title, category: dto.category, emoji: dto.emoji, happenedAt: dto.happenedAt, isCustom: dto.isCustom)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
@@ -817,13 +999,65 @@ final class SyncEngine {
         }
         try? context.save()
         refreshWidgetSnapshot(context)
+        return true
     }
 
-    private func mergeRemoteFirstTime(_ dto: FirstTimeDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func findMilestone(title: String, context: ModelContext) -> Milestone? {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return nil }
+        let descriptor = FetchDescriptor<Milestone>(predicate: #Predicate { $0.title == cleanTitle })
+        return try? context.fetch(descriptor).first
+    }
+
+    private func normalizeMilestonesByTitle(_ context: ModelContext) {
+        let milestones = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
+        guard milestones.count > 1 else { return }
+        var bestByTitle: [String: Milestone] = [:]
+        var duplicates: [Milestone] = []
+        for milestone in milestones {
+            let title = milestone.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else {
+                duplicates.append(milestone)
+                continue
+            }
+            milestone.title = title
+            if let current = bestByTitle[title] {
+                if Self.milestoneRank(milestone) > Self.milestoneRank(current) {
+                    duplicates.append(current)
+                    bestByTitle[title] = milestone
+                } else {
+                    duplicates.append(milestone)
+                }
+            } else {
+                bestByTitle[title] = milestone
+            }
+        }
+        for milestone in bestByTitle.values {
+            if Self.isLocalPresetPlaceholder(milestone) {
+                milestone.syncState = .synced
+            }
+        }
+        for duplicate in duplicates {
+            context.delete(duplicate)
+        }
+        try? context.save()
+    }
+
+    private static func milestoneRank(_ milestone: Milestone) -> Int {
+        (milestone.isAchieved ? 1_000 : 0)
+        + ((milestone.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? 200 : 0)
+        + (milestone.isCustom ? 100 : 0)
+        + (milestone.remoteId == nil ? 0 : 20)
+        + Int(min(19, max(0, Date.now.timeIntervalSince(milestone.createdAt) / 86_400)))
+    }
+
+    private func mergeRemoteFirstTime(_ dto: FirstTimeDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "firsttimes", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = FirstTime(what: dto.what, happenedAt: dto.happenedAt)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
@@ -834,26 +1068,32 @@ final class SyncEngine {
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteMember(_ dto: FamilyMemberDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteMember(_ dto: FamilyMemberDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "members", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = FamilyMember(name: dto.name, relation: dto.relation, avatarEmoji: dto.avatarEmoji, themeColorHex: dto.themeColorHex)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteChildProfile(_ dto: ChildProfileDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteChildProfile(_ dto: ChildProfileDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "childprofile", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = ChildProfile(name: dto.name, birthday: dto.birthday)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
@@ -861,105 +1101,123 @@ final class SyncEngine {
         }
         try? context.save()
         refreshWidgetSnapshot(context)
+        return true
     }
 
-    private func mergeRemoteHealth(_ dto: HealthRecordDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteHealth(_ dto: HealthRecordDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "healthrecords", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = HealthRecord(kind: HealthRecordKind(rawValue: dto.kind) ?? .meal, title: dto.title, recordedAt: dto.recordedAt)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        backfillVaccineIfNeeded(from: dto, context: context)
+        GrowthMeasurementBackfill.run(context: context, insertedSyncState: .synced, source: "health-fallback")
+        refreshWidgetSnapshot(context)
+        return true
     }
 
-    private func mergeRemoteVaccine(_ dto: VaccineRecordDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteVaccine(_ dto: VaccineRecordDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
         // 防复活：该远端记录已在本地删除队列中（删除尚未推到服务器）时，不重新合并
-        if let remoteId = dto.id {
-            let pendings = (try? context.fetch(FetchDescriptor<PendingDeletion>(
-                predicate: #Predicate { $0.collection == "vaccinerecords" }))) ?? []
-            if pendings.contains(where: { $0.remoteId == remoteId }) { return }
-        }
+        if isPendingDeletion(collection: "vaccinerecords", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = VaccineRecord(vaccineName: dto.vaccineName, injectedAt: dto.injectedAt, source: dto.source)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteGrowth(_ dto: GrowthMeasurementDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteGrowth(_ dto: GrowthMeasurementDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "growthmeasurements", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = GrowthMeasurement(measuredAt: dto.measuredAt, source: dto.source)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteComment(_ dto: CommentDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return }
+    private func mergeRemoteComment(_ dto: CommentDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "comments", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<Comment>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-            guard let entry = try? context.fetch(entryDescriptor).first else { return }
+            guard let entry = try? context.fetch(entryDescriptor).first else { return false }
             let item = Comment(authorRole: dto.authorRole, text: dto.text)
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteVoiceNote(_ dto: VoiceNoteDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return }
+    private func mergeRemoteVoiceNote(_ dto: VoiceNoteDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "voicenotes", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-            guard let entry = try? context.fetch(entryDescriptor).first else { return }
+            guard let entry = try? context.fetch(entryDescriptor).first else { return false }
             let item = VoiceNote(localFileName: nil, durationSeconds: dto.durationSeconds, authorRole: dto.authorRole, waveformSamples: dto.waveform)
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteVoiceMemo(_ dto: VoiceMemoDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteVoiceMemo(_ dto: VoiceMemoDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "voicememos", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            else { return false }
         } else {
             let item = VoiceMemo(kind: VoiceMemo.Kind(rawValue: dto.kind) ?? .childVoice, recordedAt: dto.recordedAt)
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
         try? context.save()
+        return true
     }
 
-    private func mergeRemoteTimeCapsule(_ dto: TimeCapsuleDTO) async {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return }
+    private func mergeRemoteTimeCapsule(_ dto: TimeCapsuleDTO) async -> Bool {
+        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        if isPendingDeletion(collection: "timecapsules", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == localId })
         if let existing = try? context.fetch(descriptor).first {
             if existing.syncState == .synced {
                 Self.apply(dto, to: existing)
                 existing.remoteId = dto.id
                 await ensureLocalCapsuleBlob(for: existing, dto: dto)
-            }
+            } else { return false }
         } else {
             let item = TimeCapsule(title: dto.title, fromRole: dto.fromRole, unlockAt: dto.unlockAt)
             item.id = localId
@@ -970,6 +1228,7 @@ final class SyncEngine {
             await ensureLocalCapsuleBlob(for: item, dto: dto)
         }
         try? context.save()
+        return true
     }
 
     private func ensureLocalCapsuleBlob(for capsule: TimeCapsule, dto: TimeCapsuleDTO) async {
@@ -979,8 +1238,7 @@ final class SyncEngine {
         }
         guard let remoteURL = dto.encryptedBlobRemoteURL else { return }
         do {
-            let data = try await apiClient.downloadFile(from: remoteURL)
-            capsule.encryptedBlobFileName = try mediaStore.saveBlob(data)
+            capsule.encryptedBlobFileName = try await downloadRemoteFile(remoteURL, preferredExtension: "capsule")
         } catch {
             recordFailure(error, item: "下载时间胶囊")
         }
@@ -999,6 +1257,11 @@ final class SyncEngine {
             isArchived: entry.isArchived, editedAt: entry.editedAt, createdAt: entry.createdAt)
     }
 
+    private static func remoteEntryWins(_ dto: EntryDTO, over entry: Entry) -> Bool {
+        guard let remoteEditedAt = dto.editedAt else { return false }
+        return remoteEditedAt > (entry.editedAt ?? entry.createdAt)
+    }
+
     private static func apply(_ dto: MediaDTO, to media: Media) {
         media.remoteId = dto.id
         media.typeRaw = dto.mediaType
@@ -1013,6 +1276,24 @@ final class SyncEngine {
         MilestoneDTO(id: item.remoteId, localId: item.id.uuidString, title: item.title, category: item.category,
                      emoji: item.emoji, detail: item.detail, happenedAt: item.happenedAt,
                      ageDescription: item.ageDescription, isCustom: item.isCustom, createdAt: item.createdAt)
+    }
+
+    private static func isPresetTitle(_ title: String) -> Bool {
+        MilestoneTemplate.presets.contains { $0.title == title }
+    }
+
+    private static func isLocalPresetPlaceholder(_ item: Milestone) -> Bool {
+        isPresetTitle(item.title)
+        && !item.isCustom
+        && item.happenedAt == nil
+        && (item.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    private static func isRemotePresetPlaceholder(_ dto: MilestoneDTO) -> Bool {
+        isPresetTitle(dto.title)
+        && !dto.isCustom
+        && dto.happenedAt == nil
+        && (dto.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
     private static func apply(_ dto: MilestoneDTO, to item: Milestone) {
@@ -1092,6 +1373,105 @@ final class SyncEngine {
                              heightCm: item.heightCm, weightKg: item.weightKg,
                              headCircumferenceCm: item.headCircumferenceCm, note: item.note,
                              source: item.sourceRaw, createdAt: item.createdAt)
+    }
+
+    private static func makeHealthFallbackDTO(_ item: VaccineRecord) -> HealthRecordDTO {
+        let details = compactJoined([
+            item.doseLabel,
+            item.hospital.map { "医院：\($0)" },
+            item.injectionSite.map { "部位：\($0)" },
+            item.reaction.map { "反应：\($0)" },
+            item.note
+        ])
+        return HealthRecordDTO(
+            id: nil,
+            localId: item.id.uuidString,
+            kind: HealthRecordKind.checkup.rawValue,
+            title: "疫苗：\(item.vaccineName)",
+            detail: details,
+            recordedAt: item.injectedAt,
+            amountText: item.doseLabel,
+            reaction: item.reaction,
+            amountValue: nil,
+            amountUnit: nil,
+            startAt: nil,
+            endAt: nil,
+            severity: nil,
+            temperatureCelsius: nil,
+            tags: ["疫苗", item.vaccineName],
+            createdAt: item.createdAt
+        )
+    }
+
+    private static func makeHealthFallbackDTO(_ item: GrowthMeasurement) -> HealthRecordDTO {
+        let amountText = compactJoined([
+            item.heightCm.map { "身高 \(formatMetric($0))cm" },
+            item.weightKg.map { "体重 \(formatMetric($0))kg" },
+            item.headCircumferenceCm.map { "头围 \(formatMetric($0))cm" }
+        ]) ?? "身高体重"
+        return HealthRecordDTO(
+            id: nil,
+            localId: item.id.uuidString,
+            kind: HealthRecordKind.checkup.rawValue,
+            title: "身高体重",
+            detail: item.note,
+            recordedAt: item.measuredAt,
+            amountText: amountText,
+            reaction: nil,
+            amountValue: nil,
+            amountUnit: nil,
+            startAt: nil,
+            endAt: nil,
+            severity: nil,
+            temperatureCelsius: nil,
+            tags: ["身高体重", "成长数据"],
+            createdAt: item.createdAt
+        )
+    }
+
+    private static func compactJoined(_ parts: [String?]) -> String? {
+        let values = parts.compactMap { part -> String? in
+            let trimmed = part?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed?.isEmpty == false ? trimmed : nil
+        }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private static func formatMetric(_ value: Double) -> String {
+        let rounded = (value * 10).rounded() / 10
+        if rounded.rounded() == rounded {
+            return String(Int(rounded))
+        }
+        return String(format: "%.1f", rounded)
+    }
+
+    private func backfillVaccineIfNeeded(from dto: HealthRecordDTO, context: ModelContext) {
+        guard let localId = UUID(uuidString: dto.localId) else { return }
+        let isVaccine = dto.tags.contains("疫苗") || dto.title.contains("疫苗")
+        guard isVaccine else { return }
+        let descriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == localId })
+        guard (try? context.fetch(descriptor).first) == nil else { return }
+
+        let name = Self.vaccineName(from: dto)
+        let item = VaccineRecord(vaccineName: name, injectedAt: dto.recordedAt, source: "health-fallback")
+        item.id = localId
+        item.doseLabel = dto.amountText
+        item.reaction = dto.reaction
+        item.note = dto.detail
+        item.syncState = .synced
+        context.insert(item)
+        try? context.save()
+    }
+
+    private static func vaccineName(from dto: HealthRecordDTO) -> String {
+        let cleanedTitle = dto.title
+            .replacingOccurrences(of: "疫苗：", with: "")
+            .replacingOccurrences(of: "疫苗:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanedTitle.isEmpty, cleanedTitle != "疫苗" {
+            return cleanedTitle
+        }
+        return dto.tags.first { $0 != "疫苗" } ?? "疫苗记录"
     }
 
     private static func apply(_ dto: GrowthMeasurementDTO, to item: GrowthMeasurement) {

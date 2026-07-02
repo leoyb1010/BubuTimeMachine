@@ -86,9 +86,11 @@ struct MembersView: View {
             if m.id == env.currentMemberId {
                 env.currentMemberId = members.first { $0.id != m.id }?.id
             }
+            PendingDeletion.enqueue(collection: "members", remoteId: m.remoteId, in: context)
             context.delete(m)
         }
         try? context.save()
+        env.syncEngine.syncNow()
     }
 }
 

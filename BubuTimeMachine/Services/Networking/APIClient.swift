@@ -21,7 +21,9 @@ protocol APIClient: Sendable {
     func fetchHealthRecords(since: Date?) async throws -> [HealthRecordDTO]
     func upsertVaccineRecord(_ dto: VaccineRecordDTO) async throws -> VaccineRecordDTO
     func fetchVaccineRecords(since: Date?) async throws -> [VaccineRecordDTO]
-    /// 取消打卡/误录删除：远端删掉，避免下轮拉取复活。
+    /// 软删除任意 PocketBase collection 里的远端记录。SyncEngine 用它消费本地删除队列。
+    func deleteRecord(collection: String, remoteId: String) async throws
+    /// 取消打卡/误录删除：远端写 tombstone，避免下轮拉取复活。
     func deleteVaccineRecord(remoteId: String) async throws
     func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO
     func fetchGrowthMeasurements(since: Date?) async throws -> [GrowthMeasurementDTO]
@@ -39,6 +41,8 @@ protocol APIClient: Sendable {
     func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func deleteTimeCapsule(remoteId: String) async throws
     func downloadFile(from remoteURL: String) async throws -> Data
+    /// 大文件下载优先落到系统临时文件，避免照片/视频/音频同步时一次性把完整文件读进内存。
+    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL
     /// 分片上传：返回可观察进度的异步流。
     func uploadMedia(_ file: MediaUploadRequest) -> AsyncThrowingStream<UploadEvent, Error>
     func subscribeRealtime() -> AsyncStream<RealtimeEvent>

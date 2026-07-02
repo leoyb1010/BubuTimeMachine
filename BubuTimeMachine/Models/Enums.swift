@@ -28,11 +28,15 @@ enum MediaType: String, Codable, Sendable {
 }
 
 // MARK: - 家庭角色
-/// 三人家庭场景：记录者身份。用于署名、家人合奏多视角、当前身份切换。
+/// 记录者身份。必须覆盖成员系统里的所有称谓，否则爷爷/奶奶/姥爷切换身份后会被回落成妈妈署名。
 enum FamilyRole: String, Codable, CaseIterable, Sendable {
     case papa = "爸爸"
     case mama = "妈妈"
     case grandma = "姥姥"
+    case grandpa = "姥爷"
+    case yeye = "爷爷"
+    case nainai = "奶奶"
+    case other = "家人"
 
     var displayName: String { rawValue }
 }

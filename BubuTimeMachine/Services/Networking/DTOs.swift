@@ -7,6 +7,8 @@ struct AuthToken: Codable, Sendable {
     let token: String
     let role: String
     let expiresAt: Date?
+    let userId: String?
+    let familyId: String?
 }
 
 /// Entry 的服务器表示。与 SwiftData `Entry` 解耦，便于后端字段独立演进。

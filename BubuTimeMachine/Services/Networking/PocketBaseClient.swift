@@ -24,7 +24,12 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     /// 复用已有 token；过期由各请求的 401 自动重登兜底。
     /// 不再每个同步周期跑一次密码登录（省电、少打服务器）。
     func authenticate(role: String) async throws -> AuthToken {
-        AuthToken(token: try await ensureToken(), role: role, expiresAt: nil)
+        let token = try await ensureToken()
+        return AuthToken(token: token,
+                         role: role,
+                         expiresAt: nil,
+                         userId: await tokenBox.userId(),
+                         familyId: await tokenBox.familyId())
     }
 
     /// 真正的密码登录。
@@ -42,12 +47,15 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
               let token = obj["token"] as? String else {
             throw APIError.server(500, "鉴权响应异常")
         }
-        await tokenBox.set(token)
+        let record = obj["record"] as? [String: Any]
+        await tokenBox.set(token: token,
+                           userId: record?["id"] as? String,
+                           familyId: record?["familyId"] as? String)
         return token
     }
 
     private func ensureToken() async throws -> String {
-        if let t = await tokenBox.get() { return t }
+        if let t = await tokenBox.token() { return t }
         return try await login()
     }
 
@@ -60,7 +68,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             do {
                 return try await op(token)
             } catch APIError.unauthorized {
-                await tokenBox.set(nil)
+                await tokenBox.clearAuth()
                 let fresh = try await ensureToken()
                 return try await op(fresh)
             }
@@ -181,7 +189,20 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     func deleteVaccineRecord(remoteId: String) async throws {
-        try await delete(collection: "vaccinerecords", id: remoteId)
+        try await deleteRecord(collection: "vaccinerecords", remoteId: remoteId)
+    }
+
+    func deleteRecord(collection: String, remoteId: String) async throws {
+        let iso = ISO8601DateFormatter()
+        var body: [String: Any] = [
+            "isDeleted": true,
+            "deletedAt": iso.string(from: .now),
+        ]
+        if let userId = await tokenBox.userId(), !userId.isEmpty {
+            body["deletedByUserId"] = userId
+        }
+        Self.addSyncTimestamp(to: &body)
+        _ = try await patch(collection: collection, id: remoteId, json: body)
     }
 
     func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO {
@@ -255,18 +276,72 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     func deleteTimeCapsule(remoteId: String) async throws {
-        try await delete(collection: "timecapsules", id: remoteId)
+        try await deleteRecord(collection: "timecapsules", remoteId: remoteId)
     }
 
     func downloadFile(from remoteURL: String) async throws -> Data {
         guard let url = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
         return try await withAuthRetry { token in
-            var req = URLRequest(url: url)
+            let accessURL = try await self.fileAccessURL(for: url, bearerToken: token)
+            var req = URLRequest(url: accessURL)
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
             return data
         }
+    }
+
+    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL {
+        guard let url = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
+        return try await withAuthRetry { token in
+            let accessURL = try await self.fileAccessURL(for: url, bearerToken: token)
+            var req = URLRequest(url: accessURL)
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (downloadedURL, resp) = try await URLSession.shared.download(for: req)
+            try Self.check(resp, Data())
+
+            let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension
+            let stableURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("bubu-download-\(UUID().uuidString).\(ext)")
+            try? FileManager.default.removeItem(at: stableURL)
+            try FileManager.default.moveItem(at: downloadedURL, to: stableURL)
+            return stableURL
+        }
+    }
+
+    private func fileAccessURL(for url: URL, bearerToken: String) async throws -> URL {
+        let fileToken: String
+        if let cached = await tokenBox.validFileToken() {
+            fileToken = cached
+        } else {
+            fileToken = try await requestFileToken(bearerToken: bearerToken)
+            await tokenBox.setFileToken(fileToken)
+        }
+        return Self.appendingQueryItem(name: "token", value: fileToken, to: url)
+    }
+
+    private func requestFileToken(bearerToken: String) async throws -> String {
+        let url = baseURL.appendingPathComponent("api/files/token")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try Self.check(resp, data)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = obj["token"] as? String, !token.isEmpty else {
+            throw APIError.server(500, "文件访问令牌响应异常")
+        }
+        return token
+    }
+
+    private static func appendingQueryItem(name: String, value: String, to url: URL) -> URL {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = comps.queryItems ?? []
+        items.removeAll { $0.name == name }
+        items.append(URLQueryItem(name: name, value: value))
+        comps.queryItems = items
+        return comps.url ?? url
     }
 
     // MARK: 媒体上传（multipart + 进度）
@@ -384,7 +459,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             if page >= totalPages || items.isEmpty { break }
             page += 1
         }
-        return all
+        return all.filter { ($0["isDeleted"] as? Bool) != true }
     }
 
     private func fetchPage(collection: String, since: Date?, sort: String?,
@@ -422,24 +497,47 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return try await send(url: url, method: "PATCH", json: json)
     }
 
-    private func delete(collection: String, id: String) async throws {
-        let url = baseURL.appendingPathComponent("api/collections/\(collection)/records/\(id)")
-        _ = try await send(url: url, method: "DELETE", json: [:])
-    }
-
     private func send(url: URL, method: String, json: [String: Any]) async throws -> [String: Any] {
         try await withAuthRetry { token in
             var req = URLRequest(url: url)
             req.httpMethod = method
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if method != "DELETE" {
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.httpBody = try JSONSerialization.data(withJSONObject: json)
+                let body = await self.activeRecordJSON(json)
+                req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            } else {
+                req.httpBody = Data("{}".utf8)
             }
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
             return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         }
+    }
+
+    private func activeRecordJSON(_ json: [String: Any]) async -> [String: Any] {
+        var body = json
+        if body["isDeleted"] == nil { body["isDeleted"] = false }
+        if body["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
+            body["authorUserId"] = userId
+        }
+        if body["familyId"] == nil, let familyId = await tokenBox.familyId(), !familyId.isEmpty {
+            body["familyId"] = familyId
+        }
+        return body
+    }
+
+    private func activeRecordFields(_ fields: [String: String]) async -> [String: String] {
+        var result = fields
+        if result["isDeleted"] == nil { result["isDeleted"] = "false" }
+        if result["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
+            result["authorUserId"] = userId
+        }
+        if result["familyId"] == nil, let familyId = await tokenBox.familyId(), !familyId.isEmpty {
+            result["familyId"] = familyId
+        }
+        return result
     }
 
     private func uploadGenericFile(collection: String, localId: String, fields: [String: String],
@@ -486,6 +584,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         var uploadFields = fields
         uploadFields["localId"] = localId
         Self.addSyncTimestamp(to: &uploadFields)
+        uploadFields = await activeRecordFields(uploadFields)
         let bodyURL = try multipartBodyFile(boundary: boundary, fields: uploadFields,
                                             fileField: fileField, fileURL: fileURL, fileName: fileName)
         defer { try? FileManager.default.removeItem(at: bodyURL) }
@@ -519,6 +618,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             "mediaType": file.type.rawValue,
         ]
         Self.addSyncTimestamp(to: &fields)
+        fields = await activeRecordFields(fields)
         let bodyURL = try multipartBodyFile(
             boundary: boundary,
             fields: fields,
@@ -580,7 +680,12 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     // MARK: - 私有：编解码
 
     static func syncTimestampString(_ date: Date = .now) -> String {
-        ISO8601DateFormatter().string(from: date)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS'Z'"
+        return formatter.string(from: date)
     }
 
     static func addSyncTimestamp(to body: inout [String: Any], date: Date = .now) {
@@ -599,6 +704,14 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return fallback
     }
 
+    private static func jsonValue<T>(_ value: T?) -> Any {
+        value.map { $0 as Any } ?? NSNull()
+    }
+
+    private static func jsonDate(_ date: Date?, formatter: ISO8601DateFormatter) -> Any {
+        date.map { formatter.string(from: $0) as Any } ?? NSNull()
+    }
+
     private static func entryBody(_ dto: EntryDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         var body: [String: Any] = [
@@ -607,17 +720,17 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             "authorRole": dto.authorRole,
             "isArchived": dto.isArchived,
             "createdAt": iso.string(from: dto.createdAt),
+            "title": jsonValue(dto.title),
+            "note": jsonValue(dto.note),
+            "firstPersonNote": jsonValue(dto.firstPersonNote),
+            "locationName": jsonValue(dto.locationName),
+            "latitude": jsonValue(dto.latitude),
+            "longitude": jsonValue(dto.longitude),
+            "mood": jsonValue(dto.mood),
+            "editedAt": jsonDate(dto.editedAt, formatter: iso),
         ]
-        if let v = dto.title { body["title"] = v }
         if let v = dto.familyId { body["familyId"] = v }
         if let v = dto.authorUserId { body["authorUserId"] = v }
-        if let v = dto.note { body["note"] = v }
-        if let v = dto.firstPersonNote { body["firstPersonNote"] = v }
-        if let v = dto.locationName { body["locationName"] = v }
-        if let v = dto.latitude { body["latitude"] = v }
-        if let v = dto.longitude { body["longitude"] = v }
-        if let v = dto.mood { body["mood"] = v }
-        if let v = dto.editedAt { body["editedAt"] = iso.string(from: v) }
         addSyncTimestamp(to: &body)
         return body
     }
@@ -670,10 +783,16 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private static func milestoneBody(_ dto: MilestoneDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        var body: [String: Any] = ["localId": dto.localId, "title": dto.title, "category": dto.category, "emoji": dto.emoji, "isCustom": dto.isCustom]
-        if let v = dto.detail { body["detail"] = v }
-        if let v = dto.happenedAt { body["happenedAt"] = iso.string(from: v) }
-        if let v = dto.ageDescription { body["ageDescription"] = v }
+        var body: [String: Any] = [
+            "localId": dto.localId,
+            "title": dto.title,
+            "category": dto.category,
+            "emoji": dto.emoji,
+            "isCustom": dto.isCustom,
+            "detail": jsonValue(dto.detail),
+            "happenedAt": jsonDate(dto.happenedAt, formatter: iso),
+            "ageDescription": jsonValue(dto.ageDescription)
+        ]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -695,8 +814,14 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private static func firstTimeBody(_ dto: FirstTimeDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        var body: [String: Any] = ["localId": dto.localId, "what": dto.what, "happenedAt": iso.string(from: dto.happenedAt), "detectedByAI": dto.detectedByAI, "confirmedByParent": dto.confirmedByParent]
-        if let v = dto.entryLocalId { body["entryLocalId"] = v }
+        var body: [String: Any] = [
+            "localId": dto.localId,
+            "what": dto.what,
+            "happenedAt": iso.string(from: dto.happenedAt),
+            "detectedByAI": dto.detectedByAI,
+            "confirmedByParent": dto.confirmedByParent,
+            "entryLocalId": jsonValue(dto.entryLocalId)
+        ]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -733,10 +858,14 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private static func childProfileBody(_ dto: ChildProfileDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        var body: [String: Any] = ["localId": dto.localId, "name": dto.name, "birthday": iso.string(from: dto.birthday)]
-        if let v = dto.gender { body["gender"] = v }
-        if let v = dto.bloodType { body["bloodType"] = v }
-        if let v = dto.birthPlace { body["birthPlace"] = v }
+        var body: [String: Any] = [
+            "localId": dto.localId,
+            "name": dto.name,
+            "birthday": iso.string(from: dto.birthday),
+            "gender": jsonValue(dto.gender),
+            "bloodType": jsonValue(dto.bloodType),
+            "birthPlace": jsonValue(dto.birthPlace)
+        ]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -760,13 +889,13 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     private static func vaccineBody(_ dto: VaccineRecordDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         var body: [String: Any] = ["localId": dto.localId, "vaccineName": dto.vaccineName,
-                                   "injectedAt": iso.string(from: dto.injectedAt), "sourceRaw": dto.source]
-        if let v = dto.doseId { body["doseId"] = v }
-        if let v = dto.doseLabel { body["doseLabel"] = v }
-        if let v = dto.hospital { body["hospital"] = v }
-        if let v = dto.injectionSite { body["injectionSite"] = v }
-        if let v = dto.reaction { body["reaction"] = v }
-        if let v = dto.note { body["note"] = v }
+                                   "injectedAt": iso.string(from: dto.injectedAt), "sourceRaw": dto.source,
+                                   "doseId": jsonValue(dto.doseId),
+                                   "doseLabel": jsonValue(dto.doseLabel),
+                                   "hospital": jsonValue(dto.hospital),
+                                   "injectionSite": jsonValue(dto.injectionSite),
+                                   "reaction": jsonValue(dto.reaction),
+                                   "note": jsonValue(dto.note)]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -784,18 +913,18 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                                 injectionSite: obj["injectionSite"] as? String ?? fallback?.injectionSite,
                                 reaction: obj["reaction"] as? String ?? fallback?.reaction,
                                 note: obj["note"] as? String ?? fallback?.note,
-                                source: obj["sourceRaw"] as? String ?? fallback?.source ?? "manual",
+                                source: obj["sourceRaw"] as? String ?? obj["source"] as? String ?? fallback?.source ?? "manual",
                                 createdAt: date("created") ?? fallback?.createdAt ?? .now)
     }
 
     private static func growthBody(_ dto: GrowthMeasurementDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         var body: [String: Any] = ["localId": dto.localId,
-                                   "measuredAt": iso.string(from: dto.measuredAt), "sourceRaw": dto.source]
-        if let v = dto.heightCm { body["heightCm"] = v }
-        if let v = dto.weightKg { body["weightKg"] = v }
-        if let v = dto.headCircumferenceCm { body["headCircumferenceCm"] = v }
-        if let v = dto.note { body["note"] = v }
+                                   "measuredAt": iso.string(from: dto.measuredAt), "sourceRaw": dto.source,
+                                   "heightCm": jsonValue(dto.heightCm),
+                                   "weightKg": jsonValue(dto.weightKg),
+                                   "headCircumferenceCm": jsonValue(dto.headCircumferenceCm),
+                                   "note": jsonValue(dto.note)]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -810,22 +939,27 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
                                     weightKg: obj["weightKg"] as? Double ?? fallback?.weightKg,
                                     headCircumferenceCm: obj["headCircumferenceCm"] as? Double ?? fallback?.headCircumferenceCm,
                                     note: obj["note"] as? String ?? fallback?.note,
-                                    source: obj["sourceRaw"] as? String ?? fallback?.source ?? "manual",
+                                    source: obj["sourceRaw"] as? String ?? obj["source"] as? String ?? fallback?.source ?? "manual",
                                     createdAt: date("created") ?? fallback?.createdAt ?? .now)
     }
 
     private static func healthBody(_ dto: HealthRecordDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        var body: [String: Any] = ["localId": dto.localId, "kind": dto.kind, "title": dto.title, "recordedAt": iso.string(from: dto.recordedAt)]
-        if let v = dto.detail { body["detail"] = v }
-        if let v = dto.amountText { body["amountText"] = v }
-        if let v = dto.reaction { body["reaction"] = v }
-        if let v = dto.amountValue { body["amountValue"] = v }
-        if let v = dto.amountUnit { body["amountUnit"] = v }
-        if let v = dto.startAt { body["startAt"] = iso.string(from: v) }
-        if let v = dto.endAt { body["endAt"] = iso.string(from: v) }
-        if let v = dto.severity { body["severity"] = v }
-        if let v = dto.temperatureCelsius { body["temperatureCelsius"] = v }
+        var body: [String: Any] = [
+            "localId": dto.localId,
+            "kind": dto.kind,
+            "title": dto.title,
+            "recordedAt": iso.string(from: dto.recordedAt),
+            "detail": jsonValue(dto.detail),
+            "amountText": jsonValue(dto.amountText),
+            "reaction": jsonValue(dto.reaction),
+            "amountValue": jsonValue(dto.amountValue),
+            "amountUnit": jsonValue(dto.amountUnit),
+            "startAt": jsonDate(dto.startAt, formatter: iso),
+            "endAt": jsonDate(dto.endAt, formatter: iso),
+            "severity": jsonValue(dto.severity),
+            "temperatureCelsius": jsonValue(dto.temperatureCelsius)
+        ]
         body["tags"] = dto.tags
         addSyncTimestamp(to: &body)
         return body
@@ -853,8 +987,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     private static func commentBody(_ dto: CommentDTO) -> [String: Any] {
-        var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "voiceDuration": dto.voiceDuration, "voiceWaveform": dto.voiceWaveform]
-        if let v = dto.text { body["text"] = v }
+        var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "voiceDuration": dto.voiceDuration, "voiceWaveform": dto.voiceWaveform, "text": jsonValue(dto.text)]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -876,8 +1009,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
     }
 
     private static func voiceNoteBody(_ dto: VoiceNoteDTO) -> [String: Any] {
-        var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "durationSeconds": dto.durationSeconds, "waveform": dto.waveform]
-        if let v = dto.transcript { body["transcript"] = v }
+        var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "durationSeconds": dto.durationSeconds, "waveform": dto.waveform, "transcript": jsonValue(dto.transcript)]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -900,10 +1032,14 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private static func voiceMemoBody(_ dto: VoiceMemoDTO) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        var body: [String: Any] = ["localId": dto.localId, "kind": dto.kind, "recordedAt": iso.string(from: dto.recordedAt)]
-        if let v = dto.transcript { body["transcript"] = v }
-        if let v = dto.ageYears { body["ageYears"] = v }
-        if let v = dto.durationSeconds { body["durationSeconds"] = v }
+        var body: [String: Any] = [
+            "localId": dto.localId,
+            "kind": dto.kind,
+            "recordedAt": iso.string(from: dto.recordedAt),
+            "transcript": jsonValue(dto.transcript),
+            "ageYears": jsonValue(dto.ageYears),
+            "durationSeconds": jsonValue(dto.durationSeconds)
+        ]
         addSyncTimestamp(to: &body)
         return body
     }
@@ -930,6 +1066,7 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             result[pair.key] = pair.value
         }
         body["isLocked"] = dto.isLocked
+        body["coverEmoji"] = jsonValue(dto.coverEmoji)
         return body
     }
 
@@ -993,9 +1130,41 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
 // MARK: - Token 容器（actor，线程安全）
 private actor TokenBox {
-    private var token: String?
-    func get() -> String? { token }
-    func set(_ t: String?) { token = t }
+    private var authToken: String?
+    private var currentUserId: String?
+    private var currentFamilyId: String?
+    private var fileToken: String?
+    private var fileTokenExpiresAt: Date?
+
+    func token() -> String? { authToken }
+    func userId() -> String? { currentUserId }
+    func familyId() -> String? { currentFamilyId }
+
+    func set(token: String, userId: String?, familyId: String?) {
+        authToken = token
+        currentUserId = userId
+        currentFamilyId = familyId
+        fileToken = nil
+        fileTokenExpiresAt = nil
+    }
+
+    func clearAuth() {
+        authToken = nil
+        currentUserId = nil
+        currentFamilyId = nil
+        fileToken = nil
+        fileTokenExpiresAt = nil
+    }
+
+    func validFileToken(now: Date = .now) -> String? {
+        guard let fileToken, let fileTokenExpiresAt, fileTokenExpiresAt > now else { return nil }
+        return fileToken
+    }
+
+    func setFileToken(_ token: String) {
+        fileToken = token
+        fileTokenExpiresAt = Date().addingTimeInterval(100)
+    }
 }
 
 // MARK: - 上传进度 delegate

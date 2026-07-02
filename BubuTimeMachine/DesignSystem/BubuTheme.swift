@@ -40,10 +40,10 @@ nonisolated enum BubuTheme {
             light: UIColor(red: 0.353, green: 0.239, blue: 0.204, alpha: 1),   // #5A3D34
             dark: UIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
         )
-        /// 柔和次要文字 ink2（#A98D82）。
+        /// 次要文字：必须在奶油底上通过 WCAG AA，对老人机大字模式仍清晰。
         static let secondaryText = dynamic(
-            light: UIColor(red: 0.663, green: 0.553, blue: 0.510, alpha: 1),   // #A98D82
-            dark: UIColor(red: 0.73, green: 0.66, blue: 0.60, alpha: 1)
+            light: UIColor(red: 0.455, green: 0.326, blue: 0.278, alpha: 1),   // #745347
+            dark: UIColor(red: 0.80, green: 0.73, blue: 0.67, alpha: 1)
         )
         /// 页面背景（奶油基底，略带粉调）。
         static let background = dynamic(
@@ -107,11 +107,11 @@ nonisolated enum BubuTheme {
 
     // MARK: 字号阶梯（偏大，适老；马卡龙加重标题字）
     enum Font {
-        static let hugeTitle = SwiftUI.Font.system(size: 34, weight: .heavy, design: .rounded)
-        static let title = SwiftUI.Font.system(size: 26, weight: .heavy, design: .rounded)
-        static let headline = SwiftUI.Font.system(size: 21, weight: .bold, design: .rounded)
-        static let body = SwiftUI.Font.system(size: 18, weight: .regular, design: .rounded)
-        static let caption = SwiftUI.Font.system(size: 15, weight: .medium, design: .rounded)
+        static let hugeTitle = SwiftUI.Font.system(.largeTitle, design: .rounded).weight(.heavy)
+        static let title = SwiftUI.Font.system(.title, design: .rounded).weight(.heavy)
+        static let headline = SwiftUI.Font.system(.title3, design: .rounded).weight(.bold)
+        static let body = SwiftUI.Font.system(.body, design: .rounded)
+        static let caption = SwiftUI.Font.system(.subheadline, design: .rounded).weight(.medium)
     }
 
     // MARK: 圆角（马卡龙更圆润）

@@ -4,8 +4,11 @@ import SwiftData
 // MARK: - 布布健康
 struct HealthHomeView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.modelContext) private var context
     @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var records: [HealthRecord]
     @State private var composingKind: HealthRecordKind?
+    @State private var editingRecord: HealthRecord?
+    @State private var deletingRecord: HealthRecord?
 
     private var theme: Color { env.theme.theme.primary }
     private var todayRecords: [HealthRecord] { records.filter { Calendar.current.isDateInToday($0.recordedAt) } }
@@ -26,6 +29,18 @@ struct HealthHomeView: View {
         .navigationTitle("布布健康")
         .sheet(item: $composingKind) { kind in
             HealthRecordSheet(kind: kind)
+        }
+        .sheet(item: $editingRecord) { record in
+            HealthRecordSheet(kind: record.kind, record: record)
+        }
+        .alert("删除这条健康记录？", isPresented: Binding(
+            get: { deletingRecord != nil },
+            set: { if !$0 { deletingRecord = nil } }
+        )) {
+            Button("删除", role: .destructive) { deletePendingRecord() }
+            Button("取消", role: .cancel) { deletingRecord = nil }
+        } message: {
+            Text("删除后会同步到家里服务器，其他设备不会再拉回这条记录。")
         }
     }
 
@@ -155,9 +170,41 @@ struct HealthHomeView: View {
                 }
             }
             Spacer()
+            VStack(spacing: 8) {
+                Button {
+                    editingRecord = record
+                } label: {
+                    Image(systemName: "pencil")
+                        .frame(width: 38, height: 38)
+                        .background(theme.opacity(0.10), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("编辑健康记录")
+
+                Button(role: .destructive) {
+                    deletingRecord = record
+                } label: {
+                    Image(systemName: "trash")
+                        .frame(width: 38, height: 38)
+                        .background(BubuTheme.Color.danger.opacity(0.10), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("删除健康记录")
+            }
         }
         .padding(12)
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+    }
+
+    private func deletePendingRecord() {
+        guard let record = deletingRecord else { return }
+        PendingDeletion.enqueue(collection: "healthrecords", remoteId: record.remoteId, in: context)
+        context.delete(record)
+        try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
+        env.syncEngine.syncNow()
+        deletingRecord = nil
     }
 
     private func amountSummary(_ record: HealthRecord) -> String? {

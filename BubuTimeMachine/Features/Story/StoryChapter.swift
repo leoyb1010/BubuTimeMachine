@@ -22,7 +22,7 @@ enum StoryChapterBuilder {
     /// 把里程碑编织成章节：仅取「已达成」的，按发生时间升序；正文优先 detail。
     static func chapters(from milestones: [Milestone]) -> [StoryChapter] {
         let achieved = milestones
-            .filter { $0.isAchieved }
+            .filter { $0.isAchieved && ($0.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) }
             .sorted { ($0.happenedAt ?? .distantPast) < ($1.happenedAt ?? .distantPast) }
 
         return achieved.enumerated().map { idx, m in

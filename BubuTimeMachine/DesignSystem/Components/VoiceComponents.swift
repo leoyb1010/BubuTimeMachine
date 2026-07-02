@@ -64,6 +64,11 @@ struct VoiceRecorderBar: View {
         } message: {
             Text("请到系统设置里允许布布时光机使用麦克风。")
         }
+        .onDisappear {
+            if recorder.state == .recording {
+                recorder.cancel()
+            }
+        }
     }
 
     private var recordButton: some View {
@@ -94,6 +99,7 @@ struct VoiceRecorderBar: View {
                 try? await Task.sleep(for: .milliseconds(120))
                 BubuHaptics.tapLight()
             }
+            defer { try? FileManager.default.removeItem(at: result.url) }
             if let fileName = try? mediaStore.importFile(from: result.url, preferredExtension: "m4a") {
                 onFinished(fileName, result.duration, result.waveform)
             }

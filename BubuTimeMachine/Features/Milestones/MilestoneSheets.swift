@@ -250,10 +250,12 @@ struct MilestoneEditSheet: View {
 
     private func deleteMilestone() {
         if let m = milestone {
+            PendingDeletion.enqueue(collection: "milestones", remoteId: m.remoteId, in: context)
             context.delete(m)
             try? context.save()
             env.refreshWidgetSnapshot(context: context)
             WidgetRefresher.reload()
+            env.syncEngine.syncNow()
         }
         dismiss()
     }

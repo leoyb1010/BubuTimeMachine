@@ -41,6 +41,16 @@ struct PocketBaseClientSyncQueryTests {
         #expect(body["clientUpdatedAt"] as? String == PocketBaseClient.syncTimestampString(date))
     }
 
+    @Test("同步时间戳使用 PocketBase date 过滤格式")
+    func syncTimestampUsesPocketBaseDateFilterFormat() {
+        let date = Date(timeIntervalSince1970: 2_000_000_000)
+        let value = PocketBaseClient.syncTimestampString(date)
+
+        #expect(value == "2033-05-18 03:33:20.000Z")
+        #expect(value.contains(" "))
+        #expect(!value.contains("T"))
+    }
+
     @Test("multipart fields 会注入同步时间戳")
     func multipartFieldsGetSyncTimestamp() {
         var fields = ["localId": "abc"]

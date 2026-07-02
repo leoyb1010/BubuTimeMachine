@@ -123,11 +123,16 @@ struct TimelineView: View {
                     Label("删除记录", systemImage: "trash")
                 }
             }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) { entryPendingDelete = entry } label: {
-                    Label("删除", systemImage: "trash")
-                }
+            Button(role: .destructive) {
+                entryPendingDelete = entry
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .frame(width: 44, height: 44)
+                    .background(BubuTheme.Color.danger.opacity(0.10), in: Circle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("删除记录")
         }
     }
 

@@ -223,9 +223,8 @@ struct VaccineView: View {
     }
 
     private func deleteRecord(_ record: VaccineRecord) {
-        if let remoteId = record.remoteId {
-            context.insert(PendingDeletion(collection: "vaccinerecords", remoteId: remoteId))
-        }
+        let collection = record.sourceRaw == "health-fallback" ? "healthrecords" : "vaccinerecords"
+        PendingDeletion.enqueue(collection: collection, remoteId: record.remoteId, in: context)
         context.delete(record)
         try? context.save()
         env.syncEngine.syncNow()

@@ -4,12 +4,18 @@ import SwiftData
 // MARK: - 健康记录编辑
 struct HealthRecordSheet: View {
     let kind: HealthRecordKind
+    let existingRecord: HealthRecord?
     @Environment(\.modelContext) private var context
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var records: [HealthRecord]
 
     @State private var draft = HealthRecordDraft()
+
+    init(kind: HealthRecordKind, record: HealthRecord? = nil) {
+        self.kind = kind
+        self.existingRecord = record
+    }
 
     private var theme: Color { env.theme.theme.primary }
     private var todayWaterTotal: Double {
@@ -62,19 +68,29 @@ struct HealthRecordSheet: View {
             }
         }
         .tint(theme)
+        .onAppear {
+            if let existingRecord {
+                draft = HealthRecordDraft(record: existingRecord)
+            }
+        }
     }
 
     private func save() {
-        let record = draft.makeRecord(kind: kind)
+        let record = existingRecord ?? HealthRecord(kind: kind, title: kind.title, recordedAt: draft.recordedAt)
+        draft.apply(to: record, kind: kind)
         record.syncState = .local
-        context.insert(record)
-        if kind == .checkup, draft.hasGrowthMeasurement {
+        if existingRecord == nil {
+            context.insert(record)
+        }
+        if existingRecord == nil, kind == .checkup, draft.hasGrowthMeasurement {
             let measurement = draft.makeGrowthMeasurement()
             context.insert(measurement)
         }
-        context.insert(FeedEvent(kind: .healthRecorded,
-                                 actorRole: env.config.currentRole.rawValue,
-                                 summary: "记录了\(kind.title)：\(record.title)"))
+        if existingRecord == nil {
+            context.insert(FeedEvent(kind: .healthRecorded,
+                                     actorRole: env.config.currentRole.rawValue,
+                                     summary: "记录了\(kind.title)：\(record.title)"))
+        }
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
         WidgetRefresher.reload()
@@ -101,6 +117,22 @@ struct HealthRecordDraft: Equatable {
 
     var hasGrowthMeasurement: Bool {
         heightCm != nil || weightKg != nil || headCircumferenceCm != nil
+    }
+
+    init() {}
+
+    init(record: HealthRecord) {
+        title = record.title
+        detail = record.detail ?? ""
+        recordedAt = record.recordedAt
+        amountValue = record.amountValue
+        amountUnit = record.amountUnit
+        startAt = record.startAt
+        endAt = record.endAt
+        reaction = record.reaction ?? ""
+        severity = record.severityRaw ?? ""
+        temperatureCelsius = record.temperatureCelsius
+        tags = record.tags
     }
 
     func canSave(kind: HealthRecordKind) -> Bool {
@@ -165,6 +197,23 @@ struct HealthRecordDraft: Equatable {
         }
 
         return record
+    }
+
+    func apply(to record: HealthRecord, kind: HealthRecordKind) {
+        let updated = makeRecord(kind: kind)
+        record.kind = kind
+        record.title = updated.title
+        record.detail = updated.detail
+        record.recordedAt = updated.recordedAt
+        record.amountText = updated.amountText
+        record.reaction = updated.reaction
+        record.amountValue = updated.amountValue
+        record.amountUnit = updated.amountUnit
+        record.startAt = updated.startAt
+        record.endAt = updated.endAt
+        record.severityRaw = updated.severityRaw
+        record.temperatureCelsius = updated.temperatureCelsius
+        record.tags = updated.tags
     }
 
     func makeGrowthMeasurement() -> GrowthMeasurement {
@@ -437,11 +486,9 @@ private struct DetailNoteCard: View {
     var body: some View {
         ComposerCard(title: "时间和备注", icon: "calendar", tint: tint) {
             DatePicker("记录时间", selection: $draft.recordedAt, displayedComponents: [.date, .hourAndMinute])
-            if draft.detail.isEmpty {
-                TextField("补充一点观察，比如吃完状态、睡醒精神……", text: $draft.detail, axis: .vertical)
-                    .lineLimit(2...5)
-                    .healthTextField()
-            }
+            TextField("补充一点观察，比如吃完状态、睡醒精神……", text: $draft.detail, axis: .vertical)
+                .lineLimit(2...5)
+                .healthTextField()
         }
     }
 }

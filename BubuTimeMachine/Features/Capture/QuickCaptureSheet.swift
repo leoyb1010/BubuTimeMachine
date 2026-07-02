@@ -20,6 +20,7 @@ struct QuickCaptureSheet: View {
     @State private var requestingCamera = false
     @State private var showNaturalCapture = false
     @State private var panelAppeared = false
+    @State private var mediaSourceSheet: CaptureMediaSource?
 
     private var theme: Color { env.theme.theme.primary }
 
@@ -110,6 +111,19 @@ struct QuickCaptureSheet: View {
             .sheet(isPresented: $showNaturalCapture) {
                 NaturalCapturePanel()
             }
+            .sheet(item: $mediaSourceSheet) { source in
+                CaptureMediaSourceSheet(
+                    source: source,
+                    pickedItems: $model.pickedItems,
+                    requestingCamera: requestingCamera,
+                    onCamera: {
+                        mediaSourceSheet = nil
+                        Task { await requestCamera(video: source == .video) }
+                    }
+                )
+                .presentationDetents([.height(300)])
+                .presentationDragIndicator(.visible)
+            }
             .navigationTitle("记录此刻")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: model.pickedItems) { _, _ in
@@ -193,28 +207,22 @@ struct QuickCaptureSheet: View {
 
     private func primaryActions(proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 8) {
-            Menu {
-                Button { Task { await requestCamera(video: false) } } label: {
-                    Label("打开相机", systemImage: "camera.fill")
-                }
-                PhotosPicker(selection: $model.pickedItems, maxSelectionCount: 9, matching: .images) {
-                    Label("从相册选择", systemImage: "photo.on.rectangle.angled")
-                }
+            Button {
+                BubuHaptics.selection()
+                mediaSourceSheet = .photo
             } label: {
                 actionChip("照片", systemImage: "camera.fill", tint: BubuTheme.Color.pink)
             }
+            .buttonStyle(BubuPressableStyle(scale: 0.97))
             .disabled(requestingCamera)
 
-            Menu {
-                Button { Task { await requestCamera(video: true) } } label: {
-                    Label("打开相机录像", systemImage: "video.fill")
-                }
-                PhotosPicker(selection: $model.pickedItems, maxSelectionCount: 9, matching: .videos) {
-                    Label("从相册选择视频", systemImage: "film.stack")
-                }
+            Button {
+                BubuHaptics.selection()
+                mediaSourceSheet = .video
             } label: {
                 actionChip("视频", systemImage: "video.fill", tint: BubuTheme.Color.lav)
             }
+            .buttonStyle(BubuPressableStyle(scale: 0.97))
             .disabled(requestingCamera)
 
             Button {
@@ -551,6 +559,101 @@ struct QuickCaptureSheet: View {
 private enum CaptureTarget: Hashable {
     case note
     case voice
+}
+
+private enum CaptureMediaSource: String, Identifiable {
+    case photo
+    case video
+
+    var id: String { rawValue }
+    var title: String { self == .photo ? "添加照片" : "添加视频" }
+    var pickerTitle: String { self == .photo ? "从本地相册选择照片" : "从本地相册选择视频" }
+    var cameraTitle: String { self == .photo ? "打开相机拍照" : "打开相机录像" }
+    var pickerIcon: String { self == .photo ? "photo.on.rectangle.angled" : "film.stack" }
+    var cameraIcon: String { self == .photo ? "camera.fill" : "video.fill" }
+    var tint: Color { self == .photo ? BubuTheme.Color.pink : BubuTheme.Color.lav }
+    var matching: PHPickerFilter { self == .photo ? .images : .videos }
+}
+
+private struct CaptureMediaSourceSheet: View {
+    let source: CaptureMediaSource
+    @Binding var pickedItems: [PhotosPickerItem]
+    let requestingCamera: Bool
+    let onCamera: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let pickerTitle = source.pickerTitle
+        let pickerIcon = source.pickerIcon
+        let cameraTitle = source.cameraTitle
+        let cameraIcon = source.cameraIcon
+        let cameraSubtitle = source == .photo ? "直接拍一张当前照片" : "直接录一段当前视频"
+        let tint = source.tint
+        let matching = source.matching
+        VStack(alignment: .leading, spacing: 14) {
+            Text(source.title)
+                .font(.system(size: 22, weight: .black, design: .rounded))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+
+            PhotosPicker(selection: $pickedItems, maxSelectionCount: 9, matching: matching) {
+                CaptureMediaSourceRow(title: pickerTitle,
+                                      subtitle: "打开系统选择器，选好后会出现在本次记录里",
+                                      systemImage: pickerIcon,
+                                      tint: tint)
+            }
+            .onChange(of: pickedItems) { _, _ in dismiss() }
+
+            Button(action: onCamera) {
+                CaptureMediaSourceRow(title: cameraTitle,
+                                      subtitle: cameraSubtitle,
+                                      systemImage: cameraIcon,
+                                      tint: tint)
+            }
+            .buttonStyle(BubuPressableStyle(scale: 0.98))
+            .disabled(requestingCamera)
+
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .background(BubuTheme.Color.background.ignoresSafeArea())
+    }
+}
+
+private struct CaptureMediaSourceRow: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(tint, in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(subtitle)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .black))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .bubuGlassSurface(cornerRadius: 22, tint: tint, interactive: true)
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.58), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
 }
 
 private enum CameraAlert: Identifiable {

@@ -4,17 +4,13 @@ import Foundation
 /// 这是「我们一家自己用」的 App：所有账号同属一个家庭、共享同一个布布的数据（不做按账号隔离）。
 /// 「独立账号」的价值是：每位家人有自己的登录身份（自动对应署名角色），而不是数据各看各的。
 ///
-/// 注册用「家庭码」把关——只有知道家庭码的人才能在你的自托管服务器上建账号，挡住陌生人。
-/// 家庭码校验放客户端即可（App 不公开 + 服务器仅家人知道，对自家场景足够）。
+/// 服务端关闭公开注册：新账号由 PocketBase 超管创建，再在这里登录。
 ///
-/// 服务器地址固定走 ServerConfig.defaultBaseURL；注册/登录成功后把邮箱密码写入 ServerConfig，
+/// 服务器地址固定走 ServerConfig.defaultBaseURL；登录成功后把邮箱密码写入 ServerConfig，
 /// 同步层（PocketBaseClient）复用这套凭据，无需改动既有同步逻辑。
 @MainActor
 final class AccountService {
-    /// 家庭码（只有家人知道）。如需更换，改这里发新版即可。
-    static let familyCode = "YUANCHENXI"
-
-    /// 用户名 → 固定家庭邮箱域。用户只感知「用户名」，避免邮箱难记/填错导致注册登录不一致。
+    /// 用户名 → 固定家庭邮箱域。用户只感知「用户名」，避免邮箱难记/填错导致登录不一致。
     /// 例：用户名 yuanbo → 实际账号 yuanbo@bubu.family。注册和登录都用同一拼接结果，绝不会对不上。
     private static let emailDomain = "bubu.family"
 
@@ -25,68 +21,35 @@ final class AccountService {
     }
 
     enum AccountError: LocalizedError {
-        case wrongFamilyCode
         case emptyField
+        case registrationClosed
         case server(String)
 
         var errorDescription: String? {
             switch self {
-            case .wrongFamilyCode: return "家庭码不对，问问家里人正确的家庭码"
-            case .emptyField: return "用户名至少 1 位、密码至少 6 位"
+            case .emptyField: return "请先填写服务器地址、用户名和至少 8 位密码"
+            case .registrationClosed: return "家里服务器已关闭公开注册。请先在 PocketBase 后台创建账号，再用「登录」进入。"
             case .server(let m): return m
             }
         }
     }
 
-    private var baseURL: URL { URL(string: ServerConfig.defaultBaseURL)! }
-
     /// 登录：用户名 → 拼邮箱 → 校验密码，成功后写入凭据供同步层使用。
     func login(username: String, password: String, role: FamilyRole, config: ServerConfig) async throws {
         let e = Self.emailFor(username: username)
-        guard !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !password.isEmpty else {
+        guard let baseURL = config.baseURL,
+              !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              password.count >= 8 else {
             throw AccountError.emptyField
         }
-        _ = try await authWithPassword(identity: e, password: password)
+        _ = try await authWithPassword(identity: e, password: password, baseURL: baseURL)
         persist(email: e, password: password, role: role, config: config)
     }
 
-    /// 注册：校验家庭码 → 用用户名拼邮箱建 users 记录 → 自动登录 → 写入凭据。
+    /// 公开注册已关闭：新账号由 PocketBase 超管创建。
     func register(username: String, password: String, familyCode: String,
                   role: FamilyRole, config: ServerConfig) async throws {
-        guard familyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-                == Self.familyCode else { throw AccountError.wrongFamilyCode }
-        let u = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !u.isEmpty, password.count >= 6 else { throw AccountError.emptyField }
-        let e = Self.emailFor(username: u)
-
-        // PocketBase users 创建：email + password + passwordConfirm。
-        let url = baseURL.appendingPathComponent("api/collections/users/records")
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "email": e, "password": password, "passwordConfirm": password,
-            "name": role.displayName
-        ])
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if !(200..<300).contains(code) {
-            // 创建失败，最常见是「该用户名已注册」。这时如果密码也对，就直接当登录成功——
-            // 家人重复注册同一用户名不该报错，应该顺势进去。
-            if (try? await authWithPassword(identity: e, password: password)) != nil {
-                persist(email: e, password: password, role: role, config: config)
-                return
-            }
-            // 用户名占用但密码不对：明确提示。
-            if code == 400 {
-                throw AccountError.server("这个用户名已被注册，但密码不对。换个用户名，或用正确密码去「登录」。")
-            }
-            try Self.check(resp, data, context: "注册")
-        }
-
-        // 注册成功后立即登录拿 token 校验，并写入凭据。
-        _ = try await authWithPassword(identity: e, password: password)
-        persist(email: e, password: password, role: role, config: config)
+        throw AccountError.registrationClosed
     }
 
     /// 登出：清掉本地凭据（数据仍在本地，连不上服务器，离线可用）。
@@ -104,7 +67,7 @@ final class AccountService {
     }
 
     @discardableResult
-    private func authWithPassword(identity: String, password: String) async throws -> String {
+    private func authWithPassword(identity: String, password: String, baseURL: URL) async throws -> String {
         let url = baseURL.appendingPathComponent("api/collections/users/auth-with-password")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

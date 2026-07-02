@@ -227,7 +227,10 @@ struct EntryDetailView: View {
         let myRole = env.config.currentRole.rawValue
         let existing = entry.comments.filter { $0.authorRole == myRole && Reaction.isReaction($0) }
         let already = ReactionSummary.from(entry.comments, myRole: myRole).mine == r
-        for c in existing { context.delete(c) }
+        for c in existing {
+            PendingDeletion.enqueue(collection: "comments", remoteId: c.remoteId, in: context)
+            context.delete(c)
+        }
         if !already {
             let comment = Comment(authorRole: myRole, text: r.encodedText)
             comment.entry = entry
@@ -474,6 +477,7 @@ struct EntryDetailView: View {
     }
 
     private func deleteMedia(_ media: Media) {
+        PendingDeletion.enqueue(collection: "media", remoteId: media.remoteId, in: context)
         env.mediaStore.deleteLocalFiles(media: media.localFileName, thumbnail: media.thumbnailFileName)
         context.delete(media)
         markEntryDirty()
@@ -483,6 +487,7 @@ struct EntryDetailView: View {
     }
 
     private func deleteVoice(_ voice: VoiceNote) {
+        PendingDeletion.enqueue(collection: "voicenotes", remoteId: voice.remoteId, in: context)
         env.mediaStore.deleteLocalFiles(media: voice.localFileName)
         context.delete(voice)
         markEntryDirty()

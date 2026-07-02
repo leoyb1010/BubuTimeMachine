@@ -14,10 +14,11 @@ struct CapsuleHomeView: View {
     @State private var unlocking: TimeCapsule?
     @State private var glowPulse = false
     @State private var showRecovery = false
+    @State private var currentDate = Date.now
 
     private var theme: Color { env.theme.theme.primary }
-    private var locked: [TimeCapsule] { capsules.filter { !canOpen($0) } }
-    private var openable: [TimeCapsule] { capsules.filter { canOpen($0) } }
+    private var locked: [TimeCapsule] { capsules.filter { !canOpen($0, at: currentDate) } }
+    private var openable: [TimeCapsule] { capsules.filter { canOpen($0, at: currentDate) } }
 
     var body: some View {
         ZStack {
@@ -56,6 +57,9 @@ struct CapsuleHomeView: View {
         .fullScreenCover(item: $unlocking) { capsule in
             CapsuleUnlockView(capsule: capsule)
         }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { date in
+            currentDate = date
+        }
     }
 
     @ViewBuilder
@@ -74,14 +78,7 @@ struct CapsuleHomeView: View {
             Label("可以开启了", systemImage: "envelope.open.fill")
                 .font(BubuTheme.Font.headline).foregroundStyle(theme)
             ForEach(openable) { capsule in
-                Button { unlocking = capsule } label: { capsuleCard(capsule, open: true) }
-                    .buttonStyle(.plain)
-                    .contextMenu { capsuleActions(capsule) }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) { deleteCapsule(capsule) } label: { Label("删除", systemImage: "trash") }
-                        Button { editing = capsule } label: { Label("修改", systemImage: "pencil") }
-                            .tint(theme)
-                    }
+                capsuleRow(capsule, open: true)
             }
         }
     }
@@ -93,13 +90,7 @@ struct CapsuleHomeView: View {
                 Label("静静等待", systemImage: "lock.fill")
                     .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
                 ForEach(locked) { capsule in
-                    capsuleCard(capsule, open: false, now: context.date)
-                        .contextMenu { capsuleActions(capsule) }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) { deleteCapsule(capsule) } label: { Label("删除", systemImage: "trash") }
-                            Button { editing = capsule } label: { Label("修改", systemImage: "pencil") }
-                                .tint(theme)
-                        }
+                    capsuleRow(capsule, open: false, now: context.date)
                 }
             }
         }
@@ -148,6 +139,31 @@ struct CapsuleHomeView: View {
                 radius: imminent ? (glowPulse ? 16 : 8) : 12, y: 4)
     }
 
+    private func capsuleRow(_ capsule: TimeCapsule, open: Bool, now: Date = .now) -> some View {
+        HStack(spacing: 10) {
+            Group {
+                if open {
+                    Button { unlocking = capsule } label: { capsuleCard(capsule, open: true, now: now) }
+                        .buttonStyle(.plain)
+                } else {
+                    capsuleCard(capsule, open: false, now: now)
+                }
+            }
+            .contextMenu { capsuleActions(capsule) }
+
+            Menu {
+                capsuleActions(capsule)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .frame(width: 44, height: 44)
+                    .background(BubuTheme.Color.card.opacity(0.75), in: Circle())
+            }
+            .accessibilityLabel("胶囊操作")
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 18) {
             BubuMascotBadge(size: 84, expression: .love)
@@ -171,8 +187,8 @@ struct CapsuleHomeView: View {
         .padding(40)
     }
 
-    private func canOpen(_ capsule: TimeCapsule) -> Bool {
-        Date.now >= capsule.unlockAt
+    private func canOpen(_ capsule: TimeCapsule, at date: Date) -> Bool {
+        date >= capsule.unlockAt
     }
 
     private func countdownText(_ date: Date, now: Date = .now) -> String {
@@ -197,11 +213,9 @@ struct CapsuleHomeView: View {
         if let blob = capsule.encryptedBlobFileName {
             env.mediaStore.deleteMedia(named: blob)
         }
-        let remoteId = capsule.remoteId
+        PendingDeletion.enqueue(collection: "timecapsules", remoteId: capsule.remoteId, in: context)
         context.delete(capsule)
         try? context.save()
-        if let remoteId {
-            Task { try? await env.apiClient.deleteTimeCapsule(remoteId: remoteId) }
-        }
+        env.syncEngine.syncNow()
     }
 }

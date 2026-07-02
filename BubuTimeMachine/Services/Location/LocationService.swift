@@ -39,6 +39,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             return true
         case .notDetermined:
             return await withCheckedContinuation { continuation in
+                permissionContinuation?.resume(returning: false)
                 permissionContinuation = continuation
                 manager.requestWhenInUseAuthorization()
             }

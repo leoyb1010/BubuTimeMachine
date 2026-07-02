@@ -101,10 +101,8 @@ private struct MediaPageView: View {
 
     @ViewBuilder
     private var photoPage: some View {
-        if let name = media.localFileName,
-           let data = mediaStore.data(forMedia: name),
-           let image = UIImage(data: data) {
-            ZoomableImageView(image: image)
+        if let name = media.localFileName {
+            LocalZoomableImage(url: mediaStore.mediaURL(for: name))
                 .ignoresSafeArea()
         } else if let remote = media.remoteURL {
             RemoteZoomableImage(remoteURL: remote)
@@ -116,25 +114,23 @@ private struct MediaPageView: View {
 
     @ViewBuilder
     private var videoPage: some View {
-        if let name = media.localFileName {
-            let localURL = mediaStore.mediaURL(for: name)
-            if FileManager.default.fileExists(atPath: localURL.path) {
-                VideoPlayer(player: AVPlayer(url: localURL))
-                    .ignoresSafeArea(edges: .bottom)
-            } else if let remote = media.remoteURL,
-                      let remoteURL = URL(string: remote) {
-                VideoPlayer(player: AVPlayer(url: remoteURL))
-                    .ignoresSafeArea(edges: .bottom)
-            } else {
-                missing("本地视频文件找不到了")
-            }
-        } else if let remote = media.remoteURL,
-                  let remoteURL = URL(string: remote) {
-            VideoPlayer(player: AVPlayer(url: remoteURL))
+        if let url = videoURL {
+            StableVideoPlayer(url: url)
                 .ignoresSafeArea(edges: .bottom)
         } else {
             missing("本地视频文件找不到了")
         }
+    }
+
+    private var videoURL: URL? {
+        if let name = media.localFileName {
+            let localURL = mediaStore.mediaURL(for: name)
+            if FileManager.default.fileExists(atPath: localURL.path) {
+                return localURL
+            }
+        }
+        guard let remote = media.remoteURL else { return nil }
+        return URL(string: remote)
     }
 
     private var audioPage: some View {
@@ -167,6 +163,55 @@ private struct MediaPageView: View {
                 .font(BubuTheme.Font.body)
         }
         .foregroundStyle(.white.opacity(0.85))
+    }
+}
+
+private struct LocalZoomableImage: View {
+    let url: URL
+
+    @State private var image: UIImage?
+    @State private var didFail = false
+
+    var body: some View {
+        Group {
+            if let image {
+                ZoomableImageView(image: image)
+            } else if didFail {
+                ContentUnavailableView("照片文件无法解码", systemImage: "photo.badge.exclamationmark")
+                    .foregroundStyle(.white)
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task(id: url) {
+            didFail = false
+            image = await Task.detached(priority: .userInitiated) {
+                ThumbnailProvider.downsample(url: url, maxPixel: 2400)
+            }.value
+            didFail = image == nil
+        }
+    }
+}
+
+private struct StableVideoPlayer: View {
+    let url: URL
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        Group {
+            if let player {
+                VideoPlayer(player: player)
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task(id: url) {
+            player?.pause()
+            player = AVPlayer(url: url)
+        }
+        .onDisappear {
+            player?.pause()
+        }
     }
 }
 
@@ -217,8 +262,11 @@ private struct RemoteZoomableImage: View {
         errorText = nil
         defer { isLoading = false }
         do {
-            let data = try await env.apiClient.downloadFile(from: remoteURL)
-            guard let decoded = UIImage(data: data) else {
+            let tempURL = try await env.apiClient.downloadFileToTemporaryURL(from: remoteURL)
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+            guard let decoded = await Task.detached(priority: .userInitiated, operation: {
+                ThumbnailProvider.downsample(url: tempURL, maxPixel: 2400)
+            }).value else {
                 errorText = "照片文件无法解码"
                 return
             }

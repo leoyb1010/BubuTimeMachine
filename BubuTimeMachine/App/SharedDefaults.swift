@@ -166,12 +166,12 @@ extension SharedWidgetSnapshot {
 
     private static func latestHeight(from measurements: [GrowthMeasurement], healthRecords: [HealthRecord]) -> Double? {
         latestNonNil(measurements.compactMap(\.heightCm))
-        ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(.height, from: $0) }.first
+        ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(GrowthMeasurementExtractor.Metric.height, from: $0) }.first
     }
 
     private static func latestWeight(from measurements: [GrowthMeasurement], healthRecords: [HealthRecord]) -> Double? {
         latestNonNil(measurements.compactMap(\.weightKg))
-        ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(.weight, from: $0) }.first
+        ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(GrowthMeasurementExtractor.Metric.weight, from: $0) }.first
     }
 }
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UIKit
 
 // MARK: - 首页 · 成长仪表盘
 /// 专属布布的主屏：年龄实时计数 + 那年今日 + 统计 + 精选 + 大记录按钮。
@@ -11,6 +12,7 @@ struct CaptureHomeView: View {
 
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
     @Query private var profiles: [ChildProfile]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
@@ -25,15 +27,19 @@ struct CaptureHomeView: View {
     @State private var firstTimeEntryID: UUID?
     @State private var showNaturalCapture = false
     @State private var naturalCaptureButtonOffset: CGSize = .zero
+    @State private var heroBackgroundImage: UIImage?
     @GestureState private var naturalCaptureButtonDrag: CGSize = .zero
 
     /// 缩略图 → 详情页的 iOS 18+ 缩放共享元素转场（与 TimelineView 同一套做法）。
     @Namespace private var zoomNS
 
     private var profile: ChildProfile? { profiles.first }
-    private var theme: BubuThemeDefinition { BubuThemeDefinition.default }
+    private var theme: BubuThemeDefinition { env.theme.theme }
     private var homeSurface: Color {
-        Color.white.opacity(0.94)
+        env.themedCard.opacity(colorScheme == .dark || env.isDarkTheme ? 0.92 : 0.94)
+    }
+    private var heroBackgroundKey: String {
+        "\(env.theme.heroMode.rawValue)|\(profile?.heroBackgroundFileName ?? "")|\(theme.id)"
     }
 
     var body: some View {
@@ -100,6 +106,9 @@ struct CaptureHomeView: View {
                 Task { await detectFirstTime(entryID: id) }
             }
         }
+        .task(id: heroBackgroundKey) {
+            await refreshHeroBackgroundImage()
+        }
         .alert("这是布布的第一次吗？", isPresented: Binding(
             get: { firstTimeSuggestion != nil },
             set: { if !$0 { firstTimeSuggestion = nil } })) {
@@ -111,7 +120,6 @@ struct CaptureHomeView: View {
         .sheet(isPresented: $showNaturalCapture) {
             NaturalCapturePanel()
         }
-        .preferredColorScheme(.light)
     }
 
     /// 保存后调用 AI 识别"第一次"（仅在启用真实 AI 时）。
@@ -158,22 +166,60 @@ struct CaptureHomeView: View {
     @ViewBuilder
     private var heroBackground: some View {
         ZStack {
-            LinearGradient(colors: [
-                Color(hex: "#FFF5F0"),
-                Color(hex: "#FDEDE6"),
-                Color(hex: "#FFF8F2")
-            ], startPoint: .topLeading, endPoint: .bottomTrailing)
+            themeBackgroundLayer
 
-            BubuBlobBackground(tint: BubuTheme.Color.primary, includeBase: false)
-                .opacity(0.34)
+            if env.theme.heroMode == .photo, let heroBackgroundImage {
+                Image(uiImage: heroBackgroundImage)
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+                    .overlay {
+                        LinearGradient(colors: [
+                            Color.black.opacity(colorScheme == .dark ? 0.36 : 0.12),
+                            theme.primary.opacity(colorScheme == .dark ? 0.28 : 0.16),
+                            BubuTheme.Color.background.opacity(colorScheme == .dark ? 0.78 : 0.62),
+                        ], startPoint: .top, endPoint: .bottom)
+                    }
+            }
+
+            BubuBlobBackground(tint: theme.primary, includeBase: false)
+                .opacity(env.theme.heroMode == .photo ? 0.18 : 0.34)
 
             LinearGradient(colors: [
-                Color(hex: "#FFF7F1").opacity(0.28),
+                BubuTheme.Color.background.opacity(0.28),
                 .clear,
-                Color(hex: "#FFF7F1").opacity(0.62)
+                BubuTheme.Color.background.opacity(0.62)
             ], startPoint: .top, endPoint: .bottom)
             .allowsHitTesting(false)
         }
+    }
+
+    @ViewBuilder
+    private var themeBackgroundLayer: some View {
+        if colorScheme == .dark || theme.isDark {
+            BubuTheme.Color.background
+        } else {
+            switch theme.backgroundStyle {
+            case .solid(let hex):
+                Color(hex: hex)
+            case .gradient(let a, let b):
+                LinearGradient(colors: [Color(hex: a), Color(hex: b), BubuTheme.Color.background],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshHeroBackgroundImage() async {
+        guard env.theme.heroMode == .photo,
+              let fileName = profile?.heroBackgroundFileName else {
+            heroBackgroundImage = nil
+            return
+        }
+        let url = env.mediaStore.mediaURL(for: fileName)
+        heroBackgroundImage = await Task.detached(priority: .utility) {
+            ThumbnailProvider.downsample(url: url, maxPixel: 1800)
+        }.value
     }
 
     // MARK: 年龄头部（布布个人身份卡）

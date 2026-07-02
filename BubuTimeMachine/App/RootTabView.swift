@@ -16,30 +16,31 @@ struct RootTabView: View {
                     CaptureHomeView(openTimeline: { selection = 1 },
                                     quickCaptureTrigger: quickCaptureTrigger)
                 }
+                .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("首页", systemImage: "house.fill") }
                 .tag(0)
                 .toolbar(.hidden, for: .tabBar)
 
                 NavigationStack {
                     TimelineView()
-                        .safeAreaPadding(.bottom, 84)
                 }
+                .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("时光", systemImage: "clock.fill") }
                 .tag(1)
                 .toolbar(.hidden, for: .tabBar)
 
                 NavigationStack {
                     MilestonesHomeView()
-                        .safeAreaPadding(.bottom, 84)
                 }
+                .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("里程碑", systemImage: "star.fill") }
                 .tag(2)
                 .toolbar(.hidden, for: .tabBar)
 
                 NavigationStack {
                     AIStudioHomeView()
-                        .safeAreaPadding(.bottom, 84)
                 }
+                .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("魔法屋", systemImage: "wand.and.stars.inverse") }
                 .tag(3)
                 .toolbar(.hidden, for: .tabBar)
@@ -62,5 +63,11 @@ struct RootTabView: View {
             }
             #endif
         }
+    }
+
+    private var tabBarSpacer: some View {
+        Color.clear
+            .frame(height: 92)
+            .allowsHitTesting(false)
     }
 }

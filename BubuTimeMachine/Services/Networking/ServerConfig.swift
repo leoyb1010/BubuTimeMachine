@@ -97,9 +97,9 @@ final class ServerConfig {
     private static let aiEnabledKey = "bubu.ai.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
 
-    /// 默认指向家庭自托管服务；真实用户是家庭内测版本，首装即可同步/使用 AI。
-    static let defaultBaseURL = "https://bubu-api.leoyuan.top"
-    static let defaultAIBaseURL = "https://bubu-ai.leoyuan.top"
+    /// 出厂默认不内置任何家庭服务器地址；真实地址由用户在设置页填写，避免源码泄露家庭域名。
+    static let defaultBaseURL = ""
+    static let defaultAIBaseURL = ""
     /// 可用 Info.plist 或调试环境注入，避免把真实密钥提交到 GitHub。
     private static var defaultAIAPIKey: String {
         let infoValue = Bundle.main.object(forInfoDictionaryKey: "BUBU_DEFAULT_AI_API_KEY") as? String
@@ -113,13 +113,7 @@ final class ServerConfig {
     static let aiBaseURLPlaceholder = "https://你的AI服务地址:8000"
 
     init() {
-        // 发布版：服务器地址固定为家庭自托管地址，忽略历史/手填值，保证装上即连；
-        // Debug 版：保留可改，便于本地联调。
-        #if DEBUG
         self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
-        #else
-        self.baseURLString = Self.defaultBaseURL
-        #endif
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
         self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""
@@ -136,8 +130,7 @@ final class ServerConfig {
         if storedAIKey.isEmpty, !initialAIKey.isEmpty {
             KeychainStore.set(initialAIKey, for: Self.aiKeyKey)
         }
-        // 家庭内测默认启用真实 AI；如果用户手动关闭过，则尊重用户设置。
-        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? true
+        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
         // didSet 不在 init 内触发，显式把身份/名字镜像到 App Group，供 Intent/Widget 首次即可读。
         SharedDefaults.mirror(role: FamilyRole(rawValue: currentRoleRaw) ?? .mama, childName: childName)

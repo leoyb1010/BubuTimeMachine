@@ -11,6 +11,8 @@ struct ChildProfileView: View {
 
     @State private var avatarPick: PhotosPickerItem?
     @State private var heroPick: PhotosPickerItem?
+    @State private var profileRefreshTask: Task<Void, Never>?
+    @State private var profileRefreshDirty = false
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
@@ -29,6 +31,9 @@ struct ChildProfileView: View {
         .navigationTitle("布布的档案")
         .onChange(of: avatarPick) { _, item in Task { await loadAvatar(item) } }
         .onChange(of: heroPick) { _, item in Task { await loadHero(item) } }
+        .onDisappear {
+            flushProfileRefresh()
+        }
     }
 
     private func avatarSection(_ profile: ChildProfile) -> some View {
@@ -75,9 +80,7 @@ struct ChildProfileView: View {
                         profile.name = $0
                         profile.syncState = .local
                         env.config.childName = $0
-                        try? context.save()
-                        env.refreshWidgetSnapshot(context: context)
-                        WidgetRefresher.reload()
+                        scheduleProfileRefresh()
                     }))
                     .multilineTextAlignment(.trailing)
             }
@@ -117,6 +120,29 @@ struct ChildProfileView: View {
     private static let unset = ""
     private static let genderOptions = ["男", "女", "其他"]
     private static let bloodTypeOptions = ["A", "B", "O", "AB"]
+
+    private func scheduleProfileRefresh() {
+        profileRefreshDirty = true
+        profileRefreshTask?.cancel()
+        profileRefreshTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(700))
+            } catch {
+                return
+            }
+            flushProfileRefresh()
+        }
+    }
+
+    private func flushProfileRefresh() {
+        profileRefreshTask?.cancel()
+        profileRefreshTask = nil
+        guard profileRefreshDirty else { return }
+        profileRefreshDirty = false
+        try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
+    }
 
     /// 把 `String?` 字段桥接成 Picker 可用的非可选 `String` 绑定（空串 = nil = 未填写）。
     private func optionalStringBinding(

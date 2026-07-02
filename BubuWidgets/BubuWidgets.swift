@@ -176,27 +176,33 @@ private struct BubuPhotoTile: View {
     var cornerRadius: CGFloat = 16
 
     var body: some View {
-        ZStack {
-            if let image = BubuAvatar.downsampledImage(from: imageData, maxPixel: 360) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                LinearGradient(
-                    colors: [WidgetPalette.honey.opacity(0.66), WidgetPalette.pink.opacity(0.62), WidgetPalette.lav.opacity(0.52)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                Image(systemName: "sparkles")
-                    .font(.system(size: 24, weight: .black))
-                    .foregroundColor(.white.opacity(0.86))
+        GeometryReader { proxy in
+            ZStack {
+                if let image = BubuAvatar.downsampledImage(from: imageData, maxPixel: max(proxy.size.width, proxy.size.height) * 3) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: max(1, proxy.size.width), height: max(1, proxy.size.height))
+                } else {
+                    LinearGradient(
+                        colors: [WidgetPalette.honey.opacity(0.66), WidgetPalette.pink.opacity(0.62), WidgetPalette.lav.opacity(0.52)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 24, weight: .black))
+                        .foregroundColor(.white.opacity(0.86))
+                }
             }
+            .frame(width: max(1, proxy.size.width), height: max(1, proxy.size.height))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.white.opacity(0.72), lineWidth: 1)
+            )
+            .clipped()
         }
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(.white.opacity(0.68), lineWidth: 1)
-        )
+        .clipped()
     }
 }
 
@@ -292,6 +298,7 @@ private struct BubuPhotoStrip: View {
             ForEach(0..<3, id: \.self) { index in
                 BubuPhotoTile(imageData: imageData(at: index), cornerRadius: 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
         }
     }
@@ -470,7 +477,8 @@ private struct BubuMomentSmallView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             BubuPhotoTile(imageData: snapshot.recentPhotoImageData, cornerRadius: 18)
-                .frame(height: 68)
+                .frame(height: 64)
+                .clipped()
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(snapshot.recentMoodEmoji ?? "✨")
@@ -481,7 +489,7 @@ private struct BubuMomentSmallView: View {
                         .lineLimit(1)
                 }
                 Text(snapshot.recentEntryTitle.isEmpty ? "今日时光" : snapshot.recentEntryTitle)
-                    .font(.system(size: 14.5, weight: .black, design: .rounded))
+                    .font(.system(size: 14, weight: .black, design: .rounded))
                     .foregroundColor(WidgetPalette.warmBrown)
                     .lineLimit(2)
                     .minimumScaleFactor(0.6)
@@ -502,13 +510,13 @@ private struct BubuMomentMediumView: View {
     var body: some View {
         HStack(spacing: 10) {
             BubuPhotoTile(imageData: snapshot.recentPhotoImageData)
-                .frame(width: 108)
-                .frame(maxHeight: .infinity)
-            VStack(alignment: .leading, spacing: 6) {
+                .frame(width: 106, height: 118)
+                .clipped()
+            VStack(alignment: .leading, spacing: 7) {
                 BubuMomentHeader(snapshot: snapshot, compact: true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(snapshot.recentEntryTitle)
-                        .font(.system(size: 19, weight: .black, design: .rounded))
+                        .font(.system(size: 18, weight: .black, design: .rounded))
                         .foregroundColor(WidgetPalette.warmBrown)
                         .lineLimit(1)
                         .minimumScaleFactor(0.62)
@@ -520,10 +528,7 @@ private struct BubuMomentMediumView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .layoutPriority(1)
-                HStack(spacing: 8) {
-                    BubuMetricPill(title: "陪伴", value: "\(snapshot.daysSinceBirth) 天", icon: "heart.fill", tint: WidgetPalette.primary)
-                    BubuMetricPill(title: "记录", value: "\(snapshot.totalEntryCount) 条", icon: "text.bubble.fill", tint: WidgetPalette.mint)
-                }
+                BubuMomentStatsRow(snapshot: snapshot)
             }
         }
     }
@@ -533,16 +538,17 @@ private struct BubuMomentLargeView: View {
     let snapshot: BubuSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             BubuMomentHeader(snapshot: snapshot)
             Text(snapshot.recentEntryTitle)
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(.system(size: 22, weight: .black, design: .rounded))
                 .foregroundColor(WidgetPalette.warmBrown)
                 .lineLimit(1)
                 .minimumScaleFactor(0.62)
 
             BubuPhotoStrip(snapshot: snapshot)
-                .frame(height: 108)
+                .frame(height: 92)
+                .clipped()
 
             Text(snapshot.recentEntryNote)
                 .font(.system(size: 12.5, weight: .medium, design: .rounded))
@@ -554,11 +560,20 @@ private struct BubuMomentLargeView: View {
                 .padding(.vertical, 7)
                 .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            HStack(spacing: 8) {
-                BubuMetricPill(title: "本月照片", value: "\(snapshot.monthlyPhotoCount) 张", icon: "photo.fill.on.rectangle.fill", tint: WidgetPalette.honey)
-                BubuMetricPill(title: "全部记录", value: "\(snapshot.totalEntryCount) 条", icon: "book.pages.fill", tint: WidgetPalette.mint)
-            }
+            BubuMomentStatsRow(snapshot: snapshot)
             Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct BubuMomentStatsRow: View {
+    let snapshot: BubuSnapshot
+
+    var body: some View {
+        HStack(spacing: 8) {
+            BubuMetricPill(title: "陪伴", value: "\(snapshot.daysSinceBirth) 天", icon: "heart.fill", tint: WidgetPalette.primary)
+            BubuMetricPill(title: "本月照片", value: "\(snapshot.monthlyPhotoCount) 张", icon: "photo.stack.fill", tint: WidgetPalette.honey)
+            BubuMetricPill(title: "记录", value: "\(snapshot.totalEntryCount) 条", icon: "book.pages.fill", tint: WidgetPalette.mint)
         }
     }
 }

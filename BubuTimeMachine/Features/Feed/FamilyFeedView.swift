@@ -14,12 +14,24 @@ struct FamilyFeedView: View {
         return derivedEvents.filter { $0.kind == selectedKind }
     }
     private var derivedEvents: [FeedEvent] {
-        let entryEvents = entries.map { entry in
-            FeedEvent(kind: .entryCreated, actorRole: entry.authorRole,
-                      summary: entry.note?.isEmpty == false ? "记录了：\(entry.note!)" : "记录了布布的一个新瞬间",
-                      targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt)
+        let persistedEntryTargets = Set(events
+            .filter { $0.kind == .entryCreated }
+            .compactMap(\.targetLocalId))
+        let entryEvents = entries.compactMap { entry -> FeedEvent? in
+            let target = entry.id.uuidString
+            guard !persistedEntryTargets.contains(target) else { return nil }
+            return FeedEvent(kind: .entryCreated, actorRole: entry.authorRole,
+                             summary: entry.note?.isEmpty == false ? "记录了：\(entry.note!)" : "记录了布布的一个新瞬间",
+                             targetLocalId: target, happenedAt: entry.happenedAt)
         }
-        return (events + entryEvents).sorted { $0.happenedAt > $1.happenedAt }
+        var seen = Set<String>()
+        return (events + entryEvents)
+            .filter { event in
+                let key = event.targetLocalId.map { "\(event.kindRaw)|\($0)" }
+                    ?? "\(event.kindRaw)|\(event.id.uuidString)"
+                return seen.insert(key).inserted
+            }
+            .sorted { $0.happenedAt > $1.happenedAt }
     }
 
     var body: some View {

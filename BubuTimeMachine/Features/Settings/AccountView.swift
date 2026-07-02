@@ -1,16 +1,14 @@
 import SwiftUI
 
-// MARK: - 登录 / 注册（单家庭多账号）
-/// 家人各自登录自己的账号；注册需要家庭码。登录身份对应署名角色（爸爸/妈妈/姥姥）。
+// MARK: - 登录（单家庭多账号）
+/// 家人各自登录自己的账号；新账号由 PocketBase 后台创建。登录身份对应署名角色（爸爸/妈妈/姥姥）。
 /// 登录成功后凭据写入 ServerConfig，同步层自动接管。
 struct AccountView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
 
-    @State private var isRegister = false
     @State private var username = ""
     @State private var password = ""
-    @State private var familyCode = ""
     @State private var roleIndex = 1     // 默认妈妈
     @State private var busy = false
     @State private var errorText: String?
@@ -23,14 +21,9 @@ struct AccountView: View {
             VStack(spacing: 18) {
                 header
 
-                segmented
-
                 VStack(spacing: 12) {
                     field("用户名（如 yuanbo）", text: $username, keyboard: .default, secure: false)
-                    field("密码（至少 6 位）", text: $password, keyboard: .default, secure: true)
-                    if isRegister {
-                        field("家庭码", text: $familyCode, keyboard: .default, secure: false)
-                    }
+                    field("密码", text: $password, keyboard: .default, secure: true)
                     rolePicker
                 }
                 .padding(16)
@@ -48,7 +41,7 @@ struct AccountView: View {
                 } label: {
                     HStack {
                         if busy { ProgressView().tint(.white) }
-                        Text(isRegister ? "注册并登录" : "登录")
+                        Text("登录")
                             .font(BubuTheme.Font.body.weight(.semibold))
                     }
                     .foregroundStyle(.white)
@@ -88,14 +81,6 @@ struct AccountView: View {
         .padding(.top, 8)
     }
 
-    private var segmented: some View {
-        Picker("", selection: $isRegister) {
-            Text("登录").tag(false)
-            Text("注册").tag(true)
-        }
-        .pickerStyle(.segmented)
-    }
-
     private var rolePicker: some View {
         HStack {
             Text("我是").font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
@@ -131,12 +116,7 @@ struct AccountView: View {
         errorText = nil
         let role = roles[roleIndex]
         do {
-            if isRegister {
-                try await service.register(username: username, password: password,
-                                           familyCode: familyCode, role: role, config: env.config)
-            } else {
-                try await service.login(username: username, password: password, role: role, config: env.config)
-            }
+            try await service.login(username: username, password: password, role: role, config: env.config)
             busy = false
             dismiss()
         } catch {
