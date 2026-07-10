@@ -8,6 +8,7 @@ struct MediaGalleryViewer: View {
     let mediaStore: MediaStore
     var onDismiss: () -> Void
 
+    @Environment(AppEnvironment.self) private var env
     @State private var selectedID: UUID
 
     init(mediaItems: [Media], initialMediaID: UUID, mediaStore: MediaStore, onDismiss: @escaping () -> Void) {
@@ -30,14 +31,11 @@ struct MediaGalleryViewer: View {
                 ContentUnavailableView("没有可查看的媒体", systemImage: "photo")
                     .foregroundStyle(.white)
             } else {
-                TabView(selection: $selectedID) {
-                    ForEach(mediaItems) { media in
-                        MediaPageView(media: media, mediaStore: mediaStore)
-                            .tag(media.id)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea()
+                // 用 UIKit UIPageViewController 翻页（系统相册同款）：翻页对齐由系统保证，
+                // 彻底避免 SwiftUI TabView(.page) 套可缩放 UIScrollView 时「滑一半卡住」的老问题。
+                PhotoPager(mediaItems: mediaItems, mediaStore: mediaStore,
+                           selectedID: $selectedID, env: env)
+                    .ignoresSafeArea()
             }
 
             VStack {
@@ -80,6 +78,98 @@ struct MediaGalleryViewer: View {
                         .padding(.bottom, 18)
                 }
             }
+        }
+    }
+}
+
+// MARK: - UIKit 翻页容器（替代 SwiftUI TabView.page，翻页对齐可靠）
+private final class MediaHostingController: UIHostingController<AnyView> {
+    let mediaID: UUID
+    init(mediaID: UUID, rootView: AnyView) {
+        self.mediaID = mediaID
+        super.init(rootView: rootView)
+        view.backgroundColor = .clear
+    }
+    @MainActor required dynamic init?(coder aDecoder: NSCoder) { fatalError("init(coder:) unavailable") }
+}
+
+private struct PhotoPager: UIViewControllerRepresentable {
+    let mediaItems: [Media]
+    let mediaStore: MediaStore
+    @Binding var selectedID: UUID
+    let env: AppEnvironment
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pager = UIPageViewController(
+            transitionStyle: .scroll,
+            navigationOrientation: .horizontal,
+            options: [.interPageSpacing: 20]     // 页间留白，相邻图片不会露边
+        )
+        pager.dataSource = context.coordinator
+        pager.delegate = context.coordinator
+        pager.view.backgroundColor = .clear
+        let start = mediaItems.firstIndex { $0.id == selectedID } ?? 0
+        if !mediaItems.isEmpty {
+            pager.setViewControllers([context.coordinator.controller(for: start)],
+                                     direction: .forward, animated: false)
+        }
+        return pager
+    }
+
+    func updateUIViewController(_ pager: UIPageViewController, context: Context) {
+        context.coordinator.parent = self
+        // 仅当外部改了 selectedID（与当前显示页不一致）才跳页；用户滑动引起的变更不会触发跳转。
+        guard let current = pager.viewControllers?.first as? MediaHostingController,
+              current.mediaID != selectedID,
+              let target = mediaItems.firstIndex(where: { $0.id == selectedID }),
+              let currentIdx = mediaItems.firstIndex(where: { $0.id == current.mediaID }) else { return }
+        pager.setViewControllers([context.coordinator.controller(for: target)],
+                                 direction: target > currentIdx ? .forward : .reverse, animated: true)
+    }
+
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: PhotoPager
+        private var cache: [UUID: MediaHostingController] = [:]
+
+        init(_ parent: PhotoPager) { self.parent = parent }
+
+        func controller(for index: Int) -> MediaHostingController {
+            let media = parent.mediaItems[index]
+            if let cached = cache[media.id] { return cached }
+            let root = AnyView(
+                MediaPageView(media: media, mediaStore: parent.mediaStore)
+                    .environment(parent.env)
+            )
+            let controller = MediaHostingController(mediaID: media.id, rootView: root)
+            cache[media.id] = controller
+            return controller
+        }
+
+        private func index(of controller: UIViewController) -> Int? {
+            guard let media = controller as? MediaHostingController else { return nil }
+            return parent.mediaItems.firstIndex { $0.id == media.mediaID }
+        }
+
+        func pageViewController(_ pvc: UIPageViewController,
+                                viewControllerBefore controller: UIViewController) -> UIViewController? {
+            guard let i = index(of: controller), i > 0 else { return nil }
+            return self.controller(for: i - 1)
+        }
+
+        func pageViewController(_ pvc: UIPageViewController,
+                                viewControllerAfter controller: UIViewController) -> UIViewController? {
+            guard let i = index(of: controller), i < parent.mediaItems.count - 1 else { return nil }
+            return self.controller(for: i + 1)
+        }
+
+        func pageViewController(_ pvc: UIPageViewController,
+                                didFinishAnimating finished: Bool,
+                                previousViewControllers: [UIViewController],
+                                transitionCompleted completed: Bool) {
+            guard completed, let current = pvc.viewControllers?.first as? MediaHostingController else { return }
+            parent.selectedID = current.mediaID
         }
     }
 }
