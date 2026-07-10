@@ -144,6 +144,24 @@ class MovieResp(BaseModel):
     narration: str
 
 
+class QARecord(BaseModel):
+    id: str = Field(max_length=64)
+    date: str = Field("", max_length=40)       # 已在 App 侧格式化，如 "2025年6月3日"
+    age: str = Field("", max_length=40)         # 当时年龄
+    text: str = Field("", max_length=1000)
+
+
+class AskReq(BaseModel):
+    question: str = Field(max_length=500)
+    child_name: str = Field("布布", max_length=40)
+    records: list[QARecord] = Field(default_factory=list, max_length=40)   # App 检索出的相关记录
+
+
+class AskResp(BaseModel):
+    answer: str
+    used_ids: list[str] = Field(default_factory=list)   # 答案实际引用到的记录 id
+
+
 # ---------- 路由 ----------
 
 @app.get("/health")
@@ -238,6 +256,36 @@ def movie_narration(req: MovieReq):
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return MovieResp(narration=text.strip())
+
+
+@app.post("/ask", response_model=AskResp, dependencies=[Depends(require_api_key)])
+def ask(req: AskReq):
+    """布布问答：App 检索出相关记录传来，这里用它们组织答案并给出处。检索在 App 端（离线优先）。"""
+    name = req.child_name
+    if not req.records:
+        return AskResp(answer=f"我在{name}的时光里没有找到相关的记录。换个说法再问问，或者先去记一笔？", used_ids=[])
+
+    sys = (
+        f"你是「{name}」的家庭记忆助手。家长会问关于{name}成长的问题，"
+        "你只能依据下面提供的记录回答，不得编造记录里没有的事实、日期或数字。"
+        "回答简短温暖、像家人聊天；如果记录里没有足够信息，就如实说没找到，不要猜。"
+        "在句末用【记录N】的形式标注你用到的记录编号（N 是记录前的编号）。"
+    )
+    lines = []
+    for i, r in enumerate(req.records, start=1):
+        meta = " · ".join(x for x in [r.date, r.age] if x)
+        lines.append(f"[{i}] （{meta}）{r.text}")
+    user = "已有记录：\n" + "\n".join(lines) + f"\n\n问题：{req.question}"
+    try:
+        text = llm.complete(sys, user, max_tokens=500)
+    except LLMError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # 从答案里解析出引用到的编号 → 映射回记录 id
+    import re as _re
+    used_idx = set(int(n) for n in _re.findall(r"【记录(\d+)】", text))
+    used_ids = [req.records[i - 1].id for i in sorted(used_idx) if 1 <= i <= len(req.records)]
+    return AskResp(answer=text.strip(), used_ids=used_ids)
 
 
 # ---------- 一句话自然语言 → 结构化记录 ----------

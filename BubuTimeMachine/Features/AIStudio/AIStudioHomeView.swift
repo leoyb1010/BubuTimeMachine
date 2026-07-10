@@ -150,6 +150,12 @@ struct AIStudioHomeView: View {
             GridItem(.flexible(), spacing: 10),
             GridItem(.flexible(), spacing: 10)
         ], spacing: 10) {
+            capabilityTile(icon: "bubble.left.and.text.bubble.right.fill",
+                           title: "问问布布",
+                           subtitle: "关于她的都能问",
+                           tint: BubuTheme.Color.primary) {
+                BubuQAView()
+            }
             capabilityTile(icon: "quote.bubble.fill",
                            title: "第一人称日记",
                            subtitle: "改写成布布的话",

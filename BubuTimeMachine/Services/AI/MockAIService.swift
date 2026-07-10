@@ -104,6 +104,15 @@ final class MockAIService: AIService {
         """
     }
 
+    func ask(question: String, childName: String, records: [QAContextRecord]) async throws -> QAAnswer {
+        try? await Task.sleep(for: .seconds(1))
+        guard let first = records.first else {
+            return QAAnswer(answer: "我在\(childName)的时光里还没找到相关记录，先去记一笔吧。", usedIDs: [])
+        }
+        return QAAnswer(answer: "根据记录，\(first.dateText)\(first.text)。【记录1】（这是本地示例，配置真实 AI 后会更聪明）",
+                        usedIDs: [first.id])
+    }
+
     func generateGrowthMovie(year: Int) async throws -> GrowthMovieJob {
         try? await Task.sleep(for: .milliseconds(500))
         return GrowthMovieJob(jobId: "mock-job-\(year)", year: year, status: "generating")

@@ -40,6 +40,16 @@ final class BubuAIService: AIService, @unchecked Sendable {
         return (obj["first_person"] as? String) ?? ""
     }
 
+    func ask(question: String, childName: String, records: [QAContextRecord]) async throws -> QAAnswer {
+        let recs: [[String: Any]] = records.map {
+            ["id": $0.id, "date": $0.dateText, "age": $0.ageText, "text": $0.text]
+        }
+        let body: [String: Any] = ["question": question, "child_name": childName, "records": recs]
+        let obj = try await post("ask", body)
+        return QAAnswer(answer: obj["answer"] as? String ?? "",
+                        usedIDs: obj["used_ids"] as? [String] ?? [])
+    }
+
     /// 富归类：传文字 + 标签 + 地点。
     func classifyContent(note: String?, tags: [String], locationName: String?) async throws -> AIClassification {
         let body: [String: Any] = [
