@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "1.2.0"
-    CURRENT_PROJECT_VERSION: "2026061312"
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: "2026071001"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -58,19 +58,57 @@ targets:
       - path: BubuWatch
         excludes:
           - "Info.plist"
-      # 通信契约 + 纯 Foundation 的年龄/枚举（手表不引入 SwiftData）
+          - "BubuWatch.entitlements"
+      # 通信契约 + 手表本地快照存储 + 纯 Foundation 的年龄/枚举（手表不引入 SwiftData）
       - path: WatchShared/WatchLink.swift
+      - path: WatchShared/WatchSnapshotStore.swift
       - path: BubuTimeMachine/Models/AgeCalculator.swift
       - path: BubuTimeMachine/Models/Enums.swift
+    entitlements:
+      path: BubuWatch/BubuWatch.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.bubu.timemachine.watch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.watchkitapp
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: BubuWatch/Info.plist
+        CODE_SIGN_ENTITLEMENTS: BubuWatch/BubuWatch.entitlements
         TARGETED_DEVICE_FAMILY: "4"
         WATCHOS_DEPLOYMENT_TARGET: "11.0"
     dependencies:
       - sdk: WatchConnectivity.framework
+      - target: BubuWatchWidgets
+        embed: true
+
+  BubuWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: BubuWatchWidgets
+        excludes:
+          - "BubuWatchWidgets.entitlements"
+          - "Info.plist"
+      - path: WatchShared/WatchLink.swift
+      - path: WatchShared/WatchSnapshotStore.swift
+    entitlements:
+      path: BubuWatchWidgets/BubuWatchWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.bubu.timemachine.watch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.watchkitapp.widgets
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: BubuWatchWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: BubuWatchWidgets/BubuWatchWidgets.entitlements
+        TARGETED_DEVICE_FAMILY: "4"
+        WATCHOS_DEPLOYMENT_TARGET: "11.0"
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
 
   BubuWidgetsExtension:
     type: app-extension

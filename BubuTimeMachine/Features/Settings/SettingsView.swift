@@ -55,6 +55,9 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                group("Apple Watch") {
+                    row("布布上表盘", icon: "applewatch.watchface", tint: env.theme.theme.primary) { WatchFaceGuideView() }
+                }
                 group("关于") {
                     row("更新记录", icon: "sparkles", tint: env.theme.theme.primary) { WhatsNewListView() }
                 }

@@ -1,6 +1,7 @@
 import Foundation
 import WatchConnectivity
 import Observation
+import WidgetKit
 
 // MARK: - 手表连接器（watchOS 侧）
 /// 收 iPhone 推来的概览快照；把记录意图发回 iPhone。可达时即时发送，不可达时排队保证送达（离线也不丢）。
@@ -75,6 +76,8 @@ extension WatchConnector: WCSessionDelegate {
         let ctx = session.receivedApplicationContext
         if let data = ctx[WatchLink.snapshotKey] as? Data,
            let snap = WatchLink.decode(WatchSnapshot.self, from: data) {
+            WatchSnapshotStore.save(snap)
+            WidgetCenter.shared.reloadAllTimelines()
             Task { @MainActor in if self.snapshot == nil { self.snapshot = snap } }
         }
     }
@@ -82,6 +85,9 @@ extension WatchConnector: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         guard let data = context[WatchLink.snapshotKey] as? Data,
               let snap = WatchLink.decode(WatchSnapshot.self, from: data) else { return }
+        // 落到手表本地 App Group 并刷新表盘复杂功能。
+        WatchSnapshotStore.save(snap)
+        WidgetCenter.shared.reloadAllTimelines()
         Task { @MainActor in self.snapshot = snap }
     }
 }
