@@ -315,9 +315,18 @@ final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
         imageView.isUserInteractionEnabled = true
         addSubview(imageView)
 
+        // 未放大时禁用内层滚动，把横滑让给外层 TabView 翻页（否则内层平移手势与翻页抢滑，
+        // 造成「一次滑半张、停在中间」）。放大后再启用以支持平移。缩放/双击手势不受影响。
+        isScrollEnabled = false
+
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         addGestureRecognizer(doubleTap)
+    }
+
+    /// 只有放大后才允许内层滚动（平移），原始大小时交给 TabView 翻页。
+    private func updateScrollEnabled() {
+        isScrollEnabled = zoomScale > minimumZoomScale + 0.01
     }
 
     required init?(coder: NSCoder) {
@@ -332,6 +341,7 @@ final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
         lastImage = image
         imageView.image = image
         zoomScale = 1
+        updateScrollEnabled()
         setNeedsLayout()
     }
 
@@ -370,6 +380,7 @@ final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         centerImage()
+        updateScrollEnabled()
     }
 
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
