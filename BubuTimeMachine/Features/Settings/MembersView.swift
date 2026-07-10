@@ -84,7 +84,10 @@ struct MembersView: View {
         for i in offsets {
             let m = members[i]
             if m.id == env.currentMemberId {
-                env.currentMemberId = members.first { $0.id != m.id }?.id
+                let fallback = members.first { $0.id != m.id }
+                env.currentMemberId = fallback?.id
+                // 同步署名身份，否则会卡在已删成员的角色（长辈时还会卡在简单模式）。
+                if let relation = fallback?.relation { env.config.currentRoleRaw = relation }
             }
             PendingDeletion.enqueue(collection: "members", remoteId: m.remoteId, in: context)
             context.delete(m)

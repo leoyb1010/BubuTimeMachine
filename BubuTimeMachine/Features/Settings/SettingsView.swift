@@ -37,6 +37,13 @@ struct SettingsView: View {
                     }
                     .onChange(of: soundOn) { _, on in if on { BubuSound.play(.save) } }
                     .tint(env.theme.theme.primary)
+
+                    Toggle(isOn: $config.simpleModeEnabled) {
+                        settingRowLabel(config.currentRole.simpleModeName, icon: "hand.tap.fill",
+                                        tint: BubuTheme.Color.success,
+                                        subtitle: "大字大按钮，只保留 拍照 / 录音 / 看布布。切到长辈身份会自动开启")
+                    }
+                    .tint(env.theme.theme.primary)
                 }
                 reminderCard(config: config)
                 dataCard

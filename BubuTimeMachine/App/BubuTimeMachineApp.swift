@@ -240,7 +240,9 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-uitest-capture") {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-simple") {
+            SimpleModeView()
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-capture") {
             DebugQuickCapturePreviewView()
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-timeline") {
             NavigationStack { TimelineView() }
@@ -257,10 +259,20 @@ struct RootView: View {
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-export") {
             NavigationStack { ExportView() }
         } else {
-            RootTabView()
+            mainOrSimple
         }
         #else
-        RootTabView()
+        mainOrSimple
         #endif
+    }
+
+    /// 身份决定界面：长辈（或手动开启）→ 简单模式；否则完整 App。
+    @ViewBuilder
+    private var mainOrSimple: some View {
+        if env.config.simpleModeEnabled {
+            SimpleModeView().transition(.opacity)
+        } else {
+            RootTabView().transition(.opacity)
+        }
     }
 }

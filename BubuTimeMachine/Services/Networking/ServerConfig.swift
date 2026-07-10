@@ -17,7 +17,25 @@ final class ServerConfig {
             UserDefaults.standard.set(currentRoleRaw, forKey: Self.roleKey)
             // 镜像到 App Group，供 Intent/Widget 读取当前署名身份。
             SharedDefaults.currentRole = FamilyRole(rawValue: currentRoleRaw) ?? .mama
+            let newRole = FamilyRole(rawValue: currentRoleRaw) ?? .mama
+            // 从「父母」切到「长辈」时，记住切换前的父母身份，供退出简单模式时切回（避免误署长辈名）。
+            if newRole.isElder, !(FamilyRole(rawValue: oldValue)?.isElder ?? false) {
+                roleBeforeElderRaw = oldValue
+            }
+            // 身份决定模式：切到长辈自动进「简单模式」，切回父母自动回完整 App。
+            simpleModeEnabled = newRole.isElder
         }
+    }
+
+    /// 简单模式（老人模式）开关：大字大按钮、只保留 拍照 / 录音 / 看布布。
+    /// 跟随身份自动开关（见 currentRoleRaw.didSet），也可在设置里手动覆盖。
+    var simpleModeEnabled: Bool {
+        didSet { UserDefaults.standard.set(simpleModeEnabled, forKey: Self.simpleModeKey) }
+    }
+
+    /// 切到长辈身份前最后一次的父母身份（退出简单模式时切回）。
+    var roleBeforeElderRaw: String? {
+        didSet { UserDefaults.standard.set(roleBeforeElderRaw, forKey: Self.roleBeforeElderKey) }
     }
 
     var currentRole: FamilyRole {
@@ -96,6 +114,8 @@ final class ServerConfig {
     private static let aiKeyKey = "bubu.ai.apiKey"
     private static let aiEnabledKey = "bubu.ai.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
+    private static let simpleModeKey = "bubu.simpleMode.enabled"
+    private static let roleBeforeElderKey = "bubu.simpleMode.roleBeforeElder"
 
     /// 出厂默认不内置任何家庭服务器地址；真实地址由用户在设置页填写，避免源码泄露家庭域名。
     static let defaultBaseURL = ""
@@ -132,6 +152,10 @@ final class ServerConfig {
         }
         self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
+        // 简单模式：已存过就用存的；从没存过时，按当前身份是否长辈给默认值（长辈默认开）。
+        let storedRole = FamilyRole(rawValue: UserDefaults.standard.string(forKey: Self.roleKey) ?? "") ?? .mama
+        self.simpleModeEnabled = UserDefaults.standard.object(forKey: Self.simpleModeKey) as? Bool ?? storedRole.isElder
+        self.roleBeforeElderRaw = UserDefaults.standard.string(forKey: Self.roleBeforeElderKey)
         // didSet 不在 init 内触发，显式把身份/名字镜像到 App Group，供 Intent/Widget 首次即可读。
         SharedDefaults.mirror(role: FamilyRole(rawValue: currentRoleRaw) ?? .mama, childName: childName)
     }

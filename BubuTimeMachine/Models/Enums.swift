@@ -39,6 +39,20 @@ enum FamilyRole: String, Codable, CaseIterable, Sendable {
     case other = "家人"
 
     var displayName: String { rawValue }
+
+    /// 是否为需要「简单模式」的长辈身份（爷爷/奶奶/姥姥/姥爷）。
+    var isElder: Bool {
+        switch self {
+        case .grandma, .grandpa, .yeye, .nainai: return true
+        default: return false
+        }
+    }
+
+    /// 简单模式的显示名，跟随当前身份：长辈 →「爷爷/奶奶/姥姥/姥爷模式」；其余 →「简单模式」。
+    /// 关键：不写死"姥姥模式"，谁在用就是谁的模式。
+    var simpleModeName: String {
+        isElder ? "\(displayName)模式" : "简单模式"
+    }
 }
 
 // MARK: - 心情标签
