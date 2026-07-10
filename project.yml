@@ -29,6 +29,8 @@ targets:
         excludes:
           - "Info.plist"
           - "BubuTimeMachine.entitlements"
+      # 手表通信契约（与 watchOS target 共用）
+      - path: WatchShared/WatchLink.swift
     entitlements:
       path: BubuTimeMachine/BubuTimeMachine.entitlements
       properties:
@@ -45,6 +47,30 @@ targets:
     dependencies:
       - target: BubuWidgetsExtension
         embed: true
+      - target: BubuWatch
+        embed: true
+
+  BubuWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: BubuWatch
+        excludes:
+          - "Info.plist"
+      # 通信契约 + 纯 Foundation 的年龄/枚举（手表不引入 SwiftData）
+      - path: WatchShared/WatchLink.swift
+      - path: BubuTimeMachine/Models/AgeCalculator.swift
+      - path: BubuTimeMachine/Models/Enums.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.watchkitapp
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: BubuWatch/Info.plist
+        TARGETED_DEVICE_FAMILY: "4"
+        WATCHOS_DEPLOYMENT_TARGET: "11.0"
+    dependencies:
+      - sdk: WatchConnectivity.framework
 
   BubuWidgetsExtension:
     type: app-extension

@@ -14,24 +14,28 @@ import SwiftData
 /// 不与 SyncEngine 并发写同一 context。
 enum EntryWriter {
 
-    /// 写一条纯文字瞬间。返回新建 Entry 的 id；失败抛错（Intent 层据此给用户反馈）。
+    /// 写一条纯文字瞬间。返回 Entry 的 id；失败抛错（Intent 层据此给用户反馈）。
+    /// `localId` 用于幂等（手表离线补传、重发不重复）：若同 id 记录已存在则直接返回。
     @discardableResult
     static func quickTextEntry(
         note: String,
         mood: Mood? = nil,
         role: FamilyRole,
-        in context: ModelContext
+        in context: ModelContext,
+        localId: UUID? = nil,
+        happenedAt: Date = .now
     ) throws -> UUID {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw EntryWriterError.emptyNote
         }
+        if let localId, entryExists(id: localId, in: context) { return localId }
 
-        let entry = Entry(happenedAt: .now, authorRole: role.rawValue, note: trimmed)
+        let entry = Entry(happenedAt: happenedAt, authorRole: role.rawValue, note: trimmed)
+        if let localId { entry.id = localId }
         entry.mood = mood
         context.insert(entry)
 
-        // 与 CaptureModel.savePickedItems 同构：记录后写一条家庭动态。
         let event = FeedEvent(kind: .entryCreated,
                               actorRole: role.rawValue,
                               summary: "记录了：\(trimmed)",
@@ -41,6 +45,43 @@ enum EntryWriter {
 
         try context.save()
         return entry.id
+    }
+
+    /// 写一条健康打卡（手表一键：喝奶/睡觉…）。幂等同上。返回 HealthRecord 的 id。
+    @discardableResult
+    static func quickHealthEntry(
+        kind: HealthRecordKind,
+        title: String,
+        role: FamilyRole,
+        in context: ModelContext,
+        localId: UUID? = nil,
+        happenedAt: Date = .now
+    ) throws -> UUID {
+        if let localId, healthExists(id: localId, in: context) { return localId }
+
+        let record = HealthRecord(kind: kind, title: title, recordedAt: happenedAt)
+        if let localId { record.id = localId }
+        context.insert(record)
+
+        let event = FeedEvent(kind: .healthRecorded,
+                              actorRole: role.rawValue,
+                              summary: "记了一次\(kind.title)：\(title)",
+                              targetLocalId: record.id.uuidString,
+                              happenedAt: happenedAt)
+        context.insert(event)
+
+        try context.save()
+        return record.id
+    }
+
+    private static func entryExists(id: UUID, in context: ModelContext) -> Bool {
+        let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+        return ((try? context.fetchCount(d)) ?? 0) > 0
+    }
+
+    private static func healthExists(id: UUID, in context: ModelContext) -> Bool {
+        let d = FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == id })
+        return ((try? context.fetchCount(d)) ?? 0) > 0
     }
 
     /// 读取当前布布档案（Intent 念年龄 / 小组件取生日用）。无档案返回 nil。

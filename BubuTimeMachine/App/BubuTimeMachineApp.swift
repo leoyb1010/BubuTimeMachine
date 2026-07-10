@@ -48,6 +48,20 @@ struct BubuTimeMachineApp: App {
                     env.bootstrap(context: modelContainer.mainContext)
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                     WidgetRefresher.reload()
+                    // 手表连接：注入 App 正在用的 context（手表记录能让前台时光轴实时刷新）+ 激活 + 推初始快照 + 监听
+                    WatchConnectivityManager.shared.appContext = modelContainer.mainContext
+                    WatchConnectivityManager.shared.activate()
+                    pushWatchSnapshot()
+                    NotificationCenter.default.addObserver(
+                        forName: WatchConnectivityManager.didRecordNotification,
+                        object: nil, queue: .main) { _ in
+                        Task { @MainActor in
+                            env.syncEngine.syncNow()
+                            env.refreshWidgetSnapshot(context: modelContainer.mainContext)
+                            WidgetRefresher.reload()
+                            pushWatchSnapshot()
+                        }
+                    }
                 }
         }
         .modelContainer(modelContainer)
@@ -58,10 +72,19 @@ struct BubuTimeMachineApp: App {
                 env.syncEngine.start()
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                 WidgetRefresher.reload()
+                pushWatchSnapshot()
             case .background: env.syncEngine.stopPolling()
             default: break
             }
         }
+    }
+
+    /// 读库生成概览快照并推给手表。
+    @MainActor
+    private func pushWatchSnapshot() {
+        guard let snapshot = WatchSnapshotBuilder.make(context: modelContainer.mainContext,
+                                                       role: env.config.currentRole) else { return }
+        WatchConnectivityManager.shared.push(snapshot)
     }
 
     #if DEBUG
