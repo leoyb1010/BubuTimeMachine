@@ -15,6 +15,26 @@ protocol AIService: Sendable {
     func parseNaturalCapture(_ request: NaturalCaptureRequest) async throws -> NaturalCaptureResult
     /// 布布问答：App 端检索出相关记录传入，服务端组织答案并回引用到的记录 id。
     func ask(question: String, childName: String, records: [QAContextRecord]) async throws -> QAAnswer
+    /// 成长电影服务端合成：照片本就同步在家庭自己的服务器，App 只传【本机照片 URL】。
+    func startMovieRender(childName: String, year: Int, template: String,
+                          photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus
+    func movieRenderStatus(jobId: String) async throws -> MovieRenderStatus
+    /// 下载合成好的成片到本地临时文件，供播放/分享。
+    func downloadRenderedMovie(jobId: String) async throws -> URL
+}
+
+// MARK: - 成长电影服务端合成
+struct MovieRenderPhoto: Sendable {
+    let url: String       // 家庭自托管 PocketBase 上的照片 URL
+    let caption: String
+}
+
+struct MovieRenderStatus: Sendable {
+    let jobId: String
+    let status: String    // queued / rendering / ready / failed
+    let progress: Double  // 0...1
+    let ready: Bool
+    let error: String
 }
 
 // MARK: - 问答上下文（检索在 App 端做）

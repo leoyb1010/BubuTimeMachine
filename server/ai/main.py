@@ -28,9 +28,11 @@ from threading import Lock
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from llm import LLMClient, LLMError
+import movie_render
 
 logging.basicConfig(
     level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
@@ -286,6 +288,61 @@ def ask(req: AskReq):
     used_idx = set(int(n) for n in _re.findall(r"【记录(\d+)】", text))
     used_ids = [req.records[i - 1].id for i in sorted(used_idx) if 1 <= i <= len(req.records)]
     return AskResp(answer=text.strip(), used_ids=used_ids)
+
+
+# ---------- 成长电影 · 服务端合成（ffmpeg）----------
+# 隐私：照片本就通过家庭自己的 PocketBase 同步到本机，App 只传【本机照片 URL】+ 文案。
+
+class MovieRenderPhoto(BaseModel):
+    url: str = Field(max_length=2000)          # 家庭自托管 PocketBase 上的照片 URL
+    caption: str = Field("", max_length=120)
+
+
+class MovieRenderReq(BaseModel):
+    child_name: str = Field("布布", max_length=40)
+    year: int = 0
+    template: str = Field("documentary", max_length=40)
+    narration: str = Field("", max_length=2000)
+    photos: list[MovieRenderPhoto] = Field(default_factory=list, max_length=60)
+
+
+class MovieRenderResp(BaseModel):
+    job_id: str
+    status: str
+    progress: float = 0.0
+    error: str = ""
+    ready: bool = False
+    year: int = 0
+
+
+@app.post("/movie/render", response_model=MovieRenderResp,
+          dependencies=[Depends(require_api_key)])
+def movie_render_start(req: MovieRenderReq):
+    if not movie_render.ffmpeg_available():
+        raise HTTPException(status_code=503, detail="服务器未安装 ffmpeg，无法服务端合成")
+    if not req.photos:
+        raise HTTPException(status_code=400, detail="没有可合成的照片")
+    photos = [movie_render.RenderPhoto(url=p.url, caption=p.caption) for p in req.photos]
+    job = movie_render.submit_render(req.child_name, req.year, req.template, photos, req.narration)
+    return MovieRenderResp(**job.public())
+
+
+@app.get("/movie/status/{job_id}", response_model=MovieRenderResp,
+         dependencies=[Depends(require_api_key)])
+def movie_render_status(job_id: str):
+    job = movie_render.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return MovieRenderResp(**job.public())
+
+
+@app.get("/movie/file/{job_id}", dependencies=[Depends(require_api_key)])
+def movie_render_file(job_id: str):
+    job = movie_render.get_job(job_id)
+    if not job or job.status != "ready" or not job.file_path:
+        raise HTTPException(status_code=404, detail="成片尚未就绪")
+    return FileResponse(job.file_path, media_type="video/mp4",
+                        filename=f"{job.child_name}_{job.year}.mp4")
 
 
 # ---------- 一句话自然语言 → 结构化记录 ----------

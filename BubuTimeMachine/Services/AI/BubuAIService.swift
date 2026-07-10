@@ -50,6 +50,43 @@ final class BubuAIService: AIService, @unchecked Sendable {
                         usedIDs: obj["used_ids"] as? [String] ?? [])
     }
 
+    func startMovieRender(childName: String, year: Int, template: String,
+                          photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
+        let body: [String: Any] = [
+            "child_name": childName, "year": year, "template": template, "narration": narration,
+            "photos": photos.map { ["url": $0.url, "caption": $0.caption] },
+        ]
+        let obj = try await post("movie/render", body)
+        return Self.renderStatus(from: obj)
+    }
+
+    func movieRenderStatus(jobId: String) async throws -> MovieRenderStatus {
+        let obj = try await get("movie/status/\(jobId)")
+        return Self.renderStatus(from: obj)
+    }
+
+    func downloadRenderedMovie(jobId: String) async throws -> URL {
+        let url = baseURL.appendingPathComponent("movie/file/\(jobId)")
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 120
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        let dest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu_movie_\(jobId).mp4")
+        try data.write(to: dest, options: .atomic)
+        return dest
+    }
+
+    private static func renderStatus(from obj: [String: Any]) -> MovieRenderStatus {
+        MovieRenderStatus(
+            jobId: obj["job_id"] as? String ?? "",
+            status: obj["status"] as? String ?? "failed",
+            progress: obj["progress"] as? Double ?? 0,
+            ready: obj["ready"] as? Bool ?? false,
+            error: obj["error"] as? String ?? "")
+    }
+
     /// 富归类：传文字 + 标签 + 地点。
     func classifyContent(note: String?, tags: [String], locationName: String?) async throws -> AIClassification {
         let body: [String: Any] = [
@@ -129,6 +166,16 @@ final class BubuAIService: AIService, @unchecked Sendable {
     }
 
     // MARK: - 私有
+
+    private func get(_ path: String) async throws -> [String: Any] {
+        let url = baseURL.appendingPathComponent(path)
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
 
     private func post(_ path: String, _ body: [String: Any]) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent(path)

@@ -113,6 +113,20 @@ final class MockAIService: AIService {
                         usedIDs: [first.id])
     }
 
+    func startMovieRender(childName: String, year: Int, template: String,
+                          photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
+        // 无自托管服务器时不支持真实合成：明确抛错，UI 保留本地预览草稿。
+        throw APIError.server(503, "服务端合成需要配置自托管 AI 服务器")
+    }
+
+    func movieRenderStatus(jobId: String) async throws -> MovieRenderStatus {
+        throw APIError.server(503, "无服务器")
+    }
+
+    func downloadRenderedMovie(jobId: String) async throws -> URL {
+        throw APIError.server(503, "无服务器")
+    }
+
     func generateGrowthMovie(year: Int) async throws -> GrowthMovieJob {
         try? await Task.sleep(for: .milliseconds(500))
         return GrowthMovieJob(jobId: "mock-job-\(year)", year: year, status: "generating")

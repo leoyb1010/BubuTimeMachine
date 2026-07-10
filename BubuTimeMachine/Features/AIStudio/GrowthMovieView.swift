@@ -1,8 +1,11 @@
 import SwiftUI
 import SwiftData
+import AVKit
 
 // MARK: - 年度成长电影
 /// 端侧生成“电影草稿”：按年龄 / 地点 / 时间筛选真实照片，套用模板播放。
+/// 配置了自托管服务器时，可再「合成高清版」——照片本就同步在家庭自己的服务器，
+/// 服务端用 ffmpeg 合成真正的 mp4（Ken Burns + 交叉淡入）供播放/分享。
 struct GrowthMovieView: View {
     @Environment(AppEnvironment.self) private var env
     @Query private var profiles: [ChildProfile]
@@ -16,6 +19,13 @@ struct GrowthMovieView: View {
     @State private var draft: MovieDraft?
     @State private var aiNarration: String?
     @State private var showPlayer = false
+
+    // 服务端合成态
+    @State private var serverRendering = false
+    @State private var serverProgress: Double = 0
+    @State private var serverMovieURL: URL?
+    @State private var serverHint = ""
+    @State private var showServerPlayer = false
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -41,6 +51,11 @@ struct GrowthMovieView: View {
                 GrowthMoviePlayer(draft: draft, mediaStore: env.mediaStore, tint: theme) {
                     showPlayer = false
                 }
+            }
+        }
+        .fullScreenCover(isPresented: $showServerPlayer) {
+            if let serverMovieURL {
+                ServerMoviePlayer(url: serverMovieURL, title: draftTitle) { showServerPlayer = false }
             }
         }
     }
@@ -220,7 +235,73 @@ struct GrowthMovieView: View {
                         .background(theme.opacity(0.10), in: Capsule())
                 }
                 .buttonStyle(.plain)
+
+                // 配了服务器才出「合成高清版」：真正的 mp4，可存可分享
+                if env.config.isAIConfigured {
+                    Button { Task { await renderOnServer() } } label: {
+                        Label(serverRendering
+                              ? "服务端合成中… \(Int(serverProgress * 100))%"
+                              : "合成高清版 · 服务端",
+                              systemImage: serverRendering ? "gearshape.2.fill" : "film.fill")
+                            .font(BubuTheme.Font.headline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).frame(height: 50)
+                            .background(theme, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(serverRendering)
+
+                    if !serverHint.isEmpty {
+                        Text(serverHint)
+                            .font(BubuTheme.Font.caption)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
             }
+        }
+    }
+
+    /// 服务端合成成片：收集已同步照片的远端 URL → 提交渲染 → 轮询 → 下载播放。
+    /// 全程降级：无照片同步/服务器不可用时给提示，本地预览草稿始终可用。
+    private func renderOnServer() async {
+        let photos = remoteMoviePhotos
+        guard !photos.isEmpty else {
+            serverHint = "这些照片还没同步到服务器，先联网同步后再合成高清版～"
+            return
+        }
+        serverHint = ""; serverRendering = true; serverProgress = 0; serverMovieURL = nil
+        defer { serverRendering = false }
+        do {
+            let year = selectedYear ?? Calendar.current.component(.year, from: .now)
+            var status = try await env.aiService.startMovieRender(
+                childName: env.config.childName, year: year,
+                template: selectedTemplate.rawValue, photos: photos, narration: aiNarration ?? "")
+            var polls = 0
+            while !status.ready && status.status != "failed" && polls < 90 {
+                try await Task.sleep(for: .seconds(2))
+                status = try await env.aiService.movieRenderStatus(jobId: status.jobId)
+                serverProgress = status.progress
+                polls += 1
+            }
+            guard status.ready else {
+                serverHint = status.error.isEmpty ? "服务端合成失败，稍后再试" : status.error
+                return
+            }
+            serverMovieURL = try await env.aiService.downloadRenderedMovie(jobId: status.jobId)
+            showServerPlayer = true
+        } catch {
+            serverHint = "服务端合成暂不可用：\(error.localizedDescription)"
+        }
+    }
+
+    /// 已同步（有远端 URL）的照片 + 对齐的文案，供服务端合成。
+    private var remoteMoviePhotos: [MovieRenderPhoto] {
+        let caps = buildCaptions()
+        return zip(selectedPreviewMedia, caps).compactMap { media, cap in
+            guard let u = media.remoteURL, !u.isEmpty else { return nil }
+            return MovieRenderPhoto(url: u, caption: cap)
         }
     }
 
@@ -332,6 +413,42 @@ enum MovieTemplate: String, CaseIterable, Identifiable {
     var title: String { switch self { case .documentary: "温柔纪录片"; case .travel: "出门旅行"; case .birthday: "生日回顾"; case .daily: "日常碎片" } }
     var subtitle: String { switch self { case .documentary: "按时间慢慢讲"; case .travel: "适合公园和外出"; case .birthday: "更有仪式感"; case .daily: "短节奏、多照片" } }
     var emoji: String { switch self { case .documentary: "🎬"; case .travel: "🧳"; case .birthday: "🎂"; case .daily: "✨" } }
+}
+
+// MARK: - 服务端成片播放器（AVKit + 分享）
+private struct ServerMoviePlayer: View {
+    let url: URL
+    let title: String
+    let onClose: () -> Void
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+                    .onAppear { player.play() }
+            }
+            VStack {
+                HStack {
+                    Button { player?.pause(); onClose() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up.circle.fill")
+                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                .padding()
+                Spacer()
+            }
+        }
+        .onAppear { player = AVPlayer(url: url) }
+        .onDisappear { player?.pause() }
+    }
 }
 
 enum MovieTimeRange: String, CaseIterable, Identifiable {
