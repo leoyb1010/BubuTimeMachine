@@ -307,10 +307,10 @@ struct BubuIdentityCard: View {
         // 奶油马卡龙：peach → pink → lav 柔粉渐变（对照设计稿 Hero 卡）。
         LinearGradient(
             colors: [
-                BubuTheme.Color.peach.opacity(0.55),
-                BubuTheme.Color.pink.opacity(0.45),
-                BubuTheme.Color.lav.opacity(0.45),
-                .white.opacity(0.30)
+                BubuTheme.Color.heroSurfaceTop.opacity(0.55),
+                BubuTheme.Color.heroSurfaceMid.opacity(0.45),
+                BubuTheme.Color.heroSurfaceEnd.opacity(0.45),
+                BubuTheme.Color.heroSurfaceHighlight.opacity(0.30)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing

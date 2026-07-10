@@ -512,9 +512,9 @@ struct CaptureHomeView: View {
 
     private var storyTile: some View {
         compactTileSurface(
-            fill: AnyShapeStyle(LinearGradient(colors: [BubuTheme.Color.butter.opacity(0.82),
-                                                        BubuTheme.Color.peach.opacity(0.88),
-                                                        BubuTheme.Color.pink.opacity(0.72)],
+            fill: AnyShapeStyle(LinearGradient(colors: [BubuTheme.Color.warmSurfaceTop,
+                                                        BubuTheme.Color.warmSurfaceMid,
+                                                        BubuTheme.Color.warmSurfaceEnd],
                                                startPoint: .topLeading,
                                                endPoint: .bottomTrailing)),
             centered: true
@@ -572,8 +572,8 @@ struct CaptureHomeView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         let surface = fill ?? AnyShapeStyle(LinearGradient(colors: [
-            Color.white.opacity(0.96),
-            Color(hex: "#FCEDE4").opacity(0.62)
+            BubuTheme.Color.tileSurfaceTop,
+            BubuTheme.Color.tileSurfaceBottom
         ], startPoint: .topLeading, endPoint: .bottomTrailing))
         return VStack(alignment: .leading, spacing: 6) {
             content()
@@ -644,7 +644,7 @@ struct CaptureHomeView: View {
                         .lineLimit(1)
                     Text("由你记录的点滴，自动编织成故事")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color(red: 0.54, green: 0.42, blue: 0.33))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -655,7 +655,7 @@ struct CaptureHomeView: View {
             .padding(16)
             .frame(maxWidth: .infinity)
             .background(
-                LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.peach],
+                LinearGradient(colors: [BubuTheme.Color.warmSurfaceTop, BubuTheme.Color.warmSurfaceMid],
                                startPoint: .leading, endPoint: .trailing),
                 in: RoundedRectangle(cornerRadius: 28, style: .continuous)
             )
@@ -699,7 +699,7 @@ struct CaptureHomeView: View {
             Button { model?.startQuickCapture() } label: {
                 VStack(spacing: 8) {
                     ZStack {
-                        Circle().fill(Color(hex: "#FFF1E8")).frame(width: 46, height: 46)
+                        Circle().fill(BubuTheme.Color.softFill).frame(width: 46, height: 46)
                         Image(systemName: "plus")
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(BubuTheme.Color.deepRose)
@@ -714,7 +714,7 @@ struct CaptureHomeView: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 130)
                 .background(
-                    LinearGradient(colors: [Color.white.opacity(0.96), Color(hex: "#FFF1E8").opacity(0.72)],
+                    LinearGradient(colors: [BubuTheme.Color.tileSurfaceTop, BubuTheme.Color.tileSurfaceBottom],
                                    startPoint: .top, endPoint: .bottom),
                     in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                 )
@@ -784,7 +784,7 @@ struct CaptureHomeView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .bubuCardShadow()
     }
 

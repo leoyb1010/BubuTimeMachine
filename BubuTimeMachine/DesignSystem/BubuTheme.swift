@@ -103,6 +103,51 @@ nonisolated enum BubuTheme {
             SwiftUI.Color(hue: (h.truncatingRemainder(dividingBy: 360)) / 360.0,
                           saturation: saturation, brightness: lightness)
         }
+
+        // MARK: 卡片大面积柔面（动态：浅色=近白奶油/马卡龙，深色=压暗同色相，承托动态文字并融入深色页）
+        // 马卡龙副色板（peach/pink/… 静态）仅用于小面积点缀（星点/圆点/图标），大面积卡片背景改用下面这组。
+        /// 中性四宫格柔面上层（里程碑/成长/今日一问/最近时光）。
+        static let tileSurfaceTop = dynamic(
+            light: UIColor.white,
+            dark: UIColor(red: 0.205, green: 0.170, blue: 0.160, alpha: 1)
+        )
+        /// 中性四宫格柔面下层。
+        static let tileSurfaceBottom = dynamic(
+            light: UIColor(red: 0.988, green: 0.929, blue: 0.894, alpha: 1),   // #FCEDE4
+            dark: UIColor(red: 0.160, green: 0.135, blue: 0.125, alpha: 1)
+        )
+        /// 暖彩卡（故事绘本）上层：浅=butter，深=压暗暖金。
+        static let warmSurfaceTop = dynamic(
+            light: UIColor(red: 1.000, green: 0.886, blue: 0.627, alpha: 1),   // butter
+            dark: UIColor(red: 0.30, green: 0.235, blue: 0.135, alpha: 1)
+        )
+        /// 暖彩卡中层：浅=peach，深=压暗暖橙。
+        static let warmSurfaceMid = dynamic(
+            light: UIColor(red: 1.000, green: 0.827, blue: 0.745, alpha: 1),   // peach
+            dark: UIColor(red: 0.32, green: 0.205, blue: 0.170, alpha: 1)
+        )
+        /// 暖彩卡尾层：浅=pink，深=压暗暖玫。
+        static let warmSurfaceEnd = dynamic(
+            light: UIColor(red: 1.000, green: 0.761, blue: 0.839, alpha: 1),   // pink
+            dark: UIColor(red: 0.32, green: 0.180, blue: 0.225, alpha: 1)
+        )
+        /// 身份卡 Hero 柔面（peach/pink/lav 三停 + 提亮尾）：浅=马卡龙，深=压暗紫粉暖调，承托证件卡文字。
+        static let heroSurfaceTop = dynamic(
+            light: UIColor(red: 1.000, green: 0.827, blue: 0.745, alpha: 1),   // peach
+            dark: UIColor(red: 0.30, green: 0.215, blue: 0.205, alpha: 1)
+        )
+        static let heroSurfaceMid = dynamic(
+            light: UIColor(red: 1.000, green: 0.761, blue: 0.839, alpha: 1),   // pink
+            dark: UIColor(red: 0.30, green: 0.190, blue: 0.245, alpha: 1)
+        )
+        static let heroSurfaceEnd = dynamic(
+            light: UIColor(red: 0.863, green: 0.788, blue: 1.000, alpha: 1),   // lav
+            dark: UIColor(red: 0.235, green: 0.205, blue: 0.320, alpha: 1)
+        )
+        static let heroSurfaceHighlight = dynamic(
+            light: UIColor.white,
+            dark: UIColor(red: 0.17, green: 0.150, blue: 0.165, alpha: 1)
+        )
     }
 
     // MARK: 字号阶梯（偏大，适老；马卡龙加重标题字）
