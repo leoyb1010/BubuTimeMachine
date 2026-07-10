@@ -68,4 +68,16 @@ enum FeedEventKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .firstTimeConfirmed: return "sparkles"
         }
     }
+
+    var emoji: String {
+        switch self {
+        case .entryCreated: return "✨"
+        case .entryArchived: return "🗑️"
+        case .commentAdded: return "💬"
+        case .voiceAdded: return "🎤"
+        case .milestoneLit: return "🌟"
+        case .healthRecorded: return "🍼"
+        case .firstTimeConfirmed: return "🎉"
+        }
+    }
 }

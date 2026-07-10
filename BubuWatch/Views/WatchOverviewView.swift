@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 今日概览（抬腕即见）
 struct WatchOverviewView: View {
@@ -12,7 +13,13 @@ struct WatchOverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
-                    Text("👶").font(.system(size: 22))
+                    if let data = snap?.avatarData, let img = UIImage(data: data) {
+                        Image(uiImage: img).resizable().scaledToFill()
+                            .frame(width: 30, height: 30).clipShape(Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.8), lineWidth: 1))
+                    } else {
+                        Text("👶").font(.system(size: 22))
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(name)
                             .font(.system(size: 20, weight: .black, design: .rounded))

@@ -26,6 +26,7 @@ struct WatchRecordView: View {
         .navigationTitle("记录")
         .containerBackground(WatchTheme.deepRose.opacity(0.2).gradient, for: .tabView)
         .sheet(isPresented: $showMood) { WatchMoodView() }
+        .onDisappear { recorder.cancel() }
     }
 
     private var voiceButton: some View {

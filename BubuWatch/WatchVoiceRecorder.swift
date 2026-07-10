@@ -53,6 +53,17 @@ final class WatchVoiceRecorder: NSObject {
         }
     }
 
+    /// 取消录音（离页/中断时兜底）：停录、丢弃文件、复位状态、反激活会话。
+    func cancel() {
+        guard isRecording else { return }
+        recorder?.stop()
+        recorder = nil
+        isRecording = false
+        if let url = fileURL { try? FileManager.default.removeItem(at: url) }
+        fileURL = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     private func stop() -> (url: URL, duration: Double)? {
         recorder?.stop()
         isRecording = false

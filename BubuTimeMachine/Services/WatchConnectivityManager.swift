@@ -100,23 +100,37 @@ enum WatchSnapshotBuilder {
     @MainActor
     static func make(context: ModelContext, role: FamilyRole) -> WatchSnapshot? {
         guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return nil }
-        var recentDescriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate { !$0.isArchived },
+        // 「最近」用 FeedEvent（统一涵盖记录/健康打卡/语音等），这样手表打卡后也能立刻在「最近」看到。
+        var feedDescriptor = FetchDescriptor<FeedEvent>(
             sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
-        recentDescriptor.fetchLimit = 4
-        let entries = (try? context.fetch(recentDescriptor)) ?? []
-        let recent = entries.map { e in
-            WatchRecent(id: e.id.uuidString,
-                        dateText: BubuDateFormat.monthDay(e.happenedAt),
-                        note: (e.note?.isEmpty == false ? e.note! : "记录此刻"),
-                        moodEmoji: e.mood?.emoji)
-        }
+        feedDescriptor.fetchLimit = 6
+        let events = (try? context.fetch(feedDescriptor)) ?? []
+        let recent = events
+            .filter { $0.kind != .entryArchived }
+            .prefix(4)
+            .map { e in
+                WatchRecent(id: e.id.uuidString,
+                            dateText: BubuDateFormat.monthDay(e.happenedAt),
+                            note: e.summary,
+                            moodEmoji: e.kind.emoji)
+            }
         let milestones = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
         let achieved = milestones.filter { $0.isAchieved }.count
         return WatchSnapshot(childName: profile.name, birthday: profile.birthday,
                              roleRaw: role.rawValue,
                              achievedMilestones: achieved, totalMilestones: milestones.count,
-                             recent: recent, updatedAt: .now)
+                             recent: Array(recent), avatarData: avatarThumbData(profile.avatarMediaFileName),
+                             updatedAt: .now)
+    }
+
+    /// 布布头像小缩略图（120px，jpeg 0.7，<30KB），供手表概览显示。
+    private static func avatarThumbData(_ fileName: String?) -> Data? {
+        guard let fileName, !fileName.isEmpty else { return nil }
+        let thumb = BubuStorage.thumbnailDirectory.appendingPathComponent(fileName)
+        let media = BubuStorage.mediaDirectory.appendingPathComponent(fileName)
+        let url = FileManager.default.fileExists(atPath: thumb.path) ? thumb : media
+        guard let image = ThumbnailProvider.downsample(url: url, maxPixel: 120) else { return nil }
+        return image.jpegData(compressionQuality: 0.7)
     }
 }
 

@@ -41,16 +41,17 @@ struct RecordMomentIntent: AppIntent {
 
 // MARK: 打开 App 到记录（控制中心/Action Button 用）
 
-/// 控制中心 / 锁屏 / Action Button 的「记录布布」入口：打开 App。
-/// 控件按钮无法弹文字输入框，故用打开 App 落到首页（「记录此刻」首屏即在），而非直接空写。
+/// 控制中心 / 锁屏 / Action Button 的「记录布布」入口：打开 App 并直达快速记录。
+/// 控件按钮无法弹文字输入框，故置一个共享标志，App 启动/前台时消费它拉起记录面板。
 struct OpenRecordIntent: AppIntent {
     static let title: LocalizedStringResource = "打开布布时光机记录"
-    static let description = IntentDescription("打开 App，记录布布此刻。")
+    static let description = IntentDescription("打开 App，直接记录布布此刻。")
     static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        .result()
+        SharedDefaults.pendingRecord = true
+        return .result()
     }
 }
 

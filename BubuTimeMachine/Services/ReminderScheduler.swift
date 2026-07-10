@@ -54,9 +54,10 @@ final class ReminderScheduler {
             content.title = "那年今日 · 布布时光机"
             let memory = onThisDayMemory(context: context, for: day)
             content.body = memory.isEmpty
-                ? "翻一翻布布的时光轴，今天也想她了吧。"
-                : memory
+                ? "翻一翻布布的时光轴，今天也想她了吧。下滑可以直接回一句。"
+                : "\(memory)\n下滑可以直接回一句今天的布布。"
             content.sound = .default
+            content.categoryIdentifier = NotificationReplyHandler.categoryId   // 通知可直接文字回复成记录
 
             let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
             let req = UNNotificationRequest(identifier: "\(identifierPrefix)\(offset)",

@@ -25,6 +25,8 @@ struct CaptureHomeView: View {
     @State private var model: CaptureModel?
     @State private var firstTimeSuggestion: String?
     @State private var firstTimeEntryID: UUID?
+    @State private var photoScanner = PhotoLibraryScanner()
+    @State private var showTodayPhotos = false
     @State private var showNaturalCapture = false
     @State private var naturalCaptureButtonOffset: CGSize = .zero
     @State private var heroBackgroundImage: UIImage?
@@ -54,6 +56,7 @@ struct CaptureHomeView: View {
                 VStack(spacing: 12) {
                     greetingRow
                     identityCardTop            // ① 布布身份卡（可翻面看性别/血型/出生地）
+                    todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
                     primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
                     dashboardGridTop           // ③ 紧凑四宫格：星座/成长/故事/健康
                     recentMomentsSection       // ⑤ 最近时光（行卡）
@@ -97,6 +100,9 @@ struct CaptureHomeView: View {
                 model = CaptureModel(mediaStore: env.mediaStore, analyzer: env.photoAnalyzer,
                                      role: env.config.currentRole)
             }
+            // 已授权过相册就顺手扫一下今天的照片（不主动弹权限）
+            photoScanner.refreshAuthorizationState()
+            if photoScanner.authorized { _ = photoScanner.scan() }
         }
         .onChange(of: quickCaptureTrigger) { _, _ in
             startQuickCapture()
@@ -119,6 +125,47 @@ struct CaptureHomeView: View {
         }
         .sheet(isPresented: $showNaturalCapture) {
             NaturalCapturePanel()
+        }
+        .sheet(isPresented: $showTodayPhotos) {
+            TodayPhotosSheet(assets: photoScanner.todayAssets) { handled in
+                photoScanner.markHandled(handled)
+            }
+        }
+    }
+
+    // MARK: 今天拍的照片卡（零操作记录）
+    @ViewBuilder
+    private var todayPhotosCard: some View {
+        if photoScanner.authorized, !photoScanner.todayAssets.isEmpty {
+            Button {
+                showTodayPhotos = true
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(BubuTheme.Color.primary.opacity(0.16)).frame(width: 44, height: 44)
+                        Image(systemName: "photo.badge.plus.fill")
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundStyle(BubuTheme.Color.primary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("今天拍了 \(photoScanner.todayAssets.count) 张")
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("挑几张收进布布的时光轴？")
+                            .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(BubuTheme.Color.primary)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .bubuCardShadow()
+            }
+            .buttonStyle(.plain)
         }
     }
 

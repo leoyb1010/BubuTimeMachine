@@ -189,6 +189,13 @@ nonisolated enum SharedDefaults {
     private static let roleKey = "bubu.shared.role"
     private static let childNameKey = "bubu.shared.childName"
     private static let widgetSnapshotKey = "bubu.shared.widgetSnapshot.v1"
+    private static let pendingRecordKey = "bubu.shared.pendingRecord"
+
+    /// 控制中心/Action Button 的「记录」控件按下时置 true，主 App 启动/前台消费后拉起快速记录。
+    static var pendingRecord: Bool {
+        get { suite?.bool(forKey: pendingRecordKey) ?? false }
+        set { suite?.set(newValue, forKey: pendingRecordKey) }
+    }
 
     // MARK: 当前家庭身份
 

@@ -45,6 +45,11 @@ final class WatchConnector: NSObject {
         flash("语音已送到手机")
     }
 
+    /// 传输完成后清理临时 m4a（否则 tmp 会堆积）。
+    nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+    }
+
     private func send(_ request: WatchRecordRequest, label: String) {
         guard let data = WatchLink.encode(request) else { return }
         let session = WCSession.default

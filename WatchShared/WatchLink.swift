@@ -13,17 +13,20 @@ public nonisolated struct WatchSnapshot: Codable, Sendable {
     public var achievedMilestones: Int
     public var totalMilestones: Int
     public var recent: [WatchRecent]
+    /// 布布头像小缩略图（<30KB，抬腕看到她的脸）。可空。
+    public var avatarData: Data?
     public var updatedAt: Date
 
     public init(childName: String, birthday: Date?, roleRaw: String,
                 achievedMilestones: Int, totalMilestones: Int,
-                recent: [WatchRecent], updatedAt: Date) {
+                recent: [WatchRecent], avatarData: Data? = nil, updatedAt: Date) {
         self.childName = childName
         self.birthday = birthday
         self.roleRaw = roleRaw
         self.achievedMilestones = achievedMilestones
         self.totalMilestones = totalMilestones
         self.recent = recent
+        self.avatarData = avatarData
         self.updatedAt = updatedAt
     }
 }

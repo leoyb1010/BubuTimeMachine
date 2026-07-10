@@ -48,6 +48,9 @@ struct BubuTimeMachineApp: App {
                     env.bootstrap(context: modelContainer.mainContext)
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                     WidgetRefresher.reload()
+                    // 通知直接回复：注册「回一句」类目 + 通知代理
+                    NotificationReplyHandler.shared.register()
+                    consumePendingRecord()
                     // 手表连接：注入 App 正在用的 context（手表记录能让前台时光轴实时刷新）+ 激活 + 推初始快照 + 监听
                     WatchConnectivityManager.shared.appContext = modelContainer.mainContext
                     WatchConnectivityManager.shared.activate()
@@ -73,10 +76,19 @@ struct BubuTimeMachineApp: App {
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                 WidgetRefresher.reload()
                 pushWatchSnapshot()
+                consumePendingRecord()
             case .background: env.syncEngine.stopPolling()
             default: break
             }
         }
+    }
+
+    /// 消费控制中心/Action Button 置的记录标志：拉起快速记录。
+    @MainActor
+    private func consumePendingRecord() {
+        guard SharedDefaults.pendingRecord else { return }
+        SharedDefaults.pendingRecord = false
+        router.pendingQuickCapture = true
     }
 
     /// 读库生成概览快照并推给手表。
