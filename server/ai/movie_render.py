@@ -45,6 +45,21 @@ _jobs: dict[str, "RenderJob"] = {}
 _jobs_lock = threading.Lock()
 
 
+def _resolve_ffmpeg() -> str:
+    """launchd 下 PATH 极简，不含 /opt/homebrew/bin，shutil.which 会找不到；
+    显式回退到 Homebrew 常见安装路径。"""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
+        if os.path.exists(p):
+            return p
+    return "ffmpeg"
+
+
+_FFMPEG = _resolve_ffmpeg()
+
+
 @dataclass
 class RenderPhoto:
     url: str
@@ -74,7 +89,7 @@ class RenderJob:
 
 
 def ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return _FFMPEG != "ffmpeg" or shutil.which("ffmpeg") is not None
 
 
 def get_job(job_id: str) -> Optional[RenderJob]:
@@ -141,7 +156,7 @@ def _kenburns_clip(src: str, dst: str, seconds: float, zoom_in: bool) -> bool:
         f"format=yuv420p"
     )
     cmd = [
-        "ffmpeg", "-y", "-loop", "1", "-i", src, "-t", f"{seconds:.3f}",
+        _FFMPEG, "-y", "-loop", "1", "-i", src, "-t", f"{seconds:.3f}",
         "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         "-r", str(_FPS), dst,
     ]
@@ -168,7 +183,7 @@ def _xfade_concat(clips: list[str], out: str) -> bool:
         )
         prev = label
     filt = filt.rstrip(";")
-    cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filt,
+    cmd = [_FFMPEG, "-y", *inputs, "-filter_complex", filt,
            "-map", "[vout]", "-c:v", "libx264", "-preset", "veryfast",
            "-pix_fmt", "yuv420p", "-r", str(_FPS), out]
     return _run_ffmpeg(cmd, "xfade concat")
