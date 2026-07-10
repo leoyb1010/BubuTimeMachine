@@ -9,6 +9,7 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Query private var members: [FamilyMember]
     @State private var soundOn = BubuSound.isEnabled
+    @State private var showFrame = false
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
@@ -44,6 +45,13 @@ struct SettingsView: View {
                                         subtitle: "大字大按钮，只保留 拍照 / 录音 / 看布布。切到长辈身份会自动开启")
                     }
                     .tint(env.theme.theme.primary)
+
+                    Button { showFrame = true } label: {
+                        settingRowLabel("相框模式", icon: "photo.stack.fill",
+                                        tint: BubuTheme.Color.pink,
+                                        subtitle: "把 iPad / 旧手机变成布布的数字相框，全屏轮播精选照片")
+                    }
+                    .buttonStyle(.plain)
                 }
                 reminderCard(config: config)
                 dataCard
@@ -67,6 +75,7 @@ struct SettingsView: View {
         }
         .navigationTitle("设置")
         .background(BubuTheme.Color.background.ignoresSafeArea())
+        .fullScreenCover(isPresented: $showFrame) { PhotoFrameView() }
     }
 
     // MARK: 顶卡 · 当前身份
