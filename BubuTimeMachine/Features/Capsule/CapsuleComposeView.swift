@@ -18,6 +18,10 @@ struct CapsuleComposeView: View {
     @State private var pendingVoice: (fileName: String, duration: Double, waveform: [Float])?
     @State private var saving = false
     @State private var errorText: String?
+    /// 编辑已到期胶囊时成功解出的原 payload（保留 photo 等未在本页编辑的字段）。
+    /// 有旧 blob 但解密失败 → 保持 nil 且 decryptFailed=true：此时【绝不】重封，防止空信覆盖原信。
+    @State private var loadedPayload: CapsulePayload?
+    @State private var decryptFailed = false
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -181,7 +185,9 @@ struct CapsuleComposeView: View {
     }
 
     private var canRewritePayload: Bool {
-        editing == nil || (editing?.unlockAt ?? .now) <= .now
+        // 解密失败时按"锁定"处理：只许改标题/封面，绝不重封——否则空信会覆盖写给孩子的原信
+        guard !decryptFailed else { return false }
+        return editing == nil || (editing?.unlockAt ?? .now) <= .now
     }
 
     private func loadEditing() {
@@ -189,14 +195,20 @@ struct CapsuleComposeView: View {
         title = editing.title
         emoji = editing.coverEmoji ?? "💌"
         unlockAt = max(editing.unlockAt, .now)
-        if let blob = editing.encryptedBlobFileName,
-           editing.unlockAt <= .now,
-           let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt,
-                                               salt: editing.id.uuidString,
-                                               recoveryCode: CapsuleRecovery.current()) {
-            letter = payload.letter
-            if let voice = payload.voiceFileName {
-                pendingVoice = (voice, payload.voiceDuration, payload.voiceWaveform)
+        if let blob = editing.encryptedBlobFileName, editing.unlockAt <= .now {
+            if let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt,
+                                                   salt: editing.id.uuidString,
+                                                   recoveryCode: CapsuleRecovery.current()) {
+                loadedPayload = payload
+                letter = payload.letter
+                if let voice = payload.voiceFileName {
+                    pendingVoice = (voice, payload.voiceDuration, payload.voiceWaveform)
+                }
+            } else {
+                // 典型场景：换机/长辈设备钥匙串没同步到恢复码。此时信的内容读不出来，
+                // 只允许改标题和封面，原信保持原样。
+                decryptFailed = true
+                errorText = "这封信在这台设备上暂时解不开（可能还没录入家庭恢复码）。可以改标题和封面，信的内容会保持原样。"
             }
         }
     }
@@ -221,12 +233,13 @@ struct CapsuleComposeView: View {
 
         capsule.unlockAt = sealedUnlockAt
 
-        let payload = CapsulePayload(
-            letter: letter,
-            voiceFileName: pendingVoice?.fileName,
-            voiceDuration: pendingVoice?.duration ?? 0,
-            voiceWaveform: pendingVoice?.waveform ?? []
-        )
+        // 在原 payload 基础上改（编辑场景），只覆盖本页真正编辑过的字段；
+        // 照片、内嵌语音等不在本页编辑的内容原样保留，不会因"换个封面"而丢。
+        var payload = loadedPayload ?? CapsulePayload()
+        payload.letter = letter
+        payload.voiceFileName = pendingVoice?.fileName
+        payload.voiceDuration = pendingVoice?.duration ?? 0
+        payload.voiceWaveform = pendingVoice?.waveform ?? []
         do {
             // v3 真 E2E：用家庭恢复码派生密钥加密，密钥不随记录同步。
             let recoveryCode = CapsuleRecovery.currentOrCreate()

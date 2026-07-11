@@ -1,15 +1,19 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - 时间胶囊恢复码（v3 真 E2E 管理页）
 /// 展示家庭恢复码，引导打印/抄写收进实体盒子；支持用纸条恢复码恢复（换新机/iCloud 丢失）。
 struct CapsuleRecoveryView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    @Query private var capsules: [TimeCapsule]
 
     @State private var code: String = ""
     @State private var restoring = false
     @State private var restoreInput = ""
     @State private var copied = false
+    @State private var restoreError: String?
+    @State private var confirmOverwrite = false
 
     private var theme: Color { env.theme.theme.primary }
 
@@ -71,13 +75,13 @@ struct CapsuleRecoveryView: View {
             .bubuCardShadow()
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                Text("你的 24 词恢复码").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                Text("你的 24 词恢复码").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.paperInkSecondary)
                 let words = code.split(separator: " ").map(String.init)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 8) {
                     ForEach(Array(words.enumerated()), id: \.offset) { i, w in
                         Text("\(i + 1). \(w)")
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                            .foregroundStyle(BubuTheme.Color.paperInk)
                     }
                 }
             }
@@ -131,20 +135,76 @@ struct CapsuleRecoveryView: View {
                     .lineLimit(3...6)
                     .padding()
                     .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
-                Button("恢复") {
-                    CapsuleRecovery.restore(restoreInput)
-                    code = CapsuleRecovery.current() ?? ""
-                    restoreInput = ""
-                    restoring = false
-                    BubuHaptics.success()
-                }
+                Button("恢复") { attemptRestore() }
                 .font(BubuTheme.Font.body.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 24).padding(.vertical, 10)
                 .background(theme, in: Capsule())
                 .disabled(restoreInput.split(separator: " ").count < 12)
+
+                if let restoreError {
+                    Text(restoreError)
+                        .font(.system(size: 12))
+                        .foregroundStyle(BubuTheme.Color.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
+        .alert("覆盖现有恢复码？", isPresented: $confirmOverwrite) {
+            Button("覆盖", role: .destructive) { doRestore() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这台设备上还没有可校验的胶囊，无法确认这串词是否正确。覆盖后，如果词抄错了，之前封存的信会解不开。确定要覆盖吗？")
+        }
+    }
+
+    /// 恢复前先校验：词表核对 → 用现有 v3 胶囊试解（不显示内容）。
+    /// 校验不过绝不写入——防止一串抄错的词静默覆盖全家的正确密钥。
+    private func attemptRestore() {
+        restoreError = nil
+        let words = restoreInput.lowercased()
+            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .map(String.init)
+        guard words.count == 24 else {
+            restoreError = "恢复码应是 24 个词，现在有 \(words.count) 个，检查一下有没有抄漏。"
+            return
+        }
+        let badWords = words.filter { !CapsuleRecovery.wordList.contains($0) }
+        guard badWords.isEmpty else {
+            restoreError = "这几个词不在词表里：\(badWords.prefix(3).joined(separator: "、"))。对照纸条再检查一下拼写。"
+            return
+        }
+        let candidate = words.joined(separator: " ")
+
+        // 有 v3 胶囊就用密码学校验：解得开才是对的码
+        let v3Capsules = capsules.filter { c in
+            guard let blob = c.encryptedBlobFileName else { return false }
+            return env.vault.isV3Blob(fileName: blob)
+        }
+        if let sample = v3Capsules.first, let blob = sample.encryptedBlobFileName {
+            guard env.vault.canDecryptV3(fileName: blob, salt: sample.id.uuidString,
+                                         recoveryCode: candidate, unlockAt: sample.unlockAt) else {
+                restoreError = "这串词解不开家里现有的胶囊——很可能抄错了。请对照纸条逐词核对后再试。"
+                return
+            }
+            doRestore()
+            return
+        }
+        // 没有可校验的胶囊：如果会覆盖已有的不同恢复码，先确认
+        if let current = CapsuleRecovery.current(), !current.isEmpty, current != candidate {
+            confirmOverwrite = true
+        } else {
+            doRestore()
+        }
+    }
+
+    private func doRestore() {
+        CapsuleRecovery.restore(restoreInput)
+        code = CapsuleRecovery.current() ?? ""
+        restoreInput = ""
+        restoring = false
+        restoreError = nil
+        BubuHaptics.success()
     }
 
     private var warning: some View {

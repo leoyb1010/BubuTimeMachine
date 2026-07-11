@@ -62,6 +62,21 @@ struct CapsuleVault: Sendable {
         return try mediaStore.saveBlob(cipher)
     }
 
+    /// 该 blob 是否 v3（恢复码加密）。恢复码校验时用来挑选可验证的胶囊。
+    func isV3Blob(fileName: String) -> Bool {
+        guard let cipher = mediaStore.blob(named: fileName) else { return false }
+        return CapsuleCrypto.isV3(cipher)
+    }
+
+    /// 只验证恢复码能否解开该 v3 blob（不返回内容、无副作用、绕过时间锁——
+    /// v3 密钥与时间无关，时间锁只是软件层约束，校验不算"偷看"）。
+    func canDecryptV3(fileName: String, salt: String, recoveryCode: String, unlockAt: Date) -> Bool {
+        guard let cipher = mediaStore.blob(named: fileName), CapsuleCrypto.isV3(cipher) else { return false }
+        let futureNow = max(.now, unlockAt.addingTimeInterval(1))
+        return (try? crypto.decryptV3(cipher, recoveryCode: recoveryCode, salt: salt,
+                                      unlockAt: unlockAt, now: futureNow)) != nil
+    }
+
     /// 到期解密读出。未到期抛 CapsuleCrypto.CryptoError.stillLocked。
     /// v3 blob 需提供 recoveryCode（来自 iCloud Keychain 或纸条）；v1/v2 自动按旧逻辑解。
     func unseal(fileName: String, unlockAt: Date, salt: String,

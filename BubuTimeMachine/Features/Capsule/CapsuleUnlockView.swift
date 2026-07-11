@@ -156,21 +156,21 @@ struct CapsuleUnlockView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(spacing: 6) {
                         Text(capsule.coverEmoji ?? "💌").font(.system(size: 50))
-                        Text(capsule.title).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text(capsule.title).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.paperInk)
                     }
                     .frame(maxWidth: .infinity)
 
                     if !payload.letter.isEmpty {
                         Text(payload.letter)
                             .font(.system(size: 19, design: .serif))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                            .foregroundStyle(BubuTheme.Color.paperInk)
                             .lineSpacing(8)
                     }
 
                     if let voiceName = payload.voiceFileName {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("还有一段话想对你说", systemImage: "waveform")
-                                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.paperInkSecondary)
                             VoicePlayerBubble(fileName: voiceName, duration: payload.voiceDuration,
                                               waveform: payload.voiceWaveform, mediaStore: env.mediaStore, tint: theme)
                         }
@@ -178,7 +178,7 @@ struct CapsuleUnlockView: View {
 
                     Text("—— 来自\(capsule.fromRole)，写于 \(BubuDateFormat.longDate(capsule.createdAt))")
                         .font(BubuTheme.Font.caption)
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .foregroundStyle(BubuTheme.Color.paperInkSecondary)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .padding(26)

@@ -40,6 +40,10 @@ nonisolated enum BubuTheme {
             light: UIColor(red: 0.353, green: 0.239, blue: 0.204, alpha: 1),   // #5A3D34
             dark: UIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
         )
+        /// 固定墨色：给「固定浅色纸面」（信纸/恢复码卡 #FFFDF8 底）配的不随深色翻转的深棕。
+        /// 固定底必须配固定字——否则深色下 warmBrown 变米白，白纸白字不可读。
+        static let paperInk = SwiftUI.Color(red: 0.353, green: 0.239, blue: 0.204)          // #5A3D34
+        static let paperInkSecondary = SwiftUI.Color(red: 0.455, green: 0.326, blue: 0.278) // #745347
         /// 次要文字：必须在奶油底上通过 WCAG AA，对老人机大字模式仍清晰。
         static let secondaryText = dynamic(
             light: UIColor(red: 0.455, green: 0.326, blue: 0.278, alpha: 1),   // #745347
