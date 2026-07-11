@@ -9,6 +9,8 @@ struct BubuQAView: View {
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
     @Query private var profiles: [ChildProfile]
+    @Query private var milestones: [Milestone]
+    @Query(sort: \GrowthMeasurement.measuredAt) private var measurements: [GrowthMeasurement]
 
     @State private var input = ""
     @State private var messages: [QAMessage] = []
@@ -152,27 +154,100 @@ struct BubuQAView: View {
         }
     }
 
-    /// 本地检索：按问题关键词命中 note/title，命中不足则补最近记录。最多 12 条给 AI。
+    /// 本地检索（跨数据域 + 日期意图感知，R4 P2-27）：
+    /// ① 「去年今天/前年今天/生日」等先转成时间窗直接取该窗记录；
+    /// ② 关键词（含 2-gram，过滤疑问停用词）命中时光、里程碑、成长测量；
+    /// ③ 命中不足补最近时光。最多 12 条给 AI。
     private func retrieve(for question: String) -> [(context: QAContextRecord, snippet: String)] {
         let birthday = profiles.first?.birthday
-        let keys = Self.keywords(from: question)
-        func score(_ e: Entry) -> Int {
-            let hay = ((e.note ?? "") + (e.title ?? "") + (e.firstPersonNote ?? "")).lowercased()
-            return keys.reduce(0) { $0 + (hay.contains($1) ? 1 : 0) }
+        func dateText(_ d: Date) -> String { BubuDateFormat.yearMonthDay(d) }
+        func ageText(_ d: Date) -> String {
+            birthday.map { AgeCalculator.ageDescription(birthday: $0, at: d) } ?? ""
         }
-        let scored = entries.map { ($0, score($0)) }
-        var picked = scored.filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.map { $0.0 }
-        if picked.count < 6 {   // 命中不够，补最近的
-            let recent = entries.prefix(8).filter { e in !picked.contains { $0.id == e.id } }
-            picked.append(contentsOf: recent)
+
+        // 统一候选池：时光 + 已点亮里程碑 + 成长测量（都能被问到）
+        struct Candidate { let id: String; let date: Date; let text: String }
+        var pool: [Candidate] = entries.map {
+            Candidate(id: $0.id.uuidString, date: $0.happenedAt,
+                      text: [$0.note, $0.title, $0.firstPersonNote].compactMap { $0 }.joined(separator: " "))
         }
-        return picked.prefix(12).map { e in
-            let text = (e.note?.isEmpty == false ? e.note! : (e.title ?? "一个瞬间"))
-            let dateText = BubuDateFormat.yearMonthDay(e.happenedAt)
-            let age = birthday.map { AgeCalculator.ageDescription(birthday: $0, at: e.happenedAt) } ?? ""
-            let ctx = QAContextRecord(id: e.id.uuidString, dateText: dateText, ageText: age, text: text)
+        pool += milestones.compactMap { m in
+            guard let d = m.happenedAt else { return nil }
+            return Candidate(id: m.id.uuidString, date: d,
+                             text: "里程碑：\(m.title) \(m.detail ?? "")")
+        }
+        pool += measurements.map { m in
+            let parts = [m.heightCm.map { "身高\($0)cm" }, m.weightKg.map { "体重\($0)kg" },
+                         m.headCircumferenceCm.map { "头围\($0)cm" }].compactMap { $0 }
+            return Candidate(id: m.id.uuidString, date: m.measuredAt,
+                             text: "成长测量：" + parts.joined(separator: " "))
+        }
+
+        var picked: [Candidate] = []
+
+        // ① 日期意图：去年今天 / 前年今天 / 生日
+        if let windows = Self.dateWindows(for: question, birthday: birthday) {
+            picked = pool.filter { c in windows.contains { $0.contains(c.date) } }
+                .sorted { $0.date > $1.date }
+        }
+
+        // ② 关键词打分
+        if picked.count < 6 {
+            let keys = Self.keywords(from: question)
+            let scored = pool
+                .map { c in (c, keys.reduce(0) { $0 + (c.text.lowercased().contains($1) ? 1 : 0) }) }
+                .filter { $0.1 > 0 }
+                .sorted { $0.1 > $1.1 }
+                .map(\.0)
+            for c in scored where !picked.contains(where: { $0.id == c.id }) { picked.append(c) }
+        }
+
+        // ③ 补最近时光
+        if picked.count < 6 {
+            for e in entries.prefix(8) {
+                let id = e.id.uuidString
+                if !picked.contains(where: { $0.id == id }) {
+                    picked.append(Candidate(id: id, date: e.happenedAt,
+                                            text: e.note ?? e.title ?? "一个瞬间"))
+                }
+            }
+        }
+
+        return picked.prefix(12).map { c in
+            let text = c.text.isEmpty ? "一个瞬间" : c.text
+            let ctx = QAContextRecord(id: c.id, dateText: dateText(c.date),
+                                      ageText: ageText(c.date), text: String(text.prefix(200)))
             return (ctx, String(text.prefix(20)))
         }
+    }
+
+    /// 问题里的日期意图 → 时间窗（±3 天）。生日会展开为每一年的生日窗。
+    private static func dateWindows(for question: String, birthday: Date?) -> [ClosedRange<Date>]? {
+        let cal = Calendar.current
+        func window(around day: Date) -> ClosedRange<Date> {
+            let start = cal.date(byAdding: .day, value: -3, to: cal.startOfDay(for: day)) ?? day
+            let end = cal.date(byAdding: .day, value: 4, to: cal.startOfDay(for: day)) ?? day
+            return start...end
+        }
+        if question.contains("去年今天") || question.contains("去年的今天") {
+            if let d = cal.date(byAdding: .year, value: -1, to: .now) { return [window(around: d)] }
+        }
+        if question.contains("前年今天") || question.contains("前年的今天") {
+            if let d = cal.date(byAdding: .year, value: -2, to: .now) { return [window(around: d)] }
+        }
+        if question.contains("生日"), let birthday {
+            // 出生那天起，每年生日一个窗
+            var windows: [ClosedRange<Date>] = []
+            let thisYear = cal.component(.year, from: .now)
+            let birthYear = cal.component(.year, from: birthday)
+            for year in birthYear...thisYear {
+                var comps = cal.dateComponents([.month, .day], from: birthday)
+                comps.year = year
+                if let d = cal.date(from: comps) { windows.append(window(around: d)) }
+            }
+            return windows.isEmpty ? nil : windows
+        }
+        return nil
     }
 
     /// 问题 → 关键词：ASCII 词整取，中文取 2-gram（廉价而有效的中文召回，避免整句变一个 token）。
@@ -195,7 +270,11 @@ struct BubuQAView: View {
         } else if cjk.count >= 2 {
             for i in 0..<(cjk.count - 1) { grams.append(String([cjk[i], cjk[i + 1]])) }
         }
-        return Array(Set(words + grams))
+        // 疑问停用词不参与打分：否则「什么时候」会命中一堆无关记录
+        let stopGrams: Set<String> = ["什么", "时候", "么时", "怎么", "哪天", "干嘛", "多少",
+                                      "是不", "不是", "有没", "没有", "去年", "前年", "今天",
+                                      "年今", "的今", "在干", "呢", "吗", "啊"]
+        return Array(Set(words + grams.filter { !stopGrams.contains($0) }))
     }
 }
 

@@ -19,8 +19,9 @@ struct AlbumDetailView: View {
                 ContentUnavailableView("这个相册还是空的", systemImage: "photo")
                     .padding(.top, 80)
             } else {
+                let visible = Array(items.prefix(visibleCount))
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
-                    ForEach(items.prefix(visibleCount)) { item in
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, item in
                         Button {
                             viewerRoute = MediaViewerRoute(initialMediaID: item.media.id)
                         } label: {
@@ -30,14 +31,20 @@ struct AlbumDetailView: View {
                                 .clipped()
                         }
                         .buttonStyle(.plain)
+                        // 哨兵挂在【倒数第 12 个真实 cell】上：LazyVGrid 只在 cell 真正滚到
+                        // 视口附近才触发 onAppear——之前独立 ProgressView 随 ScrollView 立即
+                        // 渲染只加一次，大相册永远卡在 180 张（R4 P2-21）
+                        .onAppear {
+                            if index >= visible.count - 12, visibleCount < items.count {
+                                visibleCount += 90
+                            }
+                        }
                     }
                 }
                 .padding(8)
 
                 if visibleCount < items.count {
-                    ProgressView()
-                        .padding(.vertical, 16)
-                        .onAppear { visibleCount += 90 }
+                    ProgressView().padding(.vertical, 16)
                 }
             }
         }

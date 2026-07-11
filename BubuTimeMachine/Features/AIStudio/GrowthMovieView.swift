@@ -251,6 +251,21 @@ struct GrowthMovieView: View {
                     .buttonStyle(.plain)
                     .disabled(serverRendering)
 
+                    if let url = serverMovieURL ?? Self.existingMovie(
+                        year: selectedYear ?? Calendar.current.component(.year, from: .now)) {
+                        Button {
+                            serverMovieURL = url
+                            showServerPlayer = true
+                        } label: {
+                            Label("播放高清版", systemImage: "sparkles.tv.fill")
+                                .font(BubuTheme.Font.headline.weight(.bold))
+                                .foregroundStyle(theme)
+                                .frame(maxWidth: .infinity).frame(height: 50)
+                                .background(theme.opacity(0.10), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     if !serverHint.isEmpty {
                         Text(serverHint)
                             .font(BubuTheme.Font.caption)
@@ -264,36 +279,64 @@ struct GrowthMovieView: View {
     }
 
     /// 服务端合成成片：收集已同步照片的远端 URL → 提交渲染 → 轮询 → 下载播放。
-    /// 全程降级：无照片同步/服务器不可用时给提示，本地预览草稿始终可用。
+    /// 轮询抗抖动：单次失败重试，连续 3 次才放弃；成片落 Documents，可随时重看（R4 P2-25/26）。
     private func renderOnServer() async {
         let photos = remoteMoviePhotos
         guard !photos.isEmpty else {
             serverHint = "这些照片还没同步到服务器，先联网同步后再合成高清版～"
             return
         }
-        serverHint = ""; serverRendering = true; serverProgress = 0; serverMovieURL = nil
+        serverHint = ""; serverRendering = true; serverProgress = 0
         defer { serverRendering = false }
+        let year = selectedYear ?? Calendar.current.component(.year, from: .now)
         do {
-            let year = selectedYear ?? Calendar.current.component(.year, from: .now)
             var status = try await env.aiService.startMovieRender(
                 childName: env.config.childName, year: year,
                 template: selectedTemplate.rawValue, photos: photos, narration: aiNarration ?? "")
             var polls = 0
-            while !status.ready && status.status != "failed" && polls < 90 {
+            var consecutiveFailures = 0
+            while !status.ready && status.status != "failed" && polls < 300 {
                 try await Task.sleep(for: .seconds(2))
-                status = try await env.aiService.movieRenderStatus(jobId: status.jobId)
-                serverProgress = status.progress
+                do {
+                    status = try await env.aiService.movieRenderStatus(jobId: status.jobId)
+                    consecutiveFailures = 0
+                    serverProgress = status.progress
+                } catch {
+                    // 一次网络抖动不弃剧：连续 3 次失败才放弃
+                    consecutiveFailures += 1
+                    if consecutiveFailures >= 3 { throw error }
+                }
                 polls += 1
             }
             guard status.ready else {
-                serverHint = status.error.isEmpty ? "服务端合成失败，稍后再试" : status.error
+                serverHint = status.status == "failed"
+                    ? (status.error.isEmpty ? "服务端合成失败，稍后再试" : status.error)
+                    : "还在合成中，稍后回到这里再试一次就能取到成片。"
                 return
             }
-            serverMovieURL = try await env.aiService.downloadRenderedMovie(jobId: status.jobId)
+            let tempURL = try await env.aiService.downloadRenderedMovie(jobId: status.jobId)
+            serverMovieURL = Self.persistMovie(tempURL, year: year)
             showServerPlayer = true
         } catch {
             serverHint = "服务端合成暂不可用：\(error.localizedDescription)"
         }
+    }
+
+    /// 成片移入 Documents（看完不再即丢，重进页面也能直接播）。
+    private static func persistMovie(_ tempURL: URL, year: Int) -> URL {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dest = docs.appendingPathComponent("bubu_movie_\(year).mp4")
+        try? fm.removeItem(at: dest)
+        if (try? fm.moveItem(at: tempURL, to: dest)) != nil { return dest }
+        return tempURL
+    }
+
+    /// 本年度已有成片就带出来（跨会话重看）。
+    private static func existingMovie(year: Int) -> URL? {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent("bubu_movie_\(year).mp4")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     /// 已同步（有远端 URL）的照片 + 对齐的文案，供服务端合成。

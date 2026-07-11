@@ -6,6 +6,8 @@ struct FamilyFeedView: View {
     @Environment(AppEnvironment.self) private var env
     @Query(sort: \FeedEvent.happenedAt, order: .reverse) private var events: [FeedEvent]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
+    @Query(sort: \Comment.createdAt, order: .reverse) private var comments: [Comment]
+    @Query private var milestones: [Milestone]
     @State private var selectedKind: FeedEventKind?
 
     private var theme: Color { env.theme.theme.primary }
@@ -13,19 +15,43 @@ struct FamilyFeedView: View {
         guard let selectedKind else { return derivedEvents }
         return derivedEvents.filter { $0.kind == selectedKind }
     }
+    /// FeedEvent 表不参与同步（各设备只有自己产生的）。要看到全家的动态，
+    /// 从【已同步的数据】现场派生：Entry、Comment（含语音补充）、Milestone（R4 P2-22）。
     private var derivedEvents: [FeedEvent] {
-        let persistedEntryTargets = Set(events
-            .filter { $0.kind == .entryCreated }
-            .compactMap(\.targetLocalId))
+        let persisted = Set(events.compactMap { e in e.targetLocalId.map { "\(e.kindRaw)|\($0)" } })
+        func fresh(_ kind: FeedEventKind, _ target: String) -> Bool {
+            !persisted.contains("\(kind.rawValue)|\(target)")
+        }
+
         let entryEvents = entries.compactMap { entry -> FeedEvent? in
             let target = entry.id.uuidString
-            guard !persistedEntryTargets.contains(target) else { return nil }
+            guard fresh(.entryCreated, target) else { return nil }
             return FeedEvent(kind: .entryCreated, actorRole: entry.authorRole,
                              summary: entry.note?.isEmpty == false ? "记录了：\(entry.note!)" : "记录了布布的一个新瞬间",
                              targetLocalId: target, happenedAt: entry.happenedAt)
         }
+        // 家人的评论/语音补充：每条评论用自己的 id 做目标，互相不会吞掉（R4 P2-23）
+        let commentEvents = comments.compactMap { comment -> FeedEvent? in
+            guard let entry = comment.entry, !entry.isArchived else { return nil }
+            let target = comment.id.uuidString
+            let isVoice = comment.voiceFileName != nil || comment.remoteURL != nil
+            guard fresh(isVoice ? .voiceAdded : .commentAdded, target) else { return nil }
+            let text = comment.text?.isEmpty == false ? "补充了：\(comment.text!)" : "补了一段语音"
+            return FeedEvent(kind: isVoice ? .voiceAdded : .commentAdded,
+                             actorRole: comment.authorRole, summary: text,
+                             targetLocalId: target, happenedAt: comment.createdAt)
+        }
+        let milestoneEvents = milestones.compactMap { m -> FeedEvent? in
+            guard let happened = m.happenedAt else { return nil }
+            let target = m.id.uuidString
+            guard fresh(.milestoneLit, target) else { return nil }
+            return FeedEvent(kind: .milestoneLit, actorRole: "家人",
+                             summary: "点亮了里程碑：\(m.title)",
+                             targetLocalId: target, happenedAt: happened)
+        }
+
         var seen = Set<String>()
-        return (events + entryEvents)
+        return (events + entryEvents + commentEvents + milestoneEvents)
             .filter { event in
                 let key = event.targetLocalId.map { "\(event.kindRaw)|\($0)" }
                     ?? "\(event.kindRaw)|\(event.id.uuidString)"

@@ -9,6 +9,7 @@ struct FamilyEnsembleView: View {
            sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
 
     @State private var selected: Entry?
+    @State private var typeTask: Task<Void, Never>?
     @State private var generating = false
     @State private var story = ""
     @State private var displayed = ""
@@ -52,6 +53,7 @@ struct FamilyEnsembleView: View {
             Text("选一个有家人补充的瞬间").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
             ForEach(candidates.prefix(8)) { entry in
                 Button {
+                    typeTask?.cancel()
                     withAnimation { selected = entry; story = ""; displayed = "" }
                 } label: {
                     HStack {
@@ -124,19 +126,43 @@ struct FamilyEnsembleView: View {
         generating = true
         displayed = ""
         defer { generating = false }
-        // Mock 合成：把多视角拼成一段温暖叙述
-        try? await Task.sleep(for: .seconds(1))
+        let name = env.config.childName
         let perspectives = [entry.authorRole + "说：" + (entry.note ?? "记录了这一刻")]
             + entry.comments.compactMap { c in c.text.map { "\(c.authorRole)说：\($0)" } }
+
+        // 配置了真实 AI：让服务端把多视角织成完整故事；失败降级到本地模板（明示简易版）
+        if env.config.isAIConfigured {
+            let prompt = """
+            日期：\(BubuDateFormat.longDate(entry.happenedAt))
+            \(perspectives.joined(separator: "\n"))
+            """
+            if let woven = try? await env.aiService.rewriteFirstPerson(
+                note: "请以第三人称、150字左右，把这家人对同一瞬间的多视角记录织成一段温暖完整的小故事，保留每个人的称谓：\n" + prompt,
+                childName: name), !woven.isEmpty {
+                story = woven
+                typewriter(story)
+                return
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(400))
         story = """
         那是 \(BubuDateFormat.longDate(entry.happenedAt))。
         \(perspectives.joined(separator: "；"))。
-        同一个瞬间，在每个人心里留下了不一样的温柔。这就是属于布布的、被全家人一起记住的一天。
+        同一个瞬间，在每个人心里留下了不一样的温柔。这就是属于\(name)的、被全家人一起记住的一天。
         """
-        await typewriter(story)
+        typewriter(story)
     }
 
-    private func typewriter(_ text: String) async {
-        for ch in text { displayed.append(ch); try? await Task.sleep(for: .milliseconds(22)) }
+    /// 可取消打字机：切换记录/重新生成时旧任务立即停，残尾不再拼进新文本。
+    private func typewriter(_ text: String) {
+        typeTask?.cancel()
+        typeTask = Task {
+            displayed = ""
+            for ch in text {
+                guard !Task.isCancelled else { return }
+                displayed.append(ch)
+                try? await Task.sleep(for: .milliseconds(22))
+            }
+        }
     }
 }

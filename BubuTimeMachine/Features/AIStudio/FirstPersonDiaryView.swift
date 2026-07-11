@@ -10,6 +10,7 @@ struct FirstPersonDiaryView: View {
            sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
 
     @State private var selected: Entry?
+    @State private var typeTask: Task<Void, Never>?
     @State private var generating = false
     @State private var output = ""
     @State private var displayed = ""
@@ -78,6 +79,7 @@ struct FirstPersonDiaryView: View {
     private func entryChip(_ entry: Entry) -> some View {
         let isSel = selected?.id == entry.id
         return Button {
+            typeTask?.cancel()   // 切换记录先掐掉上一条的打字机，残尾不再拼进新文本
             withAnimation { selected = entry; output = ""; displayed = ""; errorText = nil }
         } label: {
             HStack(alignment: .top, spacing: 10) {
@@ -216,19 +218,23 @@ struct FirstPersonDiaryView: View {
             let text = try await env.aiService.rewriteFirstPerson(
                 note: note, childName: env.config.childName)
             output = text
-            await typewriter(text)
+            typewriter(text)
         } catch {
             output = ""
             errorText = "AI 暂时没想好，稍后再试一次。"
         }
     }
 
-    /// 打字机动效逐字显示。
-    private func typewriter(_ text: String) async {
-        displayed = ""
-        for ch in text {
-            displayed.append(ch)
-            try? await Task.sleep(for: .milliseconds(18))
+    /// 打字机动效逐字显示（可取消：切换记录/重新生成时旧任务立即停）。
+    private func typewriter(_ text: String) {
+        typeTask?.cancel()
+        typeTask = Task {
+            displayed = ""
+            for ch in text {
+                guard !Task.isCancelled else { return }
+                displayed.append(ch)
+                try? await Task.sleep(for: .milliseconds(18))
+            }
         }
     }
 
