@@ -41,6 +41,9 @@ protocol APIClient: Sendable {
 
     /// 拉取自 since 以来被删除记录的 localId（tombstone），用于把删除传播到本设备。
     func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String]
+
+    /// 实时变更流（SSE 长连）：远端有任何写入就产出一个信号。不支持的后端返回 nil。
+    func realtimeStream() -> AsyncStream<Void>?
     func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func deleteTimeCapsule(remoteId: String) async throws
     func downloadFile(from remoteURL: String) async throws -> Data
@@ -81,4 +84,5 @@ enum APIError: LocalizedError, Sendable {
 // MARK: - 默认实现（Mock / 旧后端无需支持 tombstone）
 extension APIClient {
     func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String] { [] }
+    func realtimeStream() -> AsyncStream<Void>? { nil }
 }

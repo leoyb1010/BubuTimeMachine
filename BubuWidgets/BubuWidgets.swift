@@ -8,6 +8,8 @@ import ImageIO
 struct BubuEntry: TimelineEntry {
     let date: Date
     let snapshot: BubuSnapshot
+    /// 记忆轮播款用：本 entry 展示第几张照片（多 entry 时间线自动翻页，免刷新预算）。
+    var photoIndex: Int = 0
 }
 
 struct BubuProvider: TimelineProvider {
@@ -1080,6 +1082,92 @@ struct BubuAccessoryWidget: Widget {
     }
 }
 
+// MARK: - 记忆轮播小组件（R4 F-1：桌面变成会自动翻页的成长相框）
+
+/// 多 entry 时间线：未来 6 小时每 30 分钟一个 entry 轮换一张照片。
+/// 翻页由时间线驱动，不消耗 WidgetKit 刷新预算（一次生成、系统按时切换）。
+struct BubuMemoryProvider: TimelineProvider {
+    func placeholder(in context: Context) -> BubuEntry {
+        BubuEntry(date: .now, snapshot: .sample)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (BubuEntry) -> Void) {
+        completion(BubuEntry(date: .now, snapshot: BubuWidgetData.loadSnapshot()))
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<BubuEntry>) -> Void) {
+        let snapshot = BubuWidgetData.loadSnapshot()
+        let photoCount = max(1, snapshot.photoImageData.count)
+        var entries: [BubuEntry] = []
+        for slot in 0..<12 {   // 6 小时 × 每 30 分钟
+            let date = Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60)
+            entries.append(BubuEntry(date: date, snapshot: snapshot, photoIndex: slot % photoCount))
+        }
+        completion(Timeline(entries: entries, policy: .atEnd))
+    }
+}
+
+struct BubuMemoryWidgetView: View {
+    var entry: BubuEntry
+
+    private var photoData: Data? {
+        let photos = entry.snapshot.photoImageData
+        guard !photos.isEmpty else { return nil }
+        return photos[entry.photoIndex % photos.count]
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if let data = photoData, let image = BubuAvatar.downsampledImage(from: data, maxPixel: 800) {
+                Color.clear
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.snapshot.name)
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    Text(entry.snapshot.ageText)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .opacity(0.9)
+                }
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .containerBackground(for: .widget) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .overlay {
+                            LinearGradient(colors: [.clear, .black.opacity(0.45)],
+                                           startPoint: .center, endPoint: .bottom)
+                        }
+                }
+            } else {
+                VStack(spacing: 6) {
+                    Text("🖼️").font(.system(size: 30))
+                    Text("多记几张照片\n这里就是\(entry.snapshot.name)的相框")
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(WidgetPalette.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .containerBackground(for: .widget) { WidgetPalette.cream }
+            }
+        }
+    }
+}
+
+struct BubuMemoryWidget: Widget {
+    let kind = "BubuMemoryWidget"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: BubuMemoryProvider()) { entry in
+            BubuMemoryWidgetView(entry: entry)
+        }
+        .configurationDisplayName("成长相框")
+        .description("最近的照片每半小时自动换一张，桌面就是布布的相框。")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .contentMarginsDisabled()
+    }
+}
+
 // MARK: - 一键打卡小组件（交互按钮，不开 App 直接落库，R4 E-2）
 
 private struct CheckInButton: View {
@@ -1164,6 +1252,7 @@ struct BubuWidgetsBundle: WidgetBundle {
         BubuWidget()
         BubuMomentWidget()
         BubuGrowthWidget()
+        BubuMemoryWidget()
         BubuCheckInWidget()
         BubuAccessoryWidget()
         BubuLiveActivity()

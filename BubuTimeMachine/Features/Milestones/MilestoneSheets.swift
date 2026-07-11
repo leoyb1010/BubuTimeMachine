@@ -128,6 +128,34 @@ struct MilestoneEditSheet: View {
                     .background(.white.opacity(0.85), in: Capsule())
                     .padding(.top, 8)
             }
+            // 点星回到那一刻（R4 F-2）：里程碑挂着当天的记录就把照片和话带出来
+            if let linked = milestone?.entry, !linked.isArchived {
+                HStack(spacing: 10) {
+                    if let photo = linked.media.first(where: { $0.type == .photo }) {
+                        MediaThumbnail(media: photo, mediaStore: env.mediaStore,
+                                       cornerRadius: 12, size: .grid)
+                            .frame(width: 52, height: 52)
+                    } else {
+                        Text("💛").font(.system(size: 28))
+                            .frame(width: 52, height: 52)
+                            .background(.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("那一刻")
+                            .font(.system(size: 10.5, weight: .black, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                        Text(linked.note ?? linked.title ?? "那天的布布")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .background(.white.opacity(0.80), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)

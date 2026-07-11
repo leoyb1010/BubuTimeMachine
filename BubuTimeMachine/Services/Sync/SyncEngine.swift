@@ -43,6 +43,8 @@ final class SyncEngine {
     private var activeSyncID: UUID?
     private var needsAnotherSync = false
     private var pollTimer: Timer?
+    /// SSE 实时监听任务（R4 F-5）：远端一有写入就触发增量同步，家人的照片秒到。
+    private var realtimeTask: Task<Void, Never>?
 
     // MARK: - 增量游标（按集合持久化）
     /// 任一集合拉取失败则该集合游标不推进，下次补拉；游标回退 60 秒容忍时钟偏差（合并幂等）。
@@ -77,6 +79,8 @@ final class SyncEngine {
     func stopPolling() {
         pollTimer?.invalidate()
         pollTimer = nil
+        realtimeTask?.cancel()
+        realtimeTask = nil
     }
     /// 由 App 注入主上下文（同步需要读写 SwiftData）。
     func attach(context: ModelContext) {
@@ -94,7 +98,26 @@ final class SyncEngine {
             return
         }
         startPolling()
+        startRealtime()
         scheduleSync()
+    }
+
+    /// SSE 长连：收到远端写入信号→去抖 2 秒→增量同步。30 秒轮询保留作兜底。
+    private func startRealtime() {
+        guard realtimeTask == nil, let stream = apiClient.realtimeStream() else { return }
+        realtimeTask = Task { [weak self] in
+            var pending = false
+            for await _ in stream {
+                guard let self, !Task.isCancelled else { return }
+                if pending { continue }   // 去抖：短时间多条事件只跑一轮
+                pending = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    pending = false
+                    self?.syncNow()
+                }
+            }
+        }
     }
 
     /// 手动触发一次同步（设置页/下拉刷新可调）。

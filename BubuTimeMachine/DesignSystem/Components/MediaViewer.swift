@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import Photos
 
 // MARK: - 媒体相册查看器
 struct MediaGalleryViewer: View {
@@ -10,6 +11,7 @@ struct MediaGalleryViewer: View {
 
     @Environment(AppEnvironment.self) private var env
     @State private var selectedID: UUID
+    @State private var saveToast: String?
 
     init(mediaItems: [Media], initialMediaID: UUID, mediaStore: MediaStore, onDismiss: @escaping () -> Void) {
         self.mediaItems = mediaItems
@@ -21,6 +23,35 @@ struct MediaGalleryViewer: View {
 
     private var selectedIndex: Int {
         mediaItems.firstIndex(where: { $0.id == selectedID }) ?? 0
+    }
+
+    private var currentMedia: Media? {
+        mediaItems.first(where: { $0.id == selectedID })
+    }
+
+    private var currentFileURL: URL? {
+        guard let media = currentMedia, let name = media.localFileName else { return nil }
+        return mediaStore.mediaURL(for: name)
+    }
+
+    /// 存回系统相册（照片/视频都支持；只需「添加」权限，不读相册）。
+    private func saveToPhotoLibrary() {
+        guard let media = currentMedia, let url = currentFileURL else { return }
+        let isVideo = media.type == .video
+        PHPhotoLibrary.shared().performChanges({
+            if isVideo {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+            } else {
+                PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+            }
+        }) { success, _ in
+            Task { @MainActor in
+                withAnimation { saveToast = success ? "已存到系统相册 ✓" : "没存成功，检查相册权限" }
+                if success { BubuHaptics.success() }
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { saveToast = nil }
+            }
+        }
     }
 
     var body: some View {
@@ -40,6 +71,25 @@ struct MediaGalleryViewer: View {
 
             VStack {
                 HStack {
+                    // 导出到系统相册 + 分享（照片终于「出得去」了，R4 F-4）
+                    if let url = currentFileURL {
+                        Button { saveToPhotoLibrary() } label: {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(.black.opacity(0.45), in: Circle())
+                        }
+                        .accessibilityLabel("存到系统相册")
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(.black.opacity(0.45), in: Circle())
+                        }
+                        .accessibilityLabel("分享")
+                    }
                     Spacer()
                     Button {
                         onDismiss()
@@ -54,6 +104,15 @@ struct MediaGalleryViewer: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
+
+                if let saveToast {
+                    Text(saveToast)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .transition(.opacity)
+                }
 
                 Spacer()
 

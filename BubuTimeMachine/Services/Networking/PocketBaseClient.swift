@@ -448,6 +448,82 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         }
     }
 
+    // MARK: - 实时订阅（PocketBase SSE，R4 F-5）
+    // 爸爸发的照片妈妈手机秒到：SSE 长连收到任何订阅集合的写入就发一个信号，
+    // SyncEngine 收到信号立刻跑一轮增量同步（复用既有 merge 全逻辑，实现最小、行为一致）。
+
+    func realtimeStream() -> AsyncStream<Void>? {
+        AsyncStream { continuation in
+            let task = Task { [weak self] in
+                var backoff: Double = 2
+                while !Task.isCancelled {
+                    guard let self else { return }
+                    do {
+                        try await self.runRealtimeOnce { continuation.yield(()) }
+                        backoff = 2   // 正常断开（服务器重启等）：快速重连
+                    } catch {
+                        // 连接失败按指数退避，最长 60s
+                    }
+                    if Task.isCancelled { break }
+                    try? await Task.sleep(for: .seconds(backoff))
+                    backoff = min(backoff * 2, 60)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// 一次 SSE 会话：连上 → 拿 clientId → 提交订阅 → 逐事件产出信号；连接断开返回。
+    private func runRealtimeOnce(onEvent: @escaping @Sendable () -> Void) async throws {
+        let url = baseURL.appendingPathComponent("api/realtime")
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 3600
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+        try Self.check(resp, Data())
+
+        var eventName = ""
+        var dataBuffer = ""
+        var subscribed = false
+        for try await line in bytes.lines {
+            if Task.isCancelled { return }
+            if line.hasPrefix("event:") {
+                eventName = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("data:") {
+                dataBuffer += line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            } else if line.isEmpty {
+                defer { eventName = ""; dataBuffer = "" }
+                if eventName == "PB_CONNECT", !subscribed {
+                    guard let data = dataBuffer.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let clientId = obj["clientId"] as? String else { continue }
+                    try await subscribeRealtime(clientId: clientId)
+                    subscribed = true
+                } else if !eventName.isEmpty, eventName != "PB_CONNECT" {
+                    onEvent()
+                }
+            }
+        }
+    }
+
+    private func subscribeRealtime(clientId: String) async throws {
+        let token = try await ensureToken()
+        let url = baseURL.appendingPathComponent("api/realtime")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = [
+            "clientId": clientId,
+            "subscriptions": ["entries", "media", "comments", "milestones",
+                              "voicenotes", "voicememos", "healthrecords", "timecapsules"],
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try Self.check(resp, data)
+    }
+
     private func findRecord(collection: String, localId: String) async throws -> String? {
         try await withAuthRetry { token in
             var comps = URLComponents(

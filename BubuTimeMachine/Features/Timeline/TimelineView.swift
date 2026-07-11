@@ -42,8 +42,16 @@ struct TimelineView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showFamilyFeed = true
+                    // 打开即视为已读
+                    UserDefaults.standard.set(Date.now, forKey: "bubu.feed.lastSeenAt")
                 } label: {
                     Label("家庭动态", systemImage: "person.2.wave.2.fill")
+                }
+                // 未读红点（R4 F-3）：上次看过之后家人有新动态就亮
+                .overlay(alignment: .topTrailing) {
+                    if hasUnseenFamilyActivity {
+                        Circle().fill(.red).frame(width: 8, height: 8).offset(x: 2, y: -1)
+                    }
                 }
             }
         }
@@ -58,6 +66,16 @@ struct TimelineView: View {
             Button("取消", role: .cancel) { entryPendingDelete = nil }
         } message: {
             Text("删除后会从时光轴隐藏，本地记录会标记为待同步删除。")
+        }
+    }
+
+    /// 上次看过动态之后，家里其他人有没有新动作（新记录/新评论）。
+    private var hasUnseenFamilyActivity: Bool {
+        let lastSeen = UserDefaults.standard.object(forKey: "bubu.feed.lastSeenAt") as? Date ?? .distantPast
+        let myRole = env.config.currentRole.rawValue
+        if entries.contains(where: { $0.createdAt > lastSeen && $0.authorRole != myRole }) { return true }
+        return entries.contains { entry in
+            entry.comments.contains { $0.createdAt > lastSeen && $0.authorRole != myRole }
         }
     }
 

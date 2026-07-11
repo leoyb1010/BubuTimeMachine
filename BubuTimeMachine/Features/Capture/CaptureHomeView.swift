@@ -504,7 +504,7 @@ struct CaptureHomeView: View {
             NavigationLink { BubuStoryView() } label: { storyTile }
                 .buttonStyle(.plain)
             Button { startQuickCapture(prefillNote: "【今日一问】\(DailyQuestion.todays(birthday: profile?.birthday ?? .now))\n") } label: {
-                dailyQuestionTile
+                dailyQuestionTile   // 副标会显示今天已有几位家人回答（全家合唱，R4 F-6）
             }
             .buttonStyle(.plain)
         }
@@ -589,6 +589,17 @@ struct CaptureHomeView: View {
         }
     }
 
+    /// 今天已回答「今日一问」的家人称谓（全家合唱，R4 F-6）。
+    private var todayQuestionAnswerers: [String] {
+        let cal = Calendar.current
+        var roles: [String] = []
+        for e in entries where cal.isDateInToday(e.happenedAt) {
+            guard e.note?.hasPrefix("【今日一问】") == true else { continue }
+            if !roles.contains(e.authorRole) { roles.append(e.authorRole) }
+        }
+        return roles
+    }
+
     private var dailyQuestionTile: some View {
         compactTileSurface(centered: true) {
             HStack(alignment: .center, spacing: 9) {
@@ -597,10 +608,14 @@ struct CaptureHomeView: View {
                     Text("今日一问")
                         .font(.system(size: 14, weight: .heavy, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("答一句就成时光")
+                    Text(todayQuestionAnswerers.isEmpty
+                         ? "答一句就成时光"
+                         : "\(todayQuestionAnswerers.joined(separator: "、"))已回答，合个唱？")
                         .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .foregroundStyle(todayQuestionAnswerers.isEmpty
+                                         ? BubuTheme.Color.secondaryText : BubuTheme.Color.deepRose)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text("记录")
                         .font(.system(size: 10.5, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
