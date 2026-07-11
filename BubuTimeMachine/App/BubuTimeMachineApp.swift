@@ -40,6 +40,9 @@ struct BubuTimeMachineApp: App {
                 .environment(env)
                 .environment(router)
                 .tint(env.theme.theme.primary)
+                // 选了深色主题（星夜）就整 App 强制深色：动态色 token 统一翻到深色值，
+                // 否则浅色系统下暗渐变底 + 深棕文字 = 全 App 不可读（R4 待核-星夜）
+                .preferredColorScheme(env.theme.theme.isDark ? .dark : nil)
                 .onOpenURL { router.handle($0) }
                 .task {
                     #if DEBUG

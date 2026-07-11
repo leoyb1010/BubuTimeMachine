@@ -108,6 +108,12 @@ struct NaturalCaptureBar: View {
                 .padding(.horizontal, 4)
             }
         }
+        .onChange(of: recorder.state) { _, newState in
+            // 来电等中断自动收尾：已录部分照常走转写，不静默丢失（R4 P2-37）
+            guard newState == .finished,
+                  let result = recorder.consumeInterruptedResult() else { return }
+            Task { await transcribeAndParse(url: result.url) }
+        }
         .sheet(item: $reviewPayload) { payload in
             NaturalCaptureReviewSheet(result: payload.result, originalText: payload.originalText) {
                 text = ""

@@ -191,7 +191,17 @@ struct ChildProfileView: View {
     private func loadAvatar(_ item: PhotosPickerItem?) async {
         guard let item, let data = try? await item.loadTransferable(type: Data.self),
               let profile else { return }
-        if let name = try? env.mediaStore.savePhoto(data) {
+        // 头像降采样到 600px 再存：原图动辄十几 MB 超过小组件 2MB 上限，
+        // 桌面小组件的头像会永远是"布"字兜底（R4 待核-头像）
+        let avatarData: Data
+        if let image = UIImage(data: data),
+           let small = await image.byPreparingThumbnail(ofSize: Self.avatarSize(for: image.size)),
+           let jpeg = small.jpegData(compressionQuality: 0.9) {
+            avatarData = jpeg
+        } else {
+            avatarData = data
+        }
+        if let name = try? env.mediaStore.savePhoto(avatarData) {
             profile.avatarMediaFileName = name
             profile.avatarRemoteURL = nil   // 置空触发下一轮同步补传新头像
             profile.syncState = .local
@@ -199,6 +209,13 @@ struct ChildProfileView: View {
             env.refreshWidgetSnapshot(context: context)
             WidgetRefresher.reload()        // 头像变了，刷新桌面小组件
         }
+    }
+
+    private static func avatarSize(for size: CGSize) -> CGSize {
+        let maxSide = max(size.width, size.height)
+        guard maxSide > 600, maxSide > 0 else { return size }
+        let k = 600 / maxSide
+        return CGSize(width: size.width * k, height: size.height * k)
     }
 
     private func loadHero(_ item: PhotosPickerItem?) async {

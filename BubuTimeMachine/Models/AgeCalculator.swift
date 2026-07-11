@@ -55,6 +55,10 @@ enum AgeCalculator {
     static func daysUntilNextBirthday(birthday: Date, from date: Date = .now) -> Int {
         let cal = Calendar.current
         let comps = cal.dateComponents([.month, .day], from: birthday)
+        // 生日【当天】就是 0 天：nextDate(after:) 会跳到明年，导致当天显示"还有365天"、
+        // 小组件"生日快乐🎂"分支永不可达（R4 P2-39）
+        let today = cal.dateComponents([.month, .day], from: date)
+        if today.month == comps.month && today.day == comps.day { return 0 }
         guard let next = cal.nextDate(after: date, matching: comps,
                                       matchingPolicy: .nextTime) else { return 0 }
         return cal.dateComponents([.day], from: cal.startOfDay(for: date),

@@ -41,6 +41,9 @@ struct MediaThumbnail: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .clipped()
         .task(id: media.id) { await load() }
+        // 远端文件由 SyncEngine 下载落地后 localFileName 才有值：跟着重载，不再一直占位（R4 待核-缩略图）
+        .onChange(of: media.localFileName) { _, _ in Task { await load() } }
+        .onChange(of: media.thumbnailFileName) { _, _ in Task { await load() } }
         // remoteURL 在视图出现后才同步到位时也要启动呼吸动画（onAppear 只跑一次）
         .onChange(of: isAwaitingRemote) { _, awaiting in
             if awaiting { pulse = true }

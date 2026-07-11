@@ -8,11 +8,16 @@ struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
 
+    @Query private var existingProfiles: [ChildProfile]
+    @Query private var existingMembers: [FamilyMember]
+
     @State private var step = 0
     @State private var childName = "布布"
     @State private var birthday = Calendar.current.date(byAdding: .month, value: -6, to: .now) ?? .now
     @State private var selectedRelation: Relation = .mama
     @State private var memberName = ""
+    /// 「加入已有家庭」：第二台设备不再新建档案（否则同步后全家出现两个布布，R4 P2-29）。
+    @State private var joinExisting = false
 
     private var theme: BubuThemeDefinition { env.theme.theme }
 
@@ -77,6 +82,16 @@ struct OnboardingView: View {
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
             }
+            // 第二台设备：家里已经在用了 → 跳过建档，登录后同步回全家的布布
+            Button {
+                joinExisting = true
+                withAnimation(.smooth) { step = 2 }
+            } label: {
+                Text("家里已经在用了？我是来加入的 →")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(theme.primary)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -150,6 +165,13 @@ struct OnboardingView: View {
                 .font(BubuTheme.Font.body)
                 .padding()
                 .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+
+            if joinExisting {
+                Text("进入后到「设置 → 家人登录」输入家庭账号，\n布布的照片和记录就都回来了。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
@@ -159,7 +181,7 @@ struct OnboardingView: View {
         Button {
             advance()
         } label: {
-            Text(step < 2 ? "继续" : "开始记录布布的成长")
+            Text(step < 2 ? "继续" : (joinExisting ? "进入，去登录家庭账号" : "开始记录布布的成长"))
                 .font(BubuTheme.Font.headline.weight(.bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -179,17 +201,37 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        // 创建布布档案
-        let profile = ChildProfile(name: childName.isEmpty ? "布布" : childName, birthday: birthday)
-        context.insert(profile)
+        if joinExisting {
+            // 加入已有家庭：不建档、不建成员——登录后由同步拉回全家的布布与成员，
+            // 不会再产生第二个「布布」污染全家（R4 P2-29）
+            env.config.currentRoleRaw = selectedRelation.rawValue
+            withAnimation(.smooth) {
+                env.hasCompletedOnboarding = true
+            }
+            return
+        }
 
-        // 创建第一个成员（主账号）
+        // 常规建档。若档案已存在（例如同步先一步到达），复用而不是再插一个
+        let profile: ChildProfile
+        if let existing = existingProfiles.first {
+            profile = existing
+        } else {
+            profile = ChildProfile(name: childName.isEmpty ? "布布" : childName, birthday: birthday)
+            context.insert(profile)
+        }
+
+        // 创建第一个成员（主账号）；同关系成员已存在（同步到达）就复用
         let displayName = memberName.isEmpty ? selectedRelation.rawValue : memberName
-        let member = FamilyMember(name: displayName, relation: selectedRelation.rawValue,
+        let member: FamilyMember
+        if let existing = existingMembers.first(where: { $0.relation == selectedRelation.rawValue }) {
+            member = existing
+        } else {
+            member = FamilyMember(name: displayName, relation: selectedRelation.rawValue,
                                   avatarEmoji: selectedRelation.defaultEmoji,
                                   themeColorHex: selectedRelation.defaultColorHex)
-        member.isPrimary = true
-        context.insert(member)
+            member.isPrimary = true
+            context.insert(member)
+        }
 
         try? context.save()
 

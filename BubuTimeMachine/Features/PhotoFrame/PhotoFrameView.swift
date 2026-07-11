@@ -43,7 +43,10 @@ struct PhotoFrameView: View {
         .persistentSystemOverlays(.hidden)
         .contentShape(Rectangle())
         .onTapGesture { toggleControls() }
-        .task { buildSlides() }
+        // 跨天（那年今日过期）或新照片同步进来都重建播放列表（R4 P2-33）
+        .task(id: RebuildKey(day: Calendar.current.startOfDay(for: now), count: entries.count)) {
+            buildSlides()
+        }
         // 索引或暂停态变化都重排：驱动自动轮播 + 预取
         .task(id: TickKey(index: index, paused: paused, count: slides.count)) {
             await loadAround()
@@ -235,6 +238,7 @@ struct PhotoFrameView: View {
         }
         onThisDay.sort { $0.dateText > $1.dateText }        // 年份新→旧
         slides = onThisDay + rest.shuffled()
+        if index >= slides.count { index = 0 }
     }
 
     /// 加载当前帧并预取下一帧，顺手回收远处缓存（内存红线）。
@@ -270,6 +274,11 @@ private struct FrameSlide: Identifiable {
 private struct TickKey: Equatable {
     let index: Int
     let paused: Bool
+    let count: Int
+}
+
+private struct RebuildKey: Equatable {
+    let day: Date
     let count: Int
 }
 

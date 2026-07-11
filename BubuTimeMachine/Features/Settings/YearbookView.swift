@@ -161,7 +161,7 @@ struct YearbookView: View {
             messages: Array(messages.prefix(14)))
 
         let exporter = YearbookExporter(mediaStore: env.mediaStore, theme: env.theme.theme)
-        if let url = exporter.makePDF(input) {
+        if let url = await exporter.makePDF(input) {
             pdfURL = url
             showShare = true
             BubuHaptics.success()

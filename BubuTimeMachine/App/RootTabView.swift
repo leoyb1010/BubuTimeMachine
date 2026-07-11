@@ -73,6 +73,9 @@ struct RootTabView: View {
         }
         // 小组件点击时 App 已在前台的情况：onOpenURL 更新 pendingTab，这里响应切 Tab。
         .onChange(of: router.pendingTab) { _, _ in consumePendingRoute() }
+        // 控制中心/Action Button 在 App 已运行时只置 pendingQuickCapture 不动 pendingTab：
+        // 必须单独监听，否则不拉起面板、残留标志还会在之后点小组件时误弹（R4 P2-38）
+        .onChange(of: router.pendingQuickCapture) { _, _ in consumePendingRoute() }
     }
 
     /// 消费一次待处理的深链目标 Tab / 快速记录信号（消费后置回，避免重复触发）。

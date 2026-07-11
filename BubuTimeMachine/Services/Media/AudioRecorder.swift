@@ -17,6 +17,15 @@ final class AudioRecorder: NSObject {
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var currentURL: URL?
+    private var interruptionObserver: NSObjectProtocol?
+
+    /// 来电/闹钟等中断时自动收尾保留的录音（UI 观察到后当作正常 stop 结果处理，已录的不丢）。
+    private(set) var interruptedResult: (url: URL, duration: TimeInterval, waveform: [Float])?
+
+    func consumeInterruptedResult() -> (url: URL, duration: TimeInterval, waveform: [Float])? {
+        defer { interruptedResult = nil }
+        return interruptedResult
+    }
 
     /// 请求麦克风权限。
     func requestPermission() async -> Bool {
@@ -47,19 +56,44 @@ final class AudioRecorder: NSObject {
         do {
             let rec = try AVAudioRecorder(url: url, settings: settings)
             rec.isMeteringEnabled = true
-            rec.record()
+            guard rec.record() else { return false }   // 启动失败要如实返回，不装录着
             self.recorder = rec
             self.currentURL = url
             self.state = .recording
             self.elapsed = 0
             self.levels = []
             startTimer()
+            observeInterruptions()
             // 录音中 Live Activity（灵动岛/锁屏可见时长）；未授权时安静 no-op。
             BubuActivityController.startVoiceRecording(childName: SharedDefaults.childName)
             return true
         } catch {
             return false
         }
+    }
+
+    /// 来电/闹钟/Siri 中断：自动收尾并保留已录部分——
+    /// 之前没有任何处理，来电后系统已停录，用户以为还在录，后半段静默丢失（R4 P2-37）。
+    private func observeInterruptions() {
+        removeInterruptionObserver()
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let info = note.userInfo,
+                  let typeRaw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: typeRaw) == .began else { return }
+            Task { @MainActor in
+                guard let self, self.state == .recording else { return }
+                self.interruptedResult = self.stop()
+            }
+        }
+    }
+
+    private func removeInterruptionObserver() {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+        interruptionObserver = nil
     }
 
     /// 停止录音，返回（临时文件 URL、时长、波形采样）。
@@ -73,6 +107,7 @@ final class AudioRecorder: NSObject {
         state = .finished
         let waveform = downsample(levels, to: 40)
         self.recorder = nil
+        removeInterruptionObserver()
         try? AVAudioSession.sharedInstance().setActive(false)
         BubuActivityController.endVoiceRecording(elapsedText: Self.timeText(duration))
         return (url, duration, waveform)
@@ -83,6 +118,7 @@ final class AudioRecorder: NSObject {
         if let url = currentURL { try? FileManager.default.removeItem(at: url) }
         timer?.invalidate(); timer = nil
         recorder = nil; currentURL = nil
+        removeInterruptionObserver()
         state = .idle
         elapsed = 0
         levels = []

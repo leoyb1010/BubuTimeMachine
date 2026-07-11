@@ -64,6 +64,15 @@ struct VoiceRecorderBar: View {
         } message: {
             Text("请到系统设置里允许布布时光机使用麦克风。")
         }
+        // 来电等中断自动收尾的录音：当作正常停止处理，已录部分不丢（R4 P2-37）
+        .onChange(of: recorder.state) { _, newState in
+            guard newState == .finished,
+                  let result = recorder.consumeInterruptedResult() else { return }
+            defer { try? FileManager.default.removeItem(at: result.url) }
+            if let fileName = try? mediaStore.importFile(from: result.url, preferredExtension: "m4a") {
+                onFinished(fileName, result.duration, result.waveform)
+            }
+        }
         .onDisappear {
             if recorder.state == .recording {
                 recorder.cancel()

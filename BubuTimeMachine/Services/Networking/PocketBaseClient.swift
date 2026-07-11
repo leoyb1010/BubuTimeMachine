@@ -4,7 +4,9 @@ import Foundation
 /// 对接自托管 PocketBase：REST 鉴权 + CRUD + multipart 上传（带进度）+ Realtime(SSE)。
 /// 幂等：以 localId 为去重键，createEntry 先查后建/更新。
 /// 离线优先：所有失败都抛错，由 SyncEngine 决定保留本地、稍后重试。
-final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
+/// nonisolated：纯网络客户端不碰 UI。全局默认 MainActor 下若不标注，
+/// 上传大视频时 multipart 文件在主线程同步拼装，App 会冻结数秒（R4 P2-36）。
+nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private let baseURL: URL
     private let identity: String       // 家庭共享账户邮箱

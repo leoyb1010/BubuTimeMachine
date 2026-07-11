@@ -69,12 +69,14 @@ final class BubuAIService: AIService, @unchecked Sendable {
         let url = baseURL.appendingPathComponent("movie/file/\(jobId)")
         var req = URLRequest(url: url)
         applyAuth(&req)
-        req.timeoutInterval = 120
-        let (data, resp) = try await session.data(for: req)
-        try Self.check(resp, data)
+        req.timeoutInterval = 300
+        // 流式落盘：长片整段读进内存会触发内存告警（R4 待核-mp4）
+        let (tempURL, resp) = try await session.download(for: req)
+        try Self.check(resp, Data())
         let dest = FileManager.default.temporaryDirectory
             .appendingPathComponent("bubu_movie_\(jobId).mp4")
-        try data.write(to: dest, options: .atomic)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tempURL, to: dest)
         return dest
     }
 
