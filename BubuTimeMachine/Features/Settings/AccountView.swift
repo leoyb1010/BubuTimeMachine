@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - 登录（单家庭多账号）
 /// 家人各自登录自己的账号；新账号由 PocketBase 后台创建。登录身份对应署名角色（爸爸/妈妈/姥姥）。
@@ -7,6 +8,7 @@ struct AccountView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @State private var welcomeSync = false
 
     @State private var username = ""
     @State private var password = ""
@@ -67,6 +69,31 @@ struct AccountView: View {
             .padding()
         }
         .background(BubuTheme.Color.cream.ignoresSafeArea())
+        .overlay {
+            if welcomeSync {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        Text("🏠").font(.system(size: 44))
+                        Text("正在把布布接回家…")
+                            .font(.system(size: 17, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white)
+                        if let label = env.syncEngine.currentSyncLabel {
+                            Text(label)
+                                .font(BubuTheme.Font.caption)
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                        ProgressView().tint(.white)
+                        Text("全家的时光正在同步过来，第一次会久一点")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(30)
+                    .background(BubuTheme.Color.warmBrown.opacity(0.95),
+                                in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                }
+            }
+        }
         .navigationTitle("家人登录")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -123,6 +150,17 @@ struct AccountView: View {
             // 用新凭据重建 API 客户端 + 同步引擎，否则首次登录后仍是启动时的 Mock，什么都拉不下来
             env.reloadServices(context: modelContext)
             env.syncEngine.syncNow()
+            // 新设备（本地还没有任何时光）：展示「接布布回家」进度，等首轮同步拉完再进（R4 G-4）
+            let entryCount = (try? modelContext.fetchCount(FetchDescriptor<Entry>())) ?? 0
+            if entryCount == 0 {
+                welcomeSync = true
+                let start = Date.now
+                while Date.now.timeIntervalSince(start) < 90 {
+                    try? await Task.sleep(for: .seconds(1))
+                    if env.syncEngine.lastSyncedAt != nil { break }
+                }
+                welcomeSync = false
+            }
             busy = false
             dismiss()
         } catch {

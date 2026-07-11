@@ -16,21 +16,27 @@ struct BubuTimeMachineApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        let schema = Schema([
-            Entry.self, Media.self, Milestone.self, FirstTime.self,
-            TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self,
-            FamilyMember.self, ChildProfile.self, VoiceNote.self, HealthRecord.self,
-            FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self,
-            PendingDeletion.self
-        ])
+        // schema 唯一真相源：版本化 BubuSchemaV1（与 Widget/Intent 完全一致）
+        let schema = SharedModelContainer.schema
         // App Group：先把旧私有沙盒的 store/媒体一次性迁到共享容器（幂等、失败不删源），
         // 再让 ModelConfiguration 指向共享容器里的 store —— Widget/灵动岛等 extension 才能读到同一份数据。
         StorageMigrator.migrateIfNeeded()
         let config = ModelConfiguration(schema: schema, url: BubuStorage.storeURL)
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [config])
+            modelContainer = try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
+                                                configurations: [config])
+            BubuStoreHealth.markHealthy()
         } catch {
-            fatalError("无法创建 SwiftData 容器：\(error)")
+            // 数据保护模式（R4 G-3）：以前这里 fatalError——升级迁移一旦失败，
+            // 全家的 30 年数据直接锁死打不开。现在改为：磁盘 store 原样保留（绝不动它），
+            // App 以内存容器运行并在设置页明确提示，等待修复/导出。
+            BubuStoreHealth.markFailed()
+            let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            do {
+                modelContainer = try ModelContainer(for: schema, configurations: [memory])
+            } catch {
+                fatalError("无法创建 SwiftData 容器（连内存容器都失败）：\(error)")
+            }
         }
     }
 
@@ -49,6 +55,13 @@ struct BubuTimeMachineApp: App {
                     seedForUITestingIfNeeded()
                     #endif
                     env.bootstrap(context: modelContainer.mainContext)
+                    // 后台补拉注册 + 排期（G-2）；备份提醒（G-6）
+                    BackgroundRefresher.register { [weak env] in
+                        guard let env else { return }
+                        env.syncEngine.syncNow()
+                        try? await Task.sleep(for: .seconds(20))   // 家庭 LAN 一轮同步足够
+                    }
+                    Task { await BackupReminder.scheduleIfAuthorized() }
                     // 语音自动转写补写（端侧优先，尽力而为）：三年语音逐步变成可搜索文字
                     Task {
                         await VoiceTranscriber.backfill(
@@ -86,7 +99,9 @@ struct BubuTimeMachineApp: App {
                 WidgetRefresher.reload()
                 pushWatchSnapshot()
                 consumePendingRecord()
-            case .background: env.syncEngine.stopPolling()
+            case .background:
+                env.syncEngine.stopPolling()
+                BackgroundRefresher.scheduleNext()   // 系统择机唤醒补一轮同步
             default: break
             }
         }

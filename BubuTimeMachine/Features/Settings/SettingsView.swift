@@ -66,6 +66,15 @@ struct SettingsView: View {
                 group("Apple Watch") {
                     row("布布上表盘", icon: "applewatch.watchface", tint: env.theme.theme.primary) { WatchFaceGuideView() }
                 }
+                if BubuStoreHealth.loadFailed {
+                    Label("数据保护模式：本次升级打开数据库失败，你的全部数据仍安全保存在手机里，当前修改不会保存。请把 App 升级到最新版或联系管理员修复。",
+                          systemImage: "exclamationmark.shield.fill")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.danger)
+                        .padding(12)
+                        .background(BubuTheme.Color.danger.opacity(0.10),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
                 group("关于") {
                     row("更新记录", icon: "sparkles", tint: env.theme.theme.primary) { WhatsNewListView() }
                 }

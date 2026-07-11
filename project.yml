@@ -122,6 +122,7 @@ targets:
       # 复用主 App 的共享层（均为 Foundation/SwiftData/AppIntents，extension 安全）
       - path: BubuTimeMachine/Models
       - path: BubuTimeMachine/App/BubuStorage.swift
+      - path: BubuTimeMachine/App/BubuSchema.swift
       - path: BubuTimeMachine/App/SharedModelContainer.swift
       - path: BubuTimeMachine/App/GrowthMeasurementExtractor.swift
       - path: BubuTimeMachine/App/SharedDefaults.swift

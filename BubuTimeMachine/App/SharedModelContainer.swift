@@ -9,21 +9,16 @@ import SwiftData
 enum SharedModelContainer {
     private static let log = Logger(subsystem: "com.bubu.timemachine", category: "SharedModelContainer")
 
-    /// 全实体 schema，必须与 BubuTimeMachineApp.init 中的 schema 完全一致。
-    static let schema = Schema([
-        Entry.self, Media.self, Milestone.self, FirstTime.self,
-        TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self,
-        FamilyMember.self, ChildProfile.self, VoiceNote.self, HealthRecord.self,
-        FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self,
-        PendingDeletion.self
-    ])
+    /// 全实体 schema：来自版本化的 BubuSchemaV1（唯一真相源，App/Widget/Intent 共用）。
+    static let schema = Schema(versionedSchema: BubuSchemaV1.self)
 
     /// 进程内单例容器，指向 App Group 共享 store。Widget/Intent 进程用 `sharedIfAvailable`
     /// 避免共享库暂时打不开时直接崩溃成空白。
     static let sharedIfAvailable: ModelContainer? = {
         let config = ModelConfiguration(schema: schema, url: BubuStorage.storeURL)
         do {
-            return try ModelContainer(for: schema, configurations: [config])
+            return try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
+                                      configurations: [config])
         } catch {
             log.error("无法创建共享 SwiftData 容器：\(error.localizedDescription, privacy: .public)")
             return nil
