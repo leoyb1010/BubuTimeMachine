@@ -81,6 +81,27 @@ struct NaturalCaptureRouter {
             if let name = item.fields.string("supplement_name") { record.tags.append(name) }
         case .checkup:
             if record.detail == nil { record.detail = item.fields.string("note") }
+            // 确认页体检卡上填的身高/体重/头围：落 GrowthMeasurement 进成长曲线，
+            // 并把摘要写进 amountText——之前这些字段被整体丢弃（R4 P2-18）
+            let h = item.fields.double("height_cm")
+            let w = item.fields.double("weight_kg")
+            let hc = item.fields.double("head_circumference_cm")
+            if h != nil || w != nil || hc != nil {
+                let measurement = GrowthMeasurement(measuredAt: item.date ?? .now, source: "checkup")
+                measurement.heightCm = h
+                measurement.weightKg = w
+                measurement.headCircumferenceCm = hc
+                measurement.note = item.note
+                measurement.syncState = .local
+                context.insert(measurement)
+                let summary = [
+                    h.map { "身高 \(Self.cleanNumber($0))cm" },
+                    w.map { "体重 \(Self.cleanNumber($0))kg" },
+                    hc.map { "头围 \(Self.cleanNumber($0))cm" },
+                ].compactMap { $0 }.joined(separator: " · ")
+                record.amountText = [record.amountText, summary.isEmpty ? nil : summary]
+                    .compactMap { $0 }.joined(separator: " · ")
+            }
         }
 
         context.insert(record)
@@ -93,8 +114,16 @@ struct NaturalCaptureRouter {
 
     private func saveVaccine(_ item: NaturalCaptureItem) {
         let name = item.fields.string("vaccine_name") ?? item.title
+        let injectedAt = item.date ?? .now
+        // 重复口述保护：同名 + 同一天已有记录就不再入库——
+        // 否则模糊匹配会把同一针自动打卡到"下一剂"（R4 P2-19）
+        let cal = Calendar.current
+        let existing = (try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []
+        if existing.contains(where: { $0.vaccineName == name && cal.isDate($0.injectedAt, inSameDayAs: injectedAt) }) {
+            return
+        }
         let record = VaccineRecord(vaccineName: name,
-                                   injectedAt: item.date ?? .now,
+                                   injectedAt: injectedAt,
                                    source: "ai")
         record.doseLabel = item.fields.string("dose_label")
         record.hospital = item.fields.string("hospital")
@@ -102,7 +131,8 @@ struct NaturalCaptureRouter {
         record.reaction = item.fields.string("reaction")
         record.note = item.note
         record.syncState = .local
-        if let dose = matchDose(named: name) {
+        // 名称太短/太泛（如"疫苗"两个字）不做剂次匹配，避免误打到别的针
+        if name.count >= 3, let dose = matchDose(named: name) {
             record.doseId = dose.id
             if record.doseLabel == nil { record.doseLabel = dose.doseLabel }
         }
@@ -110,6 +140,10 @@ struct NaturalCaptureRouter {
         context.insert(FeedEvent(kind: .healthRecorded,
                                  actorRole: authorRole,
                                  summary: "智能记录了疫苗接种：\(name)"))
+    }
+
+    private static func cleanNumber(_ v: Double) -> String {
+        v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v)
     }
 
     /// 名称模糊匹配国家排期：取尚未打卡、名称互相包含的第一个剂次；匹配不到就作为自由疫苗记录。

@@ -58,10 +58,13 @@ enum WHOGrowthStandard {
         }
     }
 
-    /// 给定月龄与实测值，估算落在第几百分位（粗略：在 P3…P97 五点间线性插值）。
+    /// 给定月龄与实测值，估算落在第几百分位。
+    /// 先在相邻两个关键月龄之间按月龄【线性插值】出五条百分位值（与图表渲染一致），
+    /// 再在 P3…P97 五点间插值落点——24-60 月龄区间关键点间隔 12 个月，
+    /// 之前"取最近关键月龄"最多偏 6 个月，解读会和图表自相矛盾。
     static func percentile(metric: Metric, gender: String?, month: Int, value: Double) -> Int? {
         let table = bands(metric: metric, gender: gender)
-        guard let band = nearest(table, month: month) else { return nil }
+        guard let band = interpolatedBand(table, month: month) else { return nil }
         let points: [(Double, Double)] = [(band.p3, 3), (band.p15, 15), (band.p50, 50),
                                           (band.p85, 85), (band.p97, 97)]
         if value <= band.p3 { return 3 }
@@ -75,6 +78,20 @@ enum WHOGrowthStandard {
             }
         }
         return 50
+    }
+
+    /// 月龄落在两个关键点之间时，按月龄比例插值出五条百分位值。
+    static func interpolatedBand(_ table: [Band], month: Int) -> Band? {
+        guard !table.isEmpty else { return nil }
+        if let exact = table.first(where: { $0.month == month }) { return exact }
+        guard let lower = table.last(where: { $0.month < month }) else { return table.first }
+        guard let upper = table.first(where: { $0.month > month }) else { return table.last }
+        let t = Double(month - lower.month) / Double(upper.month - lower.month)
+        func lerp(_ a: Double, _ b: Double) -> Double { a + (b - a) * t }
+        return Band(month: month,
+                    p3: lerp(lower.p3, upper.p3), p15: lerp(lower.p15, upper.p15),
+                    p50: lerp(lower.p50, upper.p50), p85: lerp(lower.p85, upper.p85),
+                    p97: lerp(lower.p97, upper.p97))
     }
 
     static func nearest(_ table: [Band], month: Int) -> Band? {

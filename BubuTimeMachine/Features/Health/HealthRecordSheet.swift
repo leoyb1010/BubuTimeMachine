@@ -71,8 +71,24 @@ struct HealthRecordSheet: View {
         .onAppear {
             if let existingRecord {
                 draft = HealthRecordDraft(record: existingRecord)
+                // 编辑体检：把同日的成长测量值回填进表单，改动才能同步回成长曲线
+                if kind == .checkup, let m = checkupMeasurement(on: existingRecord.recordedAt) {
+                    draft.heightCm = m.heightCm
+                    draft.weightKg = m.weightKg
+                    draft.headCircumferenceCm = m.headCircumferenceCm
+                }
             }
         }
+    }
+
+    /// 同一天、来源为体检的成长测量（编辑回填 / 更新用）。
+    private func checkupMeasurement(on day: Date) -> GrowthMeasurement? {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: day)
+        let end = cal.date(byAdding: .day, value: 1, to: start) ?? day
+        let descriptor = FetchDescriptor<GrowthMeasurement>(
+            predicate: #Predicate { $0.sourceRaw == "checkup" && $0.measuredAt >= start && $0.measuredAt < end })
+        return (try? context.fetch(descriptor))?.first
     }
 
     private func save() {
@@ -82,9 +98,18 @@ struct HealthRecordSheet: View {
         if existingRecord == nil {
             context.insert(record)
         }
-        if existingRecord == nil, kind == .checkup, draft.hasGrowthMeasurement {
-            let measurement = draft.makeGrowthMeasurement()
-            context.insert(measurement)
+        if kind == .checkup, draft.hasGrowthMeasurement {
+            // 新建插入；编辑则更新同日测量（找不到就补建）——曲线与记录不再脱节
+            if let m = existingRecord == nil ? nil : checkupMeasurement(on: record.recordedAt) {
+                m.heightCm = draft.heightCm
+                m.weightKg = draft.weightKg
+                m.headCircumferenceCm = draft.headCircumferenceCm
+                m.measuredAt = draft.recordedAt
+                m.updatedAt = .now
+                m.syncState = .local
+            } else {
+                context.insert(draft.makeGrowthMeasurement())
+            }
         }
         if existingRecord == nil {
             context.insert(FeedEvent(kind: .healthRecorded,
@@ -114,6 +139,8 @@ struct HealthRecordDraft: Equatable {
     var weightKg: Double?
     var headCircumferenceCm: Double?
     var tags: [String] = []
+    /// 编辑时的原 amountText：本次没有产生新的摘要就沿用旧值（AI 记的「半碗」不再被清空）。
+    var originalAmountText: String?
 
     var hasGrowthMeasurement: Bool {
         heightCm != nil || weightKg != nil || headCircumferenceCm != nil
@@ -133,6 +160,7 @@ struct HealthRecordDraft: Equatable {
         severity = record.severityRaw ?? ""
         temperatureCelsius = record.temperatureCelsius
         tags = record.tags
+        originalAmountText = record.amountText
     }
 
     func canSave(kind: HealthRecordKind) -> Bool {
@@ -205,7 +233,7 @@ struct HealthRecordDraft: Equatable {
         record.title = updated.title
         record.detail = updated.detail
         record.recordedAt = updated.recordedAt
-        record.amountText = updated.amountText
+        record.amountText = updated.amountText ?? originalAmountText
         record.reaction = updated.reaction
         record.amountValue = updated.amountValue
         record.amountUnit = updated.amountUnit
@@ -598,6 +626,11 @@ private struct AmountStepper: View {
     let step: Double
     let tint: Color
 
+    // 输入期间只写本地缓存，失焦/回车才 parse+clamp——
+    // 之前每敲一键就钳制：输 37.8 敲到 3 直接被夹成下限，键盘根本没法用（R4 P2-14）。
+    @State private var editingText = ""
+    @FocusState private var focused: Bool
+
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
@@ -610,12 +643,14 @@ private struct AmountStepper: View {
             }
             Spacer()
             HStack(spacing: 4) {
-                TextField("输入", text: numericText)
+                TextField("输入", text: $editingText)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 62)
+                    .focused($focused)
+                    .onSubmit { commit() }
                 if value != nil {
                     Text(unit)
                         .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -624,38 +659,43 @@ private struct AmountStepper: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? range.lowerBound },
-                set: { value = min(max($0, range.lowerBound), range.upperBound) }
+                set: { value = min(max($0, range.lowerBound), range.upperBound); syncText() }
             ), in: range, step: step)
             .labelsHidden()
             .tint(tint)
         }
         .padding(12)
         .background(BubuTheme.Color.cream.opacity(0.65), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .onAppear { syncText() }
+        .onChange(of: focused) { _, isFocused in
+            if !isFocused { commit() }
+        }
     }
 
-    private var numericText: Binding<String> {
-        Binding {
-            value.map { HealthRecordDraft.cleanAmount($0) } ?? ""
-        } set: { raw in
-            let text = raw
-                .replacingOccurrences(of: "，", with: ".")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else {
-                value = nil
-                return
-            }
-            if let parsed = Double(text) {
-                value = min(max(parsed, range.lowerBound), range.upperBound)
-            }
+    private func syncText() {
+        editingText = value.map { HealthRecordDraft.cleanAmount($0) } ?? ""
+    }
+
+    private func commit() {
+        let text = editingText
+            .replacingOccurrences(of: "，", with: ".")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { value = nil; return }
+        if let parsed = Double(text) {
+            value = min(max(parsed, range.lowerBound), range.upperBound)
         }
+        syncText()
     }
 }
 
 private struct TemperatureStepper: View {
     @Binding var value: Double?
+
+    @State private var editingText = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -668,41 +708,45 @@ private struct TemperatureStepper: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
             }
             Spacer()
-            TextField("输入", text: temperatureText)
+            TextField("输入", text: $editingText)
                 .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 76)
+                .focused($focused)
+                .onSubmit { commit() }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? 36.5 },
-                set: { value = min(max($0, 34.0), 42.0) }
+                set: { value = min(max($0, 34.0), 42.0); syncText() }
             ), in: 34...42, step: 0.1)
             .labelsHidden()
             .tint(BubuTheme.Color.danger)
         }
         .padding(12)
         .background(BubuTheme.Color.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .onAppear { syncText() }
+        .onChange(of: focused) { _, isFocused in
+            if !isFocused { commit() }
+        }
     }
 
-    private var temperatureText: Binding<String> {
-        Binding {
-            value.map { String(format: "%.1f", $0) } ?? ""
-        } set: { raw in
-            let text = raw
-                .replacingOccurrences(of: "，", with: ".")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else {
-                value = nil
-                return
-            }
-            if let parsed = Double(text) {
-                value = min(max(parsed, 34.0), 42.0)
-            }
+    private func syncText() {
+        editingText = value.map { String(format: "%.1f", $0) } ?? ""
+    }
+
+    private func commit() {
+        let text = editingText
+            .replacingOccurrences(of: "，", with: ".")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { value = nil; return }
+        if let parsed = Double(text) {
+            value = min(max(parsed, 34.0), 42.0)
         }
+        syncText()
     }
 }
 
