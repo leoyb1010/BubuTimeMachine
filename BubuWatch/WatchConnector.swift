@@ -12,6 +12,13 @@ final class WatchConnector: NSObject {
     /// 最近一次成功发出的提示时间（UI 显示「已送到手机」）。
     var lastSentLabel: String?
 
+    override init() {
+        super.init()
+        // 冷启动先显示上次的本地快照（复杂功能扩展已在用同一份），
+        // 抬腕不再是空白等待，WCSession 连上后再刷新为最新。
+        snapshot = WatchSnapshotStore.load()
+    }
+
     func activate() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
