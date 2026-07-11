@@ -120,6 +120,7 @@ struct VaccineQuickLogSheet: View {
             context.insert(newRecord)
         }
         try? context.save()
+        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }   // 打卡后自动排下一针
         BubuHaptics.success()
         env.syncEngine.syncNow()
         dismiss()
@@ -131,6 +132,7 @@ struct VaccineQuickLogSheet: View {
         PendingDeletion.enqueue(collection: collection, remoteId: record.remoteId, in: context)
         context.delete(record)
         try? context.save()
+        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }   // 打卡后自动排下一针
         env.syncEngine.syncNow()
         dismiss()
     }

@@ -147,6 +147,14 @@ final class CaptureModel {
                                   authorRole: role.rawValue, waveformSamples: v.waveform)
             voice.entry = entry
             context.insert(voice)
+            // 端侧自动转写（尽力而为）：成功后这段话就能被搜索/问答找到（R4 E-1）
+            let url = mediaStore.mediaURL(for: v.fileName)
+            Task { @MainActor in
+                if let text = await VoiceTranscriber.transcribe(url: url) {
+                    voice.transcript = text
+                    try? context.save()
+                }
+            }
         }
 
         let expectedMedia = cameraPhotos.count + cameraVideos.count + pickedItems.count

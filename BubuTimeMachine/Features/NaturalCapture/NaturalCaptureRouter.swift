@@ -140,6 +140,8 @@ struct NaturalCaptureRouter {
         context.insert(FeedEvent(kind: .healthRecorded,
                                  actorRole: authorRole,
                                  summary: "智能记录了疫苗接种：\(name)"))
+        let ctx = context
+        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: ctx) }   // 打卡后自动排下一针
     }
 
     private static func cleanNumber(_ v: Double) -> String {

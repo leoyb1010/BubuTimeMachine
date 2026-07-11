@@ -148,7 +148,7 @@ struct CaptureHomeView: View {
                             .foregroundStyle(BubuTheme.Color.primary)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("今天拍了 \(photoScanner.todayAssets.count) 张")
+                        Text("今天拍了 \(photoScanner.todayAssets.count) 个瞬间")
                             .font(.system(size: 15, weight: .heavy, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
                         Text("挑几张收进布布的时光轴？")

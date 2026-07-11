@@ -41,8 +41,11 @@ final class PhotoLibraryScanner {
         let startOfDay = cal.startOfDay(for: .now)
 
         let options = PHFetchOptions()
-        options.predicate = NSPredicate(format: "creationDate >= %@ AND mediaType == %d",
-                                        startOfDay as NSDate, PHAssetMediaType.image.rawValue)
+        // 照片 + 视频都扫（R4 E-6）
+        options.predicate = NSPredicate(format: "creationDate >= %@ AND (mediaType == %d OR mediaType == %d)",
+                                        startOfDay as NSDate,
+                                        PHAssetMediaType.image.rawValue,
+                                        PHAssetMediaType.video.rawValue)
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
         let result = PHAsset.fetchAssets(with: options)
@@ -78,6 +81,25 @@ final class PhotoLibraryScanner {
                 resumed = true
                 cont.resume(returning: data)
             }
+        }
+    }
+
+    /// 视频原文件导出到临时目录（保真导入用）。失败返回 nil。
+    nonisolated static func loadVideoFile(_ asset: PHAsset) async -> URL? {
+        guard asset.mediaType == .video else { return nil }
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard let res = resources.first(where: { $0.type == .video }) ?? resources.first else { return nil }
+        let ext = (res.originalFilename as NSString).pathExtension.lowercased()
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).\(ext.isEmpty ? "mov" : ext)")
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        do {
+            try await PHAssetResourceManager.default().writeData(for: res, toFile: tmp, options: options)
+            return tmp
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            return nil
         }
     }
 

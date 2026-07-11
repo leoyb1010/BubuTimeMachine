@@ -188,6 +188,7 @@ nonisolated enum SharedDefaults {
 
     private static let roleKey = "bubu.shared.role"
     private static let childNameKey = "bubu.shared.childName"
+    private static let sleepStartKey = "bubu.shared.sleepStartedAt"
     private static let widgetSnapshotKey = "bubu.shared.widgetSnapshot.v1"
     private static let pendingRecordKey = "bubu.shared.pendingRecord"
 
@@ -212,6 +213,15 @@ nonisolated enum SharedDefaults {
     static var childName: String {
         get { suite?.string(forKey: childNameKey) ?? "布布" }
         set { suite?.set(newValue, forKey: childNameKey) }
+    }
+
+    /// 进行中的哄睡开始时刻（nil = 没在哄）。持久化：杀掉 App 重开也能收尾。
+    static var sleepStartedAt: Date? {
+        get { suite?.object(forKey: sleepStartKey) as? Date }
+        set {
+            if let newValue { suite?.set(newValue, forKey: sleepStartKey) }
+            else { suite?.removeObject(forKey: sleepStartKey) }
+        }
     }
 
     /// 主 App 启动 / 配置变更时调用，把当前值同步进共享 suite。

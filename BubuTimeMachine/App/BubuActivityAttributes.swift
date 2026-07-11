@@ -16,6 +16,7 @@ struct BubuActivityAttributes: ActivityAttributes {
     enum Kind: String, Codable, Hashable {
         case voiceRecording   // 录音中
         case capsuleCountdown // 时间胶囊倒计时
+        case sleepTimer       // 哄睡计时（R4 E-3）
     }
 
     var kind: Kind

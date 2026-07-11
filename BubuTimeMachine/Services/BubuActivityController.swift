@@ -55,6 +55,37 @@ enum BubuActivityController {
         }
     }
 
+    // MARK: 哄睡计时（R4 E-3）
+
+    /// 开始哄睡：锁屏/灵动岛实时计时（Text(timerInterval:) 系统自走，零耗电 update）。
+    static func startSleepTimer(childName: String, startedAt: Date) {
+        guard isEnabled else { return }
+        let attributes = BubuActivityAttributes(
+            kind: .sleepTimer,
+            title: "\(childName)睡着啦",
+            unlockAt: nil,
+            childName: childName
+        )
+        let state = BubuActivityAttributes.ContentState(startedAt: startedAt, elapsedText: "")
+        do {
+            _ = try Activity.request(attributes: attributes,
+                                     content: .init(state: state, staleDate: nil))
+        } catch {
+            log.error("起哄睡 Live Activity 失败：\(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// 结束哄睡计时。
+    static func endSleepTimer(elapsedText: String) {
+        Task {
+            let final = BubuActivityAttributes.ContentState(startedAt: .now, elapsedText: elapsedText)
+            for activity in Activity<BubuActivityAttributes>.activities
+                where activity.attributes.kind == .sleepTimer {
+                await activity.end(.init(state: final, staleDate: nil), dismissalPolicy: .immediate)
+            }
+        }
+    }
+
     // MARK: 时间胶囊倒计时
 
     /// 为临近解锁的时间胶囊起一个倒计时 Live Activity。

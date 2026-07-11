@@ -167,9 +167,11 @@ struct BubuQAView: View {
 
         // 统一候选池：时光 + 已点亮里程碑 + 成长测量（都能被问到）
         struct Candidate { let id: String; let date: Date; let text: String }
-        var pool: [Candidate] = entries.map {
-            Candidate(id: $0.id.uuidString, date: $0.happenedAt,
-                      text: [$0.note, $0.title, $0.firstPersonNote].compactMap { $0 }.joined(separator: " "))
+        var pool: [Candidate] = entries.map { e in
+            var parts = [e.note, e.title, e.firstPersonNote].compactMap { $0 }
+            parts += e.voiceNotes.compactMap(\.transcript)   // 语音转写也可被问到（R4 E-1）
+            return Candidate(id: e.id.uuidString, date: e.happenedAt,
+                             text: parts.joined(separator: " "))
         }
         pool += milestones.compactMap { m in
             guard let d = m.happenedAt else { return nil }

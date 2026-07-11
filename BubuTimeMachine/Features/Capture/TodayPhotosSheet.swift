@@ -96,6 +96,24 @@ struct TodayPhotosSheet: View {
                 .foregroundStyle(isOn ? BubuTheme.Color.primary : .white.opacity(0.9))
                 .shadow(radius: 2)
                 .padding(4)
+
+            if asset.mediaType == .video {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .shadow(radius: 2)
+                        Spacer()
+                        Text(Self.durationText(asset.duration))
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .shadow(radius: 2)
+                    }
+                    .padding(6)
+                }
+            }
         }
         .onTapGesture {
             if isOn { selected.remove(asset.localIdentifier) } else { selected.insert(asset.localIdentifier) }
@@ -106,6 +124,11 @@ struct TodayPhotosSheet: View {
                 thumbs[asset.localIdentifier] = await PhotoLibraryScanner.loadImage(asset, targetPixel: 200)
             }
         }
+    }
+
+    private static func durationText(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private var savingOverlay: some View {
@@ -136,18 +159,29 @@ struct TodayPhotosSheet: View {
         var aggregatedTags: [String] = []
 
         for asset in chosen {
-            // 原始字节：失败（iCloud 没下载 + 无网等）计入失败，不静默
-            guard let data = await PhotoLibraryScanner.loadOriginalData(asset),
-                  let fileName = try? env.mediaStore.savePhoto(data) else { continue }
-            let media = Media(type: .photo, localFileName: fileName)
+            let media: Media
+            if asset.mediaType == .video {
+                // 视频：导出原文件 → 压缩沙盒导入 + 视频缩略图（R4 E-6）
+                guard let tmpURL = await PhotoLibraryScanner.loadVideoFile(asset),
+                      let imported = try? await env.mediaStore.importVideoForSync(from: tmpURL) else { continue }
+                try? FileManager.default.removeItem(at: tmpURL)
+                media = Media(type: .video, localFileName: imported.fileName)
+                media.durationSeconds = asset.duration
+                media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: imported.fileName)
+            } else {
+                // 原始字节：失败（iCloud 没下载 + 无网等）计入失败，不静默
+                guard let data = await PhotoLibraryScanner.loadOriginalData(asset),
+                      let fileName = try? env.mediaStore.savePhoto(data) else { continue }
+                media = Media(type: .photo, localFileName: fileName)
+                if let thumbSource = UIImage(data: data) {
+                    media.thumbnailFileName = env.mediaStore.makePhotoThumbnail(fromImage: thumbSource)
+                }
+                let analysis = await env.photoAnalyzer.analyze(imageData: data, includeLocation: false)
+                media.aiTags = analysis.tags
+                aggregatedTags.append(contentsOf: analysis.tags)
+            }
             media.width = asset.pixelWidth
             media.height = asset.pixelHeight
-            if let thumbSource = UIImage(data: data) {
-                media.thumbnailFileName = env.mediaStore.makePhotoThumbnail(fromImage: thumbSource)
-            }
-            let analysis = await env.photoAnalyzer.analyze(imageData: data, includeLocation: false)
-            media.aiTags = analysis.tags
-            aggregatedTags.append(contentsOf: analysis.tags)
             media.entry = entry
             context.insert(media)
             okAssets.append(asset)

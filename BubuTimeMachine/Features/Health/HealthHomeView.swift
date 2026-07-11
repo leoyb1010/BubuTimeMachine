@@ -7,6 +7,8 @@ struct HealthHomeView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var records: [HealthRecord]
     @State private var composingKind: HealthRecordKind?
+    /// 进行中的哄睡开始时刻（App Group 持久化：杀掉重开也能收尾）
+    @State private var sleepStartedAt: Date? = SharedDefaults.sleepStartedAt
     @State private var editingRecord: HealthRecord?
     @State private var deletingRecord: HealthRecord?
 
@@ -17,6 +19,7 @@ struct HealthHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 header
+                sleepTimerCard
                 insightLinks
                 quickActions
                 todaySection
@@ -42,6 +45,95 @@ struct HealthHomeView: View {
         } message: {
             Text("删除后会同步到家里服务器，其他设备不会再拉回这条记录。")
         }
+    }
+
+    // MARK: 哄睡计时（R4 E-3：锁屏/灵动岛实时计时，醒来一键落一条睡眠记录）
+
+    @ViewBuilder
+    private var sleepTimerCard: some View {
+        if let startedAt = sleepStartedAt {
+            HStack(spacing: 12) {
+                Text("😴").font(.system(size: 30))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("布布睡着啦")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text(startedAt, style: .timer)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(theme)
+                }
+                Spacer()
+                Button {
+                    endSleep(startedAt: startedAt)
+                } label: {
+                    Text("醒啦")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20).padding(.vertical, 10)
+                        .background(theme, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(14)
+            .background(theme.opacity(0.10), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        } else {
+            Button {
+                startSleep()
+            } label: {
+                HStack(spacing: 12) {
+                    Text("🌙").font(.system(size: 26))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("开始哄睡计时")
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("锁屏和灵动岛都能看到睡了多久，醒来点一下自动记好")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Spacer()
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(theme)
+                }
+                .padding(14)
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+                .bubuCardShadow()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func startSleep() {
+        let now = Date.now
+        sleepStartedAt = now
+        SharedDefaults.sleepStartedAt = now
+        BubuActivityController.startSleepTimer(childName: env.config.childName, startedAt: now)
+        BubuHaptics.success()
+    }
+
+    private func endSleep(startedAt: Date) {
+        let end = Date.now
+        sleepStartedAt = nil
+        SharedDefaults.sleepStartedAt = nil
+
+        let record = HealthRecord(kind: .sleep, title: "睡觉", recordedAt: end)
+        record.startAt = startedAt
+        record.endAt = end
+        let hours = end.timeIntervalSince(startedAt) / 3600
+        record.amountValue = hours
+        record.amountUnit = "小时"
+        record.amountText = HealthRecordDraft.durationText(from: startedAt, to: end)
+        record.syncState = .local
+        context.insert(record)
+        context.insert(FeedEvent(kind: .healthRecorded,
+                                 actorRole: env.config.currentRole.rawValue,
+                                 summary: "记录了睡眠：\(record.amountText ?? "")"))
+        try? context.save()
+        BubuActivityController.endSleepTimer(elapsedText: record.amountText ?? "")
+        env.refreshWidgetSnapshot(context: context)
+        env.syncEngine.syncNow()
+        BubuHaptics.success()
     }
 
     private var header: some View {

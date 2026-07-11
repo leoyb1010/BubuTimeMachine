@@ -222,8 +222,13 @@ struct NaturalCaptureBar: View {
             do {
                 result = try await env.aiService.parseNaturalCapture(request)
             } catch {
-                // AI 不可用时【绝不】退回 Mock 编造数值（假身高/假体温会画进成长曲线）。
-                // 降级为一条纯文本时光：原话原样保留，零捏造。
+                // 降级链：服务器不可用 → ① iOS 26 端上大模型（不出设备、结果强制确认）
+                //                    → ② 纯文本时光（原话保底，零捏造）。
+                // 【绝不】退回 Mock 编数值（假身高/假体温会画进成长曲线）。
+                if let onDevice = await OnDeviceNaturalParser.parse(request) {
+                    reviewPayload = ReviewPayload(result: onDevice, originalText: input)
+                    return
+                }
                 result = NaturalCaptureResult(
                     confidence: 0.5,
                     items: [NaturalCaptureItem(

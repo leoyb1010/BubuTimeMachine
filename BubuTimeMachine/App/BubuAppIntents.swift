@@ -55,6 +55,64 @@ struct OpenRecordIntent: AppIntent {
     }
 }
 
+// MARK: 一键健康打卡（交互小组件 / Siri / 快捷指令，R4 E-2）
+
+enum HealthCheckInKind: String, AppEnum {
+    case milk, sleep, water, diaper
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "打卡类型"
+    static let caseDisplayRepresentations: [HealthCheckInKind: DisplayRepresentation] = [
+        .milk: "喂奶", .sleep: "睡觉", .water: "喝水", .diaper: "换尿布",
+    ]
+
+    var emoji: String {
+        switch self {
+        case .milk: "🍼"; case .sleep: "😴"; case .water: "💧"; case .diaper: "🧷"
+        }
+    }
+    var label: String {
+        switch self {
+        case .milk: "喂奶"; case .sleep: "睡觉"; case .water: "喝水"; case .diaper: "换尿布"
+        }
+    }
+}
+
+/// 半夜喂奶单手在锁屏/桌面就能打卡——喂养期最高频的操作，一下都不用开 App。
+struct HealthCheckInIntent: AppIntent {
+    static let title: LocalizedStringResource = "布布健康打卡"
+    static let description = IntentDescription("一键记录喂奶/睡觉/喝水/换尿布，不用打开 App。")
+
+    @Parameter(title: "打卡类型")
+    var kind: HealthCheckInKind
+
+    init() {}
+    init(kind: HealthCheckInKind) { self.kind = kind }
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("给布布打卡：\(\.$kind)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let context = SharedModelContainer.sharedIfAvailable?.mainContext else {
+            return .result(dialog: "先打开一次 App 再用打卡哦。")
+        }
+        let role = SharedDefaults.currentRole
+        switch kind {
+        case .milk:
+            try EntryWriter.quickHealthEntry(kind: .meal, title: "喂奶", role: role, in: context)
+        case .sleep:
+            try EntryWriter.quickHealthEntry(kind: .sleep, title: "睡觉", role: role, in: context)
+        case .water:
+            try EntryWriter.quickHealthEntry(kind: .water, title: "喝水", role: role, in: context)
+        case .diaper:
+            // 与手表一致：换尿布无健康类型，走文字记录
+            try EntryWriter.quickTextEntry(note: "换好尿布啦 🧷", role: role, in: context)
+        }
+        return .result(dialog: "\(kind.emoji) \(kind.label)已记上")
+    }
+}
+
 // MARK: 布布多大了
 
 /// Siri 直接念出布布当前年龄；无档案时友好提示。

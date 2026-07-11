@@ -1080,6 +1080,83 @@ struct BubuAccessoryWidget: Widget {
     }
 }
 
+// MARK: - 一键打卡小组件（交互按钮，不开 App 直接落库，R4 E-2）
+
+private struct CheckInButton: View {
+    let kind: HealthCheckInKind
+    let tint: Color
+    var compact = false
+
+    var body: some View {
+        Button(intent: HealthCheckInIntent(kind: kind)) {
+            VStack(spacing: compact ? 2 : 4) {
+                Text(kind.emoji).font(.system(size: compact ? 22 : 26))
+                Text(kind.label)
+                    .font(.system(size: compact ? 10 : 11.5, weight: .heavy, design: .rounded))
+                    .foregroundStyle(WidgetPalette.warmBrown)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(tint.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct BubuCheckInWidgetView: View {
+    var entry: BubuEntry
+    @Environment(\.widgetFamily) private var family
+
+    private let kinds: [(HealthCheckInKind, Color)] = [
+        (.milk, Color(red: 0.95, green: 0.47, blue: 0.62)),
+        (.sleep, Color(red: 0.62, green: 0.55, blue: 0.90)),
+        (.water, Color(red: 0.42, green: 0.68, blue: 0.93)),
+        (.diaper, Color(red: 0.42, green: 0.78, blue: 0.65)),
+    ]
+
+    var body: some View {
+        Group {
+            if family == .systemSmall {
+                VStack(spacing: 5) {
+                    HStack(spacing: 5) {
+                        CheckInButton(kind: kinds[0].0, tint: kinds[0].1, compact: true)
+                        CheckInButton(kind: kinds[1].0, tint: kinds[1].1, compact: true)
+                    }
+                    HStack(spacing: 5) {
+                        CheckInButton(kind: kinds[2].0, tint: kinds[2].1, compact: true)
+                        CheckInButton(kind: kinds[3].0, tint: kinds[3].1, compact: true)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("给\(entry.snapshot.name)打卡")
+                        .font(.system(size: 12.5, weight: .heavy, design: .rounded))
+                        .foregroundStyle(WidgetPalette.secondary)
+                    HStack(spacing: 7) {
+                        ForEach(kinds.indices, id: \.self) { i in
+                            CheckInButton(kind: kinds[i].0, tint: kinds[i].1)
+                        }
+                    }
+                }
+            }
+        }
+        .containerBackground(for: .widget) { WidgetPalette.cream }
+    }
+}
+
+struct BubuCheckInWidget: Widget {
+    let kind = "BubuCheckInWidget"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
+            BubuCheckInWidgetView(entry: entry)
+        }
+        .configurationDisplayName("一键打卡")
+        .description("喂奶、睡觉、喝水、换尿布——点一下就记上，不用开 App。")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
 // MARK: - Bundle
 @main
 struct BubuWidgetsBundle: WidgetBundle {
@@ -1087,6 +1164,7 @@ struct BubuWidgetsBundle: WidgetBundle {
         BubuWidget()
         BubuMomentWidget()
         BubuGrowthWidget()
+        BubuCheckInWidget()
         BubuAccessoryWidget()
         BubuLiveActivity()
         BubuRecordControl()

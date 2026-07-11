@@ -49,6 +49,12 @@ struct BubuTimeMachineApp: App {
                     seedForUITestingIfNeeded()
                     #endif
                     env.bootstrap(context: modelContainer.mainContext)
+                    // 语音自动转写补写（端侧优先，尽力而为）：三年语音逐步变成可搜索文字
+                    Task {
+                        await VoiceTranscriber.backfill(
+                            context: modelContainer.mainContext, mediaStore: env.mediaStore,
+                            aiService: env.aiService, aiConfigured: env.config.isAIConfigured)
+                    }
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                     WidgetRefresher.reload()
                     // 通知直接回复：注册「回一句」类目 + 通知代理

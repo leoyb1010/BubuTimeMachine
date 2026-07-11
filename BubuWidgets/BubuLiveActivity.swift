@@ -69,6 +69,7 @@ struct BubuLiveActivity: Widget {
         switch context.attributes.kind {
         case .voiceRecording: return "waveform.circle.fill"
         case .capsuleCountdown: return "envelope.circle.fill"
+        case .sleepTimer: return "moon.zzz.fill"
         }
     }
 
@@ -76,7 +77,7 @@ struct BubuLiveActivity: Widget {
     @ViewBuilder
     private func trailingValue(_ context: ActivityViewContext<BubuActivityAttributes>) -> some View {
         switch context.attributes.kind {
-        case .voiceRecording:
+        case .voiceRecording, .sleepTimer:
             Text(context.state.startedAt, style: .timer)
                 .monospacedDigit()
         case .capsuleCountdown:

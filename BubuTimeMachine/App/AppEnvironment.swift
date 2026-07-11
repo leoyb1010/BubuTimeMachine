@@ -96,6 +96,7 @@ final class AppEnvironment {
         syncEngine.start()
         #endif
         ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)
+        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }
         installThumbnailBackfill(context: context)
         refreshWidgetSnapshot(context: context)
     }
