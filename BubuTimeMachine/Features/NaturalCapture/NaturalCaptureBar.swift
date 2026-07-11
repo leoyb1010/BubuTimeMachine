@@ -216,7 +216,16 @@ struct NaturalCaptureBar: View {
             do {
                 result = try await env.aiService.parseNaturalCapture(request)
             } catch {
-                result = try await MockAIService().parseNaturalCapture(request)
+                // AI 不可用时【绝不】退回 Mock 编造数值（假身高/假体温会画进成长曲线）。
+                // 降级为一条纯文本时光：原话原样保留，零捏造。
+                result = NaturalCaptureResult(
+                    confidence: 0.5,
+                    items: [NaturalCaptureItem(
+                        domain: .timeline, action: .create,
+                        title: String(input.prefix(12)), note: input,
+                        date: .now, fields: [:], tags: [],
+                        confidence: 0.5, needsConfirmation: false, sourceText: input)],
+                    warnings: ["ai_unavailable"])
             }
             reviewPayload = ReviewPayload(result: result, originalText: input)
         } catch {

@@ -41,7 +41,11 @@ final class CaptureModel {
 
     private let mediaStore: MediaStore
     private let analyzer: PhotoAnalyzer
-    private let role: FamilyRole
+    /// 署名身份。可变：切换家庭成员后由视图层刷新，避免新记录署到旧身份头上。
+    var role: FamilyRole
+
+    /// 预览加载单飞任务：新选择会取消旧任务，防止两个任务交错后网格与底层数组错位。
+    private var previewTask: Task<Void, Never>?
 
     init(mediaStore: MediaStore, analyzer: PhotoAnalyzer, role: FamilyRole) {
         self.mediaStore = mediaStore
@@ -145,9 +149,14 @@ final class CaptureModel {
             context.insert(voice)
         }
 
+        let expectedMedia = cameraPhotos.count + cameraVideos.count + pickedItems.count
+        let failedMedia = expectedMedia - savedCount
+
         guard savedCount > 0 || !noteText.isEmpty || pendingVoice != nil else {
             context.delete(entry)
-            saveError = "没有成功导入媒体或文字，请重新选择。"
+            saveError = expectedMedia > 0
+                ? "选中的 \(expectedMedia) 个媒体都没能导入（照片可能还在 iCloud 上没下载，连上网络后再试）。"
+                : "没有成功导入媒体或文字，请重新选择。"
             return false
         }
 
@@ -182,6 +191,10 @@ final class CaptureModel {
         let mediaText = savedCount > 0 ? " · \(savedCount) 个媒体" : ""
         let voiceText = pendingVoice == nil ? "" : " · 1 段语音"
         lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
+        // 部分媒体失败：诚实告知，不再"静默丢照片装成功"
+        if failedMedia > 0 {
+            saveError = "有 \(failedMedia) 个媒体没能导入（可能还在 iCloud 上没下载）。文字已保存，照片请稍后重新选择补上。"
+        }
         pickedItems = []
         cameraPhotos = []
         cameraVideos = []
@@ -194,10 +207,17 @@ final class CaptureModel {
         return true
     }
 
-    func updatePreviews() async {
+    /// 重建预览网格。单飞：再次调用会取消上一次，收尾前检查取消位，
+    /// 保证 selectedPreviews 永远对应【最新】的选择状态（否则加载间隙点 X 会删错媒体）。
+    func updatePreviews() {
+        previewTask?.cancel()
+        previewTask = Task { await rebuildPreviews() }
+    }
+
+    private func rebuildPreviews() async {
         let items = pickedItems
         isLoadingPreviews = !items.isEmpty
-        defer { isLoadingPreviews = false }
+        defer { if !Task.isCancelled { isLoadingPreviews = false } }
 
         var previews: [SelectedMediaPreview] = cameraPhotos.enumerated().map { index, photo in
             SelectedMediaPreview(index: index, image: photo.image, isVideo: false, label: "拍照")
@@ -207,6 +227,7 @@ final class CaptureModel {
         }
         let baseCount = cameraPhotos.count + cameraVideos.count
         for (offset, item) in items.enumerated() {
+            if Task.isCancelled { return }
             let index = baseCount + offset
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
                 let image = await Self.videoPreviewImage(url: movie.url)
@@ -215,12 +236,22 @@ final class CaptureModel {
             }
             if let data = try? await item.loadTransferable(type: Data.self),
                let image = UIImage(data: data) {
-                previews.append(SelectedMediaPreview(index: index, image: image, isVideo: false, label: "照片"))
+                // 预览只留 ~600px 小图：全尺寸位图多选时会 OOM；保存时会重新取原始数据
+                let thumb = await image.byPreparingThumbnail(ofSize: Self.previewSize(for: image.size)) ?? image
+                previews.append(SelectedMediaPreview(index: index, image: thumb, isVideo: false, label: "照片"))
             } else {
                 previews.append(SelectedMediaPreview(index: index, image: nil, isVideo: false, label: "媒体"))
             }
         }
+        guard !Task.isCancelled else { return }
         selectedPreviews = previews
+    }
+
+    private static func previewSize(for size: CGSize) -> CGSize {
+        let maxSide = max(size.width, size.height)
+        guard maxSide > 600, maxSide > 0 else { return size }
+        let scale = 600 / maxSide
+        return CGSize(width: size.width * scale, height: size.height * scale)
     }
 
     func removePickedItem(at index: Int) {
@@ -241,7 +272,7 @@ final class CaptureModel {
 
     func addCameraPhoto(_ image: UIImage) {
         cameraPhotos.append(SelectedCameraPhoto(image: image))
-        Task { await updatePreviews() }
+        updatePreviews()
     }
 
     /// 直接录像：拷入沙盒临时位置，生成缩略图，加入待保存列表。
@@ -249,7 +280,7 @@ final class CaptureModel {
         Task {
             let thumb = await Self.videoPreviewImage(url: url)
             cameraVideos.append(SelectedCameraVideo(url: url, thumbnail: thumb))
-            await updatePreviews()
+            updatePreviews()
         }
     }
 

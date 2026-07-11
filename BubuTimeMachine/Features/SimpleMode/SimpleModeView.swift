@@ -234,6 +234,7 @@ struct SimpleModeView: View {
     private func savePhoto(_ image: UIImage) async {
         guard let model, !saving else { return }   // 重入保护：保存窗口内不接受第二次动作
         withAnimation(.smooth) { saving = true }
+        model.role = role   // 署名跟随当前身份
         model.startQuickCapture()
         model.addCameraPhoto(image)
         let ok = await model.savePickedItems(into: context)
@@ -245,6 +246,7 @@ struct SimpleModeView: View {
     private func saveVoice(fileName: String, duration: Double, waveform: [Float]) async {
         guard let model, !saving else { return }
         withAnimation(.smooth) { saving = true }
+        model.role = role   // 署名跟随当前身份
         model.startQuickCapture()
         model.pendingVoice = (fileName, duration, waveform)
         let ok = await model.savePickedItems(into: context)

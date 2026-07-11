@@ -205,6 +205,7 @@ struct CaptureHomeView: View {
             model = CaptureModel(mediaStore: env.mediaStore, analyzer: env.photoAnalyzer,
                                  role: env.config.currentRole)
         }
+        model?.role = env.config.currentRole   // 身份可能在设置里换过：署名跟随当前身份
         model?.startQuickCapture(prefillNote: prefillNote)
     }
 

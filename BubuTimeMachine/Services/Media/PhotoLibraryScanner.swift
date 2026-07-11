@@ -65,6 +65,22 @@ final class PhotoLibraryScanner {
 
     func markAllHandled() { markHandled(todayAssets) }
 
+    /// 取资产的【原始字节】（保真导入用）：EXIF/GPS/拍摄时间原样保留，30 年档案不存压缩图。
+    /// iCloud 未下载时允许联网取；失败返回 nil（调用方按失败处理，不静默）。
+    nonisolated static func loadOriginalData(_ asset: PHAsset) async -> Data? {
+        await withCheckedContinuation { cont in
+            let options = PHImageRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
+            var resumed = false
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: data)
+            }
+        }
+    }
+
     /// 把资产加载成 UIImage（导入用）。失败返回 nil。
     nonisolated static func loadImage(_ asset: PHAsset, targetPixel: CGFloat = 2400) async -> UIImage? {
         await withCheckedContinuation { cont in

@@ -127,7 +127,7 @@ struct QuickCaptureSheet: View {
             .navigationTitle("记录此刻")
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: model.pickedItems) { _, _ in
-                Task { await model.updatePreviews() }
+                model.updatePreviews()   // 单飞：内部自动取消上一次加载，防网格错位
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
