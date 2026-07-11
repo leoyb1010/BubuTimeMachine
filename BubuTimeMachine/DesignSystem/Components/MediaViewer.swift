@@ -147,6 +147,15 @@ private struct PhotoPager: UIViewControllerRepresentable {
             return controller
         }
 
+        /// 只保留当前页 ±1 的控制器。每页持有一张 2400px 解码位图（15-25MB）+ 视频页的 AVPlayer，
+        /// 不驱逐的话连续翻几百张相册内存线性涨到被系统杀。
+        func evictFarPages(around id: UUID) {
+            guard let center = parent.mediaItems.firstIndex(where: { $0.id == id }) else { return }
+            let keep = Set((max(0, center - 1)...min(parent.mediaItems.count - 1, center + 1))
+                .map { parent.mediaItems[$0].id })
+            cache = cache.filter { keep.contains($0.key) }
+        }
+
         private func index(of controller: UIViewController) -> Int? {
             guard let media = controller as? MediaHostingController else { return nil }
             return parent.mediaItems.firstIndex { $0.id == media.mediaID }
@@ -170,6 +179,7 @@ private struct PhotoPager: UIViewControllerRepresentable {
                                 transitionCompleted completed: Bool) {
             guard completed, let current = pvc.viewControllers?.first as? MediaHostingController else { return }
             parent.selectedID = current.mediaID
+            evictFarPages(around: current.mediaID)
         }
     }
 }

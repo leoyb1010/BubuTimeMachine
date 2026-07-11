@@ -117,13 +117,16 @@ final class ServerConfig {
     private static let simpleModeKey = "bubu.simpleMode.enabled"
     private static let roleBeforeElderKey = "bubu.simpleMode.roleBeforeElder"
 
-    /// 出厂默认不内置任何家庭服务器地址；真实地址由用户在设置页填写，避免源码泄露家庭域名。
-    static let defaultBaseURL = ""
-    static let defaultAIBaseURL = ""
+    /// 出厂默认服务器地址：不写死源码（避免泄露家庭域名），打包时经 Info.plist 注入。
+    /// 之前 Release 分支只显示"已内置 ✓"却是空串、又没有输入框——新装机永远登录不上。
+    static var defaultBaseURL: String { injectedValue("BUBU_DEFAULT_BASE_URL") }
+    static var defaultAIBaseURL: String { injectedValue("BUBU_DEFAULT_AI_BASE_URL") }
     /// 可用 Info.plist 或调试环境注入，避免把真实密钥提交到 GitHub。
-    private static var defaultAIAPIKey: String {
-        let infoValue = Bundle.main.object(forInfoDictionaryKey: "BUBU_DEFAULT_AI_API_KEY") as? String
-        let envValue = ProcessInfo.processInfo.environment["BUBU_DEFAULT_AI_API_KEY"]
+    private static var defaultAIAPIKey: String { injectedValue("BUBU_DEFAULT_AI_API_KEY") }
+
+    private static func injectedValue(_ key: String) -> String {
+        let infoValue = Bundle.main.object(forInfoDictionaryKey: key) as? String
+        let envValue = ProcessInfo.processInfo.environment[key]
         return [infoValue, envValue]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty && !$0.hasPrefix("$(") } ?? ""

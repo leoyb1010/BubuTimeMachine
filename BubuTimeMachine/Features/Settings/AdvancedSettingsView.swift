@@ -31,12 +31,18 @@ struct AdvancedSettingsView: View {
             }
 
             Section {
-                // 服务器已内置固定（家庭自托管），普通用户无需也无法改地址；仅 Debug 下可临时修改兜底。
+                // 服务器地址：Debug 可随时改；Release 若打包时已注入内置地址则只读展示，
+                // 没注入（或被清空）时必须放出输入框兜底——否则新装机永远登录不上。
                 #if DEBUG
                 TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 #else
-                LabeledContent("服务器", value: "已内置 ✓")
+                if config.baseURL != nil {
+                    LabeledContent("服务器", value: "已内置 ✓")
+                } else {
+                    TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                }
                 #endif
                 TextField("家庭账户邮箱", text: $config.accountEmail)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)

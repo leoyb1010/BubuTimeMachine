@@ -107,6 +107,16 @@ struct EntryDetailView: View {
             }
         }
         .onChange(of: appendPick) { _, items in Task { await appendMedia(items) } }
+        // 编辑态直接左滑返回（没点「完成」）：改动已实时写进 entry（绑定即改即生效），
+        // 必须补一次标脏+保存+同步，否则永不推送、下轮拉取还会被远端覆盖回旧值。
+        .onDisappear {
+            if editing {
+                markEntryDirty()
+                try? context.save()
+                refreshWidgets()
+                env.syncEngine.syncNow()
+            }
+        }
         .sheet(isPresented: $showCommentSheet) {
             CommentComposeSheet(entry: entry)
         }

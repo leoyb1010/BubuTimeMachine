@@ -6,6 +6,7 @@ import SwiftUI
 struct AccountView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     @State private var username = ""
     @State private var password = ""
@@ -54,6 +55,8 @@ struct AccountView: View {
                 if env.config.hasServerCredentials {
                     Button(role: .destructive) {
                         service.logout(config: env.config)
+                        // 立刻用清空后的配置重建客户端与同步引擎：旧实例还握着凭据会继续偷偷同步
+                        env.reloadServices(context: modelContext)
                         dismiss()
                     } label: {
                         Text("退出当前账号").font(BubuTheme.Font.caption)
@@ -117,6 +120,9 @@ struct AccountView: View {
         let role = roles[roleIndex]
         do {
             try await service.login(username: username, password: password, role: role, config: env.config)
+            // 用新凭据重建 API 客户端 + 同步引擎，否则首次登录后仍是启动时的 Mock，什么都拉不下来
+            env.reloadServices(context: modelContext)
+            env.syncEngine.syncNow()
             busy = false
             dismiss()
         } catch {
