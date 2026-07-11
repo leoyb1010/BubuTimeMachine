@@ -16,8 +16,13 @@ struct AlbumDetailView: View {
     var body: some View {
         ScrollView {
             if items.isEmpty {
-                ContentUnavailableView("这个相册还是空的", systemImage: "photo")
-                    .padding(.top, 80)
+                VStack(spacing: 14) {
+                    BubuEmptyIllustration(assetName: "BubuEmptyAlbum", fallbackExpression: .surprised)
+                    Text("这个相册还是空的")
+                        .font(BubuTheme.Font.body)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                .padding(.top, 80)
             } else {
                 let visible = Array(items.prefix(visibleCount))
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {

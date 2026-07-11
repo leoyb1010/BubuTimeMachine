@@ -1,4 +1,5 @@
 import SwiftUI
+import TipKit
 import SwiftData
 import UIKit
 
@@ -54,6 +55,7 @@ struct BubuTimeMachineApp: App {
                     #if DEBUG
                     seedForUITestingIfNeeded()
                     #endif
+                    try? Tips.configure()   // 渐进式功能引导（H-3）
                     env.bootstrap(context: modelContainer.mainContext)
                     // 后台补拉注册 + 排期（G-2）；备份提醒（G-6）
                     BackgroundRefresher.register { [weak env] in

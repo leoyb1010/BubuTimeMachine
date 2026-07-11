@@ -80,7 +80,7 @@ struct SimpleModeView: View {
         VStack(spacing: 8) {
             HStack {
                 Text(role.simpleModeName)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(17, weight: .bold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 Spacer()
             }
@@ -91,14 +91,14 @@ struct SimpleModeView: View {
                     .background(BubuTheme.Color.card, in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
                     Text("你好呀")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(18, weight: .bold))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                     Text(childName)
-                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .font(BubuTheme.Font.scaled(34, weight: .black))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     if !ageText.isEmpty {
                         Text(ageText)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(18, weight: .bold))
                             .foregroundStyle(BubuTheme.Color.deepRose)
                     }
                 }
@@ -116,16 +116,16 @@ struct SimpleModeView: View {
         } label: {
             HStack(spacing: 18) {
                 Image(systemName: icon)
-                    .font(.system(size: 42, weight: .black))
+                    .font(BubuTheme.Font.scaled(42, weight: .black, design: .default))
                     .foregroundStyle(.white)
                     .frame(width: 74, height: 74)
                     .background(.white.opacity(0.22), in: Circle())
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 32, weight: .black, design: .rounded))
+                        .font(BubuTheme.Font.scaled(32, weight: .black))
                         .foregroundStyle(.white)
                     Text(subtitle)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(17, weight: .bold))
                         .foregroundStyle(.white.opacity(0.9))
                 }
                 Spacer()
@@ -149,7 +149,7 @@ struct SimpleModeView: View {
             withAnimation(.smooth) { exitToFullApp() }
         } label: {
             Text("切换到完整版")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(16, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -176,11 +176,11 @@ struct SimpleModeView: View {
     private var voiceSheet: some View {
         VStack(spacing: 20) {
             Text("说给\(childName)")
-                .font(.system(size: 28, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(28, weight: .black))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .padding(.top, 28)
             Text("点一下开始，说完再点一下")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(17, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in
                 showVoice = false
@@ -189,7 +189,7 @@ struct SimpleModeView: View {
             .padding(.horizontal, 20)
             Spacer()
             Button("取消") { showVoice = false }
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(18, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .padding(.bottom, 28)
         }
@@ -203,7 +203,7 @@ struct SimpleModeView: View {
         VStack(spacing: 14) {
             Text("❤️").font(.system(size: 64))
             Text(text)
-                .font(.system(size: 26, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(26, weight: .black))
                 .foregroundStyle(.white)
         }
         .padding(40)
@@ -219,7 +219,7 @@ struct SimpleModeView: View {
             VStack(spacing: 12) {
                 ProgressView().scaleEffect(1.6).tint(.white)
                 Text("正在收好…")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(20, weight: .bold))
                     .foregroundStyle(.white)
             }
             .padding(36)

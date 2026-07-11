@@ -46,7 +46,7 @@ struct SimpleTimelineView: View {
     private var topBar: some View {
         HStack {
             Text("\(childName)的时光")
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(24, weight: .black))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             Spacer()
             Button {
@@ -54,7 +54,7 @@ struct SimpleTimelineView: View {
                 dismiss()
             } label: {
                 Text("关闭")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(18, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
@@ -93,11 +93,11 @@ struct SimpleTimelineView: View {
                     .clipped()
             }
             Text(BubuDateFormat.longDate(entry.happenedAt))
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(16, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.deepRose)
             if let note = entry.note, !note.isEmpty {
                 Text(note)
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(20, weight: .semibold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .multilineTextAlignment(.leading)
                     .lineLimit(4)
@@ -110,7 +110,7 @@ struct SimpleTimelineView: View {
             // 纯语音且无文字时给一句说明，避免只剩一行日期。
             if cover == nil, (entry.note?.isEmpty ?? true), voice != nil {
                 Text("一段说给\(childName)的话")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(17, weight: .semibold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
@@ -124,10 +124,10 @@ struct SimpleTimelineView: View {
         VStack(spacing: 12) {
             Text("🍼").font(.system(size: 60))
             Text("还没有记录")
-                .font(.system(size: 22, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(22, weight: .black))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             Text("回去点「拍一张」，\n给\(childName)留下第一张照片吧")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(17, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .multilineTextAlignment(.center)
         }

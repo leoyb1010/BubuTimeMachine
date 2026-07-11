@@ -230,7 +230,7 @@ struct TimelineView: View {
 
     private var emptyState: some View {
         VStack(spacing: 18) {
-            BubuMascotBadge(size: 78, expression: .bye)
+            BubuEmptyIllustration(assetName: "BubuEmptyTimeline", fallbackExpression: .bye)
             Text(BubuTheme.Copy.emptyTimeline)
                 .font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)

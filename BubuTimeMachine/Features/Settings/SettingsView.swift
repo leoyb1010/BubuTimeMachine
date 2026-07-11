@@ -45,6 +45,7 @@ struct SettingsView: View {
                                         subtitle: "大字大按钮，只保留 拍照 / 录音 / 看布布。切到长辈身份会自动开启")
                     }
                     .tint(env.theme.theme.primary)
+                    .popoverTip(SimpleModeTip())
 
                     Button { showFrame = true } label: {
                         settingRowLabel("相框模式", icon: "photo.stack.fill",

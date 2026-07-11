@@ -15,6 +15,7 @@ struct BubuQAView: View {
     @State private var input = ""
     @State private var messages: [QAMessage] = []
     @State private var thinking = false
+    @State private var jumpEntry: Entry?
 
     private var childName: String { profiles.first?.name ?? env.config.childName }
     private let samples = ["第一次叫妈妈是什么时候？", "最近有什么新变化？", "去年今天在干嘛？", "最开心的一天是哪天？"]
@@ -39,6 +40,14 @@ struct BubuQAView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("问问\(childName)")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }
+    }
+
+    /// 出处可查证（H-5）：点出处芯片直接跳到那条时光（里程碑/测量出处暂不跳转）。
+    private func jump(to sourceID: String) {
+        guard let uuid = UUID(uuidString: sourceID),
+              let entry = entries.first(where: { $0.id == uuid }) else { return }
+        jumpEntry = entry
     }
 
     private var intro: some View {
@@ -74,10 +83,13 @@ struct BubuQAView: View {
                     .foregroundStyle(msg.isUser ? .white : BubuTheme.Color.warmBrown)
                 if !msg.sources.isEmpty {
                     ForEach(msg.sources) { src in
-                        Label(src.dateText + " · " + src.snippet, systemImage: "text.quote")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(msg.isUser ? .white.opacity(0.85) : BubuTheme.Color.secondaryText)
-                            .lineLimit(1)
+                        Button { jump(to: src.id) } label: {
+                            Label(src.dateText + " · " + src.snippet, systemImage: "text.quote")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(msg.isUser ? .white.opacity(0.85) : BubuTheme.Color.secondaryText)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

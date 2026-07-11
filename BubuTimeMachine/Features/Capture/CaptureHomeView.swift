@@ -166,6 +166,7 @@ struct CaptureHomeView: View {
                 .bubuCardShadow()
             }
             .buttonStyle(.plain)
+            .popoverTip(TodayPhotosTip())
         }
     }
 

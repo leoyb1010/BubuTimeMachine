@@ -156,6 +156,16 @@ nonisolated enum BubuTheme {
 
     // MARK: 字号阶梯（偏大，适老；马卡龙加重标题字）
     enum Font {
+        /// 固定字号的适老替代：按系统「文字大小」设置缩放（Dynamic Type）。
+        /// 老人把系统字体调大后，用它的文字会跟着变大——固定 .system(size:) 不会。
+        static func scaled(_ size: CGFloat,
+                           weight: SwiftUI.Font.Weight = .regular,
+                           design: SwiftUI.Font.Design = .rounded) -> SwiftUI.Font {
+            let scaledSize = UIFontMetrics(forTextStyle: .body)
+                .scaledValue(for: size)
+            return SwiftUI.Font.system(size: scaledSize, design: design).weight(weight)
+        }
+
         static let hugeTitle = SwiftUI.Font.system(.largeTitle, design: .rounded).weight(.heavy)
         static let title = SwiftUI.Font.system(.title, design: .rounded).weight(.heavy)
         static let headline = SwiftUI.Font.system(.title3, design: .rounded).weight(.bold)

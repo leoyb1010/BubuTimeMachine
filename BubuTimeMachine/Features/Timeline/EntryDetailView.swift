@@ -84,6 +84,7 @@ struct EntryDetailView: View {
                         .foregroundStyle(entry.inStorybook ? BubuTheme.Color.deepRose : BubuTheme.Color.warmBrown)
                 }
                 .accessibilityLabel(entry.inStorybook ? "移出绘本" : "收进绘本")
+                .popoverTip(StorybookTip())
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(role: .destructive) {
