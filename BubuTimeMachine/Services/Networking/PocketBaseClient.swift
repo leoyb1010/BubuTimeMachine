@@ -109,8 +109,17 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         let body = Self.entryBody(dto)
 
         // 先按 localId 查是否已存在
-        if let existing = try await findRecord(collection: "entries",
-                                               localId: dto.localId) {
+        if let existingObj = try await findRecordObject(collection: "entries",
+                                                        localId: dto.localId) {
+            // 并发编辑保护：远端这条被别的设备改得更【新】（editedAt 更晚）就不覆盖，
+            // 把远端版本原样带回，调用方按 newer-wins 应用到本地——旧编辑不再吃掉新编辑。
+            let remote = Self.entryDTO(from: existingObj, fallback: dto)
+            if let remoteEdited = remote.editedAt, remoteEdited > (dto.editedAt ?? .distantPast) {
+                return remote
+            }
+            guard let existing = existingObj["id"] as? String else {
+                throw APIError.server(500, "记录缺少 id 字段")
+            }
             let updated = try await patch(collection: "entries", id: existing,
                                           json: body)
             return Self.entryDTO(from: updated, fallback: dto)
@@ -417,6 +426,26 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
              .replacingOccurrences(of: "'", with: "\\'")
     }
 
+    /// 按 localId 取整条远端记录（含内容字段），供推送前的冲突比对。
+    private func findRecordObject(collection: String, localId: String) async throws -> [String: Any]? {
+        try await withAuthRetry { token in
+            var comps = URLComponents(
+                url: self.baseURL.appendingPathComponent("api/collections/\(collection)/records"),
+                resolvingAgainstBaseURL: false)!
+            comps.queryItems = [
+                URLQueryItem(name: "filter", value: "(localId='\(Self.filterEscape(localId))')"),
+                URLQueryItem(name: "perPage", value: "1"),
+            ]
+            var req = URLRequest(url: comps.url!)
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            try Self.check(resp, data)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = obj["items"] as? [[String: Any]] else { return nil }
+            return items.first
+        }
+    }
+
     private func findRecord(collection: String, localId: String) async throws -> String? {
         try await withAuthRetry { token in
             var comps = URLComponents(
@@ -462,13 +491,28 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         return all.filter { ($0["isDeleted"] as? Bool) != true }
     }
 
+    /// 拉取自 since 以来被删除记录的 localId（tombstone）。
+    /// 删除必须跨设备传播——否则妈妈删的照片在爸爸设备上永远存在（R4 P1-8）。
+    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String] {
+        var all: [[String: Any]] = []
+        var page = 1
+        while true {
+            let (items, totalPages) = try await fetchPage(collection: collection, since: since,
+                                                          sort: "clientUpdatedAt", page: page, onlyDeleted: true)
+            all.append(contentsOf: items)
+            if page >= totalPages || items.isEmpty { break }
+            page += 1
+        }
+        return all.compactMap { $0["localId"] as? String }
+    }
+
     private func fetchPage(collection: String, since: Date?, sort: String?,
-                           page: Int) async throws -> (items: [[String: Any]], totalPages: Int) {
+                           page: Int, onlyDeleted: Bool = false) async throws -> (items: [[String: Any]], totalPages: Int) {
         try await withAuthRetry { token in
             var comps = URLComponents(
                 url: self.baseURL.appendingPathComponent("api/collections/\(collection)/records"),
                 resolvingAgainstBaseURL: false)!
-            comps.queryItems = Self.listRecordsQueryItems(since: since, sort: sort, page: page)
+            comps.queryItems = Self.listRecordsQueryItems(since: since, sort: sort, page: page, onlyDeleted: onlyDeleted)
             var req = URLRequest(url: comps.url!)
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
@@ -480,14 +524,18 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         }
     }
 
-    static func listRecordsQueryItems(since: Date?, sort: String?, page: Int) -> [URLQueryItem] {
+    static func listRecordsQueryItems(since: Date?, sort: String?, page: Int,
+                                      onlyDeleted: Bool = false) -> [URLQueryItem] {
         var query = [URLQueryItem(name: "perPage", value: "200"),
                      URLQueryItem(name: "page", value: "\(page)")]
         if let sort, !sort.isEmpty {
             query.append(URLQueryItem(name: "sort", value: sort))
         }
-        if let since {
-            query.append(URLQueryItem(name: "filter", value: "(clientUpdatedAt>'\(syncTimestampString(since))')"))
+        var clauses: [String] = []
+        if let since { clauses.append("(clientUpdatedAt>'\(syncTimestampString(since))')") }
+        if onlyDeleted { clauses.append("(isDeleted=true)") }
+        if !clauses.isEmpty {
+            query.append(URLQueryItem(name: "filter", value: clauses.joined(separator: " && ")))
         }
         return query
     }
@@ -505,7 +553,9 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
             req.setValue("application/json", forHTTPHeaderField: "Accept")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if method != "DELETE" {
-                let body = await self.activeRecordJSON(json)
+                // PATCH 不默认注入 isDeleted=false：内容更新不应把 tombstone 翻活；
+                // deleteRecord 自己显式写 isDeleted=true，不受影响。
+                let body = await self.activeRecordJSON(json, defaultIsDeleted: method == "POST")
                 req.httpBody = try JSONSerialization.data(withJSONObject: body)
             } else {
                 req.httpBody = Data("{}".utf8)
@@ -516,9 +566,9 @@ final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
         }
     }
 
-    private func activeRecordJSON(_ json: [String: Any]) async -> [String: Any] {
+    private func activeRecordJSON(_ json: [String: Any], defaultIsDeleted: Bool = true) async -> [String: Any] {
         var body = json
-        if body["isDeleted"] == nil { body["isDeleted"] = false }
+        if defaultIsDeleted, body["isDeleted"] == nil { body["isDeleted"] = false }
         if body["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
             body["authorUserId"] = userId
         }

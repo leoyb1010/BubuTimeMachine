@@ -210,6 +210,9 @@ final class SyncEngine {
         guard !Task.isCancelled else { finalizeRun(); return }
         if let context = modelContext {
             await downloadMissingFiles(context)
+            // 整轮只刷一次小组件：之前每 merge 一条就 reloadAllTimelines，
+            // 首次全量同步会烧光 WidgetKit 当日刷新预算 + 主线程卡顿（R4 P2-35）
+            refreshWidgetSnapshot(context)
         }
         currentSyncLabel = nil
         currentUploadProgress = nil
@@ -255,6 +258,12 @@ final class SyncEngine {
             do {
                 let saved = try await apiClient.createEntry(dto)
                 entry.remoteId = saved.id
+                // 并发编辑：服务器上的版本更"新"（别的设备后编辑过）时，
+                // createEntry 会原样带回远端版本——本地也换成新版，旧编辑不吃掉新编辑。
+                if let remoteEdited = saved.editedAt,
+                   remoteEdited > (dto.editedAt ?? .distantPast) {
+                    _ = await mergeRemoteEntry(saved)
+                }
                 entry.syncState = .synced
             } catch {
                 entry.syncState = .failed
@@ -495,7 +504,6 @@ final class SyncEngine {
             catch { item.syncState = .failed; recordFailure(error, item: "布布档案") }
             finishItem()
             saveAndRefresh(context)
-            refreshWidgetSnapshot(context)
         }
         let localHealth = (try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
         for item in localHealth {
@@ -563,7 +571,6 @@ final class SyncEngine {
             }
             finishItem()
             saveAndRefresh(context)
-            refreshWidgetSnapshot(context)
         }
         await pushLocalFileObjects(context)
     }
@@ -759,7 +766,6 @@ final class SyncEngine {
             merge: { await self.mergeRemoteMilestone($0) }
         if let context = modelContext {
             normalizeMilestonesByTitle(context)
-            refreshWidgetSnapshot(context)
         }
         await pull("firsttimes") { try await self.apiClient.fetchFirstTimes(since: $0) }
             merge: { await self.mergeRemoteFirstTime($0) }
@@ -796,6 +802,13 @@ final class SyncEngine {
                     fullyMerged = false
                 }
             }
+            // tombstone 传播：别的设备删掉的，这台也要删——
+            // 之前拉取端直接过滤 isDeleted，删除永不同步（R4 P1-8）。
+            let deletedIds = try await apiClient.fetchDeletedLocalIds(collection: collection,
+                                                                      since: cursor(for: collection))
+            if !deletedIds.isEmpty {
+                removeLocals(collection: collection, localIds: deletedIds)
+            }
             if fullyMerged {
                 setCursor(started, for: collection)
                 lastSyncedAt = started
@@ -810,6 +823,73 @@ final class SyncEngine {
             // 瞬时拉取失败不立刻报红：标记本轮软失败，游标不推进，下轮自动补拉。
             softFailureThisRun = true
         }
+    }
+
+    /// 远端 tombstone → 删除本地对应记录与文件。
+    /// members/childprofile 不自动删（单例语义，误删代价大，历史上也没有删除入口）。
+    private func removeLocals(collection: String, localIds: [String]) {
+        guard let context = modelContext, !localIds.isEmpty else { return }
+        for localId in localIds {
+            guard let uuid = UUID(uuidString: localId) else { continue }
+            switch collection {
+            case "entries":
+                if let obj = (try? context.fetch(FetchDescriptor<Entry>(
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    for m in obj.media {
+                        mediaStore.deleteLocalFiles(media: m.localFileName, thumbnail: m.thumbnailFileName)
+                    }
+                    for v in obj.voiceNotes {
+                        mediaStore.deleteLocalFiles(media: v.localFileName)
+                    }
+                    context.delete(obj)   // 级联删除 media/comments/voiceNotes 行
+                }
+            case "media":
+                if let obj = (try? context.fetch(FetchDescriptor<Media>(
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    mediaStore.deleteLocalFiles(media: obj.localFileName, thumbnail: obj.thumbnailFileName)
+                    context.delete(obj)
+                }
+            case "milestones":
+                if let obj = (try? context.fetch(FetchDescriptor<Milestone>(
+                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+            case "firsttimes":
+                if let obj = (try? context.fetch(FetchDescriptor<FirstTime>(
+                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+            case "healthrecords":
+                if let obj = (try? context.fetch(FetchDescriptor<HealthRecord>(
+                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+            case "vaccinerecords":
+                if let obj = (try? context.fetch(FetchDescriptor<VaccineRecord>(
+                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+            case "growthmeasurements":
+                if let obj = (try? context.fetch(FetchDescriptor<GrowthMeasurement>(
+                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+            case "comments":
+                if let obj = (try? context.fetch(FetchDescriptor<Comment>(
+                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+            case "voicenotes":
+                if let obj = (try? context.fetch(FetchDescriptor<VoiceNote>(
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    mediaStore.deleteLocalFiles(media: obj.localFileName)
+                    context.delete(obj)
+                }
+            case "voicememos":
+                if let obj = (try? context.fetch(FetchDescriptor<VoiceMemo>(
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    mediaStore.deleteLocalFiles(media: obj.localFileName)
+                    context.delete(obj)
+                }
+            case "timecapsules":
+                if let obj = (try? context.fetch(FetchDescriptor<TimeCapsule>(
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    mediaStore.deleteLocalFiles(media: obj.encryptedBlobFileName)
+                    context.delete(obj)
+                }
+            default:
+                break
+            }
+        }
+        try? context.save()
     }
 
     private static func isMissingOptionalServerCollection(_ error: Error, collection: String) -> Bool {
@@ -901,7 +981,6 @@ final class SyncEngine {
                 softFailureThisRun = true
             }
             try? context.save()
-            refreshWidgetSnapshot(context)
         }
     }
 
@@ -949,7 +1028,6 @@ final class SyncEngine {
             context.insert(entry)
         }
         try? context.save()
-        refreshWidgetSnapshot(context)
         return true
     }
 
@@ -998,7 +1076,6 @@ final class SyncEngine {
             context.insert(item)
         }
         try? context.save()
-        refreshWidgetSnapshot(context)
         return true
     }
 
@@ -1100,7 +1177,6 @@ final class SyncEngine {
             context.insert(item)
         }
         try? context.save()
-        refreshWidgetSnapshot(context)
         return true
     }
 
@@ -1119,7 +1195,6 @@ final class SyncEngine {
         try? context.save()
         backfillVaccineIfNeeded(from: dto, context: context)
         GrowthMeasurementBackfill.run(context: context, insertedSyncState: .synced, source: "health-fallback")
-        refreshWidgetSnapshot(context)
         return true
     }
 

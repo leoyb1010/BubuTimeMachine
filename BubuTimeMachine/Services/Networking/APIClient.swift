@@ -38,6 +38,9 @@ protocol APIClient: Sendable {
     func uploadVoiceMemo(memoId: UUID, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO
     func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO]
+
+    /// 拉取自 since 以来被删除记录的 localId（tombstone），用于把删除传播到本设备。
+    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String]
     func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func deleteTimeCapsule(remoteId: String) async throws
     func downloadFile(from remoteURL: String) async throws -> Data
@@ -72,4 +75,10 @@ enum APIError: LocalizedError, Sendable {
     private static func megabytes(_ bytes: Int64) -> Int64 {
         max(1, bytes / 1_048_576)
     }
+}
+
+
+// MARK: - 默认实现（Mock / 旧后端无需支持 tombstone）
+extension APIClient {
+    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String] { [] }
 }
