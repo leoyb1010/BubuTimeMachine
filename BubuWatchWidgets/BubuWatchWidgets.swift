@@ -26,17 +26,15 @@ struct BubuComplicationProvider: TimelineProvider {
     }
 }
 
-// MARK: - 年龄计算（复用共享 AgeCalculator 需要它在扩展 target；这里内联极简版避免拉更多文件）
+// MARK: - 年龄计算
+// 直接调用共享 AgeCalculator（已加入本 target 的 sources）：
+// 内联副本没吃到"生日当天=0天"修复，会显示"365天后生日"、"生日快乐🎂"分支永不可达，
+// 且与手表 App / iPhone 小组件口径不一致。改为薄封装统一到 AgeCalculator。
 private func daysUntilBirthday(_ birthday: Date) -> Int {
-    let cal = Calendar.current
-    let now = Date()
-    guard let next = cal.nextDate(after: now, matching: cal.dateComponents([.month, .day], from: birthday),
-                                  matchingPolicy: .nextTimePreservingSmallerComponents) else { return 0 }
-    return max(0, cal.dateComponents([.day], from: cal.startOfDay(for: now), to: cal.startOfDay(for: next)).day ?? 0)
+    AgeCalculator.daysUntilNextBirthday(birthday: birthday)
 }
 private func daysSinceBirth(_ birthday: Date) -> Int {
-    max(0, Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: birthday),
-                                           to: Calendar.current.startOfDay(for: Date())).day ?? 0)
+    AgeCalculator.daysSinceBirth(birthday: birthday)
 }
 
 // MARK: - 复杂功能视图

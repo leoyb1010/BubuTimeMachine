@@ -93,6 +93,9 @@ targets:
           - "Info.plist"
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchSnapshotStore.swift
+      # 复用共享 AgeCalculator（只 import Foundation）：删除 widget 内联的年龄/生日副本，
+      # 与手表 App、iPhone 小组件同口径（含"生日当天=0天"修复）。
+      - path: BubuTimeMachine/Models/AgeCalculator.swift
     entitlements:
       path: BubuWatchWidgets/BubuWatchWidgets.entitlements
       properties:
