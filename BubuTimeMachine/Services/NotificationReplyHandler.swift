@@ -47,7 +47,7 @@ extension NotificationReplyHandler: UNUserNotificationCenterDelegate {
         await MainActor.run {
             guard let context = SharedModelContainer.sharedIfAvailable?.mainContext else { return }
             let role = SharedDefaults.currentRole
-            try? EntryWriter.quickTextEntry(note: text, role: role, in: context)
+            _ = try? EntryWriter.quickTextEntry(note: text, role: role, in: context)
             // 复用手表那条通知，让 App 前台时立刻同步 + 刷新
             NotificationCenter.default.post(name: WatchConnectivityManager.didRecordNotification, object: nil)
         }
