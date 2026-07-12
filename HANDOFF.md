@@ -26,8 +26,10 @@ cd /Users/leoyuan/Desktop/leoworkspace/BubuTimeMachine
 xcodegen generate
 
 # 2) clean build（增量构建会缓存误报，验证一律用 clean）
+# 注意：不要加 -sdk iphonesimulator——项目已有 watchOS target，强制 iOS SDK 会导致手表代码
+# 编译失败（WatchKit 无法解析）。只用 -destination，让 xcodebuild 自动为每个 target 选 SDK。
 xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
-  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   clean build 2>&1 | grep -E ": error:|BubuTimeMachine.*: warning:|BUILD SUCCEEDED|BUILD FAILED" | sort -u
 
 # 目标：BUILD SUCCEEDED，零 error 零 warning
