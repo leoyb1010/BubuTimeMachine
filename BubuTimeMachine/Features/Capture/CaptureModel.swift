@@ -55,6 +55,16 @@ final class CaptureModel {
         self.role = role
     }
 
+    /// 丢弃未保存的待存语音：删掉已 importFile 落盘的 m4a，再清引用，避免孤儿文件。
+    /// 仅用于「用户主动丢弃」或「开新记录前清残留」；保存成功后语音已归属 entry，
+    /// 走 pendingVoice = nil 而非此方法，切勿误删。
+    func discardPendingVoice() {
+        if let v = pendingVoice {
+            mediaStore.deleteMedia(named: v.fileName)
+        }
+        pendingVoice = nil
+    }
+
     func startQuickCapture(prefillNote: String = "") {
         note = prefillNote
         mood = nil
@@ -65,7 +75,7 @@ final class CaptureModel {
         cameraPhotos = []
         cameraVideos = []
         selectedPreviews = []
-        pendingVoice = nil
+        discardPendingVoice()
         detectedTags = []
         detectedLocation = nil
         analyzingHint = nil
@@ -192,6 +202,9 @@ final class CaptureModel {
         detectedLocation = includeLocation ? locationName : nil
 
         do { try context.save() } catch {
+            // 保存失败：回滚本次插入的 entry/media/voice，避免脏对象留在 context，
+            // 否则用户重试会再插一条新 entry → 重复记录。
+            context.rollback()
             saveError = "保存失败：\(error.localizedDescription)"
             return false
         }
@@ -247,6 +260,8 @@ final class CaptureModel {
             let index = baseCount + offset
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
                 let image = await Self.videoPreviewImage(url: movie.url)
+                // MovieTransfer 每次都把视频拷一份到 tmp，用完即删，避免 .mov 孤儿堆积。
+                try? FileManager.default.removeItem(at: movie.url)
                 previews.append(SelectedMediaPreview(index: index, image: image, isVideo: true, label: "视频"))
                 continue
             }
@@ -339,6 +354,8 @@ final class CaptureModel {
         // 视频（暂不分析，仅缩略图）
         if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
             analyzingHint = "正在整理这段视频，太大时会先压缩…"
+            // importVideoForSync 已把视频拷进媒体目录，MovieTransfer 的 tmp 拷贝用完即删，避免 .mov 孤儿。
+            defer { try? FileManager.default.removeItem(at: movie.url) }
             guard let imported = try? await mediaStore.importVideoForSync(from: movie.url) else {
                 analyzingHint = nil
                 return nil

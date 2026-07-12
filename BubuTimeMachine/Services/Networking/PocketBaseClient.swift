@@ -1315,7 +1315,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         guard let http = resp as? HTTPURLResponse else { return }
         switch http.statusCode {
         case 200..<300: return
-        case 401, 403: throw APIError.unauthorized
+        // 401=token 过期→重登；403=权限/规则错误→单独抛，不重登（否则每待推项每轮重登撞限流）。
+        case 401: throw APIError.unauthorized
+        case 403: throw APIError.forbidden
         default:
             let msg = String(data: data, encoding: .utf8)?.prefix(200) ?? ""
             throw APIError.server(http.statusCode, String(msg))

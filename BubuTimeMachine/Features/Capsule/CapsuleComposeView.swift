@@ -148,6 +148,9 @@ struct CapsuleComposeView: View {
                                 .background(isSelected(date) ? theme : BubuTheme.Color.softFill, in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        // 与 DatePicker 一致：未到期胶囊不能改解锁日，禁用快捷日期，
+                        // 否则点了会高亮但 save 早退不落库，误导用户。
+                        .disabled(editing != nil && !canRewritePayload)
                     }
                 }
             }

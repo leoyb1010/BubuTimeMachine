@@ -61,6 +61,8 @@ protocol APIClient: Sendable {
 enum APIError: LocalizedError, Sendable {
     case notConfigured
     case unauthorized
+    /// 403：权限/访问规则错误（非 token 过期）。不触发重登，避免每待推项每轮重登撞限流。
+    case forbidden
     case network(String)
     case server(Int, String)
     case fileTooLarge(bytes: Int64, limit: Int64)
@@ -69,6 +71,7 @@ enum APIError: LocalizedError, Sendable {
         switch self {
         case .notConfigured: return "还没有连接家里的服务器。"
         case .unauthorized:  return "账号状态需要重新确认，请到设置里重新连接服务器。"
+        case .forbidden: return "没有访问权限，App 会保留本地内容，稍后重试。"
         case .network: return "网络暂时不稳定，App 会保留本地内容并继续重试。"
         case .server(let code, _): return "服务器暂时没响应（\(code)），App 会继续自动补传。"
         case .fileTooLarge(let bytes, let limit):

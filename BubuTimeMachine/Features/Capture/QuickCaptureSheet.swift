@@ -470,7 +470,7 @@ struct QuickCaptureSheet: View {
                 VoicePlayerBubble(fileName: v.fileName, duration: v.duration,
                                   waveform: v.waveform, mediaStore: env.mediaStore, tint: theme)
                 Button {
-                    model.pendingVoice = nil
+                    model.discardPendingVoice()
                 } label: {
                     Image(systemName: "trash.circle.fill")
                         .font(BubuTheme.Font.scaled(28))

@@ -58,9 +58,9 @@ struct GrowthReportView: View {
 
     private var metricGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            metric("照片/视频", "\(visualMediaCount)", "photo.stack", .orange)
+            metric("照片/视频", "\(visualMediaCount)", "photo.stack", BubuTheme.Color.warning)
             metric("家人的话", "\(textCount)", "text.bubble", theme)
-            metric("声音", "\(voiceCount)", "waveform", .purple)
+            metric("声音", "\(voiceCount)", "waveform", BubuTheme.Color.info)
             metric("已点亮第一次", "\(achievedMilestones.count)", "star", BubuTheme.Color.success)
         }
     }

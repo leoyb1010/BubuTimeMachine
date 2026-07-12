@@ -330,6 +330,11 @@ struct TimelineView: View {
                                  summary: "删除了一条时光轴记录",
                                  targetLocalId: entry.id.uuidString))
         try? context.save()
+        // 删除后与 EntryDetailView.deleteEntry 一致：刷新小组件快照 + 推送墓碑同步，
+        // 否则小组件仍显示已删记录、其它设备不知情。
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
+        env.syncEngine.syncNow()
         entryPendingDelete = nil
     }
 }

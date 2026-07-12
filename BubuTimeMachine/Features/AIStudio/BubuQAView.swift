@@ -148,7 +148,8 @@ struct BubuQAView: View {
                                                       records: retrieved.map(\.context))
                 let usedSet = Set(ans.usedIDs)
                 let cited = retrieved.filter { usedSet.contains($0.context.id) }.prefix(3)
-                let sources = (cited.isEmpty ? retrieved.prefix(2) : cited).map {
+                // AI 未引用任何记录时不拿检索结果冒充出处，宁可不给来源也不伪造引用。
+                let sources = (cited.isEmpty ? [] : Array(cited)).map {
                     QASource(id: $0.context.id, dateText: $0.context.dateText, snippet: $0.snippet)
                 }
                 await MainActor.run {

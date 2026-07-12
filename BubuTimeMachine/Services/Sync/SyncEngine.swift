@@ -121,6 +121,15 @@ final class SyncEngine {
         defaults.set(true, forKey: Self.cursorMigrationFlagKey)
     }
 
+    /// 清空所有集合的增量游标。换服务器 / 恢复备份后调用：否则旧游标残留会让新服务器的
+    /// 历史记录拉不全（游标已越过它们的 updated 时间）。清空后下一轮做一次全量拉取（localId 去重 + merge 幂等）。
+    static func resetAllCursors() {
+        let defaults = UserDefaults.standard
+        for collection in cursorCollections {
+            defaults.removeObject(forKey: "bubu.sync.cursor.\(collection)")
+        }
+    }
+
     /// 启动同步层：已配置则连接 + 首次全量推拉 + 起轮询；否则保持离线。
     func start() {
         migrateCursorsIfNeeded()

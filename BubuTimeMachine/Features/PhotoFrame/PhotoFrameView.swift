@@ -18,6 +18,8 @@ struct PhotoFrameView: View {
     @State private var paused = false
     @State private var showControls = false
     @State private var now = Date.now
+    /// 控制条自动隐藏计时器句柄：每次 bump 先取消上一个，避免旧计时器把操作中的控制条中途隐藏。
+    @State private var controlsTask: Task<Void, Never>?
 
     private let dwell: TimeInterval = 8
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -148,9 +150,9 @@ struct PhotoFrameView: View {
             }
             Spacer()
             HStack(spacing: 28) {
-                circleButton("backward.fill") { advance(-1) }
+                circleButton("backward.fill") { advance(-1); bumpControls() }
                 circleButton(paused ? "play.fill" : "pause.fill") { paused.toggle(); bumpControls() }
-                circleButton("forward.fill") { advance(1) }
+                circleButton("forward.fill") { advance(1); bumpControls() }
             }
             .padding(.bottom, 24)
         }
@@ -195,11 +197,14 @@ struct PhotoFrameView: View {
         if showControls { bumpControls() }
     }
 
-    /// 控制条 3 秒后自动隐藏。
+    /// 控制条 3 秒后自动隐藏。每次调用先取消上一个计时器再起新的，
+    /// 保证操作中（点按钮会再次 bump）不会被旧计时器提前隐藏。
     private func bumpControls() {
-        Task {
+        controlsTask?.cancel()
+        controlsTask = Task {
             try? await Task.sleep(for: .seconds(3))
-            await MainActor.run { withAnimation { showControls = false } }
+            guard !Task.isCancelled else { return }
+            withAnimation { showControls = false }
         }
     }
 

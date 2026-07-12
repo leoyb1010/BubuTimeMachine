@@ -491,13 +491,20 @@ struct EntryDetailView: View {
                 context.insert(media)
                 continue
             }
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let image = UIImage(data: data),
-               let fileName = try? env.mediaStore.savePhoto(data) {
-                let media = Media(type: .photo, localFileName: fileName)
-                media.thumbnailFileName = env.mediaStore.makePhotoThumbnail(fromImage: image)
-                media.entry = entry
-                context.insert(media)
+            if let data = try? await item.loadTransferable(type: Data.self) {
+                // 全尺寸解码 + 缩略图放到后台线程，避免在 MainActor 上同步解码大图冻结界面。
+                let mediaStore = env.mediaStore
+                let prepared = await Task.detached { () -> (fileName: String, thumbnail: String?)? in
+                    guard let image = UIImage(data: data),
+                          let fileName = try? mediaStore.savePhoto(data) else { return nil }
+                    return (fileName, mediaStore.makePhotoThumbnail(fromImage: image))
+                }.value
+                if let prepared {
+                    let media = Media(type: .photo, localFileName: prepared.fileName)
+                    media.thumbnailFileName = prepared.thumbnail
+                    media.entry = entry
+                    context.insert(media)
+                }
             }
         }
         appendPick = []

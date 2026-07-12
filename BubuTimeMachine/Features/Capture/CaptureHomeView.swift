@@ -950,7 +950,10 @@ struct CaptureHomeView: View {
 
 
     private func yearsAgoText(_ date: Date) -> String {
-        let years = Calendar.current.dateComponents([.year], from: date, to: .now).year ?? 0
+        // 筛选已保证同月同日，只取「年」分量之差，避免 dateComponents 含时分导致
+        // 晚间拍的两年前照片上午被算成「1年前」。
+        let cal = Calendar.current
+        let years = cal.component(.year, from: .now) - cal.component(.year, from: date)
         return years <= 0 ? "今年" : "\(years)年前的今天"
     }
 
