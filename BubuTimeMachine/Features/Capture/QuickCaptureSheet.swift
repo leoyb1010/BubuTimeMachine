@@ -177,23 +177,23 @@ struct QuickCaptureSheet: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 18, weight: .black))
+                    .font(BubuTheme.Font.scaled(18, weight: .black))
                     .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
                     .background(BubuTheme.Gradient.primaryButton, in: Circle())
                 VStack(alignment: .leading, spacing: 3) {
                     Text("一句话智能记录")
-                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     Text("身高、体重、餐睡、里程碑都能识别")
-                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .font(BubuTheme.Font.scaled(11.5, weight: .medium, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.84)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .black))
+                    .font(BubuTheme.Font.scaled(12, weight: .black))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding(12)
@@ -244,12 +244,12 @@ struct QuickCaptureSheet: View {
     private func actionChip(_ title: String, systemImage: String, tint: Color) -> some View {
         VStack(spacing: 6) {
             Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .black))
+                .font(BubuTheme.Font.scaled(17, weight: .black))
                 .foregroundStyle(BubuTheme.Color.deepRose)
                 .frame(width: 34, height: 34)
                 .background(tint.opacity(0.72), in: Circle())
             Text(title)
-                .font(.system(size: 12, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(12, weight: .black, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .lineLimit(1)
         }
@@ -273,7 +273,7 @@ struct QuickCaptureSheet: View {
         ) {
             HStack(spacing: 14) {
                 Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 30, weight: .medium))
+                    .font(BubuTheme.Font.scaled(30, weight: .medium))
                     .foregroundStyle(tint)
                     .frame(width: 48, height: 48)
                     .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -287,7 +287,7 @@ struct QuickCaptureSheet: View {
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(BubuTheme.Font.scaled(13, weight: .semibold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding()
@@ -319,7 +319,7 @@ struct QuickCaptureSheet: View {
                         .font(BubuTheme.Font.caption.weight(.semibold))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     Text("打开后会请求一次定位；有照片自带地点时优先使用照片地点。")
-                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .font(BubuTheme.Font.scaled(12, weight: .regular, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -328,13 +328,13 @@ struct QuickCaptureSheet: View {
 
             if let location = model.currentLocation {
                 Text(location.name.map { "将记录：\($0)" } ?? "将记录当前位置")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11, weight: .medium, design: .rounded))
                     .foregroundStyle(theme)
             }
 
             if let error = model.locationError {
                 Text(error)
-                    .font(.system(size: 11, weight: .regular, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11, weight: .regular, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
@@ -378,12 +378,12 @@ struct QuickCaptureSheet: View {
                                     .fill(BubuTheme.Color.cream)
                                     .overlay {
                                         Image(systemName: preview.isVideo ? "video" : "photo")
-                                            .font(.system(size: 26))
+                                            .font(BubuTheme.Font.scaled(26))
                                             .foregroundStyle(BubuTheme.Color.secondaryText)
                                     }
                             }
                             Label(preview.label, systemImage: preview.isVideo ? "play.circle.fill" : "camera.fill")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(BubuTheme.Font.scaled(11, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 7).padding(.vertical, 4)
                                 .background(.black.opacity(0.45), in: Capsule())
@@ -397,7 +397,7 @@ struct QuickCaptureSheet: View {
                             model.removePickedItem(at: preview.index)
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 22))
+                                .font(BubuTheme.Font.scaled(22))
                                 .foregroundStyle(.white, .black.opacity(0.45))
                                 .padding(5)
                         }
@@ -470,10 +470,10 @@ struct QuickCaptureSheet: View {
                 VoicePlayerBubble(fileName: v.fileName, duration: v.duration,
                                   waveform: v.waveform, mediaStore: env.mediaStore, tint: theme)
                 Button {
-                    model.pendingVoice = nil
+                    model.discardPendingVoice()
                 } label: {
                     Image(systemName: "trash.circle.fill")
-                        .font(.system(size: 28))
+                        .font(BubuTheme.Font.scaled(28))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 .buttonStyle(.plain)
@@ -519,6 +519,9 @@ struct QuickCaptureSheet: View {
         func present() { if video { showVideoCamera = true } else { showCamera = true } }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
+            // 来源选择 sheet 刚 dismiss，立刻 present 相机会撞上"正在关闭旧 sheet"的竞态、相机弹不出。
+            // 已授权时没有系统弹窗兜底那段时间，需手动等 sheet 关完再呈现（P2c）。
+            try? await Task.sleep(for: .milliseconds(400))
             present()
         case .notDetermined:
             let granted = await AVCaptureDevice.requestAccess(for: .video)
@@ -592,7 +595,7 @@ private struct CaptureMediaSourceSheet: View {
         let matching = source.matching
         VStack(alignment: .leading, spacing: 14) {
             Text(source.title)
-                .font(.system(size: 22, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(22, weight: .black, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
 
             PhotosPicker(selection: $pickedItems, maxSelectionCount: 9, matching: matching) {
@@ -628,23 +631,23 @@ private struct CaptureMediaSourceRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .black))
+                .font(BubuTheme.Font.scaled(18, weight: .black))
                 .foregroundStyle(.white)
                 .frame(width: 42, height: 42)
                 .background(tint, in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .font(BubuTheme.Font.scaled(16, weight: .heavy, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Text(subtitle)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .medium, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .black))
+                .font(BubuTheme.Font.scaled(12, weight: .black))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .padding(14)

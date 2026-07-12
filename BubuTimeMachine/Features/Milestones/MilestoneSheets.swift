@@ -48,7 +48,7 @@ struct MilestonePickerSheet: View {
         let added = existingTitles.contains(tpl.title)
         let isSelected = selected.contains(tpl.title)
         return HStack(spacing: 12) {
-            Text(tpl.emoji).font(.system(size: 26))
+            Text(tpl.emoji).font(BubuTheme.Font.scaled(26))
             Text(tpl.title)
                 .font(BubuTheme.Font.body)
                 .foregroundStyle(added ? BubuTheme.Color.secondaryText : BubuTheme.Color.warmBrown)
@@ -104,25 +104,25 @@ struct MilestoneEditSheet: View {
     // 已点亮详情头：hue 渐变 + 迸发星点 + macStarPop 图标 + 解锁信息（对照设计稿 MacMilestoneDetail）
     @ViewBuilder
     private var achievedHeader: some View {
-        let hue = Double(abs((milestone?.title ?? title).hashValue) % 360)
+        let hue = (milestone?.title ?? title).bubuStableHue
         VStack(spacing: 0) {
             ZStack {
                 BubuBurst(radius: 96)
                 ZStack {
                     Circle().fill(.white.opacity(0.85)).frame(width: 96, height: 96)
                         .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
-                    Text(milestone?.emoji ?? emoji).font(.system(size: 44))
+                    Text(milestone?.emoji ?? emoji).font(BubuTheme.Font.scaled(44))
                 }
                 .modifier(StarPop())
             }
             .frame(height: 120)
             Text(milestone?.title ?? title)
-                .font(.system(size: 22, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(22, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.14), radius: 4, y: 2)
             if let m = milestone, let d = m.happenedAt {
                 Text("解锁于 \(BubuDateFormat.yearMonthDay(d))\(m.ageDescription.map { " · \($0)" } ?? "")")
-                    .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12.5, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .padding(.horizontal, 14).padding(.vertical, 5)
                     .background(.white.opacity(0.85), in: Capsule())
@@ -131,21 +131,21 @@ struct MilestoneEditSheet: View {
             // 点星回到那一刻（R4 F-2）：里程碑挂着当天的记录就把照片和话带出来
             if let linked = milestone?.entry, !linked.isArchived {
                 HStack(spacing: 10) {
-                    if let photo = linked.media.first(where: { $0.type == .photo }) {
+                    if let photo = linked.sortedMedia.first(where: { $0.type == .photo }) {
                         MediaThumbnail(media: photo, mediaStore: env.mediaStore,
                                        cornerRadius: 12, size: .grid)
                             .frame(width: 52, height: 52)
                     } else {
-                        Text("💛").font(.system(size: 28))
+                        Text("💛").font(BubuTheme.Font.scaled(28))
                             .frame(width: 52, height: 52)
                             .background(.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("那一刻")
-                            .font(.system(size: 10.5, weight: .black, design: .rounded))
+                            .font(BubuTheme.Font.scaled(10.5, weight: .black, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                         Text(linked.note ?? linked.title ?? "那天的布布")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
                             .lineLimit(2)
                     }
@@ -185,7 +185,7 @@ struct MilestoneEditSheet: View {
                 Section("图标") {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 10) {
                         ForEach(emojiChoices, id: \.self) { e in
-                            Text(e).font(.system(size: 26))
+                            Text(e).font(BubuTheme.Font.scaled(26))
                                 .frame(width: 38, height: 38)
                                 .background(emoji == e ? theme.opacity(0.2) : .clear, in: Circle())
                                 .overlay { Circle().stroke(emoji == e ? theme : .clear, lineWidth: 2) }

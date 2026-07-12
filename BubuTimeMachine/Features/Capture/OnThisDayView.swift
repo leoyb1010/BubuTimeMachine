@@ -110,14 +110,14 @@ struct OnThisDayView: View {
 
     private func memoryRow(_ entry: Entry) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            if let media = entry.media.first {
+            if let media = entry.coverMedia {
                 MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: BubuTheme.Radius.small, size: .card)
                     .frame(width: 96, height: 96)
             } else {
                 RoundedRectangle(cornerRadius: BubuTheme.Radius.small)
                     .fill(theme.opacity(0.12))
                     .frame(width: 96, height: 96)
-                    .overlay { Text(entry.mood?.emoji ?? "📝").font(.system(size: 36)) }
+                    .overlay { Text(entry.mood?.emoji ?? "📝").font(BubuTheme.Font.scaled(36)) }
             }
             VStack(alignment: .leading, spacing: 4) {
                 if let note = entry.note, !note.isEmpty {

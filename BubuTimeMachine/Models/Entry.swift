@@ -44,6 +44,13 @@ final class Entry {
         set { moodRaw = newValue?.rawValue }
     }
 
+    /// media 是 SwiftData 无序关系；按 createdAt 升序稳定排序。
+    /// 取封面/首图一律走排序结果，避免 .first 每次启动/同步随机漂移。
+    var sortedMedia: [Media] { media.sorted { $0.createdAt < $1.createdAt } }
+
+    /// 封面：稳定排序后的第一张（含视频，与既有 .media.first 语义一致，只是不再漂移）。
+    var coverMedia: Media? { sortedMedia.first }
+
     init(happenedAt: Date = .now, authorRole: String, note: String? = nil) {
         self.id = UUID()
         self.happenedAt = happenedAt

@@ -22,8 +22,8 @@ struct MoodPicker: View {
                             }
                         } label: {
                             VStack(spacing: 3) {
-                                Text(mood.emoji).font(.system(size: 26))
-                                Text(mood.rawValue).font(.system(size: 12, weight: .medium))
+                                Text(mood.emoji).font(BubuTheme.Font.scaled(26))
+                                Text(mood.rawValue).font(BubuTheme.Font.scaled(12, weight: .medium))
                                     .foregroundStyle(BubuTheme.Color.warmBrown)
                             }
                             .frame(width: 58, height: 62)

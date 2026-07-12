@@ -31,12 +31,22 @@ nonisolated enum GrowthMeasurementExtractor {
         let text = searchText(for: record)
         var values = Values()
 
+        // 头围先于身高提取：两者同为 cm，「45cm 身高」这类 数字-单位-关键词 顺序会被
+        // 身高的 pattern 抢走头围的 45，必须先拿到头围值、再从身高提取里排除它。
+        values.headCircumferenceCm = explicitMetricValue(
+            keywords: ["头围"],
+            unitVariants: ["cm", "CM", "厘米", "公分"],
+            in: text,
+            convert: { $0 },
+            range: 20...70
+        )
         values.heightCm = explicitMetricValue(
             keywords: ["身高", "身长"],
             unitVariants: ["cm", "CM", "厘米", "公分"],
             in: text,
             convert: { $0 },
-            range: 30...150
+            range: 30...150,
+            excluding: [values.headCircumferenceCm]
         )
         values.weightKg = explicitMetricValue(
             keywords: ["体重"],
@@ -44,13 +54,6 @@ nonisolated enum GrowthMeasurementExtractor {
             in: text,
             convert: { value, unit in unit == "斤" ? value / 2 : value },
             range: 1...60
-        )
-        values.headCircumferenceCm = explicitMetricValue(
-            keywords: ["头围"],
-            unitVariants: ["cm", "CM", "厘米", "公分"],
-            in: text,
-            convert: { $0 },
-            range: 20...70
         )
 
         if let amountValue = record.amountValue,
@@ -73,8 +76,12 @@ nonisolated enum GrowthMeasurementExtractor {
                 values.headCircumferenceCm = head
             }
 
+            // 身高兜底必须命中身高关键词，且排除已被头围消费掉的同一数字，
+            // 避免「头围45cm」这类只写头围的记录把 45 误当身高污染成长曲线。
             if values.heightCm == nil,
-               let height = unitValue(unitVariants: ["cm", "CM", "厘米", "公分"], in: text, range: 30...150) {
+               containsHeightKeyword(text),
+               let height = unitValue(unitVariants: ["cm", "CM", "厘米", "公分"], in: text, range: 30...150,
+                                      excluding: [values.headCircumferenceCm]) {
                 values.heightCm = height
             }
         }
@@ -96,14 +103,16 @@ nonisolated enum GrowthMeasurementExtractor {
         unitVariants: [String],
         in text: String,
         convert: (Double) -> Double,
-        range: ClosedRange<Double>
+        range: ClosedRange<Double>,
+        excluding excluded: [Double?] = []
     ) -> Double? {
         explicitMetricValue(
             keywords: keywords,
             unitVariants: unitVariants,
             in: text,
             convert: { value, _ in convert(value) },
-            range: range
+            range: range,
+            excluding: excluded
         )
     }
 
@@ -112,8 +121,10 @@ nonisolated enum GrowthMeasurementExtractor {
         unitVariants: [String],
         in text: String,
         convert: (Double, String?) -> Double,
-        range: ClosedRange<Double>
+        range: ClosedRange<Double>,
+        excluding excluded: [Double?] = []
     ) -> Double? {
+        let excludedValues = excluded.compactMap { $0 }
         let keywordPattern = keywords.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
         let unitPattern = unitVariants.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
         let patterns = [
@@ -123,24 +134,34 @@ nonisolated enum GrowthMeasurementExtractor {
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
             let textRange = NSRange(text.startIndex..., in: text)
-            guard let match = regex.firstMatch(in: text, range: textRange),
-                  let numberRange = Range(match.range(at: 1), in: text),
-                  let raw = Double(text[numberRange]) else { continue }
-            let unit: String?
-            if match.numberOfRanges > 2,
-               let unitRange = Range(match.range(at: 2), in: text) {
-                unit = String(text[unitRange])
-            } else {
-                unit = nil
+            for match in regex.matches(in: text, range: textRange) {
+                guard let numberRange = Range(match.range(at: 1), in: text),
+                      let raw = Double(text[numberRange]) else { continue }
+                let unit: String?
+                if match.numberOfRanges > 2,
+                   let unitRange = Range(match.range(at: 2), in: text) {
+                    unit = String(text[unitRange])
+                } else {
+                    unit = nil
+                }
+                let value = convert(raw, unit)
+                guard range.contains(value) else { continue }
+                // 跳过已被其它指标（如头围）消费掉的同一数字，防止跨指标窃取。
+                if excludedValues.contains(where: { abs($0 - value) < 0.05 }) { continue }
+                return value
             }
-            let value = convert(raw, unit)
-            guard range.contains(value) else { continue }
-            return value
         }
         return nil
     }
 
-    private static func unitValue(unitVariants: [String], in text: String, range: ClosedRange<Double>) -> Double? {
+    private static func containsHeightKeyword(_ text: String) -> Bool {
+        text.contains("身高") || text.contains("身长")
+            || text.range(of: "height", options: .caseInsensitive) != nil
+    }
+
+    private static func unitValue(unitVariants: [String], in text: String, range: ClosedRange<Double>,
+                                  excluding excluded: [Double?] = []) -> Double? {
+        let excludedValues = excluded.compactMap { $0 }
         let unitPattern = unitVariants.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
         let pattern = #"(?i)(\d+(?:\.\d+)?)\s*(\#(unitPattern))"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
@@ -149,6 +170,8 @@ nonisolated enum GrowthMeasurementExtractor {
             guard let numberRange = Range(match.range(at: 1), in: text),
                   let value = Double(text[numberRange]),
                   range.contains(value) else { continue }
+            // 跳过已被其它指标（如头围）消费掉的同一数字，防止一个 45cm 被复用成两个指标。
+            if excludedValues.contains(where: { abs($0 - value) < 0.05 }) { continue }
             return value
         }
         return nil

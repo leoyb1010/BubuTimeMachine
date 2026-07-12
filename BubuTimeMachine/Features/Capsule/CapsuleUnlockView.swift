@@ -43,7 +43,7 @@ struct CapsuleUnlockView: View {
                     Spacer()
                     Button { dismiss() } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.85))
+                            .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.85))
                     }
                     .accessibilityLabel("关闭")
                 }
@@ -67,10 +67,10 @@ struct CapsuleUnlockView: View {
     private var sealedView: some View {
         VStack(spacing: 28) {
             Text(capsule.coverEmoji ?? "💌")
-                .font(.system(size: 100))
+                .font(BubuTheme.Font.scaled(100))
                 .shadow(color: .black.opacity(0.2), radius: 20, y: 10)
             VStack(spacing: 8) {
-                Text(capsule.title).font(.system(size: 26, weight: .bold, design: .rounded))
+                Text(capsule.title).font(BubuTheme.Font.scaled(26, weight: .bold))
                     .foregroundStyle(.white)
                 Text("来自\(capsule.fromRole) · 封存于 \(BubuDateFormat.shortDate(capsule.createdAt))")
                     .font(BubuTheme.Font.caption).foregroundStyle(.white.opacity(0.85))
@@ -102,7 +102,7 @@ struct CapsuleUnlockView: View {
                     .opacity(burst ? 0 : 1)
             }
             Text(capsule.coverEmoji ?? "💌")
-                .font(.system(size: 100))
+                .font(BubuTheme.Font.scaled(100))
                 .scaleEffect(burst ? 1.18 : 1)
                 .rotationEffect(.degrees(burst ? -4 : 0))
         }
@@ -116,11 +116,11 @@ struct CapsuleUnlockView: View {
     private var retrospectView: some View {
         VStack(spacing: 18) {
             Image(systemName: "hourglass")
-                .font(.system(size: 56))
+                .font(BubuTheme.Font.scaled(56))
                 .foregroundStyle(.white)
                 .symbolEffect(.rotate, options: .nonRepeating)
             Text(waitedText)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .font(BubuTheme.Font.scaled(24, weight: .semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
             Text("现在，它是你的了")
@@ -155,14 +155,14 @@ struct CapsuleUnlockView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(spacing: 6) {
-                        Text(capsule.coverEmoji ?? "💌").font(.system(size: 50))
+                        Text(capsule.coverEmoji ?? "💌").font(BubuTheme.Font.scaled(50))
                         Text(capsule.title).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.paperInk)
                     }
                     .frame(maxWidth: .infinity)
 
                     if !payload.letter.isEmpty {
                         Text(payload.letter)
-                            .font(.system(size: 19, design: .serif))
+                            .font(BubuTheme.Font.scaled(19, design: .serif))
                             .foregroundStyle(BubuTheme.Color.paperInk)
                             .lineSpacing(8)
                     }

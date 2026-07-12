@@ -50,7 +50,7 @@ struct ChildProfileView: View {
                                 Image(uiImage: avatarUI).resizable().scaledToFill()
                             } else {
                                 tint.opacity(0.15)
-                                Text("👶").font(.system(size: 50))
+                                Text("👶").font(BubuTheme.Font.scaled(50))
                             }
                         }
                         .frame(width: 110, height: 110)
@@ -58,7 +58,7 @@ struct ChildProfileView: View {
                         .overlay { Circle().stroke(tint.opacity(0.3), lineWidth: 3) }
 
                         Image(systemName: "camera.circle.fill")
-                            .font(.system(size: 28))
+                            .font(BubuTheme.Font.scaled(28))
                             .foregroundStyle(tint)
                             .background(Circle().fill(BubuTheme.Color.card))
                     }
@@ -87,7 +87,8 @@ struct ChildProfileView: View {
             DatePicker("生日", selection: Binding(
                 get: { profile.birthday },
                 set: {
-                    profile.birthday = $0
+                    // 保存前归一化到当天 0 点，保持与全 App 年龄口径一致（C-P1-5）。
+                    profile.birthday = Calendar.current.startOfDay(for: $0)
                     profile.syncState = .local
                     try? context.save()
                     env.refreshWidgetSnapshot(context: context)

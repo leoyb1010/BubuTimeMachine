@@ -29,7 +29,7 @@ struct MediaThumbnail: View {
                     Spacer()
                     HStack {
                         Image(systemName: media.type == .video ? "play.circle.fill" : "waveform")
-                            .font(.system(size: 20))
+                            .font(BubuTheme.Font.scaled(20))
                             .foregroundStyle(.white)
                             .shadow(radius: 2)
                         Spacer()
@@ -55,7 +55,7 @@ struct MediaThumbnail: View {
             .fill(BubuTheme.Color.cream)
             .overlay {
                 Image(systemName: placeholderSymbol)
-                    .font(.system(size: 28))
+                    .font(BubuTheme.Font.scaled(28))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             // 远端尚未落地：呼吸闪烁提示「正在取」。

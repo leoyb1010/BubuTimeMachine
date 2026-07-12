@@ -3,6 +3,21 @@ import Foundation
 // MARK: - 网络传输对象（DTO）
 // UI 永不直接依赖这些类型；它们只在 Service 层与服务器之间流转。
 
+/// 增量游标来源：所有可拉取的 DTO 都能解出 PocketBase 服务器系统字段 `updated`。
+/// 游标推进只认服务器单一时钟（`serverUpdatedAt`），杜绝用本机时钟过滤他机 clientUpdatedAt
+/// 造成的「时钟偏移 → 游标推过头 → 永久漏拉」（S-P1-1）。
+protocol SyncCursorProviding {
+    var serverUpdatedAt: Date? { get }
+}
+
+/// 远端墓碑：被软删除记录的 localId + 服务器 `updated`。
+/// 携带 updated 让删除也能推进游标——否则「只有删除、没有新增」的一轮永远推不进游标，
+/// 每轮重复拉同一批墓碑（游标停滞的另一种形态）。
+struct RemoteTombstone: Sendable {
+    let localId: String
+    let serverUpdatedAt: Date?
+}
+
 struct AuthToken: Codable, Sendable {
     let token: String
     let role: String
@@ -12,7 +27,7 @@ struct AuthToken: Codable, Sendable {
 }
 
 /// Entry 的服务器表示。与 SwiftData `Entry` 解耦，便于后端字段独立演进。
-struct EntryDTO: Codable, Sendable {
+struct EntryDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?                 // remoteId
     var localId: String             // 客户端 UUID，幂等去重用
     var familyId: String?
@@ -30,9 +45,10 @@ struct EntryDTO: Codable, Sendable {
     var inStorybook: Bool?          // 收进成长绘本（可选：服务端无此字段时本地保留，不阻断同步）
     var editedAt: Date?
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil   // 服务器 updated，仅拉取路径填充，游标推进用
 }
 
-struct MediaDTO: Codable, Sendable {
+struct MediaDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var entryLocalId: String
@@ -43,9 +59,10 @@ struct MediaDTO: Codable, Sendable {
     var height: Int?
     var aiTags: [String]
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct MilestoneDTO: Codable, Sendable {
+struct MilestoneDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var title: String
@@ -56,9 +73,10 @@ struct MilestoneDTO: Codable, Sendable {
     var ageDescription: String?
     var isCustom: Bool
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct FirstTimeDTO: Codable, Sendable {
+struct FirstTimeDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var what: String
@@ -67,9 +85,10 @@ struct FirstTimeDTO: Codable, Sendable {
     var confirmedByParent: Bool
     var entryLocalId: String?
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct FamilyMemberDTO: Codable, Sendable {
+struct FamilyMemberDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var name: String
@@ -78,9 +97,10 @@ struct FamilyMemberDTO: Codable, Sendable {
     var themeColorHex: String
     var isPrimary: Bool
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct ChildProfileDTO: Codable, Sendable {
+struct ChildProfileDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var name: String
@@ -90,9 +110,10 @@ struct ChildProfileDTO: Codable, Sendable {
     var birthPlace: String?
     var avatarRemoteURL: String?   // 由服务端 avatar file 字段派生，身份卡跨设备显示头像
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct HealthRecordDTO: Codable, Sendable {
+struct HealthRecordDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var kind: String
@@ -109,9 +130,10 @@ struct HealthRecordDTO: Codable, Sendable {
     var temperatureCelsius: Double?
     var tags: [String]
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct VaccineRecordDTO: Codable, Sendable {
+struct VaccineRecordDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var doseId: String?
@@ -124,9 +146,13 @@ struct VaccineRecordDTO: Codable, Sendable {
     var note: String?
     var source: String
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
+    /// 记录级最后编辑时间（模型 `updatedAt`），作为 LWW 版本号推送到 clientUpdatedAt，
+    /// 供通用 upsert 做「远端更新则不覆盖」的时间戳比对。
+    var editedAt: Date? = nil
 }
 
-struct GrowthMeasurementDTO: Codable, Sendable {
+struct GrowthMeasurementDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var measuredAt: Date
@@ -136,9 +162,12 @@ struct GrowthMeasurementDTO: Codable, Sendable {
     var note: String?
     var source: String
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
+    /// 记录级最后编辑时间（模型 `updatedAt`），LWW 版本号，见 VaccineRecordDTO.editedAt。
+    var editedAt: Date? = nil
 }
 
-struct CommentDTO: Codable, Sendable {
+struct CommentDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var entryLocalId: String
@@ -148,9 +177,10 @@ struct CommentDTO: Codable, Sendable {
     var voiceDuration: Double
     var voiceWaveform: [Float]
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct VoiceNoteDTO: Codable, Sendable {
+struct VoiceNoteDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var entryLocalId: String
@@ -160,9 +190,10 @@ struct VoiceNoteDTO: Codable, Sendable {
     var transcript: String?
     var waveform: [Float]
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct VoiceMemoDTO: Codable, Sendable {
+struct VoiceMemoDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var kind: String
@@ -172,9 +203,10 @@ struct VoiceMemoDTO: Codable, Sendable {
     var recordedAt: Date
     var durationSeconds: Double?
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
-struct TimeCapsuleDTO: Codable, Sendable {
+struct TimeCapsuleDTO: Codable, Sendable, SyncCursorProviding {
     var id: String?
     var localId: String
     var title: String
@@ -184,6 +216,7 @@ struct TimeCapsuleDTO: Codable, Sendable {
     var encryptedBlobRemoteURL: String?
     var coverEmoji: String?
     var createdAt: Date
+    var serverUpdatedAt: Date? = nil
 }
 
 /// 一次媒体上传请求。

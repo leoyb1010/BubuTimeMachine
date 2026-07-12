@@ -12,10 +12,16 @@ import SQLite3
 /// - **不删源**：迁移成功也保留旧文件（仅标记完成），万一新容器出问题可手动回退。
 /// - **失败不致命**：任一步失败只记日志、不抛错、不删任何东西；下次启动重试。
 /// - **store 三件套**：SQLite 的 `.store` / `.store-wal` / `.store-shm` 一并搬。
-enum StorageMigrator {
+/// `nonisolated`：全部是 FileManager/SQLite/UserDefaults 纯 IO，无 UI、无共享可变状态，
+/// 既能在 App.init（MainActor）同步调 store 迁移，也能在 Task.detached 后台跑媒体迁移。
+nonisolated enum StorageMigrator {
     private static let log = Logger(subsystem: "com.bubu.timemachine", category: "StorageMigrator")
-    private static let doneKey = "bubu.storage.migratedToAppGroup.v3"
+    // store 与媒体拆成两把独立完成标记：store 同步先行（小、必须在建容器前完成），
+    // 媒体后台补搬（可能几 GB，绝不卡启动看门狗）。两者各自幂等自愈、互不阻塞。
+    private static let storeDoneKey = "bubu.storage.migratedStoreToAppGroup.v3"
+    private static let mediaDoneKey = "bubu.storage.migratedMediaToAppGroup.v3"
     private static let storeSuffixes = ["", "-wal", "-shm"]
+    private static let mediaDirNames = ["Media", "Thumbnails"]
 
     private struct StoreCandidate {
         let label: String
@@ -39,13 +45,16 @@ enum StorageMigrator {
         }
     }
 
-    /// 在 App 启动早期、创建 ModelContainer 之前调用。
-    static func migrateIfNeeded() {
+    /// 在 App 启动早期、创建 ModelContainer 之前【同步】调用。
+    /// 只搬 SwiftData store 三件套（.store / .store-wal / .store-shm）——文件小、且必须在
+    /// ModelConfiguration 指向共享容器前就位，否则容器会指向旧/空 store。
+    /// 媒体目录（可能几 GB）不在这里搬，改由 migrateMediaIfNeeded() 后台执行。
+    static func migrateStoreIfNeeded() {
         let defaults = UserDefaults.standard
 
         // App Group 还没配好（拿不到共享容器）：本次跳过，等签名就绪后下次启动再迁。
         guard BubuStorage.isUsingAppGroup else {
-            log.notice("App Group 容器不可用，跳过迁移（等 entitlements 配好后重试）")
+            log.notice("App Group 容器不可用，跳过 store 迁移（等 entitlements 配好后重试）")
             return
         }
 
@@ -57,14 +66,14 @@ enum StorageMigrator {
 
         // 源与目标相同（回退模式下二者都是 Documents）：无需迁移，直接标记完成。
         if legacyRoot.standardizedFileURL == container.standardizedFileURL {
-            defaults.set(true, forKey: doneKey)
+            defaults.set(true, forKey: storeDoneKey)
             return
         }
 
         var allOK = true
         let destination = makeCandidate(label: "App Group", url: destinationStore, fm: fm)
 
-        // 1) SwiftData store 三件套
+        // SwiftData store 三件套
         // 真实旧库曾经落在 SwiftData 默认路径 default.store；后续 0A 迁移又引入了
         // Documents/BubuTimeMachine.store。这里按业务表数量选“更完整”的库，避免把 300+ 里程碑
         // 回退成早期 100+ 里程碑。
@@ -83,15 +92,8 @@ enum StorageMigrator {
             guard let destination else { return true }
             return bestSource.stats.score > destination.stats.score
         }()
-        let mediaNeedsRepair = ["Media", "Thumbnails"].contains { dirName in
-            directoryNeedsCopy(
-                srcDir: legacyRoot.appendingPathComponent(dirName, isDirectory: true),
-                dstDir: container.appendingPathComponent(dirName, isDirectory: true),
-                fm: fm
-            )
-        }
 
-        if defaults.bool(forKey: doneKey), destination != nil, !storeNeedsRepair, !mediaNeedsRepair {
+        if defaults.bool(forKey: storeDoneKey), destination != nil, !storeNeedsRepair {
             return
         }
 
@@ -109,19 +111,64 @@ enum StorageMigrator {
             }
         }
 
-        // 2) 媒体目录：Media / Thumbnails 下逐文件搬（保留已存在的，避免覆盖）
-        for dirName in ["Media", "Thumbnails"] {
+        if allOK {
+            defaults.set(true, forKey: storeDoneKey)
+            log.notice("store 迁移到 App Group 完成")
+        } else {
+            // 不标记完成：下次启动重试。旧文件全部保留，数据不丢。
+            log.error("store 迁移失败，下次启动重试（旧数据已保留）")
+        }
+    }
+
+    /// 媒体目录（Media / Thumbnails，可能几 GB）迁移，改在【后台】执行（App .task 里
+    /// Task.detached 调用），绝不阻塞首帧、绝不触发启动看门狗强杀。
+    /// 分文件拷贝、拷贝不删源：迁移窗口内新容器还没搬到的文件，MediaStore 读取会自动回退
+    /// 旧沙盒目录（见 legacyMediaDirectory / legacyThumbnailDirectory），绝不白图。
+    /// 幂等、失败不致命：任一文件失败只记日志、不标记完成，下次启动再补。
+    static func migrateMediaIfNeeded() {
+        let defaults = UserDefaults.standard
+
+        guard BubuStorage.isUsingAppGroup else {
+            log.notice("App Group 容器不可用，跳过媒体迁移（等 entitlements 配好后重试）")
+            return
+        }
+
+        let fm = FileManager.default
+        let legacyRoot = BubuStorage.legacyDocumentsURL
+        let container = BubuStorage.containerURL
+
+        // 源与目标相同（回退模式）：无需迁移，直接标记完成。
+        if legacyRoot.standardizedFileURL == container.standardizedFileURL {
+            defaults.set(true, forKey: mediaDoneKey)
+            return
+        }
+
+        let mediaNeedsRepair = mediaDirNames.contains { dirName in
+            directoryNeedsCopy(
+                srcDir: legacyRoot.appendingPathComponent(dirName, isDirectory: true),
+                dstDir: container.appendingPathComponent(dirName, isDirectory: true),
+                fm: fm
+            )
+        }
+
+        if defaults.bool(forKey: mediaDoneKey), !mediaNeedsRepair {
+            return
+        }
+
+        var allOK = true
+        // Media / Thumbnails 下逐文件搬（保留已存在的，避免覆盖）
+        for dirName in mediaDirNames {
             let srcDir = legacyRoot.appendingPathComponent(dirName, isDirectory: true)
             let dstDir = container.appendingPathComponent(dirName, isDirectory: true)
             allOK = moveDirectoryContents(srcDir: srcDir, dstDir: dstDir, fm: fm) && allOK
         }
 
         if allOK {
-            defaults.set(true, forKey: doneKey)
-            log.notice("存储迁移到 App Group 完成")
+            defaults.set(true, forKey: mediaDoneKey)
+            log.notice("媒体迁移到 App Group 完成")
         } else {
             // 不标记完成：下次启动重试。旧文件全部保留，数据不丢。
-            log.error("存储迁移部分失败，下次启动重试（旧数据已保留）")
+            log.error("媒体迁移部分失败，下次启动重试（旧数据已保留）")
         }
     }
 

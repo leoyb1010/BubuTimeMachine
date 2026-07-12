@@ -83,15 +83,14 @@ struct CapsuleHomeView: View {
         }
     }
 
-    /// 每分钟刷新一次倒计时；最后 24 小时进入「即将开启」呼吸发光。
+    /// 倒计时随 currentDate（唯一的 30s 计时器）刷新；最后 24 小时进入「即将开启」呼吸发光。
+    /// 合并原来的双计时：不再额外套一层 TimelineView(.periodic)（P2m）。
     private var lockedSection: some View {
-        SwiftUI.TimelineView(.periodic(from: .now, by: 60)) { context in
-            VStack(alignment: .leading, spacing: 12) {
-                Label("静静等待", systemImage: "lock.fill")
-                    .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
-                ForEach(locked) { capsule in
-                    capsuleRow(capsule, open: false, now: context.date)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            Label("静静等待", systemImage: "lock.fill")
+                .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+            ForEach(locked) { capsule in
+                capsuleRow(capsule, open: false, now: currentDate)
             }
         }
         .onAppear {
@@ -104,6 +103,7 @@ struct CapsuleHomeView: View {
         let imminent = !open && capsule.unlockAt.timeIntervalSince(now) < 86_400
         return HStack(spacing: 16) {
             Text(capsule.coverEmoji ?? "💌")
+                // 固定字号：emoji 徽标锁在 60pt 圆内，随 Dynamic Type 放大会明显溢出圆形
                 .font(.system(size: 40))
                 .frame(width: 60, height: 60)
                 .background((open ? theme : BubuTheme.Color.secondaryText).opacity(0.12), in: Circle())
@@ -118,11 +118,11 @@ struct CapsuleHomeView: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 if open {
                     Label("轻触庄重开启", systemImage: "hand.tap")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(BubuTheme.Font.scaled(12, weight: .semibold))
                         .foregroundStyle(theme)
                 } else {
                     Text(countdownText(capsule.unlockAt, now: now))
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .font(BubuTheme.Font.scaled(13, weight: .medium))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                         .foregroundStyle(theme)
@@ -135,8 +135,19 @@ struct CapsuleHomeView: View {
         .padding()
         .background(BubuTheme.Color.card.opacity(open ? 0.72 : 0.62), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: open ? theme : BubuTheme.Color.secondaryText, interactive: open)
-        .shadow(color: imminent ? theme.opacity(glowPulse ? 0.45 : 0.15) : .black.opacity(0.10),
-                radius: imminent ? (glowPulse ? 16 : 8) : 12, y: 4)
+        // 静态阴影只做层次，不再随呼吸变半径（避免每帧重栅格化 shadow，P2m）
+        .shadow(color: imminent ? theme.opacity(0.20) : .black.opacity(0.10),
+                radius: imminent ? 10 : 12, y: 4)
+        .background {
+            // 即将开启的呼吸光：预渲染模糊光晕层，只动 opacity，光栅化一次即可
+            if imminent {
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
+                    .fill(theme)
+                    .blur(radius: 18)
+                    .opacity(glowPulse ? 0.45 : 0.16)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private func capsuleRow(_ capsule: TimeCapsule, open: Bool, now: Date = .now) -> some View {

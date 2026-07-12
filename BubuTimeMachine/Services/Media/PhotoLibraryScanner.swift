@@ -13,9 +13,21 @@ final class PhotoLibraryScanner {
     var authorized: Bool = false
 
     private let handledKey = "bubu.photoscan.handledIDs"
+    private let handledDayKey = "bubu.photoscan.handledDay"
     private var handledIDs: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: handledKey) ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: handledKey) }
+    }
+
+    /// handledIDs 只需覆盖「今天」——扫描谓词是 creationDate >= 今天零点，隔天的旧照片不会再出现。
+    /// 跨天即清空，避免这个已处理 ID 集合只增不减、永久膨胀。
+    private func pruneHandledIfNewDay() {
+        let today = Calendar.current.startOfDay(for: .now)
+        let stored = UserDefaults.standard.object(forKey: handledDayKey) as? Date
+        if stored != today {
+            UserDefaults.standard.set([String](), forKey: handledKey)
+            UserDefaults.standard.set(today, forKey: handledDayKey)
+        }
     }
 
     /// 当前授权态（不主动弹窗；由 UI 在合适时机 requestAndScan）。
@@ -37,6 +49,7 @@ final class PhotoLibraryScanner {
     @discardableResult
     func scan() -> Int {
         guard authorized else { return 0 }
+        pruneHandledIfNewDay()
         let cal = Calendar.current
         let startOfDay = cal.startOfDay(for: .now)
 
@@ -60,6 +73,7 @@ final class PhotoLibraryScanner {
 
     /// 标记为已处理（收录或忽略后调用），下次不再提示。
     func markHandled(_ assets: [PHAsset]) {
+        pruneHandledIfNewDay()
         var set = handledIDs
         assets.forEach { set.insert($0.localIdentifier) }
         handledIDs = set

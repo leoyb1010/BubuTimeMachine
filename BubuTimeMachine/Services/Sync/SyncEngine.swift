@@ -55,8 +55,15 @@ final class SyncEngine {
     }
 
     private func setCursor(_ date: Date, for collection: String) {
-        UserDefaults.standard.set(date.addingTimeInterval(-Self.cursorOverlap),
-                                  forKey: "bubu.sync.cursor.\(collection)")
+        let key = "bubu.sync.cursor.\(collection)"
+        // 回退 60 秒重叠余量，容忍边界并保证自我重拉幂等（localId 去重）。
+        let candidate = date.addingTimeInterval(-Self.cursorOverlap)
+        // 游标只进不退：服务器 updated 单调递增，只有 60 秒 overlap 窗口可能带来轻微回退，用 max 夹住，
+        // 避免每轮把重叠窗口反复重拉。
+        if let existing = UserDefaults.standard.object(forKey: key) as? Date, existing >= candidate {
+            return
+        }
+        UserDefaults.standard.set(candidate, forKey: key)
     }
 
     init(apiClient: APIClient, config: ServerConfig, mediaStore: MediaStore) {
@@ -72,6 +79,10 @@ final class SyncEngine {
         syncTask = nil
         pollTimer?.invalidate()
         pollTimer = nil
+        // 取消旧服务器的 SSE 长连：否则 startRealtime 的 guard realtimeTask==nil 会挡住重建，
+        // 改了服务器地址后仍连着旧服务器（S-P2）。置 nil 让 start() 能对新客户端重开长连。
+        realtimeTask?.cancel()
+        realtimeTask = nil
         self.apiClient = client
     }
 
@@ -88,8 +99,40 @@ final class SyncEngine {
         refreshPendingCount()
     }
 
+    // MARK: 游标契约迁移（本机时钟 → 服务器 updated）
+    /// 所有增量集合，用于升级时一次性清空旧游标。
+    private static let cursorCollections = [
+        "entries", "media", "milestones", "firsttimes", "members", "childprofile",
+        "healthrecords", "vaccinerecords", "growthmeasurements", "comments",
+        "voicenotes", "voicememos", "timecapsules",
+    ]
+    private static let cursorMigrationFlagKey = "bubu.sync.cursor.serverUpdatedMigration.v1"
+
+    /// 游标从「本机时钟/clientUpdatedAt」改为「服务器 updated」是跨参照系的契约变更（S-P1-1）。
+    /// 升级后旧游标是本机时钟值，直接拿去和服务器 updated 比较在时钟偏移下可能漏窗口。
+    /// 一次性清空所有游标，让升级后首轮做一次全量拉取（localId 去重 + merge 见已 synced 幂等，无重复无覆盖），
+    /// 从此游标全部以服务器时钟重建，保证「不丢窗口」。
+    private func migrateCursorsIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.cursorMigrationFlagKey) else { return }
+        for collection in Self.cursorCollections {
+            defaults.removeObject(forKey: "bubu.sync.cursor.\(collection)")
+        }
+        defaults.set(true, forKey: Self.cursorMigrationFlagKey)
+    }
+
+    /// 清空所有集合的增量游标。换服务器 / 恢复备份后调用：否则旧游标残留会让新服务器的
+    /// 历史记录拉不全（游标已越过它们的 updated 时间）。清空后下一轮做一次全量拉取（localId 去重 + merge 幂等）。
+    static func resetAllCursors() {
+        let defaults = UserDefaults.standard
+        for collection in cursorCollections {
+            defaults.removeObject(forKey: "bubu.sync.cursor.\(collection)")
+        }
+    }
+
     /// 启动同步层：已配置则连接 + 首次全量推拉 + 起轮询；否则保持离线。
     func start() {
+        migrateCursorsIfNeeded()
         guard config.isConfigured else {
             connectionState = .offline
             pollTimer?.invalidate()
@@ -128,6 +171,20 @@ final class SyncEngine {
             return
         }
         scheduleSync()
+    }
+
+    /// 后台补拉专用：真正 await 跑完「连接 → 推 → 拉 → 下载」一整轮再返回，可被取消。
+    /// 与 syncNow()（触发即返回，交给内部 syncTask 异步跑）不同——BGTask 必须等这一轮结束
+    /// 才能 setTaskCompleted。复用 connectAndSync 的单轮逻辑，内部各步都有 Task.isCancelled 检查，
+    /// 上层（BackgroundRefresher 的 expirationHandler）取消时能协作式提前收尾。
+    func syncOnce() async {
+        migrateCursorsIfNeeded()   // BGTask 冷启动兜底引擎不走 start()，这里补一次游标契约迁移
+        guard config.isConfigured else {
+            connectionState = .offline
+            refreshPendingCount()
+            return
+        }
+        await connectAndSync()
     }
 
     #if DEBUG
@@ -545,6 +602,11 @@ final class SyncEngine {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertVaccineRecord(Self.makeDTO(item))
+                // LWW：远端这条更新导致本次推送被通用 upsert 跳过（带回的编辑时间比本地新）→ 采用远端版本，
+                // 否则本地会停在旧内容却被标成 synced，且游标已越过该记录不会再拉回（与 S-P2 游标解耦并存的收尾）。
+                if let remoteEdited = saved.editedAt, remoteEdited > item.updatedAt {
+                    Self.apply(saved, to: item)
+                }
                 item.remoteId = saved.id
                 item.syncState = .synced
             } catch {
@@ -574,6 +636,10 @@ final class SyncEngine {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertGrowthMeasurement(Self.makeDTO(item))
+                // 见疫苗记录：LWW 跳过时采用远端更新版本，避免本地停留在旧内容却标记 synced。
+                if let remoteEdited = saved.editedAt, remoteEdited > item.updatedAt {
+                    Self.apply(saved, to: item)
+                }
                 item.remoteId = saved.id
                 item.syncState = .synced
             } catch {
@@ -812,52 +878,74 @@ final class SyncEngine {
             merge: { await self.mergeRemoteTimeCapsule($0) }
     }
 
-    private func pull<DTO>(_ collection: String,
+    private func pull<DTO: SyncCursorProviding>(_ collection: String,
                            fetch: (Date?) async throws -> [DTO],
                            merge: (DTO) async -> Bool) async {
-        let started = Date.now
+        let since = cursor(for: collection)
         do {
-            let items = try await fetch(cursor(for: collection))
-            var fullyMerged = true
+            let items = try await fetch(since)
+            // 远端游标与「本地脏记录是否全部消费」解耦（S-P2）：这一轮把远端项全部拉回并逐条尝试合并后，
+            // 游标就按「本轮拉到的最大服务器 updated」前进。本地未推的脏记录/永久 .failed 记录合并返回 false
+            // 只影响它是否落库，不再卡住整集合游标造成每轮从头全量重拉——那些记录由 pushLocal 负责收敛。
+            var maxUpdated: Date? = nil
             for dto in items {
                 guard !Task.isCancelled else { return }
-                if !(await merge(dto)) {
-                    fullyMerged = false
-                }
+                _ = await merge(dto)
+                maxUpdated = Self.laterDate(maxUpdated, dto.serverUpdatedAt)
             }
-            // tombstone 传播：别的设备删掉的，这台也要删——
-            // 之前拉取端直接过滤 isDeleted，删除永不同步（R4 P1-8）。
-            let deletedIds = try await apiClient.fetchDeletedLocalIds(collection: collection,
-                                                                      since: cursor(for: collection))
-            if !deletedIds.isEmpty {
-                removeLocals(collection: collection, localIds: deletedIds)
+            // tombstone 传播：别的设备删掉的，这台也要删（R4 P1-8）。
+            // 墓碑的服务器 updated 同样参与游标推进，避免「本轮只有删除」时游标停滞、每轮重复拉同一批墓碑。
+            let tombstones = try await apiClient.fetchDeletedTombstones(collection: collection, since: since)
+            if !tombstones.isEmpty {
+                removeLocals(collection: collection, localIds: tombstones.map(\.localId))
+                for t in tombstones { maxUpdated = Self.laterDate(maxUpdated, t.serverUpdatedAt) }
             }
-            if fullyMerged {
-                setCursor(started, for: collection)
-                lastSyncedAt = started
-            } else {
-                softFailureThisRun = true
+            // 游标推进用「本轮拉到的最大服务器 updated」（服务器单一权威时钟，与过滤字段 updated 同参照系），
+            // 而非本机 Date.now——杜绝读设备时钟偏移把游标推过头、写设备刚写的记录被判旧而永久跳过（S-P1-1）。
+            // setCursor 内部回退 60 秒重叠余量，边界不丢记录、自我重拉幂等（localId 去重 + merge 见已 synced 不回退）。
+            // 无 context 时不推进（没落库不能推进游标）；本轮无任何新记录/墓碑则游标保持不动（下轮空查询极廉价）。
+            if modelContext != nil, let maxUpdated {
+                setCursor(maxUpdated, for: collection)
             }
+            lastSyncedAt = Date.now
         } catch {
             if Self.isMissingOptionalServerCollection(error, collection: collection) {
-                setCursor(started, for: collection)
-                return
+                return   // 集合在服务端不存在：静默跳过，游标保持不动
             }
             // 瞬时拉取失败不立刻报红：标记本轮软失败，游标不推进，下轮自动补拉。
             softFailureThisRun = true
         }
     }
 
+    /// 取两个可选时间里较晚的一个（nil 视作无约束）。
+    private static func laterDate(_ a: Date?, _ b: Date?) -> Date? {
+        guard let a else { return b }
+        guard let b else { return a }
+        return max(a, b)
+    }
+
     /// 远端 tombstone → 删除本地对应记录与文件。
     /// members/childprofile 不自动删（单例语义，误删代价大，历史上也没有删除入口）。
+    ///
+    /// 冲突策略（S-P2）：只删「本地已 synced」的记录。若本地这条有未推送的改动（syncState != .synced，
+    /// 用户刚写还没传上去），则「保留本地、跳过删除」——本地编辑优先，绝不静默吞掉用户刚写的东西；
+    /// 该记录随后由 pushLocal 继续收敛。删除依然会传播（synced 的记录照删），只是不越过本地未推编辑。
     private func removeLocals(collection: String, localIds: [String]) {
         guard let context = modelContext, !localIds.isEmpty else { return }
+        var skippedDirty = false
+        /// 有本地未推改动（非 synced）就保留、跳过删除；返回 true 表示「已保留、不要删」。
+        func keepIfDirty(_ state: SyncState) -> Bool {
+            guard state != .synced else { return false }
+            skippedDirty = true
+            return true
+        }
         for localId in localIds {
             guard let uuid = UUID(uuidString: localId) else { continue }
             switch collection {
             case "entries":
                 if let obj = (try? context.fetch(FetchDescriptor<Entry>(
                     predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
                     for m in obj.media {
                         mediaStore.deleteLocalFiles(media: m.localFileName, thumbnail: m.thumbnailFileName)
                     }
@@ -869,42 +957,64 @@ final class SyncEngine {
             case "media":
                 if let obj = (try? context.fetch(FetchDescriptor<Media>(
                     predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
                     mediaStore.deleteLocalFiles(media: obj.localFileName, thumbnail: obj.thumbnailFileName)
                     context.delete(obj)
                 }
             case "milestones":
                 if let obj = (try? context.fetch(FetchDescriptor<Milestone>(
-                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
+                    context.delete(obj)
+                }
             case "firsttimes":
                 if let obj = (try? context.fetch(FetchDescriptor<FirstTime>(
-                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
+                    context.delete(obj)
+                }
             case "healthrecords":
                 if let obj = (try? context.fetch(FetchDescriptor<HealthRecord>(
-                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
+                    context.delete(obj)
+                }
             case "vaccinerecords":
                 if let obj = (try? context.fetch(FetchDescriptor<VaccineRecord>(
-                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
+                    context.delete(obj)
+                }
             case "growthmeasurements":
                 if let obj = (try? context.fetch(FetchDescriptor<GrowthMeasurement>(
-                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
+                    context.delete(obj)
+                }
             case "comments":
                 if let obj = (try? context.fetch(FetchDescriptor<Comment>(
-                    predicate: #Predicate { $0.id == uuid })))?.first { context.delete(obj) }
+                    predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
+                    context.delete(obj)
+                }
             case "voicenotes":
                 if let obj = (try? context.fetch(FetchDescriptor<VoiceNote>(
                     predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
                     mediaStore.deleteLocalFiles(media: obj.localFileName)
                     context.delete(obj)
                 }
             case "voicememos":
                 if let obj = (try? context.fetch(FetchDescriptor<VoiceMemo>(
                     predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
                     mediaStore.deleteLocalFiles(media: obj.localFileName)
                     context.delete(obj)
                 }
             case "timecapsules":
                 if let obj = (try? context.fetch(FetchDescriptor<TimeCapsule>(
                     predicate: #Predicate { $0.id == uuid })))?.first {
+                    if keepIfDirty(obj.syncState) { continue }
                     mediaStore.deleteLocalFiles(media: obj.encryptedBlobFileName)
                     context.delete(obj)
                 }
@@ -913,6 +1023,10 @@ final class SyncEngine {
             }
         }
         try? context.save()
+        // 有本地未推编辑因远端删除被保留：给用户一个平和提示，避免「远端删了但这台还在」显得诡异。
+        if skippedDirty {
+            softNotice = "有几项别处删掉了，但这里还有没传上去的改动，先替你留着。"
+        }
     }
 
     private static func isMissingOptionalServerCollection(_ error: Error, collection: String) -> Bool {
@@ -1457,7 +1571,8 @@ final class SyncEngine {
         VaccineRecordDTO(id: item.remoteId, localId: item.id.uuidString, doseId: item.doseId,
                          vaccineName: item.vaccineName, doseLabel: item.doseLabel, injectedAt: item.injectedAt,
                          hospital: item.hospital, injectionSite: item.injectionSite, reaction: item.reaction,
-                         note: item.note, source: item.sourceRaw, createdAt: item.createdAt)
+                         note: item.note, source: item.sourceRaw, createdAt: item.createdAt,
+                         editedAt: item.updatedAt)
     }
 
     private static func apply(_ dto: VaccineRecordDTO, to item: VaccineRecord) {
@@ -1471,7 +1586,8 @@ final class SyncEngine {
         GrowthMeasurementDTO(id: item.remoteId, localId: item.id.uuidString, measuredAt: item.measuredAt,
                              heightCm: item.heightCm, weightKg: item.weightKg,
                              headCircumferenceCm: item.headCircumferenceCm, note: item.note,
-                             source: item.sourceRaw, createdAt: item.createdAt)
+                             source: item.sourceRaw, createdAt: item.createdAt,
+                             editedAt: item.updatedAt)
     }
 
     private static func makeHealthFallbackDTO(_ item: VaccineRecord) -> HealthRecordDTO {

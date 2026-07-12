@@ -10,6 +10,11 @@ struct BubuEntry: TimelineEntry {
     let snapshot: BubuSnapshot
     /// 记忆轮播款用：本 entry 展示第几张照片（多 entry 时间线自动翻页，免刷新预算）。
     var photoIndex: Int = 0
+    /// 记忆轮播款专用：本槽位要展示的「那一张」照片数据。
+    /// 轮播时间线有 12 个 entry，若每个 entry 都带上完整 snapshot（含最多 3×2MB 图），
+    /// 会逼近 WidgetKit ~30MB 内存红线导致空白。故轮播 entry 只携带该槽位需要的一张图，
+    /// 其 snapshot 的 photoImageData 被清空（其余轻量字段照常）。其它款不设此字段，走 snapshot.photoImageData。
+    var carouselPhoto: Data? = nil
 }
 
 struct BubuProvider: TimelineProvider {
@@ -1096,12 +1101,16 @@ struct BubuMemoryProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<BubuEntry>) -> Void) {
-        let snapshot = BubuWidgetData.loadSnapshot()
-        let photoCount = max(1, snapshot.photoImageData.count)
+        var snapshot = BubuWidgetData.loadSnapshot()
+        // 关键：把图片数组从 snapshot 里剥掉，避免 12 个 entry 各自完整拷贝 3 张图 → 撞 WidgetKit 内存红线。
+        // 每个 entry 只在 carouselPhoto 里带「本槽位那一张」；同一张图在多个槽位间靠 Data 的写时复制共享底层缓冲。
+        let photos = snapshot.photoImageData
+        snapshot.photoImageData = []
         var entries: [BubuEntry] = []
         for slot in 0..<12 {   // 6 小时 × 每 30 分钟
             let date = Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60)
-            entries.append(BubuEntry(date: date, snapshot: snapshot, photoIndex: slot % photoCount))
+            let photo = photos.isEmpty ? nil : photos[slot % photos.count]
+            entries.append(BubuEntry(date: date, snapshot: snapshot, photoIndex: 0, carouselPhoto: photo))
         }
         completion(Timeline(entries: entries, policy: .atEnd))
     }
@@ -1111,6 +1120,8 @@ struct BubuMemoryWidgetView: View {
     var entry: BubuEntry
 
     private var photoData: Data? {
+        // 轮播款：本槽位那一张（entry.carouselPhoto）。兜底仍读 snapshot.photoImageData（其它入口/预览）。
+        if let carousel = entry.carouselPhoto { return carousel }
         let photos = entry.snapshot.photoImageData
         guard !photos.isEmpty else { return nil }
         return photos[entry.photoIndex % photos.count]

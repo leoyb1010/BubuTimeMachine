@@ -21,9 +21,7 @@ struct EntryDetailView: View {
     @State private var storybookToast: String?
 
     private var profile: ChildProfile? { profiles.first }
-    private var sortedMedia: [Media] {
-        entry.media.sorted { $0.createdAt < $1.createdAt }
-    }
+    private var sortedMedia: [Media] { entry.sortedMedia }
     private var theme: Color { env.theme.theme.primary }
     private var timePerspectivePrefix: String {
         let months = Calendar.current.dateComponents([.month], from: entry.happenedAt, to: .now).month ?? 0
@@ -98,7 +96,7 @@ struct EntryDetailView: View {
         .overlay(alignment: .top) {
             if let storybookToast {
                 Text(storybookToast)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(13, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 9)
                     .background(BubuTheme.Color.deepRose, in: Capsule())
@@ -181,7 +179,7 @@ struct EntryDetailView: View {
                                 deleteMedia(media)
                             } label: {
                                 Image(systemName: "minus.circle.fill")
-                                    .font(.system(size: 24))
+                                    .font(BubuTheme.Font.scaled(24))
                                     .foregroundStyle(.white, .red)
                                     .padding(6)
                             }
@@ -292,7 +290,7 @@ struct EntryDetailView: View {
                             .font(BubuTheme.Font.caption.weight(.semibold))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
                         Text(entry.locationName ?? "关闭后会移除这条记录里的地点信息")
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
+                            .font(BubuTheme.Font.scaled(12, weight: .regular, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
                 }
@@ -360,7 +358,7 @@ struct EntryDetailView: View {
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                             if editing {
                                 Button { deleteVoice(voice) } label: {
-                                    Image(systemName: "trash.circle.fill").font(.system(size: 22))
+                                    Image(systemName: "trash.circle.fill").font(BubuTheme.Font.scaled(22))
                                         .foregroundStyle(BubuTheme.Color.secondaryText)
                                 }
                                 .buttonStyle(.plain)
@@ -404,7 +402,7 @@ struct EntryDetailView: View {
     private var firstPersonPlaceholder: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkles")
-                .font(.system(size: 18, weight: .semibold))
+                .font(BubuTheme.Font.scaled(18, weight: .semibold))
                 .foregroundStyle(theme)
                 .frame(width: 34, height: 34)
                 .background(theme.opacity(0.10), in: Circle())
@@ -413,13 +411,13 @@ struct EntryDetailView: View {
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Text(entry.firstPersonNote ?? "去 AI 工坊，把这一刻变成布布自己的话")
-                    .font(.system(size: 13, weight: .regular, design: .rounded))
+                    .font(BubuTheme.Font.scaled(13, weight: .regular, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(2)
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
+                .font(BubuTheme.Font.scaled(12, weight: .semibold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .padding(12)
@@ -438,7 +436,7 @@ struct EntryDetailView: View {
                 Button {
                     showCommentSheet = true
                 } label: {
-                    Image(systemName: "plus.circle.fill").font(.system(size: 24)).foregroundStyle(theme)
+                    Image(systemName: "plus.circle.fill").font(BubuTheme.Font.scaled(24)).foregroundStyle(theme)
                 }
                 .buttonStyle(.plain)
             }
@@ -493,13 +491,20 @@ struct EntryDetailView: View {
                 context.insert(media)
                 continue
             }
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let image = UIImage(data: data),
-               let fileName = try? env.mediaStore.savePhoto(data) {
-                let media = Media(type: .photo, localFileName: fileName)
-                media.thumbnailFileName = env.mediaStore.makePhotoThumbnail(fromImage: image)
-                media.entry = entry
-                context.insert(media)
+            if let data = try? await item.loadTransferable(type: Data.self) {
+                // 全尺寸解码 + 缩略图放到后台线程，避免在 MainActor 上同步解码大图冻结界面。
+                let mediaStore = env.mediaStore
+                let prepared = await Task.detached { () -> (fileName: String, thumbnail: String?)? in
+                    guard let image = UIImage(data: data),
+                          let fileName = try? mediaStore.savePhoto(data) else { return nil }
+                    return (fileName, mediaStore.makePhotoThumbnail(fromImage: image))
+                }.value
+                if let prepared {
+                    let media = Media(type: .photo, localFileName: prepared.fileName)
+                    media.thumbnailFileName = prepared.thumbnail
+                    media.entry = entry
+                    context.insert(media)
+                }
             }
         }
         appendPick = []

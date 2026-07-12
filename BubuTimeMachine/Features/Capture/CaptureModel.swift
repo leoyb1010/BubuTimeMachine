@@ -19,6 +19,8 @@ final class CaptureModel {
     var isLoadingPreviews = false
     var isSaving = false
     var saveError: String?
+    /// 部分媒体导入失败：面板已关（记录已存），提示上移到首页层展示，避免随面板一起消失。
+    var partialSaveWarning: String?
     var lastSavedSummary: String?
     var note: String = ""
     var mood: Mood?
@@ -53,6 +55,16 @@ final class CaptureModel {
         self.role = role
     }
 
+    /// 丢弃未保存的待存语音：删掉已 importFile 落盘的 m4a，再清引用，避免孤儿文件。
+    /// 仅用于「用户主动丢弃」或「开新记录前清残留」；保存成功后语音已归属 entry，
+    /// 走 pendingVoice = nil 而非此方法，切勿误删。
+    func discardPendingVoice() {
+        if let v = pendingVoice {
+            mediaStore.deleteMedia(named: v.fileName)
+        }
+        pendingVoice = nil
+    }
+
     func startQuickCapture(prefillNote: String = "") {
         note = prefillNote
         mood = nil
@@ -63,7 +75,7 @@ final class CaptureModel {
         cameraPhotos = []
         cameraVideos = []
         selectedPreviews = []
-        pendingVoice = nil
+        discardPendingVoice()
         detectedTags = []
         detectedLocation = nil
         analyzingHint = nil
@@ -170,6 +182,11 @@ final class CaptureModel {
 
         // 应用分析结果
         if let capture = earliestCapture { entry.happenedAt = capture }
+        // 反向地理编码只对首张有 GPS 的照片做一次（各张分析时已跳过，这里统一补一次），
+        // 避免多选照片时每张各发一次反向地理编码。
+        if includeLocation, locationName == nil, let (lat, lon) = coordinate {
+            locationName = await analyzer.locationName(latitude: lat, longitude: lon)
+        }
         if includeLocation,
            locationName == nil,
            coordinate == nil,
@@ -185,6 +202,9 @@ final class CaptureModel {
         detectedLocation = includeLocation ? locationName : nil
 
         do { try context.save() } catch {
+            // 保存失败：回滚本次插入的 entry/media/voice，避免脏对象留在 context，
+            // 否则用户重试会再插一条新 entry → 重复记录。
+            context.rollback()
             saveError = "保存失败：\(error.localizedDescription)"
             return false
         }
@@ -199,9 +219,10 @@ final class CaptureModel {
         let mediaText = savedCount > 0 ? " · \(savedCount) 个媒体" : ""
         let voiceText = pendingVoice == nil ? "" : " · 1 段语音"
         lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
-        // 部分媒体失败：诚实告知，不再"静默丢照片装成功"
+        // 部分媒体失败：诚实告知，不再"静默丢照片装成功"。
+        // 面板随即关闭（记录已存），提示走 partialSaveWarning 在首页层弹出，否则 alert 随面板一起消失、用户看不到。
         if failedMedia > 0 {
-            saveError = "有 \(failedMedia) 个媒体没能导入（可能还在 iCloud 上没下载）。文字已保存，照片请稍后重新选择补上。"
+            partialSaveWarning = "有 \(failedMedia) 个媒体没能导入（可能还在 iCloud 上没下载）。文字已保存，照片请稍后重新选择补上。"
         }
         pickedItems = []
         cameraPhotos = []
@@ -239,6 +260,8 @@ final class CaptureModel {
             let index = baseCount + offset
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
                 let image = await Self.videoPreviewImage(url: movie.url)
+                // MovieTransfer 每次都把视频拷一份到 tmp，用完即删，避免 .mov 孤儿堆积。
+                try? FileManager.default.removeItem(at: movie.url)
                 previews.append(SelectedMediaPreview(index: index, image: image, isVideo: true, label: "视频"))
                 continue
             }
@@ -311,7 +334,7 @@ final class CaptureModel {
         media.height = Int(cameraPhoto.image.size.height)
         media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: cameraPhoto.image)
         analyzingHint = "正在看看这张照片里有什么…"
-        let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation)
+        let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
         analyzingHint = nil
         return (media, analysis)
     }
@@ -331,6 +354,8 @@ final class CaptureModel {
         // 视频（暂不分析，仅缩略图）
         if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
             analyzingHint = "正在整理这段视频，太大时会先压缩…"
+            // importVideoForSync 已把视频拷进媒体目录，MovieTransfer 的 tmp 拷贝用完即删，避免 .mov 孤儿。
+            defer { try? FileManager.default.removeItem(at: movie.url) }
             guard let imported = try? await mediaStore.importVideoForSync(from: movie.url) else {
                 analyzingHint = nil
                 return nil
@@ -354,7 +379,7 @@ final class CaptureModel {
             media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
 
             analyzingHint = "正在看看这张照片里有什么…"
-            let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation)
+            let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
             analyzingHint = nil
             return (media, analysis)
         }

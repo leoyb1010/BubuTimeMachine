@@ -19,6 +19,7 @@ struct ExportView: View {
     @State private var exportedURL: URL?
     @State private var showShare = false
     @State private var errorText: String?
+    @State private var missingNote: String?
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -31,6 +32,10 @@ struct ExportView: View {
                     hero
                     infoCard
                     exportButton
+                    if let missingNote {
+                        Text(missingNote).font(BubuTheme.Font.caption).foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                    }
                     if let errorText {
                         Text(errorText).font(BubuTheme.Font.caption).foregroundStyle(.red)
                     }
@@ -55,7 +60,7 @@ struct ExportView: View {
     private var hero: some View {
         VStack(spacing: 12) {
             Image(systemName: "externaldrive.badge.checkmark")
-                .font(.system(size: 56)).foregroundStyle(theme)
+                .font(BubuTheme.Font.scaled(56)).foregroundStyle(theme)
             Text("布布的一生，装进一个文件夹")
                 .font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
                 .multilineTextAlignment(.center)
@@ -115,6 +120,7 @@ struct ExportView: View {
         guard let profile else { return }
         exporting = true
         errorText = nil
+        missingNote = nil
         defer { exporting = false }
 
         // 主线程收集快照（SwiftData 模型不跨线程）
@@ -174,13 +180,18 @@ struct ExportView: View {
         let exporter = ArchiveExporter(mediaStore: env.mediaStore)
         do {
             // 后台导出 + zip
-            let folder = try await Task.detached(priority: .userInitiated) {
+            let result = try await Task.detached(priority: .userInitiated) {
                 try exporter.export(input)
             }.value
+            let folder = result.root
             let zip = try await Task.detached(priority: .userInitiated) {
                 try Self.zip(folder: folder)
             }.value
             exportedURL = zip
+            // 诚实告知：有媒体因源文件缺失或拷贝失败未能纳入档案。
+            if !result.missingMedia.isEmpty {
+                missingNote = "有 \(result.missingMedia.count) 个媒体未能纳入档案（源文件缺失或未同步下载）。其余内容已正常导出。"
+            }
             showShare = true
             // 记录导出时间戳，供「备份健康度卡」判断是否过期。
             UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "bubu.lastExportAt")

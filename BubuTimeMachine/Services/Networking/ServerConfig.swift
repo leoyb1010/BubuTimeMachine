@@ -8,7 +8,14 @@ import Observation
 final class ServerConfig {
     /// 服务器基础地址，例如默认 Cloudflare 公网地址。
     var baseURLString: String {
-        didSet { UserDefaults.standard.set(baseURLString, forKey: Self.baseURLKey) }
+        didSet {
+            UserDefaults.standard.set(baseURLString, forKey: Self.baseURLKey)
+            // 换服务器 / 恢复到别的后端：清空旧同步游标，否则新服务器的历史记录拉不全。
+            // 仅在地址真的变化时清，避免设置页写回同值触发不必要的全量重拉。
+            if oldValue != baseURLString {
+                SyncEngine.resetAllCursors()
+            }
+        }
     }
 
     /// 当前家庭身份（爸爸/妈妈/姥姥），用于署名与多视角。

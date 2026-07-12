@@ -29,7 +29,7 @@ struct BirthdayCountdownView: View {
                     BubuMascotBadge(size: 108, expression: .cheer)
                     VStack(spacing: 8) {
                         Text("\(days)")
-                            .font(.system(size: 88, weight: .bold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(88, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(theme)
                             .contentTransition(.numericText())

@@ -58,9 +58,9 @@ struct GrowthReportView: View {
 
     private var metricGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
-            metric("照片/视频", "\(visualMediaCount)", "photo.stack", .orange)
+            metric("照片/视频", "\(visualMediaCount)", "photo.stack", BubuTheme.Color.warning)
             metric("家人的话", "\(textCount)", "text.bubble", theme)
-            metric("声音", "\(voiceCount)", "waveform", .purple)
+            metric("声音", "\(voiceCount)", "waveform", BubuTheme.Color.info)
             metric("已点亮第一次", "\(achievedMilestones.count)", "star", BubuTheme.Color.success)
         }
     }
@@ -69,11 +69,11 @@ struct GrowthReportView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .foregroundStyle(tint)
-                .font(.system(size: 20, weight: .semibold))
+                .font(BubuTheme.Font.scaled(20, weight: .semibold))
                 .frame(width: 40, height: 40)
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(value).font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(value).font(BubuTheme.Font.scaled(24, weight: .bold)).foregroundStyle(BubuTheme.Color.warmBrown)
                 Text(title).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }
             Spacer()

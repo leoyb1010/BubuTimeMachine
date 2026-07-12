@@ -126,9 +126,11 @@ enum WatchSnapshotBuilder {
     /// 布布头像小缩略图（120px，jpeg 0.7，<30KB），供手表概览显示。
     private static func avatarThumbData(_ fileName: String?) -> Data? {
         guard let fileName, !fileName.isEmpty else { return nil }
-        let thumb = BubuStorage.thumbnailDirectory.appendingPathComponent(fileName)
-        let media = BubuStorage.mediaDirectory.appendingPathComponent(fileName)
-        let url = FileManager.default.fileExists(atPath: thumb.path) ? thumb : media
+        // 经 MediaStore 读回退解析：媒体后台迁移窗口内头像可能只在旧沙盒目录，
+        // 直接拼 App Group 路径会漏读、手表概览丢头像。thumbnailURL/mediaURL 自动回退旧目录。
+        let store = MediaStore()
+        let thumb = store.thumbnailURL(for: fileName)
+        let url = FileManager.default.fileExists(atPath: thumb.path) ? thumb : store.mediaURL(for: fileName)
         guard let image = ThumbnailProvider.downsample(url: url, maxPixel: 120) else { return nil }
         return image.jpegData(compressionQuality: 0.7)
     }
@@ -162,9 +164,74 @@ extension WatchConnectivityManager: WCSessionDelegate {
         guard let json = file.metadata?[WatchLink.fileMetaKey] as? String,
               let data = json.data(using: .utf8),
               let request = WatchLink.decode(WatchRecordRequest.self, from: data) else { return }
-        // 把语音文件搬进 App Group 媒体目录（在后台队列做完文件搬运，再切回主线程写库）。
+        // 把语音文件搬进 App Group 媒体目录（在 WC 队列同步搬运——file.fileURL 只在回调期间有效——再切回主线程写库）。
         let tempURL = file.fileURL
-        let moved = try? MediaStore().importFile(from: tempURL, preferredExtension: "m4a")
-        Task { @MainActor in self.handle(request, movedVoiceFileName: moved) }
+        if let moved = try? MediaStore().importFile(from: tempURL, preferredExtension: "m4a") {
+            Task { @MainActor in self.handle(request, movedVoiceFileName: moved) }
+        } else {
+            // W-P1-3：导入失败（磁盘满等）不再 guard-return 静默丢。手表端此刻可能已删源文件，
+            // 应急副本是最后防线：把 WCSessionFile 临时文件拷到 PendingWatchVoice/ + 落边车，
+            // 下次 App 启动/进前台 retryPendingVoiceImports() 重试导入。localId 保证重试幂等。
+            Self.stashEmergencyVoice(request: request, tempURL: tempURL)
+            Task { @MainActor in self.log.error("watch voice import failed, stashed for retry: \(request.localId, privacy: .public)") }
+        }
+    }
+}
+
+// MARK: - iPhone 侧语音应急收件箱（导入失败重试）
+extension WatchConnectivityManager {
+    /// 应急目录：App Group 容器内 PendingWatchVoice/。首次创建（含中间目录）。
+    nonisolated private static func emergencyVoiceDir() -> URL {
+        let dir = BubuStorage.containerURL.appendingPathComponent("PendingWatchVoice", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+
+    /// 同步拷走 WCSessionFile 临时文件（回调期间有效）+ 落边车（编码后的 WatchRecordRequest）。
+    nonisolated private static func stashEmergencyVoice(request: WatchRecordRequest, tempURL: URL) {
+        let dir = emergencyVoiceDir()
+        let m4a = dir.appendingPathComponent("\(request.localId).m4a")
+        let sidecar = dir.appendingPathComponent("\(request.localId).json")
+        try? FileManager.default.removeItem(at: m4a)
+        guard (try? FileManager.default.copyItem(at: tempURL, to: m4a)) != nil else { return }
+        if let data = WatchLink.encode(request) {
+            try? data.write(to: sidecar, options: .atomic)
+        }
+    }
+
+    /// 重试导入应急语音（App 启动 / 进前台调用）。幂等：写库前按 localId 去重，
+    /// 仅在确认入库后才删应急副本，磁盘仍满则保留待下次。
+    @MainActor
+    func retryPendingVoiceImports() {
+        let dir = Self.emergencyVoiceDir()
+        let fm = FileManager.default
+        let sidecars = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }
+        guard !sidecars.isEmpty, let context = writeContext else { return }
+        for sidecar in sidecars {
+            guard let data = try? Data(contentsOf: sidecar),
+                  let request = WatchLink.decode(WatchRecordRequest.self, from: data) else { continue }
+            let m4a = dir.appendingPathComponent("\(request.localId).m4a")
+            guard fm.fileExists(atPath: m4a.path) else {
+                try? fm.removeItem(at: sidecar)   // 边车无对应音频：无可导入，清掉
+                continue
+            }
+            guard let moved = try? MediaStore().importFile(from: m4a, preferredExtension: "m4a") else {
+                continue   // 仍失败（磁盘仍满）：留待下次
+            }
+            handle(request, movedVoiceFileName: moved)
+            // 确认入库后再删应急副本：若 save 再次失败（entry 未落库）则保留，避免删了又没写进去。
+            if let localId = UUID(uuidString: request.localId) {
+                let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
+                if ((try? context.fetchCount(d)) ?? 0) > 0 {
+                    try? fm.removeItem(at: m4a)
+                    try? fm.removeItem(at: sidecar)
+                }
+            } else {
+                try? fm.removeItem(at: m4a); try? fm.removeItem(at: sidecar)
+            }
+        }
     }
 }

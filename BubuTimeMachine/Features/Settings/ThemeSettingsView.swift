@@ -40,6 +40,8 @@ struct ThemeSettingsView: View {
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("主题与外观")
+        // 图标切到最终选择的主题，一次性应用，只弹一次系统提示（P2i）
+        .onDisappear { manager.applyThemeIcon() }
     }
 
     private func themeCard(_ theme: BubuThemeDefinition) -> some View {

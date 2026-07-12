@@ -44,7 +44,7 @@ struct CapsuleRecoveryView: View {
             Label("这是布布所有时间胶囊的钥匙", systemImage: "key.horizontal.fill")
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(theme)
-            Text("时间胶囊用这串恢复码真正加密——服务器即使被攻破，没有它也打不开。它会随你的 iCloud 钥匙串同步到全家的设备。")
+            Text("时间胶囊用这串恢复码真正加密——服务器即使被攻破，没有它也打不开。它只会随 iCloud 钥匙串同步到你【同一个 Apple ID】的设备；用不同 Apple ID 的家人，需要把这串词抄给他们、在他们设备上录入一次，才能打开。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -80,7 +80,7 @@ struct CapsuleRecoveryView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 8) {
                     ForEach(Array(words.enumerated()), id: \.offset) { i, w in
                         Text("\(i + 1). \(w)")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(BubuTheme.Font.scaled(14, weight: .medium, design: .monospaced))
                             .foregroundStyle(BubuTheme.Color.paperInk)
                     }
                 }
@@ -131,7 +131,7 @@ struct CapsuleRecoveryView: View {
             }
             if restoring {
                 TextField("把 24 个词按顺序输进来，用空格隔开", text: $restoreInput, axis: .vertical)
-                    .font(.system(size: 15, design: .monospaced))
+                    .font(BubuTheme.Font.scaled(15, design: .monospaced))
                     .lineLimit(3...6)
                     .padding()
                     .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
@@ -144,7 +144,7 @@ struct CapsuleRecoveryView: View {
 
                 if let restoreError {
                     Text(restoreError)
-                        .font(.system(size: 12))
+                        .font(BubuTheme.Font.scaled(12))
                         .foregroundStyle(BubuTheme.Color.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -209,7 +209,7 @@ struct CapsuleRecoveryView: View {
 
     private var warning: some View {
         Text("务必把这串词抄在纸上，收进家里的盒子。30 年后即使手机、iCloud 都不在了，有这张纸，布布依然能打开你今天写下的信。")
-            .font(.system(size: 12))
+            .font(BubuTheme.Font.scaled(12))
             .foregroundStyle(BubuTheme.Color.danger)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 4)

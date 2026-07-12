@@ -13,7 +13,7 @@ struct BubuTag: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .font(BubuTheme.Font.scaled(12, weight: .semibold, design: .rounded))
             .foregroundStyle(foreground)
             .padding(.horizontal, 11)
             .frame(height: 24)
@@ -145,7 +145,7 @@ struct BubuMiniConstellation: View {
                                 .opacity(0.34)
                         }
                         Text(motifs[i % motifs.count])
-                            .font(.system(size: (on ? 13 : 9) * scale, weight: .black, design: .rounded))
+                            .font(BubuTheme.Font.scaled((on ? 13 : 9) * scale, weight: .black, design: .rounded))
                             .foregroundStyle(on ? BubuTheme.Color.deepRose : BubuTheme.Color.secondaryText.opacity(0.36))
                             .frame(width: (on ? 23 : 14) * scale, height: (on ? 23 : 14) * scale)
                             .background(.white.opacity(on ? 0.72 : 0.30), in: Circle())

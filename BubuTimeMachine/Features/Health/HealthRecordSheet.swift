@@ -19,8 +19,9 @@ struct HealthRecordSheet: View {
 
     private var theme: Color { env.theme.theme.primary }
     private var todayWaterTotal: Double {
+        // 排除正在编辑的这条记录：否则「今日已记录」= 含旧值的 todayTotal + draft.amountValue（新值）→ 双算。
         records
-            .filter { $0.kind == .water && Calendar.current.isDateInToday($0.recordedAt) }
+            .filter { $0.kind == .water && Calendar.current.isDateInToday($0.recordedAt) && $0.id != existingRecord?.id }
             .compactMap(\.amountValue)
             .reduce(0, +)
     }
@@ -327,7 +328,7 @@ private struct SnackComposer: View {
                             Text(chip)
                                 .font(BubuTheme.Font.body.weight(.bold))
                             Text(draft.tags.contains(chip) ? "已选择" : "点一下")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .font(BubuTheme.Font.scaled(11, weight: .medium, design: .rounded))
                         }
                         .foregroundStyle(draft.tags.contains(chip) ? .white : BubuTheme.Color.warmBrown)
                         .frame(maxWidth: .infinity)
@@ -386,7 +387,7 @@ private struct WaterComposer: View {
                         .fill(tint.opacity(0.12))
                         .frame(width: 82, height: 82)
                     Image(systemName: "drop.fill")
-                        .font(.system(size: 38, weight: .bold))
+                        .font(BubuTheme.Font.scaled(38, weight: .bold))
                         .foregroundStyle(tint)
                 }
                 VStack(alignment: .leading, spacing: 5) {
@@ -444,6 +445,12 @@ private struct SleepComposer: View {
                     .foregroundStyle(tint)
             }
             TagGrid(chips: HealthRecordKind.sleep.design.chips, selected: $draft.tags, tint: tint)
+        }
+        .onAppear {
+            // DatePicker 的 get 只在 nil 时回退显示默认值、并不落库；用户不滑动则 startAt/endAt 仍为 nil，
+            // makeRecord 算不出时长。这里把两个 picker 展示的默认值真正写回 draft，保证时长可计算。
+            if draft.startAt == nil { draft.startAt = draft.recordedAt }
+            if draft.endAt == nil { draft.endAt = .now }
         }
     }
 }
@@ -644,7 +651,7 @@ private struct AmountStepper: View {
             Spacer()
             HStack(spacing: 4) {
                 TextField("输入", text: $editingText)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(16, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
@@ -653,7 +660,7 @@ private struct AmountStepper: View {
                     .onSubmit { commit() }
                 if value != nil {
                     Text(unit)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
             }
@@ -709,7 +716,7 @@ private struct TemperatureStepper: View {
             }
             Spacer()
             TextField("输入", text: $editingText)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(16, weight: .bold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)

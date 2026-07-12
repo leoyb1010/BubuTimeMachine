@@ -40,12 +40,18 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     func stop() {
+        let wasActive = player != nil
         player?.stop()
         player = nil
         timer?.invalidate(); timer = nil
         isPlaying = false
         progress = 0
         playingURL = nil
+        // 播放语音会用 .playback 抢占音频会话；结束时必须归还，
+        // 否则用户原本在放的音乐/播客会被永久掐断。notifyOthersOnDeactivation 让别的音频恢复。
+        if wasActive {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     private func startTimer() {

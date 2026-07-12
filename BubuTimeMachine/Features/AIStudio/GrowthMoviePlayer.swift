@@ -84,7 +84,7 @@ struct GrowthMoviePlayer: View {
         } else {
             LinearGradient(colors: [tint, tint.opacity(0.5)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-                .overlay { Text("🎬").font(.system(size: 80)) }
+                .overlay { Text("🎬").font(BubuTheme.Font.scaled(80)) }
         }
     }
 
@@ -124,7 +124,7 @@ struct GrowthMoviePlayer: View {
         HStack(spacing: 10) {
             Button { onClose() } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 34))
+                    .font(BubuTheme.Font.scaled(34))
                     .foregroundStyle(.white.opacity(0.95))
                     .shadow(radius: 4)
                     .frame(width: 48, height: 48)
@@ -136,7 +136,7 @@ struct GrowthMoviePlayer: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
                 Text(draft.template.title)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.78))
             }
             Spacer()
@@ -145,9 +145,9 @@ struct GrowthMoviePlayer: View {
 
     private var introOverlay: some View {
         VStack(spacing: 14) {
-            Text(draft.template.emoji).font(.system(size: 68))
+            Text(draft.template.emoji).font(BubuTheme.Font.scaled(68))
             Text(draft.title)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(28, weight: .bold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
             Text(draft.template.title)
@@ -165,7 +165,7 @@ struct GrowthMoviePlayer: View {
     private var caption: some View {
         if draft.captions.indices.contains(index), !draft.captions[index].isEmpty {
             Text(draft.captions[index])
-                .font(.system(size: 20, weight: .medium, design: .rounded))
+                .font(BubuTheme.Font.scaled(20, weight: .medium))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)

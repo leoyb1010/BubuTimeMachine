@@ -67,7 +67,7 @@ struct TodayPhotosSheet: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("📸").font(.system(size: 30))
+            Text("📸").font(BubuTheme.Font.scaled(30))
             Text("挑出布布的照片，点「收好」就进时光轴啦")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -92,7 +92,7 @@ struct TodayPhotosSheet: View {
                     .stroke(isOn ? BubuTheme.Color.primary : .clear, lineWidth: 3)
             }
             Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 20))
+                .font(BubuTheme.Font.scaled(20))
                 .foregroundStyle(isOn ? BubuTheme.Color.primary : .white.opacity(0.9))
                 .shadow(radius: 2)
                 .padding(4)
@@ -102,12 +102,12 @@ struct TodayPhotosSheet: View {
                     Spacer()
                     HStack {
                         Image(systemName: "video.fill")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(BubuTheme.Font.scaled(12, weight: .bold))
                             .foregroundStyle(.white)
                             .shadow(radius: 2)
                         Spacer()
                         Text(Self.durationText(asset.duration))
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(BubuTheme.Font.scaled(10, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white)
                             .shadow(radius: 2)
                     }

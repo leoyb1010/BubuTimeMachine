@@ -75,7 +75,7 @@ struct MediaGalleryViewer: View {
                     if let url = currentFileURL {
                         Button { saveToPhotoLibrary() } label: {
                             Image(systemName: "square.and.arrow.down")
-                                .font(.system(size: 15, weight: .bold))
+                                .font(BubuTheme.Font.scaled(15, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 40, height: 40)
                                 .background(.black.opacity(0.45), in: Circle())
@@ -83,7 +83,7 @@ struct MediaGalleryViewer: View {
                         .accessibilityLabel("存到系统相册")
                         ShareLink(item: url) {
                             Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 15, weight: .bold))
+                                .font(BubuTheme.Font.scaled(15, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 40, height: 40)
                                 .background(.black.opacity(0.45), in: Circle())
@@ -95,7 +95,7 @@ struct MediaGalleryViewer: View {
                         onDismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
+                            .font(BubuTheme.Font.scaled(15, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 40, height: 40)
                             .background(.black.opacity(0.45), in: Circle())
@@ -107,7 +107,7 @@ struct MediaGalleryViewer: View {
 
                 if let saveToast {
                     Text(saveToast)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(13, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .background(.black.opacity(0.55), in: Capsule())
@@ -118,7 +118,7 @@ struct MediaGalleryViewer: View {
 
                 if mediaItems.count > 1 {
                     Text("\(selectedIndex + 1) / \(mediaItems.count) · 左右滑动")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
@@ -129,7 +129,7 @@ struct MediaGalleryViewer: View {
             .overlay(alignment: .bottom) {
                 if mediaItems.count == 1 {
                     Text("双击或捏合可放大")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(12, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.86))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
@@ -295,7 +295,7 @@ private struct MediaPageView: View {
     private var audioPage: some View {
         VStack(spacing: 16) {
             Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 62))
+                .font(BubuTheme.Font.scaled(62))
                 .foregroundStyle(.white.opacity(0.9))
 
             if let name = media.localFileName {
@@ -317,7 +317,7 @@ private struct MediaPageView: View {
     private func missing(_ text: String) -> some View {
         VStack(spacing: 14) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 42))
+                .font(BubuTheme.Font.scaled(42))
             Text(text)
                 .font(BubuTheme.Font.body)
         }
@@ -394,7 +394,7 @@ private struct RemoteZoomableImage: View {
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "icloud.slash")
-                        .font(.system(size: 42))
+                        .font(BubuTheme.Font.scaled(42))
                     Text(errorText ?? "照片还没下载好")
                         .font(BubuTheme.Font.body)
                     Button("重试") {

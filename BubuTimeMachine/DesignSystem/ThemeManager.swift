@@ -135,8 +135,13 @@ final class ThemeManager {
         withAnimation(.smooth(duration: 0.4)) {
             currentThemeId = theme.id
         }
-        // 同步切换 Home Screen 图标（每套主题一枚）。
-        AppIconManager.apply(themeId: theme.id)
+        // 图标切换不在这里做：每点一次主题都换图标会连弹系统"已更换图标"窗（P2i）。
+        // 改由主题页 onDisappear 调 applyThemeIcon() 一次性应用最终选择。
+    }
+
+    /// 把 Home Screen 图标切到当前主题对应的那枚。放在离开主题页时调用，避免逐次点选弹窗。
+    func applyThemeIcon() {
+        AppIconManager.apply(themeId: currentThemeId)
     }
 }
 

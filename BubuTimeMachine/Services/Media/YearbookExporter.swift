@@ -31,55 +31,77 @@ struct YearbookExporter {
     }
 
     /// 生成 PDF 到临时文件，返回 URL。
-    /// 两阶段：先逐页渲成 UIImage（照片解码在后台线程、页间 yield 让出主线程），
-    /// 最后一次性写 PDF（画现成位图，毫秒级）——整机卡死数秒的问题不再有（R4 P2-32）。
+    /// 逐页流式写入：每页「后台解码照片 → 主线程渲成位图 → 立即画进 PDF → 释放」，
+    /// 全程只有当前一页位图在内存里，不再攒 `[UIImage]`（整年 300 条 ≈ 2.4GB 必闪退的老问题不再有）。
+    /// ImageRenderer 必须在主线程，故本方法保持 @MainActor；照片解码走后台，页间 `Task.yield()` 让出主线程，
+    /// 配合 onProgress 让 UI 有进度、不假死。
     func makePDF(_ input: Input, onProgress: ((Int, Int) -> Void)? = nil) async -> URL? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("布布年册-\(input.rangeTitle).pdf")
         try? FileManager.default.removeItem(at: url)
 
-        // 阶段一：渲染每一页（ImageRenderer 需主线程，但照片解码放后台 + 页间让出）
-        var pages: [UIImage] = []
         let totalPages = 1 + input.entries.count
             + (input.milestones.isEmpty ? 0 : 1) + (input.messages.isEmpty ? 0 : 1)
 
+        // 增量 PDF：一页画完立即落盘，位图随即释放。
+        var mediaBox = CGRect(origin: .zero, size: Self.pageSize)
+        guard let ctx = CGContext(url as CFURL, mediaBox: &mediaBox, nil) else { return nil }
+
+        // 把一张现成位图作为一页写入 PDF（PDF 坐标系原点在左下，需翻转）。
+        func addPage(_ image: UIImage) {
+            guard let cg = image.cgImage else { return }
+            ctx.beginPDFPage(nil)
+            ctx.saveGState()
+            ctx.translateBy(x: 0, y: Self.pageSize.height)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(cg, in: CGRect(origin: .zero, size: Self.pageSize))
+            ctx.restoreGState()
+            ctx.endPDFPage()
+        }
+
+        var done = 0
+
+        // 封面
         let cover = await loadImageAsync(input.coverImageFileName)
-        if let img = renderPage({ CoverPage(input: input, theme: theme, cover: cover) }) { pages.append(img) }
-        onProgress?(pages.count, totalPages)
+        if let img = renderPage({ CoverPage(input: input, theme: theme, cover: cover) }) { addPage(img) }
+        done += 1
+        onProgress?(done, totalPages)
         await Task.yield()
 
+        // 每条记录一页
         for entry in input.entries {
             var images: [UIImage] = []
             for name in entry.imageFileNames.prefix(4) {
                 if let img = await loadImageAsync(name) { images.append(img) }
             }
-            if let img = renderPage({ EntryPage(entry: entry, theme: theme, images: images) }) { pages.append(img) }
-            onProgress?(pages.count, totalPages)
+            if let img = renderPage({ EntryPage(entry: entry, theme: theme, images: images) }) { addPage(img) }
+            images = []   // 本页源图与渲染位图到此都不再持有
+            done += 1
+            onProgress?(done, totalPages)
             await Task.yield()
-        }
-        if !input.milestones.isEmpty,
-           let img = renderPage({ ListPage(title: "这一年的里程碑", icon: "star.fill", items: input.milestones, theme: theme) }) {
-            pages.append(img)
-            await Task.yield()
-        }
-        if !input.messages.isEmpty,
-           let img = renderPage({ ListPage(title: "家人想对你说", icon: "heart.fill", items: input.messages, theme: theme) }) {
-            pages.append(img)
         }
 
-        // 阶段二：写 PDF（画现成位图，快）
-        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: Self.pageSize))
-        do {
-            try renderer.writePDF(to: url) { ctx in
-                for page in pages {
-                    ctx.beginPage()
-                    page.draw(in: CGRect(origin: .zero, size: Self.pageSize))
-                }
+        // 里程碑
+        if !input.milestones.isEmpty {
+            if let img = renderPage({ ListPage(title: "这一年的里程碑", icon: "star.fill", items: input.milestones, theme: theme) }) {
+                addPage(img)
             }
-            return url
-        } catch {
-            return nil
+            done += 1
+            onProgress?(done, totalPages)
+            await Task.yield()
         }
+
+        // 家人寄语
+        if !input.messages.isEmpty {
+            if let img = renderPage({ ListPage(title: "家人想对你说", icon: "heart.fill", items: input.messages, theme: theme) }) {
+                addPage(img)
+            }
+            done += 1
+            onProgress?(done, totalPages)
+        }
+
+        ctx.closePDF()
+        return url
     }
 
     private func renderPage<V: View>(@ViewBuilder _ content: () -> V) -> UIImage? {

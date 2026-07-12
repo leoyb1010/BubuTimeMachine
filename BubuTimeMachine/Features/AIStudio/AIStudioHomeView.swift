@@ -72,17 +72,17 @@ struct AIStudioHomeView: View {
                     .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("成长绘本")
-                        .font(.system(size: 19, weight: .heavy, design: .rounded))
+                        .font(BubuTheme.Font.scaled(19, weight: .heavy))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
                     Text("由你记录的点滴，自动编织成可翻页的故事")
-                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(12.5, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.95))
                         .lineLimit(2)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(BubuTheme.Font.scaled(14, weight: .bold))
                     .foregroundStyle(.white)
             }
             .padding(18)
@@ -111,7 +111,7 @@ struct AIStudioHomeView: View {
                                              startPoint: .topLeading,
                                              endPoint: .bottomTrailing))
                     Image(systemName: "envelope.fill")
-                        .font(.system(size: 26, weight: .bold))
+                        .font(BubuTheme.Font.scaled(26, weight: .bold))
                         .foregroundStyle(.white)
                 }
                 .frame(width: 60, height: 60)
@@ -120,17 +120,17 @@ struct AIStudioHomeView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("未来胶囊")
-                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .font(BubuTheme.Font.scaled(17, weight: .heavy))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     Text("把今天的话，寄给未来的布布")
-                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(12.5, weight: .semibold))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .black))
+                    .font(BubuTheme.Font.scaled(13, weight: .black))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding(14)
@@ -196,23 +196,23 @@ struct AIStudioHomeView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: icon)
-                        .font(.system(size: 17, weight: .bold))
+                        .font(BubuTheme.Font.scaled(17, weight: .bold))
                         .foregroundStyle(BubuTheme.Color.deepRose)
                         .frame(width: 36, height: 36)
                         .background(tint.opacity(0.72), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .black))
+                        .font(BubuTheme.Font.scaled(11, weight: .black))
                         .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.72))
                 }
                 Spacer(minLength: 0)
                 Text(title)
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .font(BubuTheme.Font.scaled(15, weight: .heavy))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
                 Text(subtitle)
-                    .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11.5, weight: .medium))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.86)
@@ -241,7 +241,7 @@ struct AIStudioHomeView: View {
         } label: {
             HStack(spacing: 16) {
                 Image(systemName: icon)
-                    .font(.system(size: 26))
+                    .font(BubuTheme.Font.scaled(26))
                     .foregroundStyle(theme)
                     .frame(width: 54, height: 54)
                     .background(theme.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))

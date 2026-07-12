@@ -53,6 +53,17 @@ nonisolated enum BubuStorage {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
+    /// 旧沙盒媒体目录（媒体后台迁移期间的读回退源）。
+    /// 迁移是拷贝不删源，迁移窗口内新容器缺失的文件仍能从这里读到，绝不白图。
+    static var legacyMediaDirectory: URL {
+        legacyDocumentsURL.appendingPathComponent("Media", isDirectory: true)
+    }
+
+    /// 旧沙盒缩略图目录（读回退源，同上）。
+    static var legacyThumbnailDirectory: URL {
+        legacyDocumentsURL.appendingPathComponent("Thumbnails", isDirectory: true)
+    }
+
     private static func directory(named name: String) -> URL {
         let fm = FileManager.default
         let dir = containerURL.appendingPathComponent(name, isDirectory: true)

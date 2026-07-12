@@ -172,7 +172,7 @@ struct GrowthCurveView: View {
 
     private var disclaimer: some View {
         Text("曲线基于 WHO 0–5 岁生长标准，仅供家庭参考，不替代医生评估。")
-            .font(.system(size: 12))
+            .font(BubuTheme.Font.scaled(12))
             .foregroundStyle(BubuTheme.Color.secondaryText)
     }
 }

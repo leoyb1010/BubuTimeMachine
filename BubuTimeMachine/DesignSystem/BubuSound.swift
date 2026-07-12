@@ -24,11 +24,10 @@ enum BubuSound {
 
     /// 保活播放器引用，避免播放中被释放。
     private static var players: [String: AVAudioPlayer] = [:]
-    private static var sessionConfigured = false
 
     static func play(_ effect: Effect) {
         guard isEnabled else { return }
-        configureSessionIfNeeded()
+        configureSession()
         guard let url = Bundle.main.url(forResource: effect.rawValue, withExtension: "caf") else { return }
         do {
             let player = try AVAudioPlayer(contentsOf: url)
@@ -41,10 +40,10 @@ enum BubuSound {
         }
     }
 
-    /// ambient：不打断他人音乐、跟随静音键。
-    private static func configureSessionIfNeeded() {
-        guard !sessionConfigured else { return }
-        sessionConfigured = true
+    /// 每次播放前把会话确立为 ambient：不打断他人音乐、跟随静音键。
+    /// 每次都设，避免语音播放器（AudioPlayer 用 .playback）留下的全局 category 泄漏进这些提示音，
+    /// 把用户的音乐或静音键行为搞乱——「后播者定全局」的坑就此堵住。
+    private static func configureSession() {
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
     }

@@ -39,7 +39,7 @@ enum StoryChapterBuilder {
                 ageText: birthday.map { AgeCalculator.ageDescription(birthday: $0, at: e.happenedAt) } ?? "",
                 dateText: BubuDateFormat.yearMonthDay(e.happenedAt),
                 lines: splitLines(body),
-                hue: Double(abs(chapterTitle(for: e).hashValue) % 360),
+                hue: chapterTitle(for: e).bubuStableHue,
                 emoji: e.mood?.emoji ?? "✨",
                 photoFileName: coverPhotoFileName(for: e),
                 entryId: e.id
@@ -64,8 +64,7 @@ enum StoryChapterBuilder {
 
     /// 配图：取记录里第一张照片的缩略图文件名（优先缩略图，退到原图文件名，都没有则 nil）。
     private static func coverPhotoFileName(for e: Entry) -> String? {
-        let photos = e.media.filter { $0.type == .photo }
-        guard let first = photos.first else { return nil }
+        guard let first = e.sortedMedia.first(where: { $0.type == .photo }) else { return nil }
         return first.thumbnailFileName ?? first.localFileName
     }
 

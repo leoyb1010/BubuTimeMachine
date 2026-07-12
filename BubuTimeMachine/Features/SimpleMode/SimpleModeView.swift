@@ -86,6 +86,7 @@ struct SimpleModeView: View {
             }
             HStack(spacing: 14) {
                 Text(currentMember?.avatarEmoji ?? Relation(rawValue: role.rawValue)?.defaultEmoji ?? "🙂")
+                    // 固定圆形头像内的单 emoji，老人模式放大档下会溢出 66pt 圆，保持固定
                     .font(.system(size: 40))
                     .frame(width: 66, height: 66)
                     .background(BubuTheme.Color.card, in: Circle())
@@ -201,7 +202,7 @@ struct SimpleModeView: View {
     // MARK: 保存确认 / 进行中浮层
     private func confirmationOverlay(_ text: String) -> some View {
         VStack(spacing: 14) {
-            Text("❤️").font(.system(size: 64))
+            Text("❤️").font(BubuTheme.Font.scaled(64))
             Text(text)
                 .font(BubuTheme.Font.scaled(26, weight: .black))
                 .foregroundStyle(.white)

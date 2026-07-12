@@ -12,7 +12,7 @@ struct BigButton: View {
         Button(action: action) {
             VStack(spacing: 16) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 58, weight: .medium))
+                    .font(BubuTheme.Font.scaled(58, weight: .medium))
                 Text(title)
                     .font(BubuTheme.Font.title)
                 Text("轻点打开 · 上下滑动浏览")

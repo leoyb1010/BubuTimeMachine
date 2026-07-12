@@ -29,22 +29,22 @@ struct BubuConstellationView: View {
         VStack(spacing: 12) {
             HStack {
                 Text("✦ 已点亮 \(achieved.count) / \(totalCount) 颗星")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(15, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
                 Text("还有 \(max(0, totalCount - achieved.count)) 颗等你点亮 ♡")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .medium, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
 
             if milestones.isEmpty {
                 VStack(spacing: 8) {
-                    Text("✦").font(.system(size: 40)).foregroundStyle(primary.opacity(0.5))
+                    Text("✦").font(BubuTheme.Font.scaled(40)).foregroundStyle(primary.opacity(0.5))
                     Text("还没有点亮的星")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(14, weight: .bold, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     Text("去「奖章墙」点亮布布的第一次，这里就会升起一颗星")
-                        .font(.system(size: 12, design: .rounded))
+                        .font(BubuTheme.Font.scaled(12, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .multilineTextAlignment(.center)
                 }
@@ -74,7 +74,7 @@ struct BubuConstellationView: View {
             }
 
             Text("轻点亮起的星星，回到那一刻 ♡")
-                .font(.system(size: 12, design: .rounded))
+                .font(BubuTheme.Font.scaled(12, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
@@ -139,14 +139,14 @@ struct BubuConstellationView: View {
     }
 
     private func starView(_ m: Milestone, index: Int, dense: Bool) -> some View {
-        let starColor = BubuTheme.Color.hue(Double((abs(m.title.hashValue) % 360)), lightness: 0.82)
+        let starColor = BubuTheme.Color.hue(m.title.bubuStableHue, lightness: 0.82)
         return Button { onTapStar(m) } label: {
             VStack(spacing: 6) {
                 ConstellationStar(emoji: m.emoji, color: starColor, index: index, lit: m.isAchieved,
                                   reduceMotion: reduceMotion)
                 if m.isAchieved || !dense {
                     Text(m.title)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                         .foregroundStyle(m.isAchieved ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
                         .lineLimit(1).frame(width: 66)
                         .shadow(color: BubuTheme.Color.cream.opacity(0.95), radius: 3)
@@ -171,13 +171,15 @@ private struct ConstellationStar: View {
 
     var body: some View {
         ZStack {
-            // 呼吸光晕
+            // 呼吸光晕：用预渲染的径向渐变代替每颗星的高斯 blur，
+            // 星盘最多 12 颗常驻呼吸时不再挂 12 个实时模糊层，只做 opacity/scale 合成（P2m）
             if lit {
-                Circle().fill(color)
-                    .frame(width: 42, height: 42)
-                    .blur(radius: 6)
-                    .opacity(halo ? 0.48 : 0.26)
-                    .scaleEffect(halo ? 1.14 : 0.9)
+                Circle()
+                    .fill(RadialGradient(colors: [color.opacity(0.6), color.opacity(0)],
+                                         center: .center, startRadius: 2, endRadius: 24))
+                    .frame(width: 48, height: 48)
+                    .opacity(halo ? 0.9 : 0.5)
+                    .scaleEffect(halo ? 1.12 : 0.92)
             }
             Circle()
                 .fill(lit
@@ -189,7 +191,7 @@ private struct ConstellationStar: View {
                 .frame(width: lit ? 38 : 26, height: lit ? 38 : 26)
                 .overlay(Circle().stroke(lit ? .white : BubuTheme.Color.hairline.opacity(0.8),
                                          lineWidth: lit ? 2 : 1))
-                .overlay(Text(emoji).font(.system(size: lit ? 17 : 11)).grayscale(lit ? 0 : 1).opacity(lit ? 1 : 0.45))
+                .overlay(Text(emoji).font(BubuTheme.Font.scaled(lit ? 17 : 11)).grayscale(lit ? 0 : 1).opacity(lit ? 1 : 0.45))
                 .shadow(color: lit ? color.opacity(0.45) : .clear, radius: 5, y: 2)
         }
         .scaleEffect(reduceMotion ? 1 : (popped ? 1 : 0))

@@ -83,7 +83,7 @@ struct VaccineView: View {
 
     private var hintRow: some View {
         Text("点剂次补录日期/医院/反应 · 长按未完成的快速打卡")
-            .font(.system(size: 11))
+            .font(BubuTheme.Font.scaled(11))
             .foregroundStyle(BubuTheme.Color.secondaryText)
             .padding(.leading, 6)
     }
@@ -130,7 +130,7 @@ struct VaccineView: View {
         let isDone = record != nil
         return HStack(spacing: 12) {
             Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 24))
+                .font(BubuTheme.Font.scaled(24))
                 .foregroundStyle(isDone ? BubuTheme.Color.success : BubuTheme.Color.secondaryText.opacity(0.5))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -140,7 +140,7 @@ struct VaccineView: View {
                         .strikethrough(isDone, color: BubuTheme.Color.secondaryText)
                     if let record, needsDateConfirm(record) {
                         Text("日期待确认")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(9, weight: .bold, design: .rounded))
                             .foregroundStyle(theme)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
@@ -154,7 +154,7 @@ struct VaccineView: View {
             }
             Spacer()
             Text(dueText(dose))
-                .font(.system(size: 11))
+                .font(BubuTheme.Font.scaled(11))
                 .foregroundStyle(isDone ? BubuTheme.Color.secondaryText : theme)
         }
         .padding(12)
@@ -174,7 +174,7 @@ struct VaccineView: View {
     private func extraRow(_ record: VaccineRecord) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "syringe")
-                .font(.system(size: 20))
+                .font(BubuTheme.Font.scaled(20))
                 .foregroundStyle(theme)
             VStack(alignment: .leading, spacing: 2) {
                 Text(record.vaccineName)
@@ -189,7 +189,7 @@ struct VaccineView: View {
             }
             Spacer()
             Text(BubuDateFormat.shortDate(record.injectedAt))
-                .font(.system(size: 11))
+                .font(BubuTheme.Font.scaled(11))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .padding(12)
@@ -232,7 +232,7 @@ struct VaccineView: View {
 
     private var disclaimer: some View {
         Text("依据国家免疫规划（一类苗）排期，地区与个体差异以当地接种点通知为准。打卡仅作家庭提醒。")
-            .font(.system(size: 12))
+            .font(BubuTheme.Font.scaled(12))
             .foregroundStyle(BubuTheme.Color.secondaryText)
             .padding(.top, 4)
     }

@@ -89,7 +89,26 @@ nonisolated struct ArchiveExporter: Sendable {
         let coverEmoji: String?
     }
 
-    func export(_ input: ExportInput) throws -> URL {
+    /// 导出结果：档案根目录 + 未能纳入的媒体清单（DB 引用但源文件缺失 / 拷贝失败）。
+    struct ExportResult: Sendable {
+        let root: URL
+        /// 未能纳入档案的媒体文件名（缺失或拷贝失败），供 UI 诚实告知用户。
+        let missingMedia: [String]
+    }
+
+    enum ArchiveExportError: LocalizedError {
+        case insufficientDiskSpace(required: Int64, available: Int64)
+        var errorDescription: String? {
+            switch self {
+            case let .insufficientDiskSpace(required, available):
+                let req = ByteCountFormatter.string(fromByteCount: required, countStyle: .file)
+                let avail = ByteCountFormatter.string(fromByteCount: available, countStyle: .file)
+                return "磁盘空间不足：导出大约需要 \(req)，当前可用 \(avail)。请清理一些空间后再试。"
+            }
+        }
+    }
+
+    func export(_ input: ExportInput) throws -> ExportResult {
         let fm = FileManager.default
         let root = fm.temporaryDirectory
             .appendingPathComponent("布布的一生_\(Int(Date().timeIntervalSince1970))", isDirectory: true)
@@ -103,17 +122,42 @@ nonisolated struct ArchiveExporter: Sendable {
             entry.comments.compactMap(\.voiceFileName).forEach { names.insert($0) }
         }
         input.voiceMemos.compactMap(\.fileName).forEach { names.insert($0) }
-        for name in names {
+
+        // 预检：统计要拷贝的源文件总字节；DB 引用但沙盒文件缺失的先记进 missing。
+        var totalBytes: Int64 = 0
+        var presentNames: [String] = []
+        var missing: [String] = []
+        for name in names.sorted() {
             let src = mediaStore.mediaURL(for: name)
-            let dest = mediaDir.appendingPathComponent(name)
-            if fm.fileExists(atPath: src.path), !fm.fileExists(atPath: dest.path) {
-                try? fm.copyItem(at: src, to: dest)
+            if let size = (try? fm.attributesOfItem(atPath: src.path)[.size]) as? NSNumber {
+                totalBytes += size.int64Value
+                presentNames.append(name)
+            } else {
+                missing.append(name)   // 引用存在、文件不在（可能未同步下载或已被清理）
             }
         }
 
-        try Self.buildJSON(input).write(to: root.appendingPathComponent("data.json"), atomically: true, encoding: .utf8)
+        // 磁盘空间预检：需要「媒体总字节 × 2」（媒体副本 + 后续 zip 压缩包）。
+        if let available = try? root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage,
+           available < totalBytes * 2 {
+            throw ArchiveExportError.insufficientDiskSpace(required: totalBytes * 2, available: available)
+        }
+
+        for name in presentNames {
+            let src = mediaStore.mediaURL(for: name)
+            let dest = mediaDir.appendingPathComponent(name)
+            guard !fm.fileExists(atPath: dest.path) else { continue }
+            do {
+                try fm.copyItem(at: src, to: dest)
+            } catch {
+                missing.append(name)   // 拷贝失败也计入缺失，不再静默跳过
+            }
+        }
+
+        try Self.buildJSON(input).write(to: root.appendingPathComponent("data.json"))
         try Self.buildHTML(input).write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-        return root
+        return ExportResult(root: root, missingMedia: missing.sorted())
     }
 
     private static func buildHTML(_ input: ExportInput) -> String {
@@ -201,16 +245,88 @@ nonisolated struct ArchiveExporter: Sendable {
         }
     }
 
-    private static func buildJSON(_ input: ExportInput) -> String {
+    // MARK: data.json 编码
+    // 用 JSONEncoder 生成，杜绝手写转义漏 \r \t 等控制字符导致的非法 JSON。
+    // 字段名、"media/" 前缀、以及可空字段显式为 null 的结构，均与旧手写版本保持一致，
+    // 不破坏「导出的离线 HTML 档案」既有解析。
+
+    private struct JSONRoot: Encodable {
+        let childName: String
+        let birthday: String
+        let entries: [JSONEntry]
+    }
+
+    private struct JSONMedia: Encodable {
+        let type: String
+        let file: String
+    }
+
+    private struct JSONVoice: Encodable {
+        let author: String
+        let file: String
+        let duration: Double
+    }
+
+    private struct JSONComment: Encodable {
+        let author: String
+        let text: String?
+        let voice: String?
+        enum CodingKeys: String, CodingKey { case author, text, voice }
+        // 显式编码可空字段为 null（保持旧结构：键始终存在），而非省略键。
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(author, forKey: .author)
+            try c.encode(text, forKey: .text)
+            try c.encode(voice, forKey: .voice)
+        }
+    }
+
+    private struct JSONEntry: Encodable {
+        let happenedAt: String
+        let author: String
+        let age: String
+        let note: String?
+        let firstPerson: String?
+        let location: String?
+        let media: [JSONMedia]
+        let voiceNotes: [JSONVoice]
+        let comments: [JSONComment]
+        let tags: [String]
+        enum CodingKeys: String, CodingKey {
+            case happenedAt, author, age, note, firstPerson, location, media, voiceNotes, comments, tags
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(happenedAt, forKey: .happenedAt)
+            try c.encode(author, forKey: .author)
+            try c.encode(age, forKey: .age)
+            try c.encode(note, forKey: .note)              // nil → null
+            try c.encode(firstPerson, forKey: .firstPerson) // nil → null
+            try c.encode(location, forKey: .location)       // nil → null
+            try c.encode(media, forKey: .media)
+            try c.encode(voiceNotes, forKey: .voiceNotes)
+            try c.encode(comments, forKey: .comments)
+            try c.encode(tags, forKey: .tags)
+        }
+    }
+
+    private static func buildJSON(_ input: ExportInput) throws -> Data {
         let iso = ISO8601DateFormatter()
-        let entries = input.entries.map { entry -> String in
-            let media = entry.media.map { "{\"type\":\"\(jsonEsc($0.type))\",\"file\":\"media/\(jsonEsc($0.fileName))\"}" }.joined(separator: ",")
-            let voices = entry.voiceNotes.map { "{\"author\":\"\(jsonEsc($0.authorRole))\",\"file\":\"media/\(jsonEsc($0.fileName))\",\"duration\":\($0.duration)}" }.joined(separator: ",")
-            let comments = entry.comments.map { "{\"author\":\"\(jsonEsc($0.authorRole))\",\"text\":\($0.text.map { "\"\(jsonEsc($0))\"" } ?? "null"),\"voice\":\($0.voiceFileName.map { "\"media/\(jsonEsc($0))\"" } ?? "null")}" }.joined(separator: ",")
-            let tags = entry.tags.map { "\"\(jsonEsc($0))\"" }.joined(separator: ",")
-            return "{\"happenedAt\":\"\(iso.string(from: entry.happenedAt))\",\"author\":\"\(jsonEsc(entry.authorRole))\",\"age\":\"\(jsonEsc(entry.ageDescription))\",\"note\":\(entry.note.map { "\"\(jsonEsc($0))\"" } ?? "null"),\"firstPerson\":\(entry.firstPersonNote.map { "\"\(jsonEsc($0))\"" } ?? "null"),\"location\":\(entry.locationName.map { "\"\(jsonEsc($0))\"" } ?? "null"),\"media\":[\(media)],\"voiceNotes\":[\(voices)],\"comments\":[\(comments)],\"tags\":[\(tags)]}"
-        }.joined(separator: ",")
-        return "{\"childName\":\"\(jsonEsc(input.childName))\",\"birthday\":\"\(iso.string(from: input.birthday))\",\"entries\":[\(entries)]}"
+        let entries = input.entries.map { entry in
+            JSONEntry(
+                happenedAt: iso.string(from: entry.happenedAt),
+                author: entry.authorRole,
+                age: entry.ageDescription,
+                note: entry.note,
+                firstPerson: entry.firstPersonNote,
+                location: entry.locationName,
+                media: entry.media.map { JSONMedia(type: $0.type, file: "media/\($0.fileName)") },
+                voiceNotes: entry.voiceNotes.map { JSONVoice(author: $0.authorRole, file: "media/\($0.fileName)", duration: $0.duration) },
+                comments: entry.comments.map { JSONComment(author: $0.authorRole, text: $0.text, voice: $0.voiceFileName.map { "media/\($0)" }) },
+                tags: entry.tags)
+        }
+        let root = JSONRoot(childName: input.childName, birthday: iso.string(from: input.birthday), entries: entries)
+        return try JSONEncoder().encode(root)
     }
 
     private static func esc(_ s: String) -> String {
@@ -218,11 +334,6 @@ nonisolated struct ArchiveExporter: Sendable {
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
-    }
-    private static func jsonEsc(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
     }
     private static func urlEsc(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? s

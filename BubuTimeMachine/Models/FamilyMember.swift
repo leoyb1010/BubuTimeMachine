@@ -57,7 +57,9 @@ final class ChildProfile {
     init(name: String = "布布", birthday: Date) {
         self.id = UUID()
         self.name = name
-        self.birthday = birthday
+        // 生日归一化到当天 0 点：DatePicker(.date) 的初值会带当前时分秒，
+        // 若原样入库会让全 App 年龄口径出现"当天忽早忽晚"的偏差（C-P1-5）。
+        self.birthday = Calendar.current.startOfDay(for: birthday)
         self.createdAt = .now
     }
 }

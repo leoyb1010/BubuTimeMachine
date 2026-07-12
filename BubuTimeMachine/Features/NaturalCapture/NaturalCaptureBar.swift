@@ -27,7 +27,7 @@ struct NaturalCaptureBar: View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 17, weight: .bold))
+                    .font(BubuTheme.Font.scaled(17, weight: .bold))
                     .foregroundStyle(theme)
                     .frame(width: 34, height: 34)
                     .background(theme.opacity(0.10), in: Circle())
@@ -57,7 +57,7 @@ struct NaturalCaptureBar: View {
                                 .frame(width: 28, height: 28)
                         } else {
                             Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 28, weight: .bold))
+                                .font(BubuTheme.Font.scaled(28, weight: .bold))
                                 .foregroundStyle(text.bubuTrimmed.isEmpty
                                                  ? BubuTheme.Color.secondaryText.opacity(0.5)
                                                  : theme)
@@ -71,7 +71,7 @@ struct NaturalCaptureBar: View {
                     Task { await toggleRecording() }
                 } label: {
                     Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
-                        .font(.system(size: isRecording ? 28 : 17, weight: .bold))
+                        .font(BubuTheme.Font.scaled(isRecording ? 28 : 17, weight: .bold))
                         .foregroundStyle(isRecording ? .red : theme)
                 }
                 .disabled(isParsing || isTranscribing)
@@ -83,7 +83,7 @@ struct NaturalCaptureBar: View {
 
             if let slowHint, isParsing {
                 Text(slowHint)
-                    .font(.system(size: 11))
+                    .font(BubuTheme.Font.scaled(11))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
@@ -92,7 +92,7 @@ struct NaturalCaptureBar: View {
             if let errorText {
                 HStack(spacing: 10) {
                     Text(errorText)
-                        .font(.system(size: 11))
+                        .font(BubuTheme.Font.scaled(11))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                     if pendingAudioURL != nil, !isTranscribing {
                         Button("重试转写") {
@@ -100,7 +100,7 @@ struct NaturalCaptureBar: View {
                                 if let url = pendingAudioURL { await transcribeAndParse(url: url) }
                             }
                         }
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(BubuTheme.Font.scaled(11, weight: .semibold))
                         .foregroundStyle(theme)
                     }
                     Spacer()
@@ -211,40 +211,34 @@ struct NaturalCaptureBar: View {
             isParsing = false
         }
 
+        // 解析失败绝不抛出：内层 catch 已完全兜底（端侧模型 → 纯文本时光），故无外层 do/catch。
+        let request = NaturalCaptureRequest(
+            text: input,
+            childName: profile?.name ?? "布布",
+            timezone: TimeZone.current.identifier,
+            referenceDate: .now
+        )
+        let result: NaturalCaptureResult
         do {
-            let request = NaturalCaptureRequest(
-                text: input,
-                childName: profile?.name ?? "布布",
-                timezone: TimeZone.current.identifier,
-                referenceDate: .now
-            )
-            let result: NaturalCaptureResult
-            do {
-                result = try await env.aiService.parseNaturalCapture(request)
-            } catch {
-                // 降级链：服务器不可用 → ① iOS 26 端上大模型（不出设备、结果强制确认）
-                //                    → ② 纯文本时光（原话保底，零捏造）。
-                // 【绝不】退回 Mock 编数值（假身高/假体温会画进成长曲线）。
-                if let onDevice = await OnDeviceNaturalParser.parse(request) {
-                    reviewPayload = ReviewPayload(result: onDevice, originalText: input)
-                    return
-                }
-                result = NaturalCaptureResult(
-                    confidence: 0.5,
-                    items: [NaturalCaptureItem(
-                        domain: .timeline, action: .create,
-                        title: String(input.prefix(12)), note: input,
-                        date: .now, fields: [:], tags: [],
-                        confidence: 0.5, needsConfirmation: false, sourceText: input)],
-                    warnings: ["ai_unavailable"])
-            }
-            reviewPayload = ReviewPayload(result: result, originalText: input)
+            result = try await env.aiService.parseNaturalCapture(request)
         } catch {
-            errorText = "智能识别暂时不可用，已保留原文，可以先用「记录此刻」保存。"
-            #if DEBUG
-            print("[NaturalCapture] parse failed:", error)
-            #endif
+            // 降级链：服务器不可用 → ① iOS 26 端上大模型（不出设备、结果强制确认）
+            //                    → ② 纯文本时光（原话保底，零捏造）。
+            // 【绝不】退回 Mock 编数值（假身高/假体温会画进成长曲线）。
+            if let onDevice = await OnDeviceNaturalParser.parse(request) {
+                reviewPayload = ReviewPayload(result: onDevice, originalText: input)
+                return
+            }
+            result = NaturalCaptureResult(
+                confidence: 0.5,
+                items: [NaturalCaptureItem(
+                    domain: .timeline, action: .create,
+                    title: String(input.prefix(12)), note: input,
+                    date: .now, fields: [:], tags: [],
+                    confidence: 0.5, needsConfirmation: false, sourceText: input)],
+                warnings: ["ai_unavailable"])
         }
+        reviewPayload = ReviewPayload(result: result, originalText: input)
     }
 }
 

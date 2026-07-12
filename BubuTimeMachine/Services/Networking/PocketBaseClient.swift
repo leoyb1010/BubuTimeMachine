@@ -12,6 +12,11 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     private let identity: String       // 家庭共享账户邮箱
     private let password: String
 
+    /// 交互路径（登录/单条 CRUD/翻页/查记录/文件令牌）的显式短超时：
+    /// 家用隧道抖动时不该干等系统默认 60s，让上层的退避重试/软失败自愈更快介入。
+    /// 大文件上传下载走各自的 URLSession，不套用此超时。
+    private static let interactiveTimeout: TimeInterval = 25
+
     /// token 存内存 + Keychain（这里简化为内存；ServerConfig 可扩展持久化）。
     private let tokenBox = TokenBox()
 
@@ -39,6 +44,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         let url = baseURL.appendingPathComponent("api/collections/users/auth-with-password")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = Self.interactiveTimeout
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "identity": identity, "password": password,
@@ -335,6 +341,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         let url = baseURL.appendingPathComponent("api/files/token")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = Self.interactiveTimeout
         req.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -439,6 +446,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                 URLQueryItem(name: "perPage", value: "1"),
             ]
             var req = URLRequest(url: comps.url!)
+            req.timeoutInterval = Self.interactiveTimeout
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
@@ -534,6 +542,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                 URLQueryItem(name: "perPage", value: "1"),
             ]
             var req = URLRequest(url: comps.url!)
+            req.timeoutInterval = Self.interactiveTimeout
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
@@ -550,14 +559,37 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     private func upsert(collection: String, localId: String, body: [String: Any]) async throws -> [String: Any] {
-        if let existing = try await findRecord(collection: collection, localId: localId) {
-            return try await patch(collection: collection, id: existing, json: body)
+        if let existing = try await findRecordObject(collection: collection, localId: localId) {
+            // 通用 LWW 版本保护（S-P2）：把 Entry 已有的 editedAt 并发保护下沉到所有业务集合。
+            // 远端这条比本地推送的版本更【新】时不覆盖，把远端版本原样带回，调用方按 newer-wins 应用——
+            // 旧的本地推送不再静默盖掉新的远端版本。版本号取 clientUpdatedAt：
+            // 对 vaccine/growth（模型有 updatedAt，push 时写入真实编辑时间）是真正的编辑时间比对；
+            // 其余仅有 createdAt 的集合退化为「推送时刻」比对（行为与旧版 last-write-wins 一致，无回归），
+            // 一旦这些集合将来补上编辑时间戳即自动获得同样保护。
+            if Self.remoteVersionIsNewer(remote: existing, thanBody: body) {
+                return existing
+            }
+            guard let existingId = existing["id"] as? String else {
+                throw APIError.server(500, "记录缺少 id 字段")
+            }
+            return try await patch(collection: collection, id: existingId, json: body)
         }
         return try await post(collection: collection, json: body)
     }
 
-    /// 翻页拉增量：统一使用 App 自有的 clientUpdatedAt 游标，避免依赖 PocketBase 系统字段。
-    private func fetchRecords(collection: String, since: Date?, sort: String? = "clientUpdatedAt") async throws -> [[String: Any]] {
+    /// LWW 比对：远端 clientUpdatedAt 严格晚于本地推送 body 的 clientUpdatedAt。
+    /// 任一侧缺时间戳则返回 false（按可覆盖处理，保持既有行为）。
+    private static func remoteVersionIsNewer(remote: [String: Any], thanBody body: [String: Any]) -> Bool {
+        guard let remoteStr = remote["clientUpdatedAt"] as? String,
+              let localStr = body["clientUpdatedAt"] as? String,
+              let remoteDate = flexibleDate(remoteStr),
+              let localDate = flexibleDate(localStr) else { return false }
+        return remoteDate > localDate
+    }
+
+    /// 翻页拉增量：游标改用 PocketBase 服务器系统字段 `updated`（单一权威时钟），
+    /// 而非各写入设备各自打的 clientUpdatedAt——后者在设备时钟偏移下会漏拉（S-P1-1）。
+    private func fetchRecords(collection: String, since: Date?, sort: String? = "updated") async throws -> [[String: Any]] {
         var all: [[String: Any]] = []
         var page = 1
         while true {
@@ -569,19 +601,30 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         return all.filter { ($0["isDeleted"] as? Bool) != true }
     }
 
-    /// 拉取自 since 以来被删除记录的 localId（tombstone）。
+    /// 拉取自 since 以来被删除记录的墓碑（localId + 服务器 updated）。
     /// 删除必须跨设备传播——否则妈妈删的照片在爸爸设备上永远存在（R4 P1-8）。
-    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String] {
+    /// 游标同样按服务器 `updated` 过滤/排序，并把每条墓碑的 updated 带回，让删除也能推进游标。
+    func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone] {
         var all: [[String: Any]] = []
         var page = 1
         while true {
             let (items, totalPages) = try await fetchPage(collection: collection, since: since,
-                                                          sort: "clientUpdatedAt", page: page, onlyDeleted: true)
+                                                          sort: "updated", page: page, onlyDeleted: true)
             all.append(contentsOf: items)
             if page >= totalPages || items.isEmpty { break }
             page += 1
         }
-        return all.compactMap { $0["localId"] as? String }
+        return all.compactMap { obj in
+            guard let localId = obj["localId"] as? String else { return nil }
+            return RemoteTombstone(localId: localId, serverUpdatedAt: Self.serverUpdatedDate(obj))
+        }
+    }
+
+    /// 解析 PocketBase 系统字段 `updated`（"yyyy-MM-dd HH:mm:ss.SSSZ"）。
+    static func serverUpdatedDate(_ obj: [String: Any]) -> Date? {
+        guard let s = obj["updated"] as? String else { return nil }
+        let iso = ISO8601DateFormatter()
+        return iso.date(from: s) ?? flexibleDate(s)
     }
 
     private func fetchPage(collection: String, since: Date?, sort: String?,
@@ -592,6 +635,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                 resolvingAgainstBaseURL: false)!
             comps.queryItems = Self.listRecordsQueryItems(since: since, sort: sort, page: page, onlyDeleted: onlyDeleted)
             var req = URLRequest(url: comps.url!)
+            req.timeoutInterval = Self.interactiveTimeout
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
@@ -610,7 +654,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             query.append(URLQueryItem(name: "sort", value: sort))
         }
         var clauses: [String] = []
-        if let since { clauses.append("(clientUpdatedAt>'\(syncTimestampString(since))')") }
+        // 游标过滤改用服务器权威时钟 `updated`（与游标推进同参照系），
+        // 不再用写入设备各自的 clientUpdatedAt——避免读设备时钟偏移导致永久漏拉（S-P1-1）。
+        if let since { clauses.append("(updated>'\(syncTimestampString(since))')") }
         if onlyDeleted { clauses.append("(isDeleted=true)") }
         if !clauses.isEmpty {
             query.append(URLQueryItem(name: "filter", value: clauses.joined(separator: " && ")))
@@ -627,6 +673,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         try await withAuthRetry { token in
             var req = URLRequest(url: url)
             req.httpMethod = method
+            req.timeoutInterval = Self.interactiveTimeout
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             req.setValue("application/json", forHTTPHeaderField: "Accept")
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -886,7 +933,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             isArchived: obj["isArchived"] as? Bool ?? fallback?.isArchived ?? false,
             inStorybook: obj["inStorybook"] as? Bool ?? fallback?.inStorybook,
             editedAt: date("editedAt") ?? fallback?.editedAt,
-            createdAt: date("createdAt") ?? fallback?.createdAt ?? .now
+            createdAt: date("createdAt") ?? fallback?.createdAt ?? .now,
+            serverUpdatedAt: serverUpdatedDate(obj)
         )
     }
 
@@ -907,7 +955,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             width: obj["width"] as? Int,
             height: obj["height"] as? Int,
             aiTags: obj["aiTags"] as? [String] ?? [],
-            createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? .now
+            createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? .now,
+            serverUpdatedAt: Self.serverUpdatedDate(obj)
         )
     }
 
@@ -939,7 +988,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             happenedAt: date("happenedAt") ?? fallback?.happenedAt,
                             ageDescription: obj["ageDescription"] as? String ?? fallback?.ageDescription,
                             isCustom: obj["isCustom"] as? Bool ?? fallback?.isCustom ?? false,
-                            createdAt: date("created") ?? fallback?.createdAt ?? .now)
+                            createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                            serverUpdatedAt: serverUpdatedDate(obj))
     }
 
     private static func firstTimeBody(_ dto: FirstTimeDTO) -> [String: Any] {
@@ -966,7 +1016,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             detectedByAI: obj["detectedByAI"] as? Bool ?? fallback?.detectedByAI ?? false,
                             confirmedByParent: obj["confirmedByParent"] as? Bool ?? fallback?.confirmedByParent ?? false,
                             entryLocalId: obj["entryLocalId"] as? String ?? fallback?.entryLocalId,
-                            createdAt: date("created") ?? fallback?.createdAt ?? .now)
+                            createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                            serverUpdatedAt: serverUpdatedDate(obj))
     }
 
     private static func memberBody(_ dto: FamilyMemberDTO) -> [String: Any] {
@@ -983,7 +1034,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                         avatarEmoji: obj["avatarEmoji"] as? String ?? fallback?.avatarEmoji ?? "🙂",
                         themeColorHex: obj["themeColorHex"] as? String ?? fallback?.themeColorHex ?? "#F28C9E",
                         isPrimary: obj["isPrimary"] as? Bool ?? fallback?.isPrimary ?? false,
-                        createdAt: fallback?.createdAt ?? .now)
+                        createdAt: fallback?.createdAt ?? .now,
+                        serverUpdatedAt: serverUpdatedDate(obj))
     }
 
     private static func childProfileBody(_ dto: ChildProfileDTO) -> [String: Any] {
@@ -1013,7 +1065,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                bloodType: obj["bloodType"] as? String ?? fallback?.bloodType,
                                birthPlace: obj["birthPlace"] as? String ?? fallback?.birthPlace,
                                avatarRemoteURL: avatarRemoteURL ?? fallback?.avatarRemoteURL,
-                               createdAt: fallback?.createdAt ?? .now)
+                               createdAt: fallback?.createdAt ?? .now,
+                               serverUpdatedAt: Self.serverUpdatedDate(obj))
     }
 
     private static func vaccineBody(_ dto: VaccineRecordDTO) -> [String: Any] {
@@ -1026,7 +1079,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                    "injectionSite": jsonValue(dto.injectionSite),
                                    "reaction": jsonValue(dto.reaction),
                                    "note": jsonValue(dto.note)]
-        addSyncTimestamp(to: &body)
+        // clientUpdatedAt 写入记录真实编辑时间（模型 updatedAt），作为通用 upsert 的 LWW 版本号，
+        // 而非推送时刻——这样旧编辑的迟到推送不会盖掉别的设备的新编辑。
+        addSyncTimestamp(to: &body, date: dto.editedAt ?? dto.createdAt)
         return body
     }
 
@@ -1044,7 +1099,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                 reaction: obj["reaction"] as? String ?? fallback?.reaction,
                                 note: obj["note"] as? String ?? fallback?.note,
                                 source: obj["sourceRaw"] as? String ?? obj["source"] as? String ?? fallback?.source ?? "manual",
-                                createdAt: date("created") ?? fallback?.createdAt ?? .now)
+                                createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                                serverUpdatedAt: serverUpdatedDate(obj),
+                                editedAt: date("clientUpdatedAt") ?? fallback?.editedAt)
     }
 
     private static func growthBody(_ dto: GrowthMeasurementDTO) -> [String: Any] {
@@ -1055,7 +1112,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                    "weightKg": jsonValue(dto.weightKg),
                                    "headCircumferenceCm": jsonValue(dto.headCircumferenceCm),
                                    "note": jsonValue(dto.note)]
-        addSyncTimestamp(to: &body)
+        // 见 vaccineBody：clientUpdatedAt 用记录真实编辑时间作为 LWW 版本号。
+        addSyncTimestamp(to: &body, date: dto.editedAt ?? dto.createdAt)
         return body
     }
 
@@ -1070,7 +1128,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                     headCircumferenceCm: obj["headCircumferenceCm"] as? Double ?? fallback?.headCircumferenceCm,
                                     note: obj["note"] as? String ?? fallback?.note,
                                     source: obj["sourceRaw"] as? String ?? obj["source"] as? String ?? fallback?.source ?? "manual",
-                                    createdAt: date("created") ?? fallback?.createdAt ?? .now)
+                                    createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                                    serverUpdatedAt: serverUpdatedDate(obj),
+                                    editedAt: date("clientUpdatedAt") ?? fallback?.editedAt)
     }
 
     private static func healthBody(_ dto: HealthRecordDTO) -> [String: Any] {
@@ -1113,7 +1173,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                severity: obj["severity"] as? String ?? fallback?.severity,
                                temperatureCelsius: obj["temperatureCelsius"] as? Double ?? fallback?.temperatureCelsius,
                                tags: obj["tags"] as? [String] ?? fallback?.tags ?? [],
-                               createdAt: date("created") ?? fallback?.createdAt ?? .now)
+                               createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                               serverUpdatedAt: Self.serverUpdatedDate(obj))
     }
 
     private static func commentBody(_ dto: CommentDTO) -> [String: Any] {
@@ -1135,7 +1196,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                           remoteURL: remoteURL ?? fallback?.remoteURL,
                           voiceDuration: obj["voiceDuration"] as? Double ?? fallback?.voiceDuration ?? 0,
                           voiceWaveform: obj["voiceWaveform"] as? [Float] ?? fallback?.voiceWaveform ?? [],
-                          createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now)
+                          createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now,
+                          serverUpdatedAt: Self.serverUpdatedDate(obj))
     }
 
     private static func voiceNoteBody(_ dto: VoiceNoteDTO) -> [String: Any] {
@@ -1157,7 +1219,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             durationSeconds: obj["durationSeconds"] as? Double ?? fallback?.durationSeconds ?? 0,
                             transcript: obj["transcript"] as? String ?? fallback?.transcript,
                             waveform: obj["waveform"] as? [Float] ?? fallback?.waveform ?? [],
-                            createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now)
+                            createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now,
+                            serverUpdatedAt: Self.serverUpdatedDate(obj))
     }
 
     private static func voiceMemoBody(_ dto: VoiceMemoDTO) -> [String: Any] {
@@ -1188,7 +1251,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             ageYears: obj["ageYears"] as? Int ?? fallback?.ageYears,
                             recordedAt: date("recordedAt") ?? fallback?.recordedAt ?? .now,
                             durationSeconds: obj["durationSeconds"] as? Double ?? fallback?.durationSeconds,
-                            createdAt: date("created") ?? fallback?.createdAt ?? .now)
+                            createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                            serverUpdatedAt: Self.serverUpdatedDate(obj))
     }
 
     private static func timeCapsuleBody(_ dto: TimeCapsuleDTO) -> [String: Any] {
@@ -1229,7 +1293,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             isLocked: obj["isLocked"] as? Bool ?? fallback?.isLocked ?? true,
             encryptedBlobRemoteURL: remoteURL ?? fallback?.encryptedBlobRemoteURL,
             coverEmoji: obj["coverEmoji"] as? String ?? fallback?.coverEmoji,
-            createdAt: date("created") ?? fallback?.createdAt ?? .now
+            createdAt: date("created") ?? fallback?.createdAt ?? .now,
+            serverUpdatedAt: Self.serverUpdatedDate(obj)
         )
     }
 
@@ -1250,7 +1315,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         guard let http = resp as? HTTPURLResponse else { return }
         switch http.statusCode {
         case 200..<300: return
-        case 401, 403: throw APIError.unauthorized
+        // 401=token 过期→重登；403=权限/规则错误→单独抛，不重登（否则每待推项每轮重登撞限流）。
+        case 401: throw APIError.unauthorized
+        case 403: throw APIError.forbidden
         default:
             let msg = String(data: data, encoding: .utf8)?.prefix(200) ?? ""
             throw APIError.server(http.statusCode, String(msg))

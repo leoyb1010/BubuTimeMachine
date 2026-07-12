@@ -5,19 +5,32 @@ import Foundation
 // MARK: - PocketBase 同步查询回归测试
 struct PocketBaseClientSyncQueryTests {
 
-    @Test("增量拉取只使用 clientUpdatedAt 游标")
-    func incrementalQueryUsesClientUpdatedAt() {
+    @Test("增量拉取用服务器 updated 游标过滤（新契约：单一权威时钟，不再用 clientUpdatedAt）")
+    func incrementalQueryUsesServerUpdated() {
         let since = Date(timeIntervalSince1970: 2_000_000_000)
-        let items = PocketBaseClient.listRecordsQueryItems(since: since, sort: "clientUpdatedAt", page: 3)
+        // 生产路径 fetchRecords 传 sort:"updated"（服务器系统字段）。
+        let items = PocketBaseClient.listRecordsQueryItems(since: since, sort: "updated", page: 3)
         let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
 
         #expect(values["perPage"] == "200")
         #expect(values["page"] == "3")
-        #expect(values["sort"] == "clientUpdatedAt")
-        #expect(values["filter"]?.contains("clientUpdatedAt>") == true)
-        #expect(values.description.contains("updated>") == false)
-        #expect(values.description.contains("-updated") == false)
-        #expect(values.description.contains("-created") == false)
+        #expect(values["sort"] == "updated")
+        // 过滤字段改用服务器 updated，且与游标推进同参照系（S-P1-1）。
+        #expect(values["filter"]?.contains("updated>'") == true)
+        // 关键回归点：不得再用写入设备各自的 clientUpdatedAt 做增量过滤。
+        #expect(values.description.contains("clientUpdatedAt") == false)
+        #expect(values["filter"]?.contains("\(PocketBaseClient.syncTimestampString(since))") == true)
+    }
+
+    @Test("墓碑增量查询同样用 updated 过滤并叠加 isDeleted")
+    func deletedQueryUsesServerUpdatedAndIsDeleted() {
+        let since = Date(timeIntervalSince1970: 2_000_000_000)
+        let items = PocketBaseClient.listRecordsQueryItems(since: since, sort: "updated", page: 1, onlyDeleted: true)
+        let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+
+        #expect(values["filter"]?.contains("updated>'") == true)
+        #expect(values["filter"]?.contains("isDeleted=true") == true)
+        #expect(values.description.contains("clientUpdatedAt") == false)
     }
 
     @Test("全量拉取可不带排序和过滤")

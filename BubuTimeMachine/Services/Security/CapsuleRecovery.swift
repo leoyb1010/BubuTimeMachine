@@ -4,7 +4,7 @@ import Foundation
 /// 24 词助记词作为家庭时间胶囊的主密钥来源。
 /// - 存 iCloud Keychain（家庭同一 Apple ID 设备自动同步）；
 /// - 引导用户打印/抄写收进实体盒子（30 年后即使 iCloud 没了，纸条还在）。
-/// 词表为 BIP39 风格的常见英文词子集（256 词，零依赖内置）。
+/// 词表为 BIP39 风格的常见英文词子集（259 词，零依赖内置）。
 enum CapsuleRecovery {
     private static let keychainKey = "bubu.capsule.recoveryCode.v3"
 
@@ -38,7 +38,10 @@ enum CapsuleRecovery {
         return words.joined(separator: " ")
     }
 
-    /// 256 词常见英文词表（足够 24 词 ≈ 192 bit 熵）。
+    /// 259 词常见英文词表（去重后；24 词 ≈ 192 bit 熵）。
+    /// 兼容性：恢复码按「词字符串」原样派生密钥（见 CapsuleCrypto.deriveKeyV3），
+    /// 校验也按「词是否在表中」（membership），从不按下标编码。故去除重复词
+    /// 不影响任何已生成的恢复码，也不改变任何存量胶囊的密钥。
     static let wordList: [String] = [
         "apple","baby","bear","bird","blue","boat","book","brave","bread","bright",
         "brook","calm","candle","cat","cloud","clover","coral","cozy","cream","daisy",
@@ -59,7 +62,7 @@ enum CapsuleRecovery {
         "dove","ebony","echo","elm","fable","fairy","feather","fennel","fig","flame",
         "fleece","flora","flutter","forest","fountain","fresh","frond","gale","glade","glimmer",
         "gold","grove","hatch","haven","heath","heron","hollow","ivy","jasmine","jewel",
-        "kettle","lagoon","lantern","lark","laurel","lavender","ledge","lemon","lotus","lullaby",
+        "kettle","lagoon","lantern","lark","laurel","lavender","ledge","lemon","lullaby",
         "marble","marsh","mauve","melody","mesa","mossy","myrtle","nectar","nimbus","oak",
         "oasis","orchid","otter","palm","pasture","pebbly","pepper","plume","pollen","prairie",
         "quartz","quill","ranch","rapids","ridge","ripple","rosemary","rustic","saffron","sapling",

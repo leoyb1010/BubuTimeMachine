@@ -122,7 +122,7 @@ struct SimpleTimelineView: View {
 
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Text("🍼").font(.system(size: 60))
+            Text("🍼").font(BubuTheme.Font.scaled(60))
             Text("还没有记录")
                 .font(BubuTheme.Font.scaled(22, weight: .black))
                 .foregroundStyle(BubuTheme.Color.warmBrown)

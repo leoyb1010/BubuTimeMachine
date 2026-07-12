@@ -26,6 +26,8 @@ struct GrowthMovieView: View {
     @State private var serverMovieURL: URL?
     @State private var serverHint = ""
     @State private var showServerPlayer = false
+    /// 服务端渲染轮询任务句柄：离开页面时取消，避免最长 10 分钟的轮询在后台空跑（P2b）。
+    @State private var renderTask: Task<Void, Never>?
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -58,6 +60,7 @@ struct GrowthMovieView: View {
                 ServerMoviePlayer(url: serverMovieURL, title: draftTitle) { showServerPlayer = false }
             }
         }
+        .onDisappear { renderTask?.cancel() }
     }
 
     @ViewBuilder
@@ -96,12 +99,12 @@ struct GrowthMovieView: View {
                         draft = nil
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(template.emoji).font(.system(size: 28))
+                            Text(template.emoji).font(BubuTheme.Font.scaled(28))
                             Text(template.title)
                                 .font(BubuTheme.Font.caption.weight(.semibold))
                                 .foregroundStyle(BubuTheme.Color.warmBrown)
                             Text(template.subtitle)
-                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .font(BubuTheme.Font.scaled(12, weight: .regular))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                                 .lineLimit(2)
                         }
@@ -238,7 +241,7 @@ struct GrowthMovieView: View {
 
                 // 配了服务器才出「合成高清版」：真正的 mp4，可存可分享
                 if env.config.isAIConfigured {
-                    Button { Task { await renderOnServer() } } label: {
+                    Button { renderTask = Task { await renderOnServer() } } label: {
                         Label(serverRendering
                               ? "服务端合成中… \(Int(serverProgress * 100))%"
                               : "合成高清版 · 服务端",
@@ -251,8 +254,7 @@ struct GrowthMovieView: View {
                     .buttonStyle(.plain)
                     .disabled(serverRendering)
 
-                    if let url = serverMovieURL ?? Self.existingMovie(
-                        year: selectedYear ?? Calendar.current.component(.year, from: .now)) {
+                    if let url = serverMovieURL ?? Self.existingMovie(year: movieFileKey) {
                         Button {
                             serverMovieURL = url
                             showServerPlayer = true
@@ -288,10 +290,9 @@ struct GrowthMovieView: View {
         }
         serverHint = ""; serverRendering = true; serverProgress = 0
         defer { serverRendering = false }
-        let year = selectedYear ?? Calendar.current.component(.year, from: .now)
         do {
             var status = try await env.aiService.startMovieRender(
-                childName: env.config.childName, year: year,
+                childName: env.config.childName, year: movieCalendarYear,
                 template: selectedTemplate.rawValue, photos: photos, narration: aiNarration ?? "")
             var polls = 0
             var consecutiveFailures = 0
@@ -315,8 +316,10 @@ struct GrowthMovieView: View {
                 return
             }
             let tempURL = try await env.aiService.downloadRenderedMovie(jobId: status.jobId)
-            serverMovieURL = Self.persistMovie(tempURL, year: year)
+            serverMovieURL = Self.persistMovie(tempURL, year: movieFileKey)
             showServerPlayer = true
+        } catch is CancellationError {
+            // 离开页面主动取消轮询，不提示（P2b）
         } catch {
             serverHint = "服务端合成暂不可用：\(error.localizedDescription)"
         }
@@ -359,6 +362,21 @@ struct GrowthMovieView: View {
         return Array(Set(entries.map { AgeCalculator.ageYears(birthday: profile.birthday, at: $0.happenedAt) })).sorted()
     }
 
+    /// selectedYear 是「年龄」(0/1/2)。本地成片文件的稳定标识键：按年龄区分成片，
+    /// 全部年龄回退当前公历年。仅用于文件名，各选择互不覆盖。
+    private var movieFileKey: Int {
+        selectedYear ?? Calendar.current.component(.year, from: .now)
+    }
+
+    /// 服务端 / AI 旁白需要真实公历年，而非把「年龄」数字当年份。
+    /// 年龄段对应公历年 = 生日年份 + 年龄；全部年龄用当前公历年。
+    private var movieCalendarYear: Int {
+        if let selectedYear, let profile {
+            return Calendar.current.component(.year, from: profile.birthday) + selectedYear
+        }
+        return Calendar.current.component(.year, from: .now)
+    }
+
     private var availableLocations: [String] {
         Array(Set(entries.compactMap(\.locationName))).sorted().prefix(8).map { $0 }
     }
@@ -390,6 +408,8 @@ struct GrowthMovieView: View {
     private func generateDraft() async {
         guard !selectedPhotoFiles.isEmpty else { return }
         draft = nil
+        // 重置上一次的 AI 旁白：否则本次 AI 未配置/失败时，旧旁白会被带进新片。
+        aiNarration = nil
         for i in stages.indices {
             stageIndex = i
             try? await Task.sleep(for: .milliseconds(420))
@@ -399,7 +419,7 @@ struct GrowthMovieView: View {
         if env.config.isAIConfigured {
             let highlights = Array(Set(captions.filter { !$0.isEmpty })).prefix(8).map { String($0) }
             if let narration = try? await env.aiService.movieNarration(
-                year: selectedYear ?? Calendar.current.component(.year, from: .now),
+                year: movieCalendarYear,
                 childName: env.config.childName,
                 highlights: highlights
             ), !narration.isEmpty {
@@ -477,12 +497,12 @@ private struct ServerMoviePlayer: View {
                 HStack {
                     Button { player?.pause(); onClose() } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+                            .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.9))
                     }
                     Spacer()
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up.circle.fill")
-                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+                            .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.9))
                     }
                 }
                 .padding()

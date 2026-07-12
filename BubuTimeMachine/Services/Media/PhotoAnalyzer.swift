@@ -21,10 +21,13 @@ struct PhotoAnalysis: Sendable {
     /// - MapKit：坐标 → 地名（如"上海市·静安区"）
 /// - Vision：场景/物体分类 + 人脸计数 → 自动标签
 /// 离线时 EXIF 与 Vision 仍可用；地名需联网（失败则跳过，不影响主流程）。
-struct PhotoAnalyzer: Sendable {
+nonisolated struct PhotoAnalyzer: Sendable {
 
     /// 分析一张图片的原始数据。
-    func analyze(imageData: Data, includeLocation: Bool = true) async -> PhotoAnalysis {
+    /// - Parameter resolveLocationName: 是否顺带做反向地理编码。批量调用方（如一次记录选多张照片）
+    ///   应传 `false`，改为在拿到首张 GPS 坐标后用 `locationName(latitude:longitude:)` 只做一次，
+    ///   避免每张各发一次反向地理编码。
+    func analyze(imageData: Data, includeLocation: Bool = true, resolveLocationName: Bool = true) async -> PhotoAnalysis {
         var result = PhotoAnalysis(captureDate: nil, latitude: nil, longitude: nil,
                                    locationName: nil, tags: [], faceCount: 0)
 
@@ -39,15 +42,16 @@ struct PhotoAnalyzer: Sendable {
         }
 
         // 2) Vision：标签 + 人脸（端侧）
-        if let cgImage = UIImage(data: imageData)?.cgImage {
+        // 先降采样到 ≤2000px 再跑：48MP 全尺寸解码瞬时 ~200MB，且 Vision 对小图同样准。
+        if let cgImage = Self.downsampledCGImage(from: imageData, maxPixel: 2000) {
             async let tags = Self.classify(cgImage: cgImage)
             async let faces = Self.countFaces(cgImage: cgImage)
             result.tags = await tags
             result.faceCount = await faces
         }
 
-        // 3) 反向地理编码（需联网，失败静默）
-        if let lat = result.latitude, let lon = result.longitude {
+        // 3) 反向地理编码（需联网，失败静默）；批量调用方关掉、自行只做一次。
+        if resolveLocationName, let lat = result.latitude, let lon = result.longitude {
             result.locationName = await Self.reverseGeocode(lat: lat, lon: lon)
         }
 
@@ -56,6 +60,24 @@ struct PhotoAnalyzer: Sendable {
         else if result.faceCount >= 2 { result.tags.append("合影") }
 
         return result
+    }
+
+    /// 反向地理编码：坐标 → 地名。供批量调用方对「首张有 GPS 的照片」只做一次。
+    func locationName(latitude: Double, longitude: Double) async -> String? {
+        await Self.reverseGeocode(lat: latitude, lon: longitude)
+    }
+
+    /// ImageIO 降采样：直接解到 maxPixel，不在内存里展开全尺寸位图。
+    private static func downsampledCGImage(from data: Data, maxPixel: CGFloat) -> CGImage? {
+        let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, srcOpts) else { return nil }
+        let opts = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ] as CFDictionary
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, opts)
     }
 
     // MARK: EXIF

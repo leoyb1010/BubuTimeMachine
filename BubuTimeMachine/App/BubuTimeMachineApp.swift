@@ -15,13 +15,22 @@ struct BubuTimeMachineApp: App {
     /// 桌面小组件 / 通知 deep link 路由。
     @State private var router = BubuRouter()
     @Environment(\.scenePhase) private var scenePhase
+    /// 启动期注册（通知回复 / BGTask handler / WC 激活）前移到这里：后台冷启动也必定执行。
+    @UIApplicationDelegateAdaptor(BubuAppDelegate.self) private var appDelegate
+
+    /// 只做一次的启动装配防重（iPad 多窗口下每个 scene 都会跑一遍 .task）。
+    @State private var didWireLaunchTasks = false
+    /// 手表记录观察者 token：留存不丢弃（原代码直接丢弃，且每个 scene 重复注册）。
+    @State private var syncObserver: NSObjectProtocol?
 
     init() {
         // schema 唯一真相源：版本化 BubuSchemaV1（与 Widget/Intent 完全一致）
         let schema = SharedModelContainer.schema
-        // App Group：先把旧私有沙盒的 store/媒体一次性迁到共享容器（幂等、失败不删源），
+        // App Group：先【同步】把旧私有沙盒的 store 三件套迁到共享容器（小、幂等、失败不删源），
         // 再让 ModelConfiguration 指向共享容器里的 store —— Widget/灵动岛等 extension 才能读到同一份数据。
-        StorageMigrator.migrateIfNeeded()
+        // 媒体库（可能几 GB）不在 init 里搬——它改到 .task 后台执行（migrateMediaIfNeeded），
+        // 避免大库用户升级时主线程同步拷贝超过启动看门狗被 0x8badf00d 强杀。
+        StorageMigrator.migrateStoreIfNeeded()
         let config = ModelConfiguration(schema: schema, url: BubuStorage.storeURL)
         do {
             modelContainer = try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
@@ -39,6 +48,10 @@ struct BubuTimeMachineApp: App {
                 fatalError("无法创建 SwiftData 容器（连内存容器都失败）：\(error)")
             }
         }
+        // 进程内统一容器：把 App 真正在用的容器（磁盘或内存兜底）注入共享入口，
+        // 让 App Intents / 通知回复 / 手表写入都经它拿到同一个容器——写入能刷新主 UI、
+        // 快照读到最新数据。注入时机足够早（App.init），且 extension 是独立进程、天然拿不到它。
+        SharedModelContainer.injected = modelContainer
     }
 
     var body: some Scene {
@@ -55,40 +68,48 @@ struct BubuTimeMachineApp: App {
                     #if DEBUG
                     seedForUITestingIfNeeded()
                     #endif
-                    try? Tips.configure()   // 渐进式功能引导（H-3）
-                    env.bootstrap(context: modelContainer.mainContext)
-                    // 后台补拉注册 + 排期（G-2）；备份提醒（G-6）
-                    BackgroundRefresher.register { [weak env] in
-                        guard let env else { return }
-                        env.syncEngine.syncNow()
-                        try? await Task.sleep(for: .seconds(20))   // 家庭 LAN 一轮同步足够
-                    }
-                    Task { await BackupReminder.scheduleIfAuthorized() }
-                    // 语音自动转写补写（端侧优先，尽力而为）：三年语音逐步变成可搜索文字
-                    Task {
-                        await VoiceTranscriber.backfill(
-                            context: modelContainer.mainContext, mediaStore: env.mediaStore,
-                            aiService: env.aiService, aiConfigured: env.config.isAIConfigured)
-                    }
-                    env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                    WidgetRefresher.reload()
-                    // 通知直接回复：注册「回一句」类目 + 通知代理
-                    NotificationReplyHandler.shared.register()
-                    consumePendingRecord()
-                    // 手表连接：注入 App 正在用的 context（手表记录能让前台时光轴实时刷新）+ 激活 + 推初始快照 + 监听
-                    WatchConnectivityManager.shared.appContext = modelContainer.mainContext
-                    WatchConnectivityManager.shared.activate()
-                    pushWatchSnapshot()
-                    NotificationCenter.default.addObserver(
-                        forName: WatchConnectivityManager.didRecordNotification,
-                        object: nil, queue: .main) { _ in
-                        Task { @MainActor in
-                            env.syncEngine.syncNow()
-                            env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                            WidgetRefresher.reload()
-                            pushWatchSnapshot()
+                    // 只做一次的启动装配（多窗口下 .task 每个 scene 都会跑，需防重）。
+                    // 注意：NotificationReplyHandler / BGTask handler / WC 激活已前移到 BubuAppDelegate，
+                    // 保证后台冷启动也执行；这里只保留必须在 env/container 就绪后做的部分。
+                    if !didWireLaunchTasks {
+                        didWireLaunchTasks = true
+                        // 媒体库（Media/Thumbnails，老用户可能几 GB）从旧沙盒搬到 App Group 共享容器：
+                        // 放到后台 detached 任务，绝不阻塞首帧/卡启动看门狗。迁移是拷贝不删源，
+                        // 迁移窗口内 MediaStore 读取会自动回退旧目录，绝不白图。失败下次启动再补。
+                        Task.detached(priority: .utility) {
+                            StorageMigrator.migrateMediaIfNeeded()
+                        }
+                        try? Tips.configure()   // 渐进式功能引导（H-3）
+                        env.bootstrap(context: modelContainer.mainContext)
+                        // env 就绪后注入后台补拉 runner（handler 已在 AppDelegate 注册）：
+                        // syncOnce() 会 await 到一轮同步真正跑完，BGTask 才能如实 setTaskCompleted。
+                        BackgroundRefresher.setRunner { await env.syncEngine.syncOnce() }
+                        Task { await BackupReminder.scheduleIfAuthorized() }   // 备份提醒（G-6）
+                        // 语音自动转写补写（端侧优先，尽力而为）：三年语音逐步变成可搜索文字
+                        Task {
+                            await VoiceTranscriber.backfill(
+                                context: modelContainer.mainContext, mediaStore: env.mediaStore,
+                                aiService: env.aiService, aiConfigured: env.config.isAIConfigured)
+                        }
+                        // 手表记录 → 立即同步 + 刷新。观察者只注册一次，token 留存不丢弃。
+                        syncObserver = NotificationCenter.default.addObserver(
+                            forName: WatchConnectivityManager.didRecordNotification,
+                            object: nil, queue: .main) { _ in
+                            Task { @MainActor in
+                                env.syncEngine.syncNow()
+                                env.refreshWidgetSnapshot(context: modelContainer.mainContext)
+                                WidgetRefresher.reload()
+                                pushWatchSnapshot()
+                            }
                         }
                     }
+                    // 每次场景出现都要做的：手表上下文注入 + 小组件快照 + 消费待办 + 推手表快照。
+                    WatchConnectivityManager.shared.appContext = modelContainer.mainContext
+                    WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
+                    env.refreshWidgetSnapshot(context: modelContainer.mainContext)
+                    WidgetRefresher.reload()
+                    consumePendingRecord()
+                    pushWatchSnapshot()
                 }
         }
         .modelContainer(modelContainer)
@@ -97,6 +118,7 @@ struct BubuTimeMachineApp: App {
             switch phase {
             case .active:
                 env.syncEngine.start()
+                WatchConnectivityManager.shared.retryPendingVoiceImports()   // 进前台重试手表语音应急导入（W-P1-3）
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                 WidgetRefresher.reload()
                 pushWatchSnapshot()
@@ -277,6 +299,16 @@ struct RootView: View {
     @State private var showWhatsNew = false
 
     var body: some View {
+        rootContent
+            // 全 App Dynamic Type 兜底基线：老人把系统字体开到最大无障碍档时，先统一夹到
+            // accessibility3，避免布局爆裂。这是较宽的上限，专给以大按钮/单列布局为主、
+            // 抗放大能力强的 SimpleMode（老人模式）与引导页用；密集的 RootTabView 会在其内部
+            // 再收紧到 accessibility1（见 RootTabView）。外松内紧：内层更严的夹取会生效。
+            .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
         if env.hasCompletedOnboarding {
             content
                 .transition(.opacity)

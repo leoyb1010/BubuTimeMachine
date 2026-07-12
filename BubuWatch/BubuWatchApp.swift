@@ -3,12 +3,17 @@ import SwiftUI
 @main
 struct BubuWatchApp: App {
     @State private var connector = WatchConnector()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             WatchRootView()
                 .environment(connector)
                 .task { connector.activate() }
+        }
+        // 进前台对账：补发缓存记录 + 重发上次失败/未激活遗留的待传语音（P0-2 / W-P1-1）。
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { connector.reconcilePending() }
         }
     }
 }

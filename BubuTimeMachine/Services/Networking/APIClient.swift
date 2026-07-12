@@ -39,8 +39,9 @@ protocol APIClient: Sendable {
     func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO
     func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO]
 
-    /// 拉取自 since 以来被删除记录的 localId（tombstone），用于把删除传播到本设备。
-    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String]
+    /// 拉取自 since 以来被删除记录的墓碑（localId + 服务器 updated），用于把删除传播到本设备，
+    /// 并让删除也能推进增量游标。
+    func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone]
 
     /// 实时变更流（SSE 长连）：远端有任何写入就产出一个信号。不支持的后端返回 nil。
     func realtimeStream() -> AsyncStream<Void>?
@@ -60,6 +61,8 @@ protocol APIClient: Sendable {
 enum APIError: LocalizedError, Sendable {
     case notConfigured
     case unauthorized
+    /// 403：权限/访问规则错误（非 token 过期）。不触发重登，避免每待推项每轮重登撞限流。
+    case forbidden
     case network(String)
     case server(Int, String)
     case fileTooLarge(bytes: Int64, limit: Int64)
@@ -68,6 +71,7 @@ enum APIError: LocalizedError, Sendable {
         switch self {
         case .notConfigured: return "还没有连接家里的服务器。"
         case .unauthorized:  return "账号状态需要重新确认，请到设置里重新连接服务器。"
+        case .forbidden: return "没有访问权限，App 会保留本地内容，稍后重试。"
         case .network: return "网络暂时不稳定，App 会保留本地内容并继续重试。"
         case .server(let code, _): return "服务器暂时没响应（\(code)），App 会继续自动补传。"
         case .fileTooLarge(let bytes, let limit):
@@ -83,6 +87,6 @@ enum APIError: LocalizedError, Sendable {
 
 // MARK: - 默认实现（Mock / 旧后端无需支持 tombstone）
 extension APIClient {
-    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String] { [] }
+    func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone] { [] }
     func realtimeStream() -> AsyncStream<Void>? { nil }
 }

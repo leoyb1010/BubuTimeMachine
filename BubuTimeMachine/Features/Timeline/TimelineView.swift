@@ -18,6 +18,8 @@ struct TimelineView: View {
     @State private var entryPendingDelete: Entry?
     @State private var sections: [TimelineSection] = []
     @State private var searchText = ""
+    /// 未读家庭动态红点：一次性算好缓存，避免每次 body 全表 faulting comments（P2e）。
+    @State private var hasUnseenFamilyActivity = false
     @Namespace private var zoomNS
 
     var body: some View {
@@ -35,15 +37,23 @@ struct TimelineView: View {
         .navigationTitle("时光轴")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "找找布布的记录")
-        .onChange(of: searchText) { _, _ in rebuildSections() }
-        .onAppear { rebuildSectionsIfNeeded() }
-        .onChange(of: entries) { _, _ in rebuildSections() }
+        // 搜索 300ms 去抖：连打字时只在停顿后重建一次；清空/首屏立即重建（P2e）
+        .task(id: searchText) {
+            if !searchText.isEmpty {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+            }
+            rebuildSections()
+        }
+        .onAppear { rebuildSectionsIfNeeded(); refreshUnseenBadge() }
+        .onChange(of: entries) { _, _ in rebuildSections(); refreshUnseenBadge() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showFamilyFeed = true
                     // 打开即视为已读
                     UserDefaults.standard.set(Date.now, forKey: "bubu.feed.lastSeenAt")
+                    hasUnseenFamilyActivity = false
                 } label: {
                     Label("家庭动态", systemImage: "person.2.wave.2.fill")
                 }
@@ -69,12 +79,15 @@ struct TimelineView: View {
         }
     }
 
-    /// 上次看过动态之后，家里其他人有没有新动作（新记录/新评论）。
-    private var hasUnseenFamilyActivity: Bool {
+    /// 上次看过动态之后，家里其他人有没有新动作（新记录/新评论）。一次性算好写入缓存。
+    private func refreshUnseenBadge() {
         let lastSeen = UserDefaults.standard.object(forKey: "bubu.feed.lastSeenAt") as? Date ?? .distantPast
         let myRole = env.config.currentRole.rawValue
-        if entries.contains(where: { $0.createdAt > lastSeen && $0.authorRole != myRole }) { return true }
-        return entries.contains { entry in
+        if entries.contains(where: { $0.createdAt > lastSeen && $0.authorRole != myRole }) {
+            hasUnseenFamilyActivity = true
+            return
+        }
+        hasUnseenFamilyActivity = entries.contains { entry in
             entry.comments.contains { $0.createdAt > lastSeen && $0.authorRole != myRole }
         }
     }
@@ -123,7 +136,7 @@ struct TimelineView: View {
     private func timelineRow(_ entry: Entry, sectionIndex: Int) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Circle()
-                .fill(BubuTheme.Color.hue(Double(abs(entry.id.hashValue) % 360), lightness: 0.78))
+                .fill(BubuTheme.Color.hue(entry.id.bubuStableHue, lightness: 0.78))
                 .frame(width: 14, height: 14)
                 .overlay(Circle().stroke(.white, lineWidth: 3))
                 .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
@@ -159,10 +172,10 @@ struct TimelineView: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomLeading) {
                 Group {
-                    if let media = entry.media.first {
+                    if let media = entry.coverMedia {
                         MediaThumbnail(media: media, mediaStore: env.mediaStore)
                     } else {
-                        BubuDreamPhoto(hue: Double(abs(entry.id.hashValue) % 360), height: 178,
+                        BubuDreamPhoto(hue: entry.id.bubuStableHue, height: 178,
                                        cornerRadius: 0, motif: entry.mood?.emoji ?? "◡")
                     }
                 }
@@ -171,7 +184,7 @@ struct TimelineView: View {
                 .clipped()
 
                 Text("\(BubuDateFormat.monthDay(entry.happenedAt)) · \(BubuDateFormat.shortTime(entry.happenedAt))")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                     .padding(.horizontal, 14).padding(.bottom, 10)
@@ -180,12 +193,12 @@ struct TimelineView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.title?.isEmpty == false ? entry.title! :
                         (entry.note?.isEmpty == false ? entry.note! : "记录此刻"))
-                    .font(.system(size: 15.5, weight: .heavy, design: .rounded))
+                    .font(BubuTheme.Font.scaled(15.5, weight: .heavy, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(1)
                 if let note = entry.note, !note.isEmpty {
                     Text(note)
-                        .font(.system(size: 12.5, weight: .regular, design: .rounded))
+                        .font(BubuTheme.Font.scaled(12.5, weight: .regular, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(2)
                 }
@@ -317,6 +330,11 @@ struct TimelineView: View {
                                  summary: "删除了一条时光轴记录",
                                  targetLocalId: entry.id.uuidString))
         try? context.save()
+        // 删除后与 EntryDetailView.deleteEntry 一致：刷新小组件快照 + 推送墓碑同步，
+        // 否则小组件仍显示已删记录、其它设备不知情。
+        env.refreshWidgetSnapshot(context: context)
+        WidgetRefresher.reload()
+        env.syncEngine.syncNow()
         entryPendingDelete = nil
     }
 }

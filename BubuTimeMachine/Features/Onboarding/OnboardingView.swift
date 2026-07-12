@@ -74,7 +74,7 @@ struct OnboardingView: View {
                 .shadow(color: theme.primary.opacity(0.3), radius: 16, y: 8)
             VStack(spacing: 12) {
                 Text("欢迎来到布布时光机")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(30, weight: .bold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Text("为布布留住每一个值得记住的此刻，\n陪她长大，等她某天亲手翻开。")
                     .font(BubuTheme.Font.body)
@@ -98,7 +98,7 @@ struct OnboardingView: View {
     private var birthdayStep: some View {
         VStack(spacing: 22) {
             Text("👶")
-                .font(.system(size: 64))
+                .font(BubuTheme.Font.scaled(64))
             Text("布布是哪天来到世界的？")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -131,7 +131,7 @@ struct OnboardingView: View {
     private var memberStep: some View {
         VStack(spacing: 22) {
             Text(selectedRelation.defaultEmoji)
-                .font(.system(size: 64))
+                .font(BubuTheme.Font.scaled(64))
             Text("你是布布的……")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -143,8 +143,8 @@ struct OnboardingView: View {
                         withAnimation(.smooth) { selectedRelation = rel }
                     } label: {
                         VStack(spacing: 4) {
-                            Text(rel.defaultEmoji).font(.system(size: 28))
-                            Text(rel.rawValue).font(.system(size: 13, weight: .medium))
+                            Text(rel.defaultEmoji).font(BubuTheme.Font.scaled(28))
+                            Text(rel.rawValue).font(BubuTheme.Font.scaled(13, weight: .medium))
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
