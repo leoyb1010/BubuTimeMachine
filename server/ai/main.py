@@ -70,15 +70,15 @@ _rate_lock = Lock()
 _rate_buckets: dict[str, deque] = defaultdict(deque)
 
 
-def _check_rate(client_ip: str) -> None:
+def _check_rate(bucket_key: str) -> None:
     now = time.monotonic()
     with _rate_lock:
-        for ip, bucket in list(_rate_buckets.items()):
+        for key, bucket in list(_rate_buckets.items()):
             while bucket and now - bucket[0] > 60:
                 bucket.popleft()
             if not bucket:
-                del _rate_buckets[ip]
-        bucket = _rate_buckets[client_ip]
+                del _rate_buckets[key]
+        bucket = _rate_buckets[bucket_key]
         if len(bucket) >= _RATE_LIMIT:
             raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试。")
         bucket.append(now)
@@ -88,7 +88,6 @@ def require_api_key(request: Request,
                     x_api_key: Optional[str] = Header(default=None)) -> None:
     """业务路由必须带 X-API-Key。未配置 AI_API_KEY 时拒绝服务（fail-closed），
     防止把无鉴权服务误暴露到公网。"""
-    _check_rate(request.client.host if request.client else "unknown")
     if not _API_KEY:
         raise HTTPException(status_code=503,
                             detail="服务端未配置 AI_API_KEY，请在 .env 设置后重启。")
@@ -96,6 +95,9 @@ def require_api_key(request: Request,
         logger.warning("unauthorized request path=%s ip=%s",
                        request.url.path, request.client.host if request.client else "unknown")
         raise HTTPException(status_code=401, detail="鉴权失败：X-API-Key 不正确。")
+    # 限流放在鉴权【之后】，且按 API key 计数（家庭共用一个 key）：
+    # 避免隧道/反代后全家共享一个源 IP 时相互挤占额度，也避免无 key 的探测流量白占家庭额度。
+    _check_rate(x_api_key)
 
 
 # ---------- 请求/响应模型 ----------
@@ -169,7 +171,8 @@ class AskResp(BaseModel):
 @app.get("/health")
 def health(x_api_key: Optional[str] = Header(default=None)):
     # 连通性检查无需鉴权，但只有带正确 key 才返回服务详情。
-    if _API_KEY and x_api_key == _API_KEY:
+    # 用 secrets.compare_digest 做常量时间比较，避免 == 的定时侧信道（与业务路由一致）。
+    if _API_KEY and secrets.compare_digest(x_api_key or "", _API_KEY):
         with _parse_stats_lock:
             stats = dict(_parse_stats)
         return {"ok": True, "model": llm.model, "configured": llm.is_configured,

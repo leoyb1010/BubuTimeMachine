@@ -23,5 +23,9 @@ if [ ! -d .venv ]; then
 fi
 
 PORT="${AI_PORT:-8000}"
-echo "🚀 AI 服务启动： http://0.0.0.0:${PORT}  （健康检查 /health）"
-exec ./.venv/bin/uvicorn main:app --host 0.0.0.0 --port "${PORT}"
+# 默认只绑本机回环，不暴露到全网卡（与 PocketBase 绑 127.0.0.1 保持一致）。
+# 需要经 Tailscale/内网访问时，在 .env 显式设 BUBU_AI_BIND=100.x.x.x（该机的 Tailscale 地址）
+# 或 0.0.0.0，切勿在裸公网上直接放开。
+BIND="${BUBU_AI_BIND:-127.0.0.1}"
+echo "🚀 AI 服务启动： http://${BIND}:${PORT}  （健康检查 /health）"
+exec ./.venv/bin/uvicorn main:app --host "${BIND}" --port "${PORT}"

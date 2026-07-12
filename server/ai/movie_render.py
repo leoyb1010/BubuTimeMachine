@@ -12,9 +12,11 @@ App 只传【已同步照片的本机 URL】+ 旁白文案，服务端用 ffmpeg
 """
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -23,7 +25,9 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.request import urlopen
+from urllib.error import URLError
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, build_opener
 
 logger = logging.getLogger("bubu.ai.movie")
 
@@ -43,6 +47,121 @@ _DOWNLOAD_TIMEOUT = 20
 _executor = ThreadPoolExecutor(max_workers=1)   # 串行渲染
 _jobs: dict[str, "RenderJob"] = {}
 _jobs_lock = threading.Lock()
+
+
+# ---------- 下载 URL 白名单（SSRF/LFI 防护）----------
+# 背景：/movie/render 的 photo.url 完全来自客户端。若直接 urlopen(url)，持 key 者可传
+# file:///etc/passwd 读本地文件，或 http://127.0.0.1:8090 / http://169.254.169.254
+# 探测内网与云元数据，并把结果渲进 mp4 外泄。故此处强制：只允许下载指向【已配置的
+# 自托管 PocketBase 主机】的 http/https 图片，其余一律拒绝（fail-closed）。
+
+def _load_allowed_hosts() -> set:
+    """从环境变量读取 PocketBase 白名单主机（host 或 host:port，逗号可分隔多个）。
+    优先 PB_BASE_URL（形如 http://127.0.0.1:8090，含端口最精确），退回 BUBU_PB_HOST。
+    默认空集合 = 拒绝一切外部下载（宁可不出片，也不当 SSRF 跳板）。"""
+    raw = os.environ.get("PB_BASE_URL", "").strip() or os.environ.get("BUBU_PB_HOST", "").strip()
+    allowed: set = set()
+    if not raw:
+        return allowed
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        # 允许直接给 host / host:port，也允许给完整 URL；统一补 scheme 好让 urlsplit 解析
+        if "://" not in item:
+            item = "//" + item
+        try:
+            p = urlsplit(item)
+        except ValueError:
+            continue
+        host = (p.hostname or "").lower()
+        if not host:
+            continue
+        try:
+            port = p.port
+        except ValueError:
+            port = None
+        if port:
+            allowed.add(f"{host}:{port}")   # 精确到端口：挡住同机其它端口(redis/后台)的横向探测
+        else:
+            allowed.add(host)               # 未给端口则按主机放行
+    return allowed
+
+
+_ALLOWED_HOSTS = _load_allowed_hosts()
+
+
+def _ip_is_dangerous(ip) -> bool:
+    """私有/保留网段判断：环回、私网、链路本地(含 169.254 云元数据)、保留、组播、未指定。"""
+    return (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def _is_allowed_url(url: str) -> bool:
+    """校验单个下载 URL 是否安全放行。任何不满足项都返回 False（跳过该图，不炸整片）。
+    规则：
+      1) scheme 仅 http/https —— 挡 file://、ftp://、gopher://、data: 等本地文件/协议走私。
+      2) host 必须精确命中白名单（host:port 或裸 host）；空白名单 = 全拒。
+      3) host 若为 DNS 名，解析后不得落在私有/保留网段（防 DNS 重绑定探内网/元数据）；
+         白名单里显式配置的 IP 字面量（如自托管 PB 的 127.0.0.1）按预期例外放行。"""
+    try:
+        p = urlsplit(url)
+    except ValueError:
+        return False
+    scheme = (p.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        logger.warning("movie: reject url (scheme=%s) %s", scheme, url[:80])
+        return False
+    host = (p.hostname or "").lower()
+    if not host:
+        logger.warning("movie: reject url (no host) %s", url[:80])
+        return False
+    try:
+        port = p.port or (443 if scheme == "https" else 80)
+    except ValueError:
+        logger.warning("movie: reject url (bad port) %s", url[:80])
+        return False
+    if f"{host}:{port}" not in _ALLOWED_HOSTS and host not in _ALLOWED_HOSTS:
+        logger.warning("movie: reject non-whitelisted host %s:%s", host, port)
+        return False
+    # host 是否本身就是 IP 字面量（自托管 PB 常配 127.0.0.1 / 192.168.x）
+    try:
+        host_ip = ipaddress.ip_address(host)
+    except ValueError:
+        host_ip = None
+    # 解析所有地址，逐个校验私网；防止白名单 DNS 名被重绑定到内网/元数据地址
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        logger.warning("movie: dns resolve failed %s (%s)", host, exc)
+        return False
+    for info in infos:
+        addr = info[4][0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return False
+        if _ip_is_dangerous(ip):
+            # 仅当白名单填的就是这个 IP 字面量本身，才放行（如显式配置的 loopback PB）
+            if host_ip is not None and host_ip == ip:
+                continue
+            logger.warning("movie: reject private/reserved target %s -> %s", host, addr)
+            return False
+    return True
+
+
+class _ValidatingRedirectHandler(HTTPRedirectHandler):
+    """urllib 默认会跟随 3xx 重定向，绕过初始 host 校验。这里对每个重定向目标重新过一遍
+    _is_allowed_url —— 拦住「白名单图片 302 到 file:// 或 169.254.169.254」这类绕过。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _is_allowed_url(newurl):
+            raise URLError("blocked redirect to disallowed url: %s" % (newurl[:80],))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# 复用一个装了校验重定向处理器的 opener（替代裸 urlopen）
+_opener = build_opener(_ValidatingRedirectHandler)
 
 
 def _resolve_ffmpeg() -> str:
@@ -126,8 +245,11 @@ def _prune_locked() -> None:
 
 
 def _download(url: str, dest: str) -> bool:
+    # 下载前先过 SSRF/LFI 白名单校验，非法直接跳过该图（与坏 URL 一样不炸整片）
+    if not _is_allowed_url(url):
+        return False
     try:
-        with urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp:
+        with _opener.open(url, timeout=_DOWNLOAD_TIMEOUT) as resp:
             data = resp.read(_MAX_BYTES + 1)
         if not data or len(data) > _MAX_BYTES:
             logger.warning("movie: skip oversized/empty image %s", url[:80])
