@@ -19,6 +19,8 @@ final class CaptureModel {
     var isLoadingPreviews = false
     var isSaving = false
     var saveError: String?
+    /// 部分媒体导入失败：面板已关（记录已存），提示上移到首页层展示，避免随面板一起消失。
+    var partialSaveWarning: String?
     var lastSavedSummary: String?
     var note: String = ""
     var mood: Mood?
@@ -170,6 +172,11 @@ final class CaptureModel {
 
         // 应用分析结果
         if let capture = earliestCapture { entry.happenedAt = capture }
+        // 反向地理编码只对首张有 GPS 的照片做一次（各张分析时已跳过，这里统一补一次），
+        // 避免多选照片时每张各发一次反向地理编码。
+        if includeLocation, locationName == nil, let (lat, lon) = coordinate {
+            locationName = await analyzer.locationName(latitude: lat, longitude: lon)
+        }
         if includeLocation,
            locationName == nil,
            coordinate == nil,
@@ -199,9 +206,10 @@ final class CaptureModel {
         let mediaText = savedCount > 0 ? " · \(savedCount) 个媒体" : ""
         let voiceText = pendingVoice == nil ? "" : " · 1 段语音"
         lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
-        // 部分媒体失败：诚实告知，不再"静默丢照片装成功"
+        // 部分媒体失败：诚实告知，不再"静默丢照片装成功"。
+        // 面板随即关闭（记录已存），提示走 partialSaveWarning 在首页层弹出，否则 alert 随面板一起消失、用户看不到。
         if failedMedia > 0 {
-            saveError = "有 \(failedMedia) 个媒体没能导入（可能还在 iCloud 上没下载）。文字已保存，照片请稍后重新选择补上。"
+            partialSaveWarning = "有 \(failedMedia) 个媒体没能导入（可能还在 iCloud 上没下载）。文字已保存，照片请稍后重新选择补上。"
         }
         pickedItems = []
         cameraPhotos = []
@@ -311,7 +319,7 @@ final class CaptureModel {
         media.height = Int(cameraPhoto.image.size.height)
         media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: cameraPhoto.image)
         analyzingHint = "正在看看这张照片里有什么…"
-        let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation)
+        let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
         analyzingHint = nil
         return (media, analysis)
     }
@@ -354,7 +362,7 @@ final class CaptureModel {
             media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
 
             analyzingHint = "正在看看这张照片里有什么…"
-            let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation)
+            let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
             analyzingHint = nil
             return (media, analysis)
         }

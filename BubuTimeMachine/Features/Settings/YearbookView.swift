@@ -14,6 +14,7 @@ struct YearbookView: View {
     @State private var pdfURL: URL?
     @State private var showShare = false
     @State private var errorText: String?
+    @State private var progressText: String?
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -41,7 +42,7 @@ struct YearbookView: View {
 
     private var hero: some View {
         VStack(spacing: 12) {
-            Image(systemName: "book.closed.fill").font(.system(size: 52)).foregroundStyle(theme)
+            Image(systemName: "book.closed.fill").font(BubuTheme.Font.scaled(52)).foregroundStyle(theme)
             Text("把布布的一年，做成一本书")
                 .font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
                 .multilineTextAlignment(.center)
@@ -110,7 +111,7 @@ struct YearbookView: View {
             HStack {
                 if generating { ProgressView().tint(.white) }
                 else { Image(systemName: "doc.badge.arrow.up") }
-                Text(generating ? "正在排版…" : "生成年册 PDF")
+                Text(generating ? (progressText ?? "正在排版…") : "生成年册 PDF")
             }
             .font(BubuTheme.Font.headline.weight(.bold))
             .foregroundStyle(.white)
@@ -125,7 +126,8 @@ struct YearbookView: View {
         guard let profile else { return }
         generating = true
         errorText = nil
-        defer { generating = false }
+        progressText = nil
+        defer { generating = false; progressText = nil }
 
         let cal = Calendar.current
         // 主线程收集快照。
@@ -150,7 +152,7 @@ struct YearbookView: View {
                 return "\(c.authorRole)：\(t)"
             }
         }
-        let coverFile = profile.heroBackgroundFileName ?? entriesInRange.first?.media.first(where: { $0.type == .photo })?.localFileName
+        let coverFile = profile.heroBackgroundFileName ?? entriesInRange.first?.sortedMedia.first(where: { $0.type == .photo })?.localFileName
 
         let input = YearbookExporter.Input(
             childName: profile.name,
@@ -161,7 +163,9 @@ struct YearbookView: View {
             messages: Array(messages.prefix(14)))
 
         let exporter = YearbookExporter(mediaStore: env.mediaStore, theme: env.theme.theme)
-        if let url = await exporter.makePDF(input) {
+        if let url = await exporter.makePDF(input, onProgress: { done, total in
+            progressText = "正在排版… \(done)/\(total)"
+        }) {
             pdfURL = url
             showShare = true
             BubuHaptics.success()

@@ -153,7 +153,7 @@ struct BackupHealthCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: exportStale ? "exclamationmark.shield.fill" : "checkmark.shield.fill")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(BubuTheme.Font.scaled(17, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 32, height: 32)
                     .background(exportStale ? BubuTheme.Color.warning : BubuTheme.Color.success,

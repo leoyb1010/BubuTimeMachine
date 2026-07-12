@@ -75,7 +75,7 @@ struct ReactionRow: View {
                 ForEach(Reaction.allCases) { r in
                     if let n = summary.counts[r], n > 0 {
                         HStack(spacing: 2) {
-                            Text(r.rawValue).font(.system(size: 13))
+                            Text(r.rawValue).font(BubuTheme.Font.scaled(13))
                             Text("\(n)").font(BubuTheme.Font.caption.weight(.medium))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                         }
@@ -100,7 +100,7 @@ struct ReactionPicker: View {
                     onPick(r)
                 } label: {
                     Text(r.rawValue)
-                        .font(.system(size: 30))
+                        .font(BubuTheme.Font.scaled(30))
                         .scaleEffect(current == r ? 1.25 : 1.0)
                         .padding(4)
                 }

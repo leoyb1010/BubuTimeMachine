@@ -74,9 +74,9 @@ struct AccountView: View {
                 ZStack {
                     Color.black.opacity(0.35).ignoresSafeArea()
                     VStack(spacing: 14) {
-                        Text("🏠").font(.system(size: 44))
+                        Text("🏠").font(BubuTheme.Font.scaled(44))
                         Text("正在把布布接回家…")
-                            .font(.system(size: 17, weight: .heavy, design: .rounded))
+                            .font(BubuTheme.Font.scaled(17, weight: .heavy))
                             .foregroundStyle(.white)
                         if let label = env.syncEngine.currentSyncLabel {
                             Text(label)
@@ -85,7 +85,7 @@ struct AccountView: View {
                         }
                         ProgressView().tint(.white)
                         Text("全家的时光正在同步过来，第一次会久一点")
-                            .font(.system(size: 12))
+                            .font(BubuTheme.Font.scaled(12))
                             .foregroundStyle(.white.opacity(0.7))
                     }
                     .padding(30)
@@ -100,7 +100,7 @@ struct AccountView: View {
 
     private var header: some View {
         VStack(spacing: 6) {
-            Text("👨‍👩‍👧").font(.system(size: 44))
+            Text("👨‍👩‍👧").font(BubuTheme.Font.scaled(44))
             Text("一家人，各自登录")
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(BubuTheme.Color.warmBrown)

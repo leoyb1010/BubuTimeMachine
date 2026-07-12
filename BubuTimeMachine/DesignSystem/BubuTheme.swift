@@ -156,13 +156,23 @@ nonisolated enum BubuTheme {
 
     // MARK: 字号阶梯（偏大，适老；马卡龙加重标题字）
     enum Font {
-        /// 固定字号的适老替代：按系统「文字大小」设置缩放（Dynamic Type）。
+        /// 内建的字号放大上限。UIFontMetrics 直接读系统 trait，**不受 SwiftUI 的
+        /// `.dynamicTypeSize(...)` 修饰符夹取**，所以上限必须在这里手动钳住——否则老人开到
+        /// 最大无障碍字号时，密集页面（首页/时光轴）会破版。此上限已足够大、老人可读。
+        static let maxContentSizeCategory: UIContentSizeCategory = .accessibilityLarge
+
+        /// 固定字号的适老替代：按系统「文字大小」设置缩放（Dynamic Type），并钳在上限内。
         /// 老人把系统字体调大后，用它的文字会跟着变大——固定 .system(size:) 不会。
         static func scaled(_ size: CGFloat,
                            weight: SwiftUI.Font.Weight = .regular,
                            design: SwiftUI.Font.Design = .rounded) -> SwiftUI.Font {
+            // 把当前内容尺寸档位钳到上限（UIContentSizeCategory 定义了 > 比较），再交给
+            // UIFontMetrics 按钳后档位缩放，保证 scaled() 的输出永远不超过上限、不爆版。
+            let current = UITraitCollection.current.preferredContentSizeCategory
+            let capped = current > maxContentSizeCategory ? maxContentSizeCategory : current
+            let traits = UITraitCollection(preferredContentSizeCategory: capped)
             let scaledSize = UIFontMetrics(forTextStyle: .body)
-                .scaledValue(for: size)
+                .scaledValue(for: size, compatibleWith: traits)
             return SwiftUI.Font.system(size: scaledSize, design: design).weight(weight)
         }
 

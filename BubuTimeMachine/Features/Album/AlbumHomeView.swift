@@ -132,7 +132,7 @@ struct AlbumHomeView: View {
                             .fill(theme.opacity(0.10))
                             .overlay {
                                 Image(systemName: album.icon)
-                                    .font(.system(size: 30))
+                                    .font(BubuTheme.Font.scaled(30))
                                     .foregroundStyle(theme)
                             }
                     }
@@ -145,14 +145,14 @@ struct AlbumHomeView: View {
 
             HStack(spacing: 5) {
                 Image(systemName: album.icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(BubuTheme.Font.scaled(11, weight: .semibold))
                     .foregroundStyle(theme)
                 Text(album.title)
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
                 Text("\(album.count)")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .frame(width: 150)
@@ -197,7 +197,7 @@ struct AlbumHomeView: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(1)
                 Text(album.subtitle)
-                    .font(.system(size: 11))
+                    .font(BubuTheme.Font.scaled(11))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)
             }

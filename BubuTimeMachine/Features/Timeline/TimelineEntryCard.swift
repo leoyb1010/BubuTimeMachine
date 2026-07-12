@@ -36,7 +36,7 @@ struct TimelineEntryCard: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 if let mood = entry.mood {
-                    Text(mood.emoji).font(.system(size: 18))
+                    Text(mood.emoji).font(BubuTheme.Font.scaled(18))
                 }
                 Text(BubuDateFormat.shortDateTime(entry.happenedAt))
                     .font(BubuTheme.Font.caption)
@@ -52,7 +52,7 @@ struct TimelineEntryCard: View {
             }
             if let place = entry.locationName {
                 Label(place, systemImage: "mappin")
-                    .font(.system(size: 12))
+                    .font(BubuTheme.Font.scaled(12))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)
             }
@@ -62,7 +62,7 @@ struct TimelineEntryCard: View {
     @ViewBuilder
     private var mediaGrid: some View {
         let count = min(entry.media.count, 9)
-        if count == 1, let media = entry.media.first {
+        if count == 1, let media = entry.coverMedia {
             MediaThumbnail(media: media, mediaStore: mediaStore)
                 .aspectRatio(1, contentMode: .fit)
                 .frame(width: 156, height: 156)
@@ -70,7 +70,7 @@ struct TimelineEntryCard: View {
         } else {
             let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: count == 2 ? 2 : 3)
             LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(entry.media.prefix(9)) { media in
+                ForEach(entry.sortedMedia.prefix(9)) { media in
                     MediaThumbnail(media: media, mediaStore: mediaStore)
                         .aspectRatio(1, contentMode: .fit)
                         .clipped()
@@ -96,18 +96,18 @@ struct TimelineEntryCard: View {
         let realComments = entry.comments.filter { !Reaction.isReaction($0) }.count
         return HStack(spacing: 12) {
             HStack(spacing: 6) {
-                Image(systemName: syncSymbol).font(.system(size: 11))
+                Image(systemName: syncSymbol).font(BubuTheme.Font.scaled(11))
                 Text(entry.syncState.friendlyText).font(BubuTheme.Font.caption)
             }
             ReactionRow(summary: reactionSummary)
             Spacer()
             if !entry.voiceNotes.isEmpty {
                 Label("\(entry.voiceNotes.count)", systemImage: "waveform")
-                    .font(.system(size: 12))
+                    .font(BubuTheme.Font.scaled(12))
             }
             if realComments > 0 {
                 Label("\(realComments)", systemImage: "person.2.fill")
-                    .font(.system(size: 12))
+                    .font(BubuTheme.Font.scaled(12))
             }
         }
         .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.85))

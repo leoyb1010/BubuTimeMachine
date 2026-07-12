@@ -103,7 +103,7 @@ struct CeremonyAnimation: View {
     private var sparkleRing: some View {
         ForEach(0..<10, id: \.self) { index in
             Image(systemName: index.isMultiple(of: 2) ? "sparkle" : "star.fill")
-                .font(.system(size: index.isMultiple(of: 2) ? 15 : 10, weight: .semibold))
+                .font(BubuTheme.Font.scaled(index.isMultiple(of: 2) ? 15 : 10, weight: .semibold))
                 .foregroundStyle(BubuTheme.Color.primary.opacity(0.82))
                 .offset(y: sparkle ? -78 : -38)
                 .rotationEffect(.degrees(Double(index) / 10 * 360))

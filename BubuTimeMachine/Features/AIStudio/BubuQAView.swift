@@ -53,7 +53,7 @@ struct BubuQAView: View {
     private var intro: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("💬 关于\(childName)的成长，问我都行")
-                .font(.system(size: 17, weight: .heavy, design: .rounded))
+                .font(BubuTheme.Font.scaled(17, weight: .heavy))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             Text("我会翻遍你记录的时光来回答，还会告诉你依据哪条记录。")
                 .font(BubuTheme.Font.caption)
@@ -62,7 +62,7 @@ struct BubuQAView: View {
                 ForEach(samples, id: \.self) { s in
                     Button { ask(s) } label: {
                         Text(s)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(13, weight: .semibold))
                             .foregroundStyle(BubuTheme.Color.primary)
                             .padding(.horizontal, 12).padding(.vertical, 8)
                             .background(BubuTheme.Color.primary.opacity(0.12), in: Capsule())
@@ -79,13 +79,13 @@ struct BubuQAView: View {
             if msg.isUser { Spacer(minLength: 40) }
             VStack(alignment: .leading, spacing: 6) {
                 Text(msg.text)
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(15, weight: .medium))
                     .foregroundStyle(msg.isUser ? .white : BubuTheme.Color.warmBrown)
                 if !msg.sources.isEmpty {
                     ForEach(msg.sources) { src in
                         Button { jump(to: src.id) } label: {
                             Label(src.dateText + " · " + src.snippet, systemImage: "text.quote")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .font(BubuTheme.Font.scaled(11, weight: .medium))
                                 .foregroundStyle(msg.isUser ? .white.opacity(0.85) : BubuTheme.Color.secondaryText)
                                 .lineLimit(1)
                         }
@@ -120,7 +120,7 @@ struct BubuQAView: View {
             Button {
                 ask(input)
             } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
+                Image(systemName: "arrow.up.circle.fill").font(BubuTheme.Font.scaled(30))
                     .foregroundStyle(canSend ? BubuTheme.Color.primary : .gray)
             }
             .buttonStyle(.plain)

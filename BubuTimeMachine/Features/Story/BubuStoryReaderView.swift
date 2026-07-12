@@ -48,18 +48,27 @@ struct BubuStoryReaderView: View {
         HStack {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(BubuTheme.Font.scaled(16, weight: .bold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .frame(width: 40, height: 40)
                     .background(.white.opacity(0.7), in: Circle())
             }
             Spacer()
-            HStack(spacing: 5) {
-                ForEach(chapters.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(i == index ? Color.white : Color.white.opacity(0.55))
-                        .frame(width: i == index ? 18 : 7, height: 7)
-                        .animation(.easeInOut(duration: 0.3), value: index)
+            // 章节多时进度点会挤爆顶栏，超过 12 章改用"当前/总数"文本（P2l）
+            if chapters.count > 12 {
+                Text("\(index + 1) / \(chapters.count)")
+                    .font(BubuTheme.Font.scaled(14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(.white.opacity(0.25), in: Capsule())
+            } else {
+                HStack(spacing: 5) {
+                    ForEach(chapters.indices, id: \.self) { i in
+                        Capsule()
+                            .fill(i == index ? Color.white : Color.white.opacity(0.55))
+                            .frame(width: i == index ? 18 : 7, height: 7)
+                            .animation(.easeInOut(duration: 0.3), value: index)
+                    }
                 }
             }
             Spacer()
@@ -81,10 +90,10 @@ struct BubuStoryReaderView: View {
                 .padding(.bottom, 22)
 
             Text("\(chapter.noText)\(chapter.ageText.isEmpty ? "" : " · \(chapter.ageText)")")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .font(BubuTheme.Font.scaled(13, weight: .heavy))
                 .foregroundStyle(.white.opacity(0.9))
             Text(chapter.title)
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(24, weight: .black))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.14), radius: 6, y: 2)
                 .multilineTextAlignment(.center)
@@ -118,7 +127,7 @@ struct BubuStoryReaderView: View {
     private func navButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 13.5, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(13.5, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .padding(.horizontal, 18)
                 .frame(height: 44)
@@ -198,7 +207,7 @@ private struct StoryLine: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 16.5, weight: .medium, design: .rounded))
+            .font(BubuTheme.Font.scaled(16.5, weight: .medium))
             .foregroundStyle(.white)
             .multilineTextAlignment(.center)
             .lineSpacing(4)

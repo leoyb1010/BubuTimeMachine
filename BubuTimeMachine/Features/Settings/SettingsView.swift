@@ -94,6 +94,7 @@ struct SettingsView: View {
         NavigationLink { MembersView() } label: {
             HStack(spacing: 14) {
                 Text(currentMember?.avatarEmoji ?? "🙂")
+                    // 固定圆形头像内的单 emoji，随字号放大会溢出 60pt 圆，保持固定
                     .font(.system(size: 36))
                     .frame(width: 60, height: 60)
                     .background(Color(hex: currentMember?.themeColorHex ?? "#F28C9E").opacity(0.18), in: Circle())
@@ -104,7 +105,9 @@ struct SettingsView: View {
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 Spacer()
-                syncBadge
+                // 徽章挪到 overlay 单独放行尾，这里仅用隐藏占位保留原布局。
+                // 否则徽章的 NavigationLink 嵌在外层 label 里，点它会进错页（P2d）。
+                syncBadge.hidden()
             }
             .padding(16)
             .background(
@@ -120,6 +123,10 @@ struct SettingsView: View {
             .bubuCardShadow()
         }
         .buttonStyle(.plain)
+        // 同步徽章作为独立点击目标叠在行尾，与身份卡的换人跳转互不干扰（P2d）
+        .overlay(alignment: .trailing) {
+            syncBadge.padding(.trailing, 16)
+        }
     }
 
     /// 同步状态徽章：状态正常时不抢注意力，点开进诊断页。
@@ -185,7 +192,7 @@ struct SettingsView: View {
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             Text("为布布而做，2025 ❤️").font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
-            Text(AppVersion.displayFull).font(.system(size: 11, design: .monospaced))
+            Text(AppVersion.displayFull).font(BubuTheme.Font.scaled(11, design: .monospaced))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .padding(.top, 2)
         }
@@ -218,7 +225,7 @@ struct SettingsView: View {
     private func settingRowLabel(_ title: String, icon: String, tint: Color, subtitle: String?) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 17, weight: .semibold))
+                .font(BubuTheme.Font.scaled(17, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
                 .background(tint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -231,7 +238,7 @@ struct SettingsView: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
+            Image(systemName: "chevron.right").font(BubuTheme.Font.scaled(14, weight: .semibold))
                 .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.6))
         }
         .padding(.horizontal, 14)

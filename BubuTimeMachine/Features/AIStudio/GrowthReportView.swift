@@ -69,11 +69,11 @@ struct GrowthReportView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .foregroundStyle(tint)
-                .font(.system(size: 20, weight: .semibold))
+                .font(BubuTheme.Font.scaled(20, weight: .semibold))
                 .frame(width: 40, height: 40)
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(value).font(.system(size: 24, weight: .bold, design: .rounded)).foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(value).font(BubuTheme.Font.scaled(24, weight: .bold)).foregroundStyle(BubuTheme.Color.warmBrown)
                 Text(title).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }
             Spacer()

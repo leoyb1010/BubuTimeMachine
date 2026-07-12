@@ -65,7 +65,7 @@ struct PhotoFrameView: View {
     private var photoLayer: some View {
         ZStack {
             if let current, let img = images[current.id] {
-                KenBurnsImage(image: img, seed: current.id.hashValue, animating: !paused)
+                KenBurnsImage(image: img, seed: current.id.bubuStableSeed, animating: !paused)
                     .id(current.id)
                     .transition(.opacity)
             } else {
@@ -90,19 +90,19 @@ struct PhotoFrameView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if let current, current.isOnThisDay {
                         Label("那年今日", systemImage: "calendar.badge.clock")
-                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .font(BubuTheme.Font.scaled(13, weight: .heavy))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(.orange.opacity(0.85), in: Capsule())
                     }
                     if let current {
                         Text(current.caption)
-                            .font(.system(size: 22, weight: .heavy, design: .rounded))
+                            .font(BubuTheme.Font.scaled(22, weight: .heavy))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
                             .lineLimit(2)
                         Text(current.dateText + (current.ageText.isEmpty ? "" : " · " + current.ageText))
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(14, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.9))
                             .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
                     }
@@ -119,12 +119,12 @@ struct PhotoFrameView: View {
             HStack {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(now, format: .dateTime.hour().minute())
-                        .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    Text(BubuDateFormat.shortTime(now))
+                        .font(BubuTheme.Font.scaled(34, weight: .heavy))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
                     Text(childName + "的相册")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
                         .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
                 }
@@ -141,7 +141,7 @@ struct PhotoFrameView: View {
                 circleButton("xmark") { dismiss() }
                 Spacer()
                 Text("\(index + 1) / \(slides.count)")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(14, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 7)
                     .background(.black.opacity(0.35), in: Capsule())
@@ -161,7 +161,7 @@ struct PhotoFrameView: View {
     private func circleButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 20, weight: .bold))
+                .font(BubuTheme.Font.scaled(20, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
                 .background(.ultraThinMaterial, in: Circle())
@@ -172,14 +172,14 @@ struct PhotoFrameView: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 46)).foregroundStyle(.white.opacity(0.7))
+                .font(BubuTheme.Font.scaled(46)).foregroundStyle(.white.opacity(0.7))
             Text("还没有可播放的照片")
-                .font(.system(size: 18, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                .font(BubuTheme.Font.scaled(18, weight: .heavy)).foregroundStyle(.white)
             Text("先去记录几段带照片的时光，就能把这里变成布布的相框。")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(BubuTheme.Font.scaled(14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75)).multilineTextAlignment(.center)
             Button("返回") { dismiss() }
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(15, weight: .bold))
                 .foregroundStyle(.black)
                 .padding(.horizontal, 22).padding(.vertical, 10)
                 .background(.white, in: Capsule())
@@ -220,7 +220,7 @@ struct PhotoFrameView: View {
         var rest: [FrameSlide] = []
 
         for entry in entries {
-            guard let photo = entry.media.first(where: {
+            guard let photo = entry.sortedMedia.first(where: {
                 $0.type == .photo && ($0.localFileName != nil || $0.thumbnailFileName != nil)
             }) else { continue }
             let comp = cal.dateComponents([.month, .day, .year], from: entry.happenedAt)
@@ -288,6 +288,7 @@ private struct KenBurnsImage: View {
     let seed: Int
     let animating: Bool
     @State private var animate = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // 由 seed 确定性推导起止锚点：避免机械重复，又不受重绘影响
     private var dx: CGFloat { (seed & 1 == 0 ? 1 : -1) * (10 + CGFloat(abs(seed) % 17)) }
@@ -299,12 +300,14 @@ private struct KenBurnsImage: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: geo.size.width, height: geo.size.height)
-                .scaleEffect(animate ? 1.14 : 1.02)
-                .offset(x: animate ? dx : -dx, y: animate ? dy : -dy)
+                // reduceMotion 时定格满幅、不推拉（全 App 唯一漏网的动效，参考 GrowthMoviePlayer，P2h）
+                .scaleEffect(reduceMotion ? 1 : (animate ? 1.14 : 1.02))
+                .offset(x: reduceMotion ? 0 : (animate ? dx : -dx),
+                        y: reduceMotion ? 0 : (animate ? dy : -dy))
                 .clipped()
                 .onAppear {
                     animate = false
-                    guard animating else { return }
+                    guard animating, !reduceMotion else { return }
                     withAnimation(.easeInOut(duration: 10)) { animate = true }
                 }
         }

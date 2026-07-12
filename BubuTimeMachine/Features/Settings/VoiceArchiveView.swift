@@ -71,7 +71,7 @@ struct VoiceArchiveView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(age == 0 ? "0 岁" : "\(age) 岁")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(22, weight: .bold))
                     .foregroundStyle(theme)
                 Rectangle().fill(theme.opacity(0.2)).frame(height: 1)
             }
@@ -89,7 +89,7 @@ struct VoiceArchiveView: View {
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                 Spacer()
                 Text(BubuDateFormat.shortDate(memo.recordedAt))
-                    .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
+                    .font(BubuTheme.Font.scaled(11)).foregroundStyle(BubuTheme.Color.secondaryText)
             }
             if let fileName = memo.localFileName {
                 VoicePlayerBubble(fileName: fileName, duration: memo.durationSeconds ?? 0,

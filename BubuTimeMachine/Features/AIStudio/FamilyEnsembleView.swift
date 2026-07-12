@@ -59,13 +59,13 @@ struct FamilyEnsembleView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(BubuDateFormat.shortDate(entry.happenedAt))
-                                .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
+                                .font(BubuTheme.Font.scaled(11)).foregroundStyle(BubuTheme.Color.secondaryText)
                             Text(entry.note ?? "（无文字）").font(BubuTheme.Font.body)
                                 .foregroundStyle(BubuTheme.Color.warmBrown).lineLimit(1)
                         }
                         Spacer()
                         Text("\(entry.comments.count + 1) 个视角")
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(theme)
+                            .font(BubuTheme.Font.scaled(12, weight: .semibold)).foregroundStyle(theme)
                     }
                     .padding()
                     .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
@@ -104,7 +104,7 @@ struct FamilyEnsembleView: View {
 
             if !displayed.isEmpty {
                 Text(displayed)
-                    .font(.system(size: 18, design: .serif))
+                    .font(BubuTheme.Font.scaled(18, design: .serif))
                     .foregroundStyle(BubuTheme.Color.warmBrown).lineSpacing(7)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()

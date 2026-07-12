@@ -33,9 +33,12 @@ struct BubuIdentityCard: View {
         ZStack {
             front
                 .opacity(isFlipped ? 0 : 1)
+                .allowsHitTesting(!isFlipped)
             back
                 .opacity(isFlipped ? 1 : 0)
                 .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
+                // 背面透明时仍会命中、吞掉正面点击——按翻面态开关命中（P2f）
+                .allowsHitTesting(isFlipped)
         }
         .background(cardBackground)
         .overlay(alignment: .topTrailing) {
@@ -65,7 +68,12 @@ struct BubuIdentityCard: View {
         .bubuCardShadow()
         .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("布布身份卡，\(profile.name)，\(ageText)，\(daysText)，点击编辑资料，轻点头像翻面")
+        .accessibilityAddTraits(.isButton)
+        // 卡片本身只翻面（不进编辑页），标签与操作照实描述（P2f）
+        .accessibilityLabel(isFlipped
+            ? "布布身份卡背面，性别、血型、出生地，轻点翻回正面"
+            : "布布身份卡，\(profile.name)，\(ageText)，\(daysText)，轻点翻面查看性别、血型、出生地")
+        .accessibilityAction { flip() }
     }
 
     private func flip() {
@@ -89,17 +97,17 @@ struct BubuIdentityCard: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text("BUBU IDENTITY")
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .font(BubuTheme.Font.scaled(9, weight: .bold, design: .rounded))
                                 .tracking(1.4)
                                 .foregroundStyle(theme.primary.opacity(0.72))
 
                             Text(profile.name)
-                                .font(.system(size: 23, weight: .black, design: .rounded))
+                                .font(BubuTheme.Font.scaled(23, weight: .black, design: .rounded))
                                 .foregroundStyle(BubuTheme.Color.warmBrown)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.6)
                             Text("中文名 · \(profile.name)")
-                                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                                .font(BubuTheme.Font.scaled(10.5, weight: .bold, design: .rounded))
                                 .foregroundStyle(theme.primary.opacity(0.80))
                                 .lineLimit(1)
                         }
@@ -107,7 +115,7 @@ struct BubuIdentityCard: View {
                         Spacer()
 
                         Text("ACTIVE")
-                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .font(BubuTheme.Font.scaled(10, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
@@ -120,10 +128,10 @@ struct BubuIdentityCard: View {
                         barcode
                         VStack(alignment: .leading, spacing: 2) {
                             Text("No.\(cardNo)")
-                                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                                .font(BubuTheme.Font.scaled(9.5, weight: .bold, design: .monospaced))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                             Text("小小探险家 · 家庭认证")
-                                .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                                .font(BubuTheme.Font.scaled(10.5, weight: .semibold, design: .rounded))
                                 .foregroundStyle(theme.primary)
                         }
                         Spacer()
@@ -143,12 +151,12 @@ struct BubuIdentityCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("BUBU IDENTITY · 背面")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                     .tracking(1.4)
                     .foregroundStyle(theme.primary.opacity(0.72))
                 Spacer()
                 Image(systemName: "arrow.uturn.left.circle")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(BubuTheme.Font.scaled(14, weight: .semibold))
                     .foregroundStyle(theme.primary)
             }
 
@@ -158,10 +166,10 @@ struct BubuIdentityCard: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("FULL ID")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
                     .foregroundStyle(theme.primary.opacity(0.70))
                 Text(profile.id.uuidString)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
@@ -172,7 +180,7 @@ struct BubuIdentityCard: View {
             .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             Text("轻点卡片翻回正面")
-                .font(.system(size: 10))
+                .font(BubuTheme.Font.scaled(10))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -185,11 +193,11 @@ struct BubuIdentityCard: View {
     private func backRow(title: String, value: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
                 .foregroundStyle(theme.primary.opacity(0.70))
             Spacer()
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
         }
         .padding(.horizontal, 10)
@@ -207,9 +215,9 @@ struct BubuIdentityCard: View {
             if isBirthdayMonth {
                 HStack(spacing: 4) {
                     Text("🎂")
-                        .font(.system(size: 12))
+                        .font(BubuTheme.Font.scaled(12))
                     Text("生日月")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .font(BubuTheme.Font.scaled(10, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 8)
@@ -217,7 +225,7 @@ struct BubuIdentityCard: View {
                 .background(theme.primary, in: Capsule())
             } else {
                 Image(systemName: "sparkle")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(BubuTheme.Font.scaled(13, weight: .bold))
                     .foregroundStyle(theme.primary)
             }
         }
@@ -248,7 +256,7 @@ struct BubuIdentityCard: View {
             }
 
             Text("布布")
-                .font(.system(size: 11, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(11, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -273,10 +281,10 @@ struct BubuIdentityCard: View {
     private func idChip(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 9, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
                 .foregroundStyle(theme.primary.opacity(0.70))
             Text(value)
-                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .font(BubuTheme.Font.scaled(11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)

@@ -52,6 +52,7 @@ struct BubuGlassTabBar: View {
         .padding(.horizontal, 14)
         .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
+        .accessibilityLabel("主导航")
         .sensoryFeedback(.selection, trigger: selection)
         .sensoryFeedback(.impact(weight: .medium), trigger: centerTrigger)
     }
@@ -63,9 +64,9 @@ struct BubuGlassTabBar: View {
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: item.systemImage)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(BubuTheme.Font.scaled(18, weight: .semibold))
                     .symbolEffect(.bounce, value: active)
-                Text(item.title).font(.system(size: 10, weight: .semibold, design: .rounded))
+                Text(item.title).font(BubuTheme.Font.scaled(10, weight: .semibold, design: .rounded))
             }
             .foregroundStyle(active ? tint : BubuTheme.Color.secondaryText)
             .frame(width: 58, height: 50)
@@ -80,6 +81,8 @@ struct BubuGlassTabBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.title)
+        // 选中项补 .isSelected，VoiceOver 会读出"已选中"（P2g）
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private var centerButton: some View {
@@ -89,10 +92,10 @@ struct BubuGlassTabBar: View {
         } label: {
             VStack(spacing: 1) {
                 Image(systemName: "plus")
-                    .font(.system(size: 23, weight: .black))
+                    .font(BubuTheme.Font.scaled(23, weight: .black))
                     .symbolEffect(.bounce, value: centerTrigger)
                 Text("记录")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
             }
                 .foregroundStyle(.white)
                 .frame(width: 58, height: 58)

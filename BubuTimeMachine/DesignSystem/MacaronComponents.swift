@@ -126,7 +126,7 @@ struct BubuDreamPhoto: View {
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
             Text(motif)
-                .font(.system(size: height * 0.45, weight: .bold))
+                .font(BubuTheme.Font.scaled(height * 0.45, weight: .bold))
                 .foregroundStyle(.white.opacity(0.6))
             BubuSparkle(size: 12, color: .white.opacity(0.9))
                 .position(x: 24, y: 20)

@@ -47,7 +47,7 @@ struct VoiceRecorderBar: View {
             if recorder.state == .recording {
                 liveWaveform
                 Text(timeString(recorder.elapsed))
-                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .font(BubuTheme.Font.scaled(16, weight: .medium, design: .monospaced))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             } else {
                 Text("点一下开始，再点一下收好")
@@ -85,7 +85,7 @@ struct VoiceRecorderBar: View {
             toggle()
         } label: {
             Image(systemName: recorder.state == .recording ? "stop.circle.fill" : "mic.circle.fill")
-                .font(.system(size: 44))
+                .font(BubuTheme.Font.scaled(44))
                 .foregroundStyle(recorder.state == .recording ? .red : theme)
                 .symbolEffect(.pulse, isActive: recorder.state == .recording)
         }
@@ -141,14 +141,15 @@ struct VoicePlayerBubble: View {
     @State private var player = AudioPlayer()
 
     var body: some View {
-        let url = mediaStore.mediaURL(for: fileName)
+        // playbackURL：胶囊解封语音在临时目录，普通录音在媒体目录——统一在此解析。
+        let url = mediaStore.playbackURL(for: fileName)
         let isThis = player.playingURL == url
         return HStack(spacing: 12) {
             Button {
                 player.toggle(url: url)
             } label: {
                 Image(systemName: isThis && player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 36))
+                    .font(BubuTheme.Font.scaled(36))
                     .foregroundStyle(tint)
             }
             .buttonStyle(.plain)
@@ -159,7 +160,7 @@ struct VoicePlayerBubble: View {
                 .frame(height: 30)
 
             Text(timeString(duration))
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .font(BubuTheme.Font.scaled(14, weight: .medium, design: .monospaced))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)

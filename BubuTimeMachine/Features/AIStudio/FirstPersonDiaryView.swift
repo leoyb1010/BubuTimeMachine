@@ -86,7 +86,7 @@ struct FirstPersonDiaryView: View {
                 entryAvatar(entry, size: 42)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(BubuDateFormat.shortDate(entry.happenedAt))
-                        .font(.system(size: 11)).foregroundStyle(BubuTheme.Color.secondaryText)
+                        .font(BubuTheme.Font.scaled(11)).foregroundStyle(BubuTheme.Color.secondaryText)
                     Text(entry.note ?? "")
                         .font(BubuTheme.Font.caption)
                         .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -106,7 +106,7 @@ struct FirstPersonDiaryView: View {
 
     @ViewBuilder
     private func entryAvatar(_ entry: Entry, size: CGFloat) -> some View {
-        if let media = entry.media.first(where: { $0.type == .photo }) {
+        if let media = entry.sortedMedia.first(where: { $0.type == .photo }) {
             MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: size / 2)
                 .frame(width: size, height: size)
                 .clipShape(Circle())
@@ -176,10 +176,10 @@ struct FirstPersonDiaryView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("布布说")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .semibold))
                     .foregroundStyle(theme)
                 Text(displayed)
-                    .font(.system(size: 18, weight: .regular, design: .rounded))
+                    .font(BubuTheme.Font.scaled(18, weight: .regular))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineSpacing(6)
 

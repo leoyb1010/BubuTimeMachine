@@ -10,53 +10,74 @@ struct FamilyFeedView: View {
     @Query private var milestones: [Milestone]
     @State private var selectedKind: FeedEventKind?
 
+    // 动态行缓存：从多张表现场派生，但只在数据指纹变化时重算一次。
+    // 关键修复：原先 derivedEvents 每次 body 都 new 一批 id=UUID() 的 @Model，
+    // 列表 diff/滚动位置全失效 + 每次重算全表 faulting（U-P1-4）。
+    @State private var rows: [FeedRow] = []
+
     private var theme: Color { env.theme.theme.primary }
-    private var filteredEvents: [FeedEvent] {
-        guard let selectedKind else { return derivedEvents }
-        return derivedEvents.filter { $0.kind == selectedKind }
+
+    /// 轻量指纹：各表条数 + 最新时间戳；变化即重建，不构建数组。
+    private var fingerprint: String {
+        "\(events.count)-\(entries.count)-\(comments.count)-\(milestones.count)"
+        + "-\(Int(events.first?.happenedAt.timeIntervalSince1970 ?? 0))"
+        + "-\(Int(entries.first?.happenedAt.timeIntervalSince1970 ?? 0))"
+        + "-\(Int(comments.first?.createdAt.timeIntervalSince1970 ?? 0))"
     }
+
+    private var filteredRows: [FeedRow] {
+        guard let selectedKind else { return rows }
+        return rows.filter { $0.kind == selectedKind }
+    }
+
     /// FeedEvent 表不参与同步（各设备只有自己产生的）。要看到全家的动态，
     /// 从【已同步的数据】现场派生：Entry、Comment（含语音补充）、Milestone（R4 P2-22）。
-    private var derivedEvents: [FeedEvent] {
+    /// 派生结果用值类型 FeedRow，id 取稳定键 kind|target，跨 body 恒定。
+    private func rebuildRows() {
         let persisted = Set(events.compactMap { e in e.targetLocalId.map { "\(e.kindRaw)|\($0)" } })
         func fresh(_ kind: FeedEventKind, _ target: String) -> Bool {
             !persisted.contains("\(kind.rawValue)|\(target)")
         }
 
-        let entryEvents = entries.compactMap { entry -> FeedEvent? in
+        var all: [FeedRow] = []
+        // 已持久化事件（本机产生）
+        for e in events {
+            let key = e.targetLocalId.map { "\(e.kindRaw)|\($0)" } ?? "\(e.kindRaw)|\(e.id.uuidString)"
+            all.append(FeedRow(id: key, kind: e.kind, actorRole: e.actorRole,
+                               summary: e.summary, happenedAt: e.happenedAt, targetLocalId: e.targetLocalId))
+        }
+        for entry in entries {
             let target = entry.id.uuidString
-            guard fresh(.entryCreated, target) else { return nil }
-            return FeedEvent(kind: .entryCreated, actorRole: entry.authorRole,
-                             summary: entry.note?.isEmpty == false ? "记录了：\(entry.note!)" : "记录了布布的一个新瞬间",
-                             targetLocalId: target, happenedAt: entry.happenedAt)
+            guard fresh(.entryCreated, target) else { continue }
+            all.append(FeedRow(id: "\(FeedEventKind.entryCreated.rawValue)|\(target)", kind: .entryCreated,
+                               actorRole: entry.authorRole,
+                               summary: entry.note?.isEmpty == false ? "记录了：\(entry.note!)" : "记录了布布的一个新瞬间",
+                               happenedAt: entry.happenedAt, targetLocalId: target))
         }
         // 家人的评论/语音补充：每条评论用自己的 id 做目标，互相不会吞掉（R4 P2-23）
-        let commentEvents = comments.compactMap { comment -> FeedEvent? in
-            guard let entry = comment.entry, !entry.isArchived else { return nil }
+        for comment in comments {
+            guard let entry = comment.entry, !entry.isArchived else { continue }
             let target = comment.id.uuidString
             let isVoice = comment.voiceFileName != nil || comment.remoteURL != nil
-            guard fresh(isVoice ? .voiceAdded : .commentAdded, target) else { return nil }
+            let kind: FeedEventKind = isVoice ? .voiceAdded : .commentAdded
+            guard fresh(kind, target) else { continue }
             let text = comment.text?.isEmpty == false ? "补充了：\(comment.text!)" : "补了一段语音"
-            return FeedEvent(kind: isVoice ? .voiceAdded : .commentAdded,
-                             actorRole: comment.authorRole, summary: text,
-                             targetLocalId: target, happenedAt: comment.createdAt)
+            all.append(FeedRow(id: "\(kind.rawValue)|\(target)", kind: kind,
+                               actorRole: comment.authorRole, summary: text,
+                               happenedAt: comment.createdAt, targetLocalId: target))
         }
-        let milestoneEvents = milestones.compactMap { m -> FeedEvent? in
-            guard let happened = m.happenedAt else { return nil }
+        for m in milestones {
+            guard let happened = m.happenedAt else { continue }
             let target = m.id.uuidString
-            guard fresh(.milestoneLit, target) else { return nil }
-            return FeedEvent(kind: .milestoneLit, actorRole: "家人",
-                             summary: "点亮了里程碑：\(m.title)",
-                             targetLocalId: target, happenedAt: happened)
+            guard fresh(.milestoneLit, target) else { continue }
+            all.append(FeedRow(id: "\(FeedEventKind.milestoneLit.rawValue)|\(target)", kind: .milestoneLit,
+                               actorRole: "家人", summary: "点亮了里程碑：\(m.title)",
+                               happenedAt: happened, targetLocalId: target))
         }
 
         var seen = Set<String>()
-        return (events + entryEvents + commentEvents + milestoneEvents)
-            .filter { event in
-                let key = event.targetLocalId.map { "\(event.kindRaw)|\($0)" }
-                    ?? "\(event.kindRaw)|\(event.id.uuidString)"
-                return seen.insert(key).inserted
-            }
+        rows = all
+            .filter { seen.insert($0.id).inserted }
             .sorted { $0.happenedAt > $1.happenedAt }
     }
 
@@ -65,10 +86,10 @@ struct FamilyFeedView: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 header
                 filters
-                ForEach(filteredEvents) { event in
-                    eventRow(event)
+                ForEach(filteredRows) { row in
+                    eventRow(row)
                 }
-                if filteredEvents.isEmpty { emptyState }
+                if filteredRows.isEmpty { emptyState }
             }
             .padding()
         }
@@ -76,6 +97,7 @@ struct FamilyFeedView: View {
         .navigationTitle("家庭动态")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Entry.self) { EntryDetailView(entry: $0) }
+        .onChange(of: fingerprint, initial: true) { _, _ in rebuildRows() }
     }
 
     private var header: some View {
@@ -115,11 +137,11 @@ struct FamilyFeedView: View {
         .buttonStyle(.plain)
     }
 
-    private func eventRow(_ event: FeedEvent) -> some View {
+    private func eventRow(_ event: FeedRow) -> some View {
         NavigationLink(value: entry(for: event)) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: event.kind.icon)
-                    .font(.system(size: 22))
+                    .font(BubuTheme.Font.scaled(22))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(theme, in: Circle())
@@ -151,7 +173,7 @@ struct FamilyFeedView: View {
         .disabled(entry(for: event) == nil)
     }
 
-    private func entry(for event: FeedEvent) -> Entry? {
+    private func entry(for event: FeedRow) -> Entry? {
         guard event.kind == .entryCreated,
               let target = event.targetLocalId,
               let id = UUID(uuidString: target) else { return nil }
@@ -165,4 +187,15 @@ struct FamilyFeedView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 60)
     }
+}
+
+// MARK: - 动态行（值类型，稳定 id）
+/// 现场派生的动态行；id 取稳定键 kind|target，跨 body 恒定，供 ForEach diff 用。
+private struct FeedRow: Identifiable {
+    let id: String
+    let kind: FeedEventKind
+    let actorRole: String
+    let summary: String
+    let happenedAt: Date
+    let targetLocalId: String?
 }

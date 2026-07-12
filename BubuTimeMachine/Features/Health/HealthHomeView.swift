@@ -53,13 +53,13 @@ struct HealthHomeView: View {
     private var sleepTimerCard: some View {
         if let startedAt = sleepStartedAt {
             HStack(spacing: 12) {
-                Text("😴").font(.system(size: 30))
+                Text("😴").font(BubuTheme.Font.scaled(30))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("布布睡着啦")
-                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     Text(startedAt, style: .timer)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(22, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(theme)
                 }
@@ -68,7 +68,7 @@ struct HealthHomeView: View {
                     endSleep(startedAt: startedAt)
                 } label: {
                     Text("醒啦")
-                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 20).padding(.vertical, 10)
                         .background(theme, in: Capsule())
@@ -82,18 +82,18 @@ struct HealthHomeView: View {
                 startSleep()
             } label: {
                 HStack(spacing: 12) {
-                    Text("🌙").font(.system(size: 26))
+                    Text("🌙").font(BubuTheme.Font.scaled(26))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("开始哄睡计时")
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
                         Text("锁屏和灵动岛都能看到睡了多久，醒来点一下自动记好")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .font(BubuTheme.Font.scaled(12, weight: .medium, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
                     Spacer()
                     Image(systemName: "play.circle.fill")
-                        .font(.system(size: 26))
+                        .font(BubuTheme.Font.scaled(26))
                         .foregroundStyle(theme)
                 }
                 .padding(14)
@@ -169,7 +169,7 @@ struct HealthHomeView: View {
     private func insightTile(icon: String, title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 22, weight: .semibold))
+                .font(BubuTheme.Font.scaled(22, weight: .semibold))
                 .foregroundStyle(theme)
             Text(title).font(BubuTheme.Font.body.weight(.semibold))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -187,10 +187,10 @@ struct HealthHomeView: View {
             ForEach(HealthRecordKind.allCases) { kind in
                 Button { composingKind = kind } label: {
                     HStack(spacing: 10) {
-                        Text(kind.emoji).font(.system(size: 26))
+                        Text(kind.emoji).font(BubuTheme.Font.scaled(26))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(kind.title).font(BubuTheme.Font.body.weight(.semibold))
-                            Text(kind.placeholder).font(.system(size: 11)).lineLimit(1)
+                            Text(kind.placeholder).font(BubuTheme.Font.scaled(11)).lineLimit(1)
                         }
                         Spacer(minLength: 0)
                     }
@@ -230,7 +230,7 @@ struct HealthHomeView: View {
 
     private func recordRow(_ record: HealthRecord) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(record.kind.emoji).font(.system(size: 28))
+            Text(record.kind.emoji).font(BubuTheme.Font.scaled(28))
                 .frame(width: 42, height: 42)
                 .background(theme.opacity(0.1), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
@@ -246,7 +246,7 @@ struct HealthHomeView: View {
                     FlowLayout(spacing: 6) {
                         ForEach(record.tags.prefix(5), id: \.self) { tag in
                             Text(tag)
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .rounded))
                                 .foregroundStyle(theme)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
@@ -315,7 +315,7 @@ struct HealthHomeView: View {
 
     private var disclaimer: some View {
         Text("如果出现持续发热、过敏、精神状态异常等情况，请及时咨询医生。这里的记录主要用于家庭观察和复盘。")
-            .font(.system(size: 12))
+            .font(BubuTheme.Font.scaled(12))
             .foregroundStyle(BubuTheme.Color.secondaryText)
             .padding(.top, 4)
     }

@@ -43,7 +43,7 @@ struct WhatsNewSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
-                Text("✨").font(.system(size: 44))
+                Text("✨").font(BubuTheme.Font.scaled(44))
                 Text("更新好啦")
                     .font(BubuTheme.Font.hugeTitle)
                     .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -102,11 +102,11 @@ struct WhatsNewListView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .firstTextBaseline) {
                             Text("v\(note.version)")
-                                .font(.system(size: 20, weight: .black, design: .rounded))
+                                .font(BubuTheme.Font.scaled(20, weight: .black))
                                 .foregroundStyle(BubuTheme.Color.warmBrown)
                             Spacer()
                             Text(note.date)
-                                .font(.system(size: 12, design: .rounded))
+                                .font(BubuTheme.Font.scaled(12))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                         }
                         Text(note.title)
@@ -117,7 +117,7 @@ struct WhatsNewListView: View {
                                 HStack(alignment: .top, spacing: 8) {
                                     Text("·").foregroundStyle(BubuTheme.Color.primary)
                                     Text(item)
-                                        .font(.system(size: 14, design: .rounded))
+                                        .font(BubuTheme.Font.scaled(14))
                                         .foregroundStyle(BubuTheme.Color.warmBrown)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }

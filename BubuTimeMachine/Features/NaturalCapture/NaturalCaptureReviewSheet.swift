@@ -69,12 +69,12 @@ struct NaturalCaptureReviewSheet: View {
 
                         if hasSymptom {
                             Text("以上仅记录事实，不构成医疗建议；如情况严重请及时联系医生。")
-                                .font(.system(size: 11))
+                                .font(BubuTheme.Font.scaled(11))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                         }
                         if result.warnings.contains("date_inferred") || result.warnings.contains("item_date_dropped") {
                             Text("部分时间由系统推断或缺失，可点「编辑」修正。")
-                                .font(.system(size: 11))
+                                .font(BubuTheme.Font.scaled(11))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                         }
                     }
@@ -135,7 +135,7 @@ struct NaturalCaptureReviewSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: value.domain.icon)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(BubuTheme.Font.scaled(13, weight: .semibold))
                     .foregroundStyle(theme)
                     .frame(width: 26, height: 26)
                     .background(theme.opacity(0.10), in: Circle())
@@ -150,7 +150,7 @@ struct NaturalCaptureReviewSheet: View {
 
                 if lowConfidence {
                     Text("置信度低")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
@@ -161,7 +161,7 @@ struct NaturalCaptureReviewSheet: View {
 
                 if needsConfirm {
                     Text(confirmed ? "已确认" : "需要确认")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                         .foregroundStyle(confirmed ? .white : theme)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -176,7 +176,7 @@ struct NaturalCaptureReviewSheet: View {
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
+                        .font(BubuTheme.Font.scaled(18))
                         .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.5))
                 }
                 .accessibilityLabel("删除这条")
@@ -200,7 +200,7 @@ struct NaturalCaptureReviewSheet: View {
                 HStack(spacing: 10) {
                     if !editing, let date = value.date {
                         Label(BubuDateFormat.shortDateTime(date), systemImage: "calendar")
-                            .font(.system(size: 11))
+                            .font(BubuTheme.Font.scaled(11))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
                     Spacer()
@@ -260,7 +260,7 @@ struct NaturalCaptureReviewSheet: View {
             HStack(spacing: 3) {
                 Text(item.wrappedValue.domain.displayName)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(BubuTheme.Font.scaled(8, weight: .bold))
             }
             .font(BubuTheme.Font.caption.weight(.semibold))
             .foregroundStyle(theme)
@@ -328,7 +328,10 @@ struct NaturalCaptureReviewSheet: View {
                 return item.wrappedValue.fields.string(key) ?? ""
             },
             set: { newValue in
-                let trimmed = newValue.bubuTrimmed
+                // 中文逗号归一化为小数点，避免"37，8"被当非法输入丢进 string（与 HealthRecordSheet 一致，P2j）
+                let trimmed = newValue
+                    .replacingOccurrences(of: "，", with: ".")
+                    .bubuTrimmed
                 if trimmed.isEmpty {
                     item.wrappedValue.fields[key] = nil
                 } else if let number = Double(trimmed) {

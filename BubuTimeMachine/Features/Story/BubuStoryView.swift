@@ -48,14 +48,14 @@ struct BubuStoryView: View {
     private var banner: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("一本正在生长的书")
-                .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(12.5, weight: .bold))
                 .foregroundStyle(.white.opacity(0.95))
             Text("布布的成长绘本")
-                .font(.system(size: 26, weight: .black, design: .rounded))
+                .font(BubuTheme.Font.scaled(26, weight: .black))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
             Text("由你记录的点滴，自动编织成故事 · 共 \(chapters.count) 章")
-                .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                .font(BubuTheme.Font.scaled(12.5, weight: .medium))
                 .foregroundStyle(.white.opacity(0.95))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -84,20 +84,20 @@ struct BubuStoryView: View {
                 .shadow(color: .black.opacity(0.16), radius: 7, y: 4)
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(ch.noText)\(ch.ageText.isEmpty ? "" : " · \(ch.ageText)")")
-                    .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11.5, weight: .bold))
                     .foregroundStyle(BubuTheme.Color.deepRose)
                 Text(ch.title)
-                    .font(.system(size: 16.5, weight: .heavy, design: .rounded))
+                    .font(BubuTheme.Font.scaled(16.5, weight: .heavy))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(1)
                 Text(ch.lines.first ?? "")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .medium))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .bold))
+                .font(BubuTheme.Font.scaled(13, weight: .bold))
                 .foregroundStyle(BubuTheme.Color.peach)
         }
         .padding(14)
@@ -108,7 +108,7 @@ struct BubuStoryView: View {
     /// 章节封面：记录里有照片就用真实照片，否则渐变兜底。
     @ViewBuilder
     private func chapterCover(_ ch: StoryChapter, entry: Entry?) -> some View {
-        if let photo = entry?.media.first(where: { $0.type == .photo }) {
+        if let photo = entry?.sortedMedia.first(where: { $0.type == .photo }) {
             MediaThumbnail(media: photo, mediaStore: env.mediaStore, cornerRadius: 12, size: .card)
         } else {
             BubuDreamPhoto(hue: ch.hue, height: 80, cornerRadius: 12, motif: ch.emoji)
@@ -117,12 +117,12 @@ struct BubuStoryView: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Text("✦").font(.system(size: 44)).foregroundStyle(BubuTheme.Color.peach)
+            Text("✦").font(BubuTheme.Font.scaled(44)).foregroundStyle(BubuTheme.Color.peach)
             Text("绘本还是空白的")
-                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .font(BubuTheme.Font.scaled(16, weight: .heavy))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             Text("在「时光」里选中喜欢的记录，\n点「收进绘本」，这里就会长出一章一章的故事")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(BubuTheme.Font.scaled(13, weight: .medium))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .multilineTextAlignment(.center)
         }

@@ -54,6 +54,11 @@ struct RootTabView: View {
                 quickCaptureTrigger += 1
             }
         }
+        // 完整版 App 的 Dynamic Type 上限：4 Tab + 卡片 + 玻璃底栏属密集布局，
+        // 收紧到 accessibility1（无障碍档中最小的一档，body 已约 1.6×）——在「字尽量大」与
+        // 「不破版」之间取的保守安全档；younger 家人才走完整版，极端无障碍档少见。
+        // 老人主要走 SimpleMode，其上限在 RootView 放宽到 accessibility3。
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .ignoresSafeArea(.keyboard)
         .onAppear {
             #if DEBUG

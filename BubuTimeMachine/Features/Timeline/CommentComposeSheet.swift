@@ -39,7 +39,7 @@ struct CommentComposeSheet: View {
                                 VoicePlayerBubble(fileName: v.fileName, duration: v.duration,
                                                   waveform: v.waveform, mediaStore: env.mediaStore, tint: theme)
                                 Button { voice = nil } label: {
-                                    Image(systemName: "trash.circle.fill").font(.system(size: 26))
+                                    Image(systemName: "trash.circle.fill").font(BubuTheme.Font.scaled(26))
                                         .foregroundStyle(BubuTheme.Color.secondaryText)
                                 }
                                 .buttonStyle(.plain)

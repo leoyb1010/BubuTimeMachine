@@ -21,6 +21,15 @@ struct MilestonesHomeView: View {
     private var profile: ChildProfile? { profiles.first }
 
     private var achieved: [Milestone] { filteredMilestones.filter(\.isAchieved) }
+    /// 待播仪式：全量里程碑里已达成且仪式未播的第一个（不受搜索/分类过滤影响，P2a）。
+    private var pendingCeremony: Milestone? {
+        milestones.first { $0.isAchieved && !$0.ceremonyPlayed }
+    }
+    /// 仪式触发指纹：只跟"哪些已达成且未播"的集合有关，与过滤结果无关。
+    private var ceremonyFingerprint: String {
+        milestones.filter { $0.isAchieved && !$0.ceremonyPlayed }
+            .map { $0.id.uuidString }.sorted().joined(separator: ",")
+    }
     private var allPending: [Milestone] { filteredMilestones.filter { !$0.isAchieved } }
     private var pending: [Milestone] {
         if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedCategory == "全部" {
@@ -90,11 +99,10 @@ struct MilestonesHomeView: View {
                 ceremonyFor = nil
             }
         }
-        .onChange(of: achieved.map { "\($0.id)\($0.ceremonyPlayed)" }) { _, _ in
-            // 有新达成且未播放仪式 → 播放
-            if ceremonyFor == nil,
-               let pendingCeremony = achieved.first(where: { !$0.ceremonyPlayed }) {
-                ceremonyFor = pendingCeremony
+        // 仪式队列走全量数据层，不受搜索/分类过滤影响；initial:true 让别处点亮后进页也补播（P2a）
+        .onChange(of: ceremonyFingerprint, initial: true) { _, _ in
+            if ceremonyFor == nil, let next = pendingCeremony {
+                ceremonyFor = next
             }
         }
     }
@@ -108,16 +116,16 @@ struct MilestonesHomeView: View {
                 BubuProgressRing(value: done, total: max(total, 1), size: 60, stroke: 7,
                                  color: .white, track: .white.opacity(0.4))
                 Text("\(done)")
-                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .font(BubuTheme.Font.scaled(18, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text("已点亮 \(done) / \(max(total, 1)) 颗星")
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .font(BubuTheme.Font.scaled(17, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
                 Text("还有 \(max(0, total - done)) 颗等你点亮 ♡")
-                    .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.95))
             }
             Spacer(minLength: 0)
@@ -199,7 +207,7 @@ struct MilestonesHomeView: View {
     private func medallion(_ milestone: Milestone, lit: Bool) -> some View {
         VStack(spacing: 8) {
             Text(milestone.emoji)
-                .font(.system(size: 28))
+                .font(BubuTheme.Font.scaled(28))
                 .grayscale(lit ? 0 : 1)
                 .opacity(lit ? 1 : 0.45)
                 .frame(width: 54, height: 54)
@@ -208,7 +216,7 @@ struct MilestonesHomeView: View {
                 )
                 .overlay { Circle().stroke(lit ? theme : .clear, lineWidth: 2) }
             Text(milestone.title)
-                .font(.system(size: 12, weight: .medium))
+                .font(BubuTheme.Font.scaled(12, weight: .medium))
                 .foregroundStyle(lit ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)

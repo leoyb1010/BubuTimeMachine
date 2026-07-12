@@ -12,7 +12,7 @@ struct ComingSoonView: View {
             BubuTheme.Color.background.ignoresSafeArea()
             VStack(spacing: 18) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 60))
+                    .font(BubuTheme.Font.scaled(60))
                     .foregroundStyle(BubuTheme.Color.primary.opacity(0.75))
                 Text(title)
                     .font(BubuTheme.Font.title)

@@ -15,6 +15,8 @@ enum AppIconManager {
         case "peach": return "AppIcon-peach"
         case "night": return "AppIcon-night"
         case "cream": return "AppIcon-cream"
+        // 晚霞暂无专属图标素材，映射到色系最接近的蜜桃粉图标（P2i）
+        case "dusk": return "AppIcon-peach"
         default: return nil
         }
     }

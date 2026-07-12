@@ -26,6 +26,8 @@ struct GrowthMovieView: View {
     @State private var serverMovieURL: URL?
     @State private var serverHint = ""
     @State private var showServerPlayer = false
+    /// 服务端渲染轮询任务句柄：离开页面时取消，避免最长 10 分钟的轮询在后台空跑（P2b）。
+    @State private var renderTask: Task<Void, Never>?
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -58,6 +60,7 @@ struct GrowthMovieView: View {
                 ServerMoviePlayer(url: serverMovieURL, title: draftTitle) { showServerPlayer = false }
             }
         }
+        .onDisappear { renderTask?.cancel() }
     }
 
     @ViewBuilder
@@ -96,12 +99,12 @@ struct GrowthMovieView: View {
                         draft = nil
                     } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(template.emoji).font(.system(size: 28))
+                            Text(template.emoji).font(BubuTheme.Font.scaled(28))
                             Text(template.title)
                                 .font(BubuTheme.Font.caption.weight(.semibold))
                                 .foregroundStyle(BubuTheme.Color.warmBrown)
                             Text(template.subtitle)
-                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .font(BubuTheme.Font.scaled(12, weight: .regular))
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                                 .lineLimit(2)
                         }
@@ -238,7 +241,7 @@ struct GrowthMovieView: View {
 
                 // 配了服务器才出「合成高清版」：真正的 mp4，可存可分享
                 if env.config.isAIConfigured {
-                    Button { Task { await renderOnServer() } } label: {
+                    Button { renderTask = Task { await renderOnServer() } } label: {
                         Label(serverRendering
                               ? "服务端合成中… \(Int(serverProgress * 100))%"
                               : "合成高清版 · 服务端",
@@ -317,6 +320,8 @@ struct GrowthMovieView: View {
             let tempURL = try await env.aiService.downloadRenderedMovie(jobId: status.jobId)
             serverMovieURL = Self.persistMovie(tempURL, year: year)
             showServerPlayer = true
+        } catch is CancellationError {
+            // 离开页面主动取消轮询，不提示（P2b）
         } catch {
             serverHint = "服务端合成暂不可用：\(error.localizedDescription)"
         }
@@ -477,12 +482,12 @@ private struct ServerMoviePlayer: View {
                 HStack {
                     Button { player?.pause(); onClose() } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+                            .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.9))
                     }
                     Spacer()
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up.circle.fill")
-                            .font(.system(size: 30)).foregroundStyle(.white.opacity(0.9))
+                            .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.9))
                     }
                 }
                 .padding()

@@ -52,6 +52,7 @@ struct MembersView: View {
         } label: {
             HStack(spacing: 14) {
                 Text(member.avatarEmoji)
+                    // 固定圆形头像内的单 emoji，随字号放大会溢出 54pt 圆，保持固定
                     .font(.system(size: 32))
                     .frame(width: 54, height: 54)
                     .background(Color(hex: member.themeColorHex).opacity(0.18), in: Circle())
@@ -63,7 +64,7 @@ struct MembersView: View {
                 }
                 Spacer()
                 if isCurrent {
-                    Text("当前").font(.system(size: 13, weight: .semibold))
+                    Text("当前").font(BubuTheme.Font.scaled(13, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(Color(hex: member.themeColorHex), in: Capsule())
@@ -118,7 +119,9 @@ struct MemberEditSheet: View {
                 Section("头像") {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
                         ForEach(emojiChoices, id: \.self) { e in
-                            Text(e).font(.system(size: 30))
+                            Text(e)
+                                // 头像选择格内的单 emoji，随字号放大会溢出 44pt 格，保持固定
+                                .font(.system(size: 30))
                                 .frame(width: 44, height: 44)
                                 .background(emoji == e ? Color(hex: colorHex).opacity(0.2) : .clear, in: Circle())
                                 .overlay { Circle().stroke(emoji == e ? Color(hex: colorHex) : .clear, lineWidth: 2) }

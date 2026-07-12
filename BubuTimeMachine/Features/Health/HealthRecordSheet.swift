@@ -327,7 +327,7 @@ private struct SnackComposer: View {
                             Text(chip)
                                 .font(BubuTheme.Font.body.weight(.bold))
                             Text(draft.tags.contains(chip) ? "已选择" : "点一下")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .font(BubuTheme.Font.scaled(11, weight: .medium, design: .rounded))
                         }
                         .foregroundStyle(draft.tags.contains(chip) ? .white : BubuTheme.Color.warmBrown)
                         .frame(maxWidth: .infinity)
@@ -386,7 +386,7 @@ private struct WaterComposer: View {
                         .fill(tint.opacity(0.12))
                         .frame(width: 82, height: 82)
                     Image(systemName: "drop.fill")
-                        .font(.system(size: 38, weight: .bold))
+                        .font(BubuTheme.Font.scaled(38, weight: .bold))
                         .foregroundStyle(tint)
                 }
                 VStack(alignment: .leading, spacing: 5) {
@@ -644,7 +644,7 @@ private struct AmountStepper: View {
             Spacer()
             HStack(spacing: 4) {
                 TextField("输入", text: $editingText)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(16, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
@@ -653,7 +653,7 @@ private struct AmountStepper: View {
                     .onSubmit { commit() }
                 if value != nil {
                     Text(unit)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
             }
@@ -709,7 +709,7 @@ private struct TemperatureStepper: View {
             }
             Spacer()
             TextField("输入", text: $editingText)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(BubuTheme.Font.scaled(16, weight: .bold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
