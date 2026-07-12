@@ -77,6 +77,7 @@ struct CapsuleComposeView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(emojiChoices, id: \.self) { e in
+                    // 固定字号：emoji 徽标锁在 50pt 圆内，随 Dynamic Type 放大会明显溢出圆形
                     Text(e).font(.system(size: 30))
                         .frame(width: 50, height: 50)
                         .background(emoji == e ? theme.opacity(0.18) : BubuTheme.Color.softFill, in: Circle())
@@ -119,7 +120,7 @@ struct CapsuleComposeView: View {
                     VoicePlayerBubble(fileName: v.fileName, duration: v.duration,
                                       waveform: v.waveform, mediaStore: env.mediaStore, tint: theme)
                     Button { pendingVoice = nil } label: {
-                        Image(systemName: "trash.circle.fill").font(.system(size: 26))
+                        Image(systemName: "trash.circle.fill").font(BubuTheme.Font.scaled(26))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }.buttonStyle(.plain)
                 }

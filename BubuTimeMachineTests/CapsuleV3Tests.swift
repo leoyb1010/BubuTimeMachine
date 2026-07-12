@@ -79,4 +79,53 @@ struct CapsuleV3Tests {
         #expect(words.count == 24)
         #expect(words.allSatisfy { CapsuleRecovery.wordList.contains($0) })
     }
+
+    // MARK: 媒体闭环回归（C1）
+    /// 封存把语音嵌进加密 blob → 明文源可删 → 解封拿回正文与语音内容；
+    /// 语音落临时目录而非媒体目录（不留明文）、按 salt 幂等命名（不产生孤儿）。
+    @Test("媒体闭环：封存嵌语音删明文、解封拿回内容且不落媒体目录明文、幂等无孤儿")
+    func mediaClosureRoundTrip() throws {
+        let media = MediaStore()
+        let vault = CapsuleVault(crypto: crypto, mediaStore: media)
+        let capsuleId = UUID().uuidString
+        let unlockAt = Date(timeIntervalSince1970: 1_000_000_000)
+        let now = unlockAt.addingTimeInterval(1)
+
+        // 明文语音先落媒体目录（模拟录音导入）
+        let voiceBytes = Data("FAKE-M4A-VOICE-BYTES-\(capsuleId)".utf8)
+        let plainVoiceName = try media.saveBlob(voiceBytes, preferredExtension: "m4a")
+        #expect(media.fileExists(forMedia: plainVoiceName))
+
+        let payload = CapsulePayload(letter: "给布布的信", voiceFileName: plainVoiceName,
+                                     voiceDuration: 1, voiceWaveform: [0.2, 0.4])
+
+        // 封存（先写密文 blob）
+        let blob = try vault.sealV3(payload, recoveryCode: code, salt: capsuleId)
+        #expect(media.fileExists(forMedia: blob))
+
+        // 模拟 compose：密文落地后删明文源
+        media.deleteMedia(named: plainVoiceName)
+        #expect(!media.fileExists(forMedia: plainVoiceName))
+
+        // 解封：正文与语音内容都拿得回
+        let out = try vault.unseal(fileName: blob, unlockAt: unlockAt, salt: capsuleId,
+                                   recoveryCode: code, now: now)
+        #expect(out.letter == "给布布的信")
+        let voiceOut = try #require(out.voiceFileName)
+        let url = media.playbackURL(for: voiceOut)
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect((try? Data(contentsOf: url)) == voiceBytes)
+
+        // 不留媒体目录明文：解封后的语音名在媒体目录里不存在（只在 tmp scratch）
+        #expect(!media.fileExists(forMedia: voiceOut))
+
+        // 幂等无孤儿：二次解封复用同一按 salt 命名的文件
+        let out2 = try vault.unseal(fileName: blob, unlockAt: unlockAt, salt: capsuleId,
+                                    recoveryCode: code, now: now)
+        #expect(out2.voiceFileName == voiceOut)
+
+        // 清理
+        media.deleteMedia(named: blob)
+        try? FileManager.default.removeItem(at: url)
+    }
 }

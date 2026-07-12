@@ -8,7 +8,7 @@ struct CapsulePayload: Codable, Sendable {
     var voiceFileName: String?          // 语音文件名（已加密的 .m4a blob）
     var voiceDuration: Double
     var voiceWaveform: [Float]
-    var photoFileNames: [String]        // 附带照片（已加密的 blob）
+    var photoFileNames: [String]        // 预留字段：附带照片文件名（当前写信流程未启用；勿删，删除会破坏旧 blob 解码）
     var embeddedVoiceData: Data?
     var embeddedVoiceFileExtension: String?
 
@@ -96,13 +96,14 @@ struct CapsuleVault: Sendable {
         }
         var payload = try JSONDecoder().decode(CapsulePayload.self, from: plain)
         if let data = payload.embeddedVoiceData {
-            let existingName = payload.voiceFileName
-            let hasExistingFile = existingName.map { mediaStore.fileExists(forMedia: $0) } ?? false
-            if !hasExistingFile {
-                let ext = payload.embeddedVoiceFileExtension ?? "m4a"
-                payload.voiceFileName = try mediaStore.saveBlob(data, preferredExtension: ext)
+            // 内嵌语音解密到临时目录（幂等、按 salt 固定命名）——不落媒体目录、不产生孤儿 blob。
+            // 之前每次开启都 saveBlob 到媒体目录，会留下明文并每开一次多一个孤儿；现改为 tmp 复用。
+            let ext = payload.embeddedVoiceFileExtension ?? "m4a"
+            if let scratchName = mediaStore.materializeCapsuleVoice(data, salt: salt, ext: ext) {
+                payload.voiceFileName = scratchName
             }
         }
+        // 极旧 blob（无内嵌语音、仅媒体目录引用）保持原样：voiceFileName 指向媒体目录，playbackURL 会回退命中。
         return payload
     }
 }
