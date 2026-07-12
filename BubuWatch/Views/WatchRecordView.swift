@@ -26,6 +26,12 @@ struct WatchRecordView: View {
         .navigationTitle("记录")
         .containerBackground(WatchTheme.deepRose.opacity(0.2).gradient, for: .tabView)
         .sheet(isPresented: $showMood) { WatchMoodView() }
+        // 来电/Siri 打断自动收尾的录音：当作正常停止发送，已录部分不丢（W-P2）。
+        .onChange(of: recorder.isRecording) { _, nowRecording in
+            guard !nowRecording, let result = recorder.consumeInterruptedResult() else { return }
+            connector.sendVoice(fileURL: result.url, duration: result.duration)
+            WKInterfaceDevice.current().play(.success)
+        }
         .onDisappear { recorder.cancel() }
     }
 

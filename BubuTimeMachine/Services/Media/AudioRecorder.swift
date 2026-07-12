@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Observation
+import UIKit
 
 // MARK: - 录音器
 /// AVFoundation 录音，输出 .m4a 到沙盒，实时采集电平用于波形可视化。
@@ -18,6 +19,7 @@ final class AudioRecorder: NSObject {
     private var timer: Timer?
     private var currentURL: URL?
     private var interruptionObserver: NSObjectProtocol?
+    private var backgroundObserver: NSObjectProtocol?
 
     /// 来电/闹钟等中断时自动收尾保留的录音（UI 观察到后当作正常 stop 结果处理，已录的不丢）。
     private(set) var interruptedResult: (url: URL, duration: TimeInterval, waveform: [Float])?
@@ -64,6 +66,7 @@ final class AudioRecorder: NSObject {
             self.levels = []
             startTimer()
             observeInterruptions()
+            observeBackgrounding()
             // 录音中 Live Activity（灵动岛/锁屏可见时长）；未授权时安静 no-op。
             BubuActivityController.startVoiceRecording(childName: SharedDefaults.childName)
             return true
@@ -96,6 +99,30 @@ final class AudioRecorder: NSObject {
         interruptionObserver = nil
     }
 
+    /// 进后台自动收尾：录音中锁屏/切后台，App 被系统挂起时录音停止，但这不是 AVAudioSession
+    /// 打断，interruptionNotification 不触发；若不处理，回前台 UI 仍显示录音中、Live Activity 时长
+    /// 照跳，且后半段静默丢失（W-P1-3）。此处进后台主动 stop() 保存已录部分，走与打断收尾同一路径
+    /// （复位 state/isRecording + 结束 Live Activity），UI 的 .onChange(state==.finished) 照常导入。
+    /// 不加 audio 后台模式（避免 App Review 风险），改用自动收尾。
+    private func observeBackgrounding() {
+        removeBackgroundObserver()
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state == .recording else { return }
+                self.interruptedResult = self.stop()
+            }
+        }
+    }
+
+    private func removeBackgroundObserver() {
+        if let backgroundObserver {
+            NotificationCenter.default.removeObserver(backgroundObserver)
+        }
+        backgroundObserver = nil
+    }
+
     /// 停止录音，返回（临时文件 URL、时长、波形采样）。
     @discardableResult
     func stop() -> (url: URL, duration: TimeInterval, waveform: [Float])? {
@@ -108,6 +135,7 @@ final class AudioRecorder: NSObject {
         let waveform = downsample(levels, to: 40)
         self.recorder = nil
         removeInterruptionObserver()
+        removeBackgroundObserver()
         try? AVAudioSession.sharedInstance().setActive(false)
         BubuActivityController.endVoiceRecording(elapsedText: Self.timeText(duration))
         return (url, duration, waveform)
@@ -119,6 +147,7 @@ final class AudioRecorder: NSObject {
         timer?.invalidate(); timer = nil
         recorder = nil; currentURL = nil
         removeInterruptionObserver()
+        removeBackgroundObserver()
         state = .idle
         elapsed = 0
         levels = []
