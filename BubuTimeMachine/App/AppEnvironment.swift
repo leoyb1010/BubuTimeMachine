@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import OSLog
 
 // MARK: - 全局依赖容器（DI）
 /// @Observable 持有全部服务与全局状态，通过 .environment() 注入，便于 Mock 与测试。
@@ -72,12 +73,31 @@ final class AppEnvironment {
         return BubuAIService(baseURL: url, apiKey: config.aiAPIKey)
     }
 
+    /// 注册的一次性数据迁移。后续批次往这里追加即可。
+    ///
+    /// 【刻意不做】胶囊 v2→v3 自动迁移——不要"顺手"加进来。原因：
+    /// v2 密钥仅由 unlockAt+salt(=胶囊 id) 派生，这两项都是公开、随记录同步到全家每台设备的字段，
+    /// 因此任何家人设备（含不同 Apple ID）零配置即可打开 v2 历史信。
+    /// v3 是真 E2E：密钥=24 词恢复码，只在【同一 Apple ID】的 iCloud 钥匙串同步，跨 Apple ID 的家人
+    /// 必须手动录入纸条恢复码才能拿到 key。若把存量 v2 无条件迁到 v3，凡是没录入过恢复码的家人设备
+    /// 将【再也打不开这些历史信】——30 年档案的可读性回归，不可接受（情形②，锁死风险）。
+    /// 且"迁移=获得 E2E"与"无 key 设备仍可开"本质矛盾，无法两全，故不提供无条件迁移。
+    /// v2 残留风险（持自托管服务器原始数据者可推导密钥）在本 App 威胁模型（家庭自托管、离线优先）下较低；
+    /// 新信已全部走 v3。如未来确要迁移，须是用户显式触发、且已确认全家设备都已分发恢复码的前提下进行。
+    static var dataMigrations: [DataMigration] {
+        [
+            DataMigration(id: "vaccine-legacy-v1") { try VaccineLegacyMigrator.perform(context: $0) },
+            DataMigration(id: "growth-backfill-v1") { try GrowthMeasurementBackfill.perform(context: $0) },
+            DataMigration(id: "birthday-normalize-v1") { try BirthdayNormalizationMigrator.perform(context: $0) }
+        ]
+    }
+
     /// App 启动后调用：注入上下文、启动同步层（离线时无副作用）。
     func bootstrap(context: ModelContext) {
         seedMilestonePresetsIfNeeded(context: context)
         normalizeMilestonePresets(context: context)
-        VaccineLegacyMigrator.migrateIfNeeded(context: context)
-        GrowthMeasurementBackfill.run(context: context)
+        // 一次性动作统一收编进版本化迁移框架：只在未完成时跑一次，成功才落标记。
+        DataMigrationRunner(migrations: Self.dataMigrations).runPendingMigrations(context: context)
         syncEngine.attach(context: context)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-bubu-force-upload-ios-to-cloud") {
@@ -99,7 +119,33 @@ final class AppEnvironment {
         Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }
         installThumbnailBackfill(context: context)
         refreshWidgetSnapshot(context: context)
+        logStoreIntegrity(context: context)
     }
+
+    /// store 建成、启动装配完成后做一次轻量完整性统计：各主要实体 fetchCount 写入日志。
+    /// 只做 SQLite COUNT（微秒级），不加载对象、不阻塞后续启动流程；用于尽早发现"打得开但
+    /// 数据异常清零/骤减"这类静默故障（配合 BubuStoreHealth 的打不开保护形成双保险）。
+    private func logStoreIntegrity(context: ModelContext) {
+        func count<T: PersistentModel>(_ type: T.Type) -> Int {
+            (try? context.fetchCount(FetchDescriptor<T>())) ?? -1   // -1 = 该实体统计失败
+        }
+        Self.storeLog.info(
+            """
+            store 完整性统计 · 打不开保护=\(BubuStoreHealth.loadFailed, privacy: .public) | \
+            Entry=\(count(Entry.self), privacy: .public) Media=\(count(Media.self), privacy: .public) \
+            Milestone=\(count(Milestone.self), privacy: .public) FirstTime=\(count(FirstTime.self), privacy: .public) \
+            TimeCapsule=\(count(TimeCapsule.self), privacy: .public) VoiceMemo=\(count(VoiceMemo.self), privacy: .public) \
+            VoiceNote=\(count(VoiceNote.self), privacy: .public) Comment=\(count(Comment.self), privacy: .public) \
+            GrowthMovie=\(count(GrowthMovie.self), privacy: .public) FamilyMember=\(count(FamilyMember.self), privacy: .public) \
+            ChildProfile=\(count(ChildProfile.self), privacy: .public) HealthRecord=\(count(HealthRecord.self), privacy: .public) \
+            VaccineRecord=\(count(VaccineRecord.self), privacy: .public) \
+            GrowthMeasurement=\(count(GrowthMeasurement.self), privacy: .public) \
+            FeedEvent=\(count(FeedEvent.self), privacy: .public) PendingDeletion=\(count(PendingDeletion.self), privacy: .public)
+            """
+        )
+    }
+
+    private static let storeLog = Logger(subsystem: "com.bubu.timemachine", category: "StoreIntegrity")
 
     /// 小组件不直接依赖主 App 进程。把它需要的档案/头像/最近照片写入 App Group defaults，
     /// 避免 WidgetKit 进程直接打开 SwiftData store 失败时显示空白。
