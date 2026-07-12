@@ -39,8 +39,9 @@ protocol APIClient: Sendable {
     func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO
     func fetchTimeCapsules(since: Date?) async throws -> [TimeCapsuleDTO]
 
-    /// 拉取自 since 以来被删除记录的 localId（tombstone），用于把删除传播到本设备。
-    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String]
+    /// 拉取自 since 以来被删除记录的墓碑（localId + 服务器 updated），用于把删除传播到本设备，
+    /// 并让删除也能推进增量游标。
+    func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone]
 
     /// 实时变更流（SSE 长连）：远端有任何写入就产出一个信号。不支持的后端返回 nil。
     func realtimeStream() -> AsyncStream<Void>?
@@ -83,6 +84,6 @@ enum APIError: LocalizedError, Sendable {
 
 // MARK: - 默认实现（Mock / 旧后端无需支持 tombstone）
 extension APIClient {
-    func fetchDeletedLocalIds(collection: String, since: Date?) async throws -> [String] { [] }
+    func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone] { [] }
     func realtimeStream() -> AsyncStream<Void>? { nil }
 }
