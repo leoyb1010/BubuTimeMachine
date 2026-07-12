@@ -55,14 +55,20 @@ _jobs_lock = threading.Lock()
 # 探测内网与云元数据，并把结果渲进 mp4 外泄。故此处强制：只允许下载指向【已配置的
 # 自托管 PocketBase 主机】的 http/https 图片，其余一律拒绝（fail-closed）。
 
+# 未配置时的默认白名单：标准单机自托管（AI 与 PocketBase 同机）开箱即用。
+# 仍只放行本机 PB 的这个端口，file:// / 外网 / 私网其它 IP / 本机其它端口一律照拦。
+# Tailscale 或 PB 独立机部署时，用 PB_BASE_URL 覆盖成实际地址。
+_DEFAULT_ALLOWED_HOSTS = {"127.0.0.1:8090", "localhost:8090"}
+
+
 def _load_allowed_hosts() -> set:
     """从环境变量读取 PocketBase 白名单主机（host 或 host:port，逗号可分隔多个）。
     优先 PB_BASE_URL（形如 http://127.0.0.1:8090，含端口最精确），退回 BUBU_PB_HOST。
-    默认空集合 = 拒绝一切外部下载（宁可不出片，也不当 SSRF 跳板）。"""
+    未配置时退回本机 PB 默认白名单（单机部署开箱即用），而非拒绝一切。"""
     raw = os.environ.get("PB_BASE_URL", "").strip() or os.environ.get("BUBU_PB_HOST", "").strip()
     allowed: set = set()
     if not raw:
-        return allowed
+        return set(_DEFAULT_ALLOWED_HOSTS)
     for item in raw.split(","):
         item = item.strip()
         if not item:
