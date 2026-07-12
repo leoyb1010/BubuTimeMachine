@@ -116,13 +116,26 @@ nonisolated struct MediaStore: Sendable {
 
     // MARK: 读取
 
-    /// 由相对文件名解析为沙盒绝对 URL。
+    /// 由相对文件名解析为沙盒绝对 URL（读路径）。
+    /// 媒体后台迁移窗口内，App Group 新目录可能还没搬到该文件 → 回退旧沙盒目录读取。
+    /// 迁移是拷贝不删源，旧文件在迁移期间必然还在，因此读回退覆盖整个迁移窗口，绝不白图。
+    /// App Group 未就绪的回退模式下，新旧目录本就是同一路径，两次判断等价、行为不变。
+    /// 写入始终落新目录（savePhoto/importFile/saveBlob 直接用 mediaDir，不经此方法）。
     func mediaURL(for fileName: String) -> URL {
-        mediaDir.appendingPathComponent(fileName)
+        let primary = mediaDir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: primary.path) { return primary }
+        let legacy = BubuStorage.legacyMediaDirectory.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
+        return primary
     }
 
+    /// 缩略图读路径，回退规则同 mediaURL（迁移窗口内缩略图也绝不白图）。
     func thumbnailURL(for fileName: String) -> URL {
-        thumbnailDir.appendingPathComponent(fileName)
+        let primary = thumbnailDir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: primary.path) { return primary }
+        let legacy = BubuStorage.legacyThumbnailDirectory.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
+        return primary
     }
 
     func data(forMedia fileName: String) -> Data? {
@@ -142,6 +155,46 @@ nonisolated struct MediaStore: Sendable {
     /// 读取沙盒中的二进制 blob。
     func blob(named fileName: String) -> Data? {
         try? Data(contentsOf: mediaURL(for: fileName))
+    }
+
+    // MARK: 胶囊解封临时明文（不落媒体目录）
+
+    /// 时间胶囊的媒体（语音）随正文一起封在加密 blob 里；解封时把明文解出来仅供播放，
+    /// 写到这个临时目录而非媒体目录——tmp 不参与同步/归档导出，系统会自动回收。
+    /// 命名按胶囊 salt 固定（幂等）：同一封信重复开启复用同一文件，绝不产生孤儿 blob。
+    private var capsuleScratchDir: URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("CapsuleScratch", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// 由胶囊 salt（即胶囊 id，跨设备稳定）+ 扩展名得出固定的临时文件名。
+    func capsuleScratchName(salt: String, ext: String) -> String {
+        let safeSalt = salt.filter { $0.isLetter || $0.isNumber || $0 == "-" }
+        let safeExt = ext.lowercased().filter { $0.isLetter || $0.isNumber }
+        return "capsule-voice-\(safeSalt).\(safeExt.isEmpty ? "m4a" : safeExt)"
+    }
+
+    /// 把解密后的胶囊语音落到临时目录，返回相对文件名（供 playbackURL 解析）。
+    /// 幂等：已存在则直接复用，不重复写、不产生孤儿；先原子写再返回，避免半截文件。
+    func materializeCapsuleVoice(_ data: Data, salt: String, ext: String) -> String? {
+        let name = capsuleScratchName(salt: salt, ext: ext)
+        let url = capsuleScratchDir.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: url.path) { return name }
+        do {
+            try data.write(to: url, options: .atomic)
+            return name
+        } catch {
+            return nil
+        }
+    }
+
+    /// 播放解析：优先胶囊临时目录（解封语音），否则回退媒体目录（普通录音、未封存的胶囊草稿）。
+    /// 临时目录文件名带 `capsule-voice-` 前缀，不会与媒体目录里的普通语音撞名。
+    func playbackURL(for fileName: String) -> URL {
+        let scratch = capsuleScratchDir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: scratch.path) { return scratch }
+        return mediaURL(for: fileName)
     }
 
     func fileExists(forMedia fileName: String) -> Bool {

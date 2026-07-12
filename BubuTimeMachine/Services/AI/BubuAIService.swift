@@ -119,17 +119,41 @@ final class BubuAIService: AIService, @unchecked Sendable {
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         applyAuth(&req)
-        let fileData = try Data(contentsOf: audioURL)
-        var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        body.append(fileData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        let (data, resp) = try await session.upload(for: req, from: body)
+        // 分块把音频写进临时 multipart 请求体文件，再 upload(fromFile:) 流式上传，
+        // 避免整段大录音一次性读进内存拼 body 的内存峰值（沿用 PocketBaseClient 的成熟做法）。
+        let bodyURL = try Self.multipartBodyFile(boundary: boundary, audioURL: audioURL)
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
+        let (data, resp) = try await session.upload(for: req, fromFile: bodyURL)
         try Self.check(resp, data)
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         return obj["transcript"] as? String ?? ""
+    }
+
+    /// 把「单文件 multipart 请求体」分块写到临时文件，返回其 URL（字段名 file、octet-stream 与旧版一致）。
+    private static func multipartBodyFile(boundary: String, audioURL: URL) throws -> URL {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-transcribe-\(UUID().uuidString).body")
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: tempURL)
+        defer { try? output.close() }
+        func write(_ string: String) throws {
+            try output.write(contentsOf: Data(string.utf8))
+        }
+
+        try write("--\(boundary)\r\n")
+        try write("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioURL.lastPathComponent)\"\r\n")
+        try write("Content-Type: application/octet-stream\r\n\r\n")
+
+        let input = try FileHandle(forReadingFrom: audioURL)
+        defer { try? input.close() }
+        while true {
+            let chunk = try input.read(upToCount: 1_048_576)
+            guard let chunk, !chunk.isEmpty else { break }
+            try output.write(contentsOf: chunk)
+        }
+
+        try write("\r\n--\(boundary)--\r\n")
+        return tempURL
     }
 
     func generateGrowthMovie(year: Int) async throws -> GrowthMovieJob {

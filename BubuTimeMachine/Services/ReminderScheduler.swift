@@ -41,6 +41,22 @@ final class ReminderScheduler {
         center.removePendingNotificationRequests(withIdentifiers: allIdentifiers + ["bubu.onThisDay.daily"])
 
         let cal = Calendar.current
+        // 只取一次全量（而非过去每天各取一次 → 30 次主线程全表 fetch），按(月,日)分桶，
+        // 填 30 天时纯内存查表。entries 已按 happenedAt 倒序，桶内也保持倒序，选取逻辑与旧实现一致。
+        let entries: [Entry] = {
+            let d = FetchDescriptor<Entry>(
+                predicate: #Predicate { !$0.isArchived },
+                sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+            return (try? context.fetch(d)) ?? []
+        }()
+        let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
+        var bucket: [Int: [Entry]] = [:]
+        for e in entries {
+            let c = cal.dateComponents([.month, .day], from: e.happenedAt)
+            guard let m = c.month, let dd = c.day else { continue }
+            bucket[m * 100 + dd, default: []].append(e)
+        }
+
         for offset in 0..<daysAhead {
             guard let day = cal.date(byAdding: .day, value: offset, to: .now) else { continue }
             var comps = cal.dateComponents([.year, .month, .day], from: day)
@@ -51,7 +67,7 @@ final class ReminderScheduler {
 
             let content = UNMutableNotificationContent()
             content.title = "那年今日 · 布布时光机"
-            let memory = onThisDayMemory(context: context, for: day)
+            let memory = onThisDayMemory(bucket: bucket, profile: profile, cal: cal, for: day)
             content.body = memory.text.isEmpty
                 ? "翻一翻布布的时光轴，今天也想她了吧。下滑可以直接回一句。"
                 : "\(memory.text)\n下滑可以直接回一句今天的布布。"
@@ -69,24 +85,20 @@ final class ReminderScheduler {
         }
     }
 
-    /// 取指定日期「往年同月同日」的一条记录摘要 + 那天的照片缩略图。
-    private func onThisDayMemory(context: ModelContext, for day: Date) -> (text: String, thumbnail: String?) {
-        let descriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
-        guard let entries = try? context.fetch(descriptor) else { return ("", nil) }
-        let cal = Calendar.current
+    /// 从预先分好的(月,日)桶里取指定日期「往年同月同日」的一条记录摘要 + 那天的照片缩略图。
+    /// 纯内存查表，无 I/O；桶内已倒序，取第一条「非当天」的记录（与旧实现选取逻辑一致）。
+    private func onThisDayMemory(bucket: [Int: [Entry]], profile: ChildProfile?,
+                                 cal: Calendar, for day: Date) -> (text: String, thumbnail: String?) {
         let target = cal.dateComponents([.month, .day], from: day)
-        let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
-
-        for e in entries {
-            let c = cal.dateComponents([.month, .day], from: e.happenedAt)
+        guard let m = target.month, let dd = target.day,
+              let candidates = bucket[m * 100 + dd] else { return ("", nil) }
+        for e in candidates {
             let pastYear = !cal.isDate(e.happenedAt, inSameDayAs: day)
-            if c.month == target.month && c.day == target.day && pastYear {
+            if pastYear {
                 let years = cal.dateComponents([.year], from: e.happenedAt, to: day).year ?? 0
                 let age = profile.map { AgeCalculator.ageDescription(birthday: $0.birthday, at: e.happenedAt) } ?? ""
                 let note = e.note ?? "那天的布布"
-                let thumb = e.media.first(where: { $0.type == .photo })?.thumbnailFileName
+                let thumb = e.sortedMedia.first(where: { $0.type == .photo })?.thumbnailFileName
                 let text = years > 0 ? "\(years)年前的今天（\(age)）：\(note)" : "那年今日（\(age)）：\(note)"
                 return (text, thumb)
             }
@@ -97,7 +109,9 @@ final class ReminderScheduler {
     /// 把缩略图复制到 tmp 供 UNNotificationAttachment 使用（系统会移动走该文件）。
     private func photoAttachment(thumbnailFileName: String?, key: String) -> UNNotificationAttachment? {
         guard let thumbnailFileName else { return nil }
-        let src = BubuStorage.thumbnailDirectory.appendingPathComponent(thumbnailFileName)
+        // 经 MediaStore 读回退解析：媒体后台迁移窗口内缩略图可能只在旧沙盒目录，
+        // 直接拼 App Group 路径会漏读、通知丢图。走 thumbnailURL 自动回退旧目录。
+        let src = MediaStore().thumbnailURL(for: thumbnailFileName)
         guard FileManager.default.fileExists(atPath: src.path) else { return nil }
         let ext = src.pathExtension.isEmpty ? "jpg" : src.pathExtension
         let tmp = FileManager.default.temporaryDirectory
