@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import SwiftData
+import WidgetKit
 
 nonisolated struct SharedWidgetSnapshot: Codable, Sendable {
     var name: String
@@ -76,7 +77,7 @@ extension SharedWidgetSnapshot {
             latestMilestoneEmoji: latestMilestone?.emoji,
             nextMilestoneTitle: clean(nextMilestone?.title, maxLength: 18),
             nextMilestoneEmoji: nextMilestone?.emoji,
-            monthlyPhotoCount: monthlyPhotoCount(from: entries),
+            monthlyPhotoCount: monthlyPhotoCount(context: context),
             totalEntryCount: totalEntryCount(context: context),
             totalPhotoCount: totalPhotoCount(context: context),
             idNumber: defaultIDNumber,
@@ -117,17 +118,23 @@ extension SharedWidgetSnapshot {
         (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
     }
 
+    /// 总记录数：用 SQLite COUNT（fetchCount）而非全表取回内存 count，进前台不再随数据量变卡。
     @MainActor
     private static func totalEntryCount(context: ModelContext) -> Int {
         let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived })
-        return ((try? context.fetch(descriptor)) ?? []).count
+        return (try? context.fetchCount(descriptor)) ?? 0
     }
 
+    /// 总照片数：直接对 Media 做谓词 COUNT（不加载对象、不遍历每条 Entry 的关系）。
+    /// 只用 Media 自有字段（typeRaw / 缩略图 / 本地文件名）作条件，避免不稳的关系穿透谓词。
+    /// 说明：软删除（isArchived）记录里的照片会被计入，与旧实现（仅统计未归档）略有出入；
+    /// 归档是罕见的软删操作，桌面「总照片」是概览数字，为换取单条 COUNT 的性能与稳定，接受此微小口径差异。
     @MainActor
     private static func totalPhotoCount(context: ModelContext) -> Int {
-        let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived })
-        return ((try? context.fetch(descriptor)) ?? [])
-            .reduce(0) { $0 + $1.media.filter { $0.type == .photo && ($0.thumbnailFileName != nil || $0.localFileName != nil) }.count }
+        let descriptor = FetchDescriptor<Media>(predicate: #Predicate {
+            $0.typeRaw == "photo" && ($0.thumbnailFileName != nil || $0.localFileName != nil)
+        })
+        return (try? context.fetchCount(descriptor)) ?? 0
     }
 
     private static func recentPhotoFileNames(from entries: [Entry], limit: Int) -> [String] {
@@ -145,12 +152,17 @@ extension SharedWidgetSnapshot {
         return names
     }
 
-    private static func monthlyPhotoCount(from entries: [Entry]) -> Int {
+    /// 本月照片数：按「本月」直接取当月未归档记录（谓词按 happenedAt 圈定，集合很小），再累加其照片。
+    /// 旧实现从「最近 40 条记录」里数，多人家庭一个月轻松超过 40 条 → 偏小失真；这里不再受 40 条截断。
+    @MainActor
+    private static func monthlyPhotoCount(context: ModelContext) -> Int {
         let cal = Calendar.current
         guard let start = cal.dateInterval(of: .month, for: .now)?.start else { return 0 }
-        return entries
-            .filter { $0.happenedAt >= start }
-            .reduce(0) { $0 + $1.media.filter { $0.type == .photo }.count }
+        let descriptor = FetchDescriptor<Entry>(
+            predicate: #Predicate { !$0.isArchived && $0.happenedAt >= start }
+        )
+        let entries = (try? context.fetch(descriptor)) ?? []
+        return entries.reduce(0) { $0 + $1.media.filter { $0.type == .photo }.count }
     }
 
     private static func clean(_ value: String?, maxLength: Int) -> String? {
@@ -249,5 +261,17 @@ nonisolated enum SharedDefaults {
         suite.set(data, forKey: widgetSnapshotKey)
         suite.synchronize()
         log.notice("widget 快照已写入 name=\(snapshot.name, privacy: .public) birthday=\(snapshot.birthday != nil) avatar=\(snapshot.avatarFileName != nil) photo=\(snapshot.recentPhotoFileName != nil)")
+    }
+
+    /// 无 UI 写入路径（App Intents / 小组件交互按钮 / Siri）的「写后钩子」：
+    /// 落库后重建并存盘 widget 快照，再请求 WidgetKit 重载。
+    /// 否则：交互按钮所在的 widget 虽被系统自动 reload，却读到旧 JSON 快照；其它 widget 要等下次开 App 才更新。
+    /// 主 App 前台的写入走 AppEnvironment.refreshWidgetSnapshot + WidgetRefresher（带合并节流），无需再调此钩子。
+    @MainActor
+    static func refreshWidgetsAfterWrite(context: ModelContext) {
+        if let snapshot = SharedWidgetSnapshot.make(context: context) {
+            saveWidgetSnapshot(snapshot)
+        }
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }

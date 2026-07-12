@@ -32,6 +32,8 @@ struct RecordMomentIntent: AppIntent {
         let role = SharedDefaults.currentRole
         do {
             try EntryWriter.quickTextEntry(note: note, role: role, in: context)
+            // 写后钩子：重建 widget 快照 + 刷新小组件，桌面立刻读到这条新记录。
+            SharedDefaults.refreshWidgetsAfterWrite(context: context)
             return .result(dialog: "已经帮你记下啦 🌟")
         } catch {
             throw error
@@ -92,12 +94,23 @@ struct HealthCheckInIntent: AppIntent {
         Summary("给布布打卡：\(\.$kind)")
     }
 
+    /// 换尿布无健康类型，与手表一致走文字记录，用固定文案以便去重。
+    private static let diaperNote = "换好尿布啦 🧷"
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let context = SharedModelContainer.sharedIfAvailable?.mainContext else {
             return .result(dialog: "先打开一次 App 再用打卡哦。")
         }
         let role = SharedDefaults.currentRole
+
+        // 幂等：与手表路径不同，交互按钮没有 localId。WidgetKit 偶发会把同一次点击的 intent
+        // 重复执行 → 重复打卡。这里对「同类型 + 极短时间窗内」去重（用 Media/Entry 自有字段做 COUNT，
+        // 不穿透关系），既挡住系统重复执行，又不误伤真实的连续两次操作（窗口只有几秒）。
+        if isRecentDuplicate(context: context) {
+            return .result(dialog: "\(kind.emoji) \(kind.label)已记上")
+        }
+
         switch kind {
         case .milk:
             try EntryWriter.quickHealthEntry(kind: .meal, title: "喂奶", role: role, in: context)
@@ -106,10 +119,35 @@ struct HealthCheckInIntent: AppIntent {
         case .water:
             try EntryWriter.quickHealthEntry(kind: .water, title: "喝水", role: role, in: context)
         case .diaper:
-            // 与手表一致：换尿布无健康类型，走文字记录
-            try EntryWriter.quickTextEntry(note: "换好尿布啦 🧷", role: role, in: context)
+            try EntryWriter.quickTextEntry(note: Self.diaperNote, role: role, in: context)
         }
+        // 写后钩子：重建 widget 快照 + 刷新小组件，桌面/锁屏立刻反映这次打卡。
+        SharedDefaults.refreshWidgetsAfterWrite(context: context)
         return .result(dialog: "\(kind.emoji) \(kind.label)已记上")
+    }
+
+    /// 极短时间窗内是否已有同类型打卡（挡 WidgetKit 重复执行）。
+    @MainActor
+    private func isRecentDuplicate(context: ModelContext) -> Bool {
+        let cutoff = Date.now.addingTimeInterval(-4)   // 4 秒窗：足够挡系统重复执行，短到不会误伤真实连点
+        switch kind {
+        case .milk, .sleep, .water:
+            let raw: String
+            switch kind {
+            case .milk: raw = HealthRecordKind.meal.rawValue
+            case .sleep: raw = HealthRecordKind.sleep.rawValue
+            case .water: raw = HealthRecordKind.water.rawValue
+            case .diaper: raw = ""   // 不会到这
+            }
+            let d = FetchDescriptor<HealthRecord>(
+                predicate: #Predicate { $0.kindRaw == raw && $0.recordedAt >= cutoff })
+            return ((try? context.fetchCount(d)) ?? 0) > 0
+        case .diaper:
+            let note = Self.diaperNote
+            let d = FetchDescriptor<Entry>(
+                predicate: #Predicate { ($0.note ?? "") == note && $0.happenedAt >= cutoff })
+            return ((try? context.fetchCount(d)) ?? 0) > 0
+        }
     }
 }
 
