@@ -117,6 +117,8 @@ final class BubuAIService: AIService, @unchecked Sendable {
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        // 长语音服务端转写可能远超默认 60s（P3-32）：与 downloadRenderedMovie 同档放宽。
+        req.timeoutInterval = 300
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         applyAuth(&req)
         // 分块把音频写进临时 multipart 请求体文件，再 upload(fromFile:) 流式上传，

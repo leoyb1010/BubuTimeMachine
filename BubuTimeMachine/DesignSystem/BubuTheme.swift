@@ -103,9 +103,15 @@ nonisolated enum BubuTheme {
         static let sky    = SwiftUI.Color(red: 0.769, green: 0.894, blue: 1.000) // #C4E4FF
 
         /// 由色相（0–360）生成一抹柔和马卡龙色，用于按记忆/里程碑上色（对照设计稿 HUE()）。
+        /// 设计稿参数是 HSL；SwiftUI 的 Color(hue:saturation:brightness:) 是 HSB，
+        /// 直接照搬会得到高饱和霓虹色（P3-41）。这里做 HSL→HSB 换算还原柔和粉彩。
         static func hue(_ h: Double, lightness: Double = 0.86, saturation: Double = 0.90) -> SwiftUI.Color {
-            SwiftUI.Color(hue: (h.truncatingRemainder(dividingBy: 360)) / 360.0,
-                          saturation: saturation, brightness: lightness)
+            let l = min(max(lightness, 0), 1)
+            let s = min(max(saturation, 0), 1)
+            let brightness = l + s * min(l, 1 - l)
+            let hsbSaturation = brightness == 0 ? 0 : 2 * (1 - l / brightness)
+            return SwiftUI.Color(hue: (h.truncatingRemainder(dividingBy: 360)) / 360.0,
+                                 saturation: hsbSaturation, brightness: brightness)
         }
 
         // MARK: 卡片大面积柔面（动态：浅色=近白奶油/马卡龙，深色=压暗同色相，承托动态文字并融入深色页）

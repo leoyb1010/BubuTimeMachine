@@ -109,10 +109,15 @@ actor ThumbnailProvider {
 
     // MARK: 落盘补齐
 
+    /// 同图去重：grid/card/detail 三档位并发未命中时只补一次，避免生成孤儿缩略图（P3-33）。
+    /// 只增不删：成功后模型回填 thumbnailFileName 不会再进来；失败本次会话不重试（下次冷启动再试）。
+    private var backfillInFlight: Set<UUID> = []
+
     /// 后台为缺失缩略图的老数据生成缩略图并写回沙盒。
     /// 注意：仅写文件；`Media.thumbnailFileName` 字段的回填需在 MainActor 侧（SwiftData）完成，
     /// 这里通过通知把文件名带出去，由调用方更新模型。
     private func backfillThumbnail(mediaId: UUID, mediaName: String) {
+        guard backfillInFlight.insert(mediaId).inserted else { return }
         let store = self.store
         let mediaURL = store.mediaURL(for: mediaName)
         Task.detached(priority: .background) {

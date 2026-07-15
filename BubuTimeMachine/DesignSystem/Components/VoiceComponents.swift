@@ -78,6 +78,9 @@ struct VoiceRecorderBar: View {
                 recorder.cancel()
             }
         }
+        // 录音中禁止下滑关掉所在面板：一滑整段录音静默丢失（P3-43）。
+        // 从子视图向上传播到最近的 sheet，五个调用点一处生效。
+        .interactiveDismissDisabled(recorder.state == .recording)
     }
 
     private var recordButton: some View {

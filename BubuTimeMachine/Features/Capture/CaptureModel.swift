@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import Photos
 import Observation
 import AVFoundation
 
@@ -339,6 +340,24 @@ final class CaptureModel {
         return (media, analysis)
     }
 
+    /// 拍摄时间兜底：PhotosPicker 无相册权限时拿不到 PHAsset，只有在用户已授权
+    /// 相册（如开过「今日照片」挂载）时才能按 itemIdentifier 反查 creationDate。
+    /// 拿不到就返回 nil，调用方保持原行为（happenedAt = 保存时刻）。
+    private static func assetCreationDate(for item: PhotosPickerItem) -> Date? {
+        guard let id = item.itemIdentifier else { return nil }
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return nil }
+        return PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject?.creationDate
+    }
+
+    /// 视频容器元数据里的拍摄时间（无需相册权限；相机/多数 App 导出的视频都带）。
+    private static func videoCreationDate(url: URL) async -> Date? {
+        let asset = AVURLAsset(url: url)
+        guard let meta = try? await asset.load(.creationDate),
+              let date = try? await meta.load(.dateValue) else { return nil }
+        return date
+    }
+
     private static func videoPreviewImage(url: URL) async -> UIImage? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
@@ -351,11 +370,15 @@ final class CaptureModel {
 
     /// 单个 PhotosPickerItem → 落沙盒 + 缩略图 + 端侧分析。
     private func persist(item: PhotosPickerItem) async -> (Media, PhotoAnalysis?)? {
-        // 视频（暂不分析，仅缩略图）
+        // 视频（暂不分析，仅缩略图 + 拍摄时间）
         if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
             analyzingHint = "正在整理这段视频，太大时会先压缩…"
             // importVideoForSync 已把视频拷进媒体目录，MovieTransfer 的 tmp 拷贝用完即删，避免 .mov 孤儿。
             defer { try? FileManager.default.removeItem(at: movie.url) }
+            // 拍摄时间：PHAsset 最准，其次视频容器元数据；都没有则保持保存时刻。
+            // 必须在删 tmp 前读元数据。
+            var captureDate = Self.assetCreationDate(for: item)
+            if captureDate == nil { captureDate = await Self.videoCreationDate(url: movie.url) }
             guard let imported = try? await mediaStore.importVideoForSync(from: movie.url) else {
                 analyzingHint = nil
                 return nil
@@ -367,7 +390,10 @@ final class CaptureModel {
                 media.aiTags = ["已压缩", "视频"]
             }
             media.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
-            return (media, nil)
+            // tags 回填 media.aiTags 同值：save() 会用 analysis.tags 覆写 aiTags，别把「已压缩」冲掉。
+            let analysis = PhotoAnalysis(captureDate: captureDate, latitude: nil, longitude: nil,
+                                         locationName: nil, tags: media.aiTags, faceCount: 0)
+            return (media, analysis)
         }
         // 图片
         if let data = try? await item.loadTransferable(type: Data.self),
@@ -379,8 +405,13 @@ final class CaptureModel {
             media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
 
             analyzingHint = "正在看看这张照片里有什么…"
-            let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
+            var analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
             analyzingHint = nil
+            // 截图/被转发剥了 EXIF 的图拿不到拍摄时间：有相册权限时用 PHAsset 兜底，
+            // 否则 happenedAt 会落成保存时刻、老照片被排到「今天」。
+            if analysis.captureDate == nil {
+                analysis.captureDate = Self.assetCreationDate(for: item)
+            }
             return (media, analysis)
         }
         return nil

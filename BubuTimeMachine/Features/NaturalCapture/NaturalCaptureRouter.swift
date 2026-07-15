@@ -218,6 +218,7 @@ struct NaturalCaptureRouter {
         context.insert(FeedEvent(kind: .entryCreated,
                                  actorRole: authorRole,
                                  summary: "智能记录了一条时光：\(item.title)",
-                                 targetLocalId: entry.id.uuidString))
+                                 targetLocalId: entry.id.uuidString,
+                                 happenedAt: entry.happenedAt))
     }
 }

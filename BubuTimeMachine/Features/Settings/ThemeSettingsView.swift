@@ -1,11 +1,20 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - 主题与外观
 /// 切换全局主题配色，选择首页背景模式（主题背景 / 布布照片）。
 struct ThemeSettingsView: View {
     @Environment(AppEnvironment.self) private var env
+    @Query private var profiles: [ChildProfile]
 
     private var manager: ThemeManager { env.theme }
+
+    /// 生日月（与身份卡徽章同一条规则）：优先生日彩带图标。
+    private var isBirthdayMonth: Bool {
+        guard let birthday = profiles.first?.birthday else { return false }
+        return Calendar.current.component(.month, from: .now)
+            == Calendar.current.component(.month, from: birthday)
+    }
 
     var body: some View {
         ScrollView {
@@ -41,7 +50,7 @@ struct ThemeSettingsView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("主题与外观")
         // 图标切到最终选择的主题，一次性应用，只弹一次系统提示（P2i）
-        .onDisappear { manager.applyThemeIcon() }
+        .onDisappear { manager.applyThemeIcon(isBirthdayMonth: isBirthdayMonth) }
     }
 
     private func themeCard(_ theme: BubuThemeDefinition) -> some View {

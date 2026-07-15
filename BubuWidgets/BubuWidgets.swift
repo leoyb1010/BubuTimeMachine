@@ -62,6 +62,9 @@ struct BubuAvatar: View {
             if let image = Self.downsampledImage(from: imageData, maxPixel: size * 3) {
                 Image(uiImage: image)
                     .resizable()
+                    // iOS 18+ 主屏染色/淡色模式：照片保持全彩，不被系统单色化成实心色块。
+                    // 必须紧跟在 Image 上调用（scaledToFill 之后类型退化为 some View）。
+                    .widgetAccentedRenderingMode(.fullColor)
                     .scaledToFill()
             } else {
                 LinearGradient(
@@ -78,8 +81,6 @@ struct BubuAvatar: View {
         .clipShape(Circle())
         .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
         .shadow(color: WidgetPalette.primary.opacity(0.25), radius: 4, y: 2)
-        // 染色模式下把头像作为强调元素，避免整卡被单色化后失去焦点。
-        .widgetAccentable()
     }
 
     static func downsampledImage(from data: Data?, maxPixel: CGFloat) -> UIImage? {
@@ -1118,6 +1119,7 @@ struct BubuMemoryProvider: TimelineProvider {
 
 struct BubuMemoryWidgetView: View {
     var entry: BubuEntry
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     private var photoData: Data? {
         // 轮播款：本槽位那一张（entry.carouselPhoto）。兜底仍读 snapshot.photoImageData（其它入口/预览）。
@@ -1145,6 +1147,8 @@ struct BubuMemoryWidgetView: View {
                 .containerBackground(for: .widget) {
                     Image(uiImage: image)
                         .resizable()
+                        // 相框的意义就是真照片：染色模式下保持全彩（须紧跟 Image 调用）。
+                        .widgetAccentedRenderingMode(.fullColor)
                         .scaledToFill()
                         .overlay {
                             LinearGradient(colors: [.clear, .black.opacity(0.45)],
@@ -1160,7 +1164,10 @@ struct BubuMemoryWidgetView: View {
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .containerBackground(for: .widget) { WidgetPalette.cream }
+                .containerBackground(for: .widget) {
+                    // 染色/vibrant 模式下奶油实底会糊成一坨，与其它卡一致降级成中性淡底。
+                    if renderingMode == .fullColor { WidgetPalette.cream } else { Color.white.opacity(0.06) }
+                }
             }
         }
     }
@@ -1176,10 +1183,59 @@ struct BubuMemoryWidget: Widget {
         .description("最近的照片每半小时自动换一张，桌面就是布布的相框。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
+        // 照片就是背景：StandBy/锁屏等场景系统若移除容器背景，只剩白字不可读。
+        .containerBackgroundRemovable(false)
     }
 }
 
 // MARK: - 一键打卡小组件（交互按钮，不开 App 直接落库，R4 E-2）
+
+// MARK: 打卡卡片底色（长按小组件 → 编辑 可选）
+enum CheckInCardStyle: String, AppEnum {
+    case cream
+    case translucent
+
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "卡片底色")
+    static let caseDisplayRepresentations: [CheckInCardStyle: DisplayRepresentation] = [
+        .cream: "奶油底",
+        .translucent: "清透底",
+    ]
+}
+
+struct CheckInWidgetConfigIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "打卡卡片样式"
+    static let description = IntentDescription("选择卡片底色：经典奶油底，或更轻盈的清透底。")
+
+    @Parameter(title: "卡片底色", default: .cream)
+    var cardStyle: CheckInCardStyle
+}
+
+struct BubuCheckInEntry: TimelineEntry {
+    let date: Date
+    let snapshot: BubuSnapshot
+    let style: CheckInCardStyle
+}
+
+struct BubuCheckInProvider: AppIntentTimelineProvider {
+    func placeholder(in context: Context) -> BubuCheckInEntry {
+        BubuCheckInEntry(date: .now, snapshot: .sample, style: .cream)
+    }
+
+    func snapshot(for configuration: CheckInWidgetConfigIntent, in context: Context) async -> BubuCheckInEntry {
+        BubuCheckInEntry(date: .now, snapshot: BubuWidgetData.loadSnapshot(), style: configuration.cardStyle)
+    }
+
+    func timeline(for configuration: CheckInWidgetConfigIntent, in context: Context) async -> Timeline<BubuCheckInEntry> {
+        let entry = BubuCheckInEntry(date: .now, snapshot: BubuWidgetData.loadSnapshot(),
+                                     style: configuration.cardStyle)
+        // 与 BubuProvider 同节奏：日粒度内容，明天零点后刷新一次足矣。
+        let nextMidnight = Calendar.current.nextDate(
+            after: .now, matching: DateComponents(hour: 0, minute: 5),
+            matchingPolicy: .nextTime
+        ) ?? Date.now.addingTimeInterval(3600)
+        return Timeline(entries: [entry], policy: .after(nextMidnight))
+    }
+}
 
 private struct CheckInButton: View {
     let kind: HealthCheckInKind
@@ -1204,8 +1260,9 @@ private struct CheckInButton: View {
 }
 
 struct BubuCheckInWidgetView: View {
-    var entry: BubuEntry
+    var entry: BubuCheckInEntry
     @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     private let kinds: [(HealthCheckInKind, Color)] = [
         (.milk, Color(red: 0.95, green: 0.47, blue: 0.62)),
@@ -1240,19 +1297,32 @@ struct BubuCheckInWidgetView: View {
                 }
             }
         }
-        .containerBackground(for: .widget) { WidgetPalette.cream }
+        .containerBackground(for: .widget) {
+            if renderingMode != .fullColor {
+                // 染色/vibrant：与其它卡一致的中性淡底，让系统染色只作用于前景。
+                Color.white.opacity(0.06)
+            } else if entry.style == .translucent {
+                // 清透底：系统自适应半透明材质（iOS 不允许主屏小组件真透出壁纸，这是官方允许的最轻底）。
+                Rectangle().fill(.fill.tertiary)
+            } else {
+                WidgetPalette.cream
+            }
+        }
     }
 }
 
 struct BubuCheckInWidget: Widget {
     let kind = "BubuCheckInWidget"
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: CheckInWidgetConfigIntent.self,
+                               provider: BubuCheckInProvider()) { entry in
             BubuCheckInWidgetView(entry: entry)
         }
         .configurationDisplayName("一键打卡")
-        .description("喂奶、睡觉、喝水、换尿布——点一下就记上，不用开 App。")
+        .description("喂奶、睡觉、喝水、换尿布——点一下就记上，不用开 App。长按小组件可换卡片底色。")
         .supportedFamilies([.systemSmall, .systemMedium])
+        // 打卡按钮文字是深棕实色，容器背景被系统移除（StandBy 等）后对比崩坏。
+        .containerBackgroundRemovable(false)
     }
 }
 

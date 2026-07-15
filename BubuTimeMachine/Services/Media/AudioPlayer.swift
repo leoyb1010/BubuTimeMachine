@@ -14,6 +14,10 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     private var player: AVAudioPlayer?
     private var timer: Timer?
 
+    /// 全局互斥：每个语音气泡各持一个实例，起播前先停掉别处正在播的那个，
+    /// 否则多条语音会同时出声（P3-44）。弱引用，不延长生命周期。
+    private static weak var active: AudioPlayer?
+
     func toggle(url: URL) {
         if isPlaying && playingURL == url {
             stop()
@@ -23,6 +27,8 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     func play(url: URL) {
+        if let other = Self.active, other !== self { other.stop() }
+        Self.active = self
         stop()
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback)

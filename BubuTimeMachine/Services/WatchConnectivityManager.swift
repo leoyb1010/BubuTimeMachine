@@ -101,8 +101,9 @@ enum WatchSnapshotBuilder {
     static func make(context: ModelContext, role: FamilyRole) -> WatchSnapshot? {
         guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return nil }
         // 「最近」用 FeedEvent（统一涵盖记录/健康打卡/语音等），这样手表打卡后也能立刻在「最近」看到。
+        // 按 createdAt（动作时刻）排：导入旧照片的动态也能进「最近」，不被事件真实时间埋掉。
         var feedDescriptor = FetchDescriptor<FeedEvent>(
-            sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
         feedDescriptor.fetchLimit = 6
         let events = (try? context.fetch(feedDescriptor)) ?? []
         let recent = events
@@ -110,7 +111,7 @@ enum WatchSnapshotBuilder {
             .prefix(4)
             .map { e in
                 WatchRecent(id: e.id.uuidString,
-                            dateText: BubuDateFormat.monthDay(e.happenedAt),
+                            dateText: BubuDateFormat.monthDay(e.createdAt),
                             note: e.summary,
                             moodEmoji: e.kind.emoji)
             }

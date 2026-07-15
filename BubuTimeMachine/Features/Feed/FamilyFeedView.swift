@@ -4,8 +4,10 @@ import SwiftData
 // MARK: - 家庭动态墙
 struct FamilyFeedView: View {
     @Environment(AppEnvironment.self) private var env
-    @Query(sort: \FeedEvent.happenedAt, order: .reverse) private var events: [FeedEvent]
-    @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
+    // 动态墙按「动作发生的时刻」排（createdAt）：导入两年前的旧照片也是「刚刚的动态」，
+    // 不该按事件真实时间沉底（时光轴才按 happenedAt）。
+    @Query(sort: \FeedEvent.createdAt, order: .reverse) private var events: [FeedEvent]
+    @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.createdAt, order: .reverse) private var entries: [Entry]
     @Query(sort: \Comment.createdAt, order: .reverse) private var comments: [Comment]
     @Query private var milestones: [Milestone]
     @State private var selectedKind: FeedEventKind?
@@ -20,8 +22,8 @@ struct FamilyFeedView: View {
     /// 轻量指纹：各表条数 + 最新时间戳；变化即重建，不构建数组。
     private var fingerprint: String {
         "\(events.count)-\(entries.count)-\(comments.count)-\(milestones.count)"
-        + "-\(Int(events.first?.happenedAt.timeIntervalSince1970 ?? 0))"
-        + "-\(Int(entries.first?.happenedAt.timeIntervalSince1970 ?? 0))"
+        + "-\(Int(events.first?.createdAt.timeIntervalSince1970 ?? 0))"
+        + "-\(Int(entries.first?.createdAt.timeIntervalSince1970 ?? 0))"
         + "-\(Int(comments.first?.createdAt.timeIntervalSince1970 ?? 0))"
     }
 
@@ -44,7 +46,7 @@ struct FamilyFeedView: View {
         for e in events {
             let key = e.targetLocalId.map { "\(e.kindRaw)|\($0)" } ?? "\(e.kindRaw)|\(e.id.uuidString)"
             all.append(FeedRow(id: key, kind: e.kind, actorRole: e.actorRole,
-                               summary: e.summary, happenedAt: e.happenedAt, targetLocalId: e.targetLocalId))
+                               summary: e.summary, actedAt: e.createdAt, targetLocalId: e.targetLocalId))
         }
         for entry in entries {
             let target = entry.id.uuidString
@@ -52,7 +54,7 @@ struct FamilyFeedView: View {
             all.append(FeedRow(id: "\(FeedEventKind.entryCreated.rawValue)|\(target)", kind: .entryCreated,
                                actorRole: entry.authorRole,
                                summary: entry.note?.isEmpty == false ? "记录了：\(entry.note!)" : "记录了布布的一个新瞬间",
-                               happenedAt: entry.happenedAt, targetLocalId: target))
+                               actedAt: entry.createdAt, targetLocalId: target))
         }
         // 家人的评论/语音补充：每条评论用自己的 id 做目标，互相不会吞掉（R4 P2-23）
         for comment in comments {
@@ -64,7 +66,7 @@ struct FamilyFeedView: View {
             let text = comment.text?.isEmpty == false ? "补充了：\(comment.text!)" : "补了一段语音"
             all.append(FeedRow(id: "\(kind.rawValue)|\(target)", kind: kind,
                                actorRole: comment.authorRole, summary: text,
-                               happenedAt: comment.createdAt, targetLocalId: target))
+                               actedAt: comment.createdAt, targetLocalId: target))
         }
         for m in milestones {
             guard let happened = m.happenedAt else { continue }
@@ -72,13 +74,13 @@ struct FamilyFeedView: View {
             guard fresh(.milestoneLit, target) else { continue }
             all.append(FeedRow(id: "\(FeedEventKind.milestoneLit.rawValue)|\(target)", kind: .milestoneLit,
                                actorRole: "家人", summary: "点亮了里程碑：\(m.title)",
-                               happenedAt: happened, targetLocalId: target))
+                               actedAt: happened, targetLocalId: target))
         }
 
         var seen = Set<String>()
         rows = all
             .filter { seen.insert($0.id).inserted }
-            .sorted { $0.happenedAt > $1.happenedAt }
+            .sorted { $0.actedAt > $1.actedAt }
     }
 
     var body: some View {
@@ -160,7 +162,7 @@ struct FamilyFeedView: View {
                         .font(BubuTheme.Font.body)
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                         .lineLimit(3)
-                    Text(BubuDateFormat.shortDateTime(event.happenedAt))
+                    Text(BubuDateFormat.shortDateTime(event.actedAt))
                         .font(BubuTheme.Font.caption)
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
@@ -196,6 +198,7 @@ private struct FeedRow: Identifiable {
     let kind: FeedEventKind
     let actorRole: String
     let summary: String
-    let happenedAt: Date
+    /// 动作发生的时刻（非事件内容的真实时间），动态墙排序与展示都用它。
+    let actedAt: Date
     let targetLocalId: String?
 }

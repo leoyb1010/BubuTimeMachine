@@ -1,8 +1,23 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - 时光轴排序方式
+/// 拍摄时间 = 事件真实发生的时刻（回顾成长）；记录时间 = 家人存进 App 的时刻（看最新动态）。
+enum TimelineSortMode: String, CaseIterable {
+    case capture   // 按拍摄/发生时间
+    case recorded  // 按记录时间
+
+    var title: String {
+        switch self {
+        case .capture: return "按拍摄时间"
+        case .recorded: return "按记录时间"
+        }
+    }
+}
+
 // MARK: - 时光轴
-/// @Query 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示。
+/// @Query 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；
+/// 分段在 rebuildSections 内存重排，排序方式可切（拍摄时间/记录时间），偏好持久记忆。
 /// 离线优先：UI 只读本地 SwiftData，断网全功能可用。
 struct TimelineView: View {
     @Environment(AppEnvironment.self) private var env
@@ -18,6 +33,8 @@ struct TimelineView: View {
     @State private var entryPendingDelete: Entry?
     @State private var sections: [TimelineSection] = []
     @State private var searchText = ""
+    /// 排序方式偏好：默认按拍摄时间（成长回顾心智），可切按记录时间（家庭动态心智）。
+    @AppStorage("bubu.timeline.sortMode") private var sortModeRaw = TimelineSortMode.capture.rawValue
     /// 未读家庭动态红点：一次性算好缓存，避免每次 body 全表 faulting comments（P2e）。
     @State private var hasUnseenFamilyActivity = false
     @Namespace private var zoomNS
@@ -47,7 +64,19 @@ struct TimelineView: View {
         }
         .onAppear { rebuildSectionsIfNeeded(); refreshUnseenBadge() }
         .onChange(of: entries) { _, _ in rebuildSections(); refreshUnseenBadge() }
+        .onChange(of: sortModeRaw) { _, _ in rebuildSections() }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("排序方式", selection: $sortModeRaw) {
+                        ForEach(TimelineSortMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                } label: {
+                    Label("排序方式", systemImage: "arrow.up.arrow.down")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showFamilyFeed = true
@@ -227,7 +256,7 @@ struct TimelineView: View {
             Text(section.key)
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
-            if let profile = profiles.first, let anchor = section.entries.first?.happenedAt {
+            if let profile = profiles.first, let anchor = section.entries.first.map(sortDate) {
                 Text("布布 \(AgeCalculator.compactAge(birthday: profile.birthday, at: anchor))")
                     .font(BubuTheme.Font.caption.weight(.medium))
                     .foregroundStyle(env.theme.theme.primary)
@@ -284,20 +313,28 @@ struct TimelineView: View {
         if sections.isEmpty { rebuildSections() }
     }
 
-    /// 重新分组：仅在 entries / 搜索词变化时调用，避免每次 body 求值 O(n) 重分组。
+    private var sortMode: TimelineSortMode { TimelineSortMode(rawValue: sortModeRaw) ?? .capture }
+
+    /// 当前排序方式下条目的排序/分组键。
+    private func sortDate(_ entry: Entry) -> Date {
+        sortMode == .capture ? entry.happenedAt : entry.createdAt
+    }
+
+    /// 重新分组：仅在 entries / 搜索词 / 排序方式变化时调用，避免每次 body 求值 O(n) 重分组。
+    /// @Query 固定按 happenedAt 倒序取数；按记录时间浏览时在这里内存重排（个人家庭库量级无压力）。
     private func rebuildSections() {
         let calendar = Calendar.current
-        let filtered = matchingEntries
+        let filtered = matchingEntries.sorted { sortDate($0) > sortDate($1) }
         let groups = Dictionary(grouping: filtered) { entry -> DateComponents in
-            calendar.dateComponents([.year, .month], from: entry.happenedAt)
+            calendar.dateComponents([.year, .month], from: sortDate(entry))
         }
         sections = groups
             .map { (comps, items) in
                 TimelineSection(key: monthTitle(comps), entries: items)
             }
             .sorted { lhs, rhs in
-                (lhs.entries.first?.happenedAt ?? .distantPast) >
-                (rhs.entries.first?.happenedAt ?? .distantPast)
+                (lhs.entries.first.map(sortDate) ?? .distantPast) >
+                (rhs.entries.first.map(sortDate) ?? .distantPast)
             }
     }
 

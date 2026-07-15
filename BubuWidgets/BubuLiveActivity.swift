@@ -16,7 +16,8 @@ struct BubuLiveActivity: Widget {
             // 锁屏 / 横幅
             lockScreen(context)
                 .padding()
-                .activityBackgroundTint(Color.black.opacity(0.25))
+                // 视图内文字为固定白字：底衬要压得够深，浅色壁纸锁屏下白字才保底可读（P3-48）。
+                .activityBackgroundTint(Color.black.opacity(0.55))
         } dynamicIsland: { context in
             DynamicIsland {
                 // 展开态

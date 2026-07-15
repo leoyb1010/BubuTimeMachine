@@ -140,8 +140,9 @@ final class ThemeManager {
     }
 
     /// 把 Home Screen 图标切到当前主题对应的那枚。放在离开主题页时调用，避免逐次点选弹窗。
-    func applyThemeIcon() {
-        AppIconManager.apply(themeId: currentThemeId)
+    /// 生日月由调用方（能拿到档案的一侧）传入，优先生日彩带图标（P3-40）。
+    func applyThemeIcon(isBirthdayMonth: Bool = false) {
+        AppIconManager.apply(themeId: currentThemeId, isBirthdayMonth: isBirthdayMonth)
     }
 }
 

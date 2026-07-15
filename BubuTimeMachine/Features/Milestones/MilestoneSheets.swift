@@ -123,7 +123,8 @@ struct MilestoneEditSheet: View {
             if let m = milestone, let d = m.happenedAt {
                 Text("解锁于 \(BubuDateFormat.yearMonthDay(d))\(m.ageDescription.map { " · \($0)" } ?? "")")
                     .font(BubuTheme.Font.scaled(12.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    // 固定白底必须配固定深字（paperInk）：动态 warmBrown 深色模式下变米白，白底不可读（P3-42）。
+                    .foregroundStyle(BubuTheme.Color.paperInk)
                     .padding(.horizontal, 14).padding(.vertical, 5)
                     .background(.white.opacity(0.85), in: Capsule())
                     .padding(.top, 8)
