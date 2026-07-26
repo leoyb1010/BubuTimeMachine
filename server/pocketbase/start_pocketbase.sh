@@ -28,4 +28,7 @@ echo "   首次启动请在后台创建管理员账号，并新建一个家庭�
 
 # 默认只监听本机；需要 Tailscale 访问时显式传入：
 #   PB_HTTP_ADDR="<tailscale-ip>:8090" ./start_pocketbase.sh /path/to/pb_data
+# 家庭内多设备想走局域网直连（App 设置页的「局域网直连地址」）时，监听所有网卡：
+#   PB_HTTP_ADDR="0.0.0.0:8090" ./start_pocketbase.sh /path/to/pb_data
+# ——0.0.0.0 同时覆盖 Tailscale IP 与 192.168.x.x，App 侧会自动赛跑择快。
 exec "$PB_BIN" serve --http="$PB_HTTP_ADDR" --dir="$DATA_DIR" --migrationsDir="./pb_migrations"

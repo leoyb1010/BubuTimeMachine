@@ -9,6 +9,10 @@ import Foundation
 nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendable {
 
     private let baseURL: URL
+    /// 可选局域网直连地址（设置页填写）。文件传输前与主地址赛跑探测，谁快用谁——
+    /// 主地址走 Tailscale/隧道时若回落公网中继（DERP），同一 Wi-Fi 传照片会绕出外网再绕回来，
+    /// 配了 LAN 地址后大文件直接走内网，速度差一到两个数量级。
+    private let lanBaseURL: URL?
     private let identity: String       // 家庭共享账户邮箱
     private let password: String
 
@@ -17,13 +21,73 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     /// 大文件上传下载走各自的 URLSession，不套用此超时。
     private static let interactiveTimeout: TimeInterval = 25
 
+    /// 文件传输专用会话：整文件资源级超时 30 分钟（系统默认的 60s request 超时对大视频必挂）、
+    /// 断网短暂等待恢复而不是立刻失败。
+    private static let fileTransferSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForResource = 1800
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
+
     /// token 存内存 + Keychain（这里简化为内存；ServerConfig 可扩展持久化）。
     private let tokenBox = TokenBox()
+    /// 文件传输基址的探测结果缓存（每次启动赛跑一次）。
+    private let endpointBox = EndpointBox()
 
-    init(baseURL: URL, identity: String, password: String) {
+    init(baseURL: URL, identity: String, password: String, lanBaseURL: URL? = nil) {
         self.baseURL = baseURL
+        self.lanBaseURL = lanBaseURL
         self.identity = identity
         self.password = password
+    }
+
+    // MARK: 文件传输基址（LAN 赛跑）
+
+    /// 文件下载/流播放用的基址：配了 LAN 地址则与主地址并发探测 /api/health，先响应者胜，
+    /// 结果缓存本次进程生命周期。未配 LAN 或探测全失败回落主地址。
+    private func fileTransferBase() async -> URL {
+        if let resolved = await endpointBox.resolved { return resolved }
+        guard let lan = lanBaseURL else {
+            await endpointBox.setResolved(baseURL)
+            return baseURL
+        }
+        let winner = await Self.raceHealth(candidates: [lan, baseURL]) ?? baseURL
+        await endpointBox.setResolved(winner)
+        return winner
+    }
+
+    /// 并发探测候选地址的 /api/health，返回最先成功者；全失败返回 nil。
+    private nonisolated static func raceHealth(candidates: [URL]) async -> URL? {
+        await withTaskGroup(of: URL?.self) { group in
+            for base in candidates {
+                group.addTask {
+                    var req = URLRequest(url: base.appendingPathComponent("api/health"))
+                    req.timeoutInterval = 2.5
+                    guard let (_, resp) = try? await URLSession.shared.data(for: req),
+                          (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+                    return base
+                }
+            }
+            for await result in group {
+                if let winner = result {
+                    group.cancelAll()
+                    return winner
+                }
+            }
+            return nil
+        }
+    }
+
+    /// 把存量 remoteURL（可能带着旧主机/换过的服务器地址）重锚到当前文件传输基址：
+    /// 只取 path+query，host 用探测出的最快地址重组。
+    private func rebasedFileURL(_ url: URL) async -> URL {
+        let base = await fileTransferBase()
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              var baseComps = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return url }
+        baseComps.path = comps.path
+        baseComps.queryItems = comps.queryItems
+        return baseComps.url ?? url
     }
 
     // MARK: 鉴权
@@ -70,7 +134,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     /// token 过期（401/403）时清掉缓存、重新登录并重试一次；
     /// 瞬时网络抖动（超时/连接被重置/5xx 网关错误，常见于 Cloudflare 隧道/Tailscale）自动退避重试，
     /// 避免家用网络的偶发抖动被上层当成「同步失败」反复报红。
-    private func withAuthRetry<T>(_ op: (String) async throws -> T) async throws -> T {
+    /// attempts 可调：大文件上传/下载失败即整包重来，重试放大流量，传输路径用 2（一次重试）。
+    private func withAuthRetry<T>(attempts: Int = 3, _ op: (String) async throws -> T) async throws -> T {
         func attempt() async throws -> T {
             let token = try await ensureToken()
             do {
@@ -82,11 +147,11 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             }
         }
         var lastError: Error?
-        for i in 0..<3 {
+        for i in 0..<attempts {
             do { return try await attempt() }
             catch {
                 lastError = error
-                guard Self.isTransient(error), i < 2 else { throw error }
+                guard Self.isTransient(error), i < attempts - 1 else { throw error }
                 try? await Task.sleep(for: .milliseconds(400 * (i + 1)))
             }
         }
@@ -308,13 +373,21 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         }
     }
 
-    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL {
-        guard let url = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
-        return try await withAuthRetry { token in
+    func downloadFileToTemporaryURL(from remoteURL: String, thumb: String?) async throws -> URL {
+        guard let raw = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
+        // 换过服务器/配了 LAN 直连时，存量 remoteURL 的主机可能不是最优（甚至已失效）：
+        // 统一重锚到当前探测出的最快基址再下载。
+        var url = await rebasedFileURL(raw)
+        // PocketBase 原生缩略图：?thumb=WxH 让服务端出小图（仅图片生效），
+        // 预览通道用它把 3-10MB 的原图请求降到几十 KB。
+        if let thumb {
+            url = Self.appendingQueryItem(name: "thumb", value: thumb, to: url)
+        }
+        return try await withAuthRetry(attempts: 2) { token in
             let accessURL = try await self.fileAccessURL(for: url, bearerToken: token)
             var req = URLRequest(url: accessURL)
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let (downloadedURL, resp) = try await URLSession.shared.download(for: req)
+            let (downloadedURL, resp) = try await Self.fileTransferSession.download(for: req)
             try Self.check(resp, Data())
 
             let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension
@@ -324,6 +397,24 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             try FileManager.default.moveItem(at: downloadedURL, to: stableURL)
             return stableURL
         }
+    }
+
+    /// 带文件访问令牌的可播放 URL（AVPlayer 流式播放用）：protected 文件裸 URL 会被 403，
+    /// 必须拼 ?token=。令牌短时效（~2 分钟），返回的 URL 供即时起播，不可久存。
+    func signedFileURL(for remoteURL: String) async throws -> URL {
+        guard let raw = URL(string: remoteURL) else { throw APIError.network("文件地址不正确") }
+        let url = await rebasedFileURL(raw)
+        return try await withAuthRetry { token in
+            try await self.fileAccessURL(for: url, bearerToken: token)
+        }
+    }
+
+    /// 按 localId 单条拉取 Entry（未删除的）。孤儿媒体补拉父记录用：
+    /// entries 拉取抖动失败但 media 成功时，接收端媒体找不到父 Entry，当场补拉闭环。
+    func fetchEntry(localId: String) async throws -> EntryDTO? {
+        guard let obj = try await findRecordObject(collection: "entries", localId: localId) else { return nil }
+        if (obj["isDeleted"] as? Bool) == true { return nil }
+        return Self.entryDTO(from: obj, fallback: nil)
     }
 
     private func fileAccessURL(for url: URL, bearerToken: String) async throws -> URL {
@@ -374,7 +465,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let result = try await self.withAuthRetry { token in
+                    // 大文件失败即整包重传，重试 3 次会放大 3 倍流量：传输路径只重试 1 次。
+                    let result = try await self.withAuthRetry(attempts: 2) { token in
                         try await self.multipartUpload(file, token: token) { progress in
                             continuation.yield(.progress(progress))
                         }
@@ -1323,6 +1415,12 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             throw APIError.server(http.statusCode, String(msg))
         }
     }
+}
+
+// MARK: - 文件传输基址缓存（actor，线程安全）
+private actor EndpointBox {
+    private(set) var resolved: URL?
+    func setResolved(_ url: URL) { resolved = url }
 }
 
 // MARK: - Token 容器（actor，线程安全）

@@ -797,7 +797,7 @@ struct CaptureHomeView: View {
             .buttonStyle(.plain)
 
             // 记录此刻虚线卡
-            Button { model?.startQuickCapture() } label: {
+            Button { startQuickCapture() } label: {
                 VStack(spacing: 8) {
                     ZStack {
                         Circle().fill(BubuTheme.Color.softFill).frame(width: 46, height: 46)
@@ -962,7 +962,7 @@ struct CaptureHomeView: View {
     private var dailyQuestionCard: some View {
         let question = DailyQuestion.todays(birthday: profile?.birthday ?? .now)
         return Button {
-            model?.startQuickCapture(prefillNote: "【今日一问】\(question)\n")
+            startQuickCapture(prefillNote: "【今日一问】\(question)\n")
         } label: {
             HStack(spacing: 14) {
                 BubuMascotBadge(size: 46, expression: .surprised)

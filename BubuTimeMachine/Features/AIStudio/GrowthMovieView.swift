@@ -61,6 +61,11 @@ struct GrowthMovieView: View {
             }
         }
         .onDisappear { renderTask?.cancel() }
+        // 上次提交的渲染任务若还挂着（离开页面/杀 App），回来自动接着取，不重复提交（P2-25）
+        .onAppear {
+            guard renderTask == nil else { return }
+            renderTask = Task { await resumePendingRender() }
+        }
     }
 
     @ViewBuilder
@@ -291,39 +296,71 @@ struct GrowthMovieView: View {
         serverHint = ""; serverRendering = true; serverProgress = 0
         defer { serverRendering = false }
         do {
-            var status = try await env.aiService.startMovieRender(
+            let status = try await env.aiService.startMovieRender(
                 childName: env.config.childName, year: movieCalendarYear,
                 template: selectedTemplate.rawValue, photos: photos, narration: aiNarration ?? "")
-            var polls = 0
-            var consecutiveFailures = 0
-            while !status.ready && status.status != "failed" && polls < 300 {
-                try await Task.sleep(for: .seconds(2))
-                do {
-                    status = try await env.aiService.movieRenderStatus(jobId: status.jobId)
-                    consecutiveFailures = 0
-                    serverProgress = status.progress
-                } catch {
-                    // 一次网络抖动不弃剧：连续 3 次失败才放弃
-                    consecutiveFailures += 1
-                    if consecutiveFailures >= 3 { throw error }
-                }
-                polls += 1
-            }
-            guard status.ready else {
-                serverHint = status.status == "failed"
-                    ? (status.error.isEmpty ? "服务端合成失败，稍后再试" : status.error)
-                    : "还在合成中，稍后回到这里再试一次就能取到成片。"
-                return
-            }
-            let tempURL = try await env.aiService.downloadRenderedMovie(jobId: status.jobId)
-            serverMovieURL = Self.persistMovie(tempURL, year: movieFileKey)
-            showServerPlayer = true
+            // jobId 落盘：离开页面/杀 App 后回来接着取成片，不再重复提交渲染（P2-25）
+            UserDefaults.standard.set(status.jobId, forKey: Self.pendingJobKey(movieFileKey))
+            try await pollAndFetch(jobId: status.jobId)
         } catch is CancellationError {
-            // 离开页面主动取消轮询，不提示（P2b）
+            // 离开页面主动取消轮询，不提示（P2b）；jobId 已落盘，回来自动续接
         } catch {
             serverHint = "服务端合成暂不可用：\(error.localizedDescription)"
         }
     }
+
+    /// 轮询直至就绪并下载成片。抗抖动：单次失败重试、连续 3 次才放弃。
+    /// 终态（成功/失败）清掉落盘的 jobId；「仍在合成」保留，下次进页面自动续接。
+    private func pollAndFetch(jobId: String) async throws {
+        var polls = 0
+        var consecutiveFailures = 0
+        var status = try await env.aiService.movieRenderStatus(jobId: jobId)
+        serverProgress = status.progress
+        while !status.ready && status.status != "failed" && polls < 300 {
+            try await Task.sleep(for: .seconds(2))
+            do {
+                status = try await env.aiService.movieRenderStatus(jobId: jobId)
+                consecutiveFailures = 0
+                serverProgress = status.progress
+            } catch {
+                consecutiveFailures += 1
+                if consecutiveFailures >= 3 { throw error }
+            }
+            polls += 1
+        }
+        guard status.ready else {
+            if status.status == "failed" {
+                UserDefaults.standard.removeObject(forKey: Self.pendingJobKey(movieFileKey))
+                serverHint = status.error.isEmpty ? "服务端合成失败，稍后再试" : status.error
+            } else {
+                serverHint = "还在合成中，稍后回到这里会自动接着取成片。"
+            }
+            return
+        }
+        let tempURL = try await env.aiService.downloadRenderedMovie(jobId: jobId)
+        UserDefaults.standard.removeObject(forKey: Self.pendingJobKey(movieFileKey))
+        serverMovieURL = Self.persistMovie(tempURL, year: movieFileKey)
+        showServerPlayer = true
+    }
+
+    /// 进页面时若有挂起的渲染任务，自动续接轮询（不重复提交）。
+    private func resumePendingRender() async {
+        guard !serverRendering,
+              let jobId = UserDefaults.standard.string(forKey: Self.pendingJobKey(movieFileKey)) else { return }
+        serverRendering = true
+        defer { serverRendering = false }
+        serverHint = ""
+        do {
+            try await pollAndFetch(jobId: jobId)
+        } catch is CancellationError {
+        } catch {
+            // 服务端可能已重启丢了任务：清掉挂起 jobId，下次由用户重新发起
+            UserDefaults.standard.removeObject(forKey: Self.pendingJobKey(movieFileKey))
+            serverHint = "上次的合成任务已失效，可重新发起。"
+        }
+    }
+
+    private static func pendingJobKey(_ fileKey: Int) -> String { "bubu.movie.pendingJob.\(fileKey)" }
 
     /// 成片移入 Documents（看完不再即丢，重进页面也能直接播）。
     private static func persistMovie(_ tempURL: URL, year: Int) -> URL {

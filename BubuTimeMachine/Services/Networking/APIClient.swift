@@ -49,12 +49,24 @@ protocol APIClient: Sendable {
     func deleteTimeCapsule(remoteId: String) async throws
     func downloadFile(from remoteURL: String) async throws -> Data
     /// 大文件下载优先落到系统临时文件，避免照片/视频/音频同步时一次性把完整文件读进内存。
-    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL
+    /// thumb 传 PocketBase 尺寸串（如 "600x0"）可让服务端出小图（仅图片生效），预览通道用。
+    func downloadFileToTemporaryURL(from remoteURL: String, thumb: String?) async throws -> URL
+    /// 带访问令牌的可播放 URL（AVPlayer 流式播放 protected 文件用；令牌短时效，即取即用）。
+    func signedFileURL(for remoteURL: String) async throws -> URL
+    /// 按 localId 单条拉取未删除的 Entry（孤儿媒体补拉父记录）。查不到/已删返回 nil。
+    func fetchEntry(localId: String) async throws -> EntryDTO?
     /// 分片上传：返回可观察进度的异步流。
     func uploadMedia(_ file: MediaUploadRequest) -> AsyncThrowingStream<UploadEvent, Error>
     func subscribeRealtime() -> AsyncStream<RealtimeEvent>
     /// 连接测试：设置页「连接测试」按钮调用。
     func ping() async throws -> Bool
+}
+
+extension APIClient {
+    /// 旧调用点兼容：不带 thumb 即下载原文件。
+    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL {
+        try await downloadFileToTemporaryURL(from: remoteURL, thumb: nil)
+    }
 }
 
 // MARK: - 客户端错误

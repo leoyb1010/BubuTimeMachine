@@ -66,7 +66,8 @@ enum BackgroundRefresher {
               let container = SharedModelContainer.sharedIfAvailable else {
             return nil
         }
-        let client = PocketBaseClient(baseURL: url, identity: config.accountEmail, password: config.accountPassword)
+        let client = PocketBaseClient(baseURL: url, identity: config.accountEmail,
+                                      password: config.accountPassword, lanBaseURL: config.lanBaseURL)
         let engine = SyncEngine(apiClient: client, config: config, mediaStore: MediaStore())
         engine.attach(context: container.mainContext)
         log.info("BGTask 冷启动兜底：runner 未注入，用共享容器构造一次性 SyncEngine 跑一轮")

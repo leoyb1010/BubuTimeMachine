@@ -878,10 +878,16 @@ final class SyncEngine {
             merge: { await self.mergeRemoteTimeCapsule($0) }
     }
 
+    /// 本次 pull 是否挂起游标推进：merge 过程中出现「可恢复但本轮没消费成功」的记录
+    /// （如孤儿媒体补拉父记录时网络失败）时置位——游标停在原地，下轮从同一窗口幂等重拉，
+    /// 杜绝「游标推过去、记录再也拉不到」的永久丢失（存储 P0-1）。
+    private var holdCursorForCurrentPull = false
+
     private func pull<DTO: SyncCursorProviding>(_ collection: String,
                            fetch: (Date?) async throws -> [DTO],
                            merge: (DTO) async -> Bool) async {
         let since = cursor(for: collection)
+        holdCursorForCurrentPull = false
         do {
             let items = try await fetch(since)
             // 远端游标与「本地脏记录是否全部消费」解耦（S-P2）：这一轮把远端项全部拉回并逐条尝试合并后，
@@ -904,7 +910,7 @@ final class SyncEngine {
             // 而非本机 Date.now——杜绝读设备时钟偏移把游标推过头、写设备刚写的记录被判旧而永久跳过（S-P1-1）。
             // setCursor 内部回退 60 秒重叠余量，边界不丢记录、自我重拉幂等（localId 去重 + merge 见已 synced 不回退）。
             // 无 context 时不推进（没落库不能推进游标）；本轮无任何新记录/墓碑则游标保持不动（下轮空查询极廉价）。
-            if modelContext != nil, let maxUpdated {
+            if modelContext != nil, let maxUpdated, !holdCursorForCurrentPull {
                 setCursor(maxUpdated, for: collection)
             }
             lastSyncedAt = Date.now
@@ -1036,38 +1042,151 @@ final class SyncEngine {
 
     // MARK: - 下载：把远端媒体/语音落到本地（离线优先对多设备同样成立）
 
-    /// 每轮同步最多下载若干个缺失文件，避免长时间占用；下一轮继续。
-    private func downloadMissingFiles(_ context: ModelContext) async {
-        let media = (try? context.fetch(FetchDescriptor<Media>(
-            predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
-        for item in media.prefix(8) {
-            guard !Task.isCancelled else { return }
-            guard let remoteURL = item.remoteURL else { continue }
-            currentSyncLabel = item.type == .video ? "下载视频" : "下载照片"
-            do {
-                let fileName = try await downloadRemoteFile(
-                    remoteURL,
-                    preferredExtension: item.type == .video ? "mp4" : "jpg",
-                    sniffImage: item.type == .photo
-                )
-                item.localFileName = fileName
-                if item.type == .photo,
-                   let image = ThumbnailProvider.downsample(url: mediaStore.mediaURL(for: fileName), maxPixel: 600) {
-                    item.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
-                } else if item.type == .video {
-                    item.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
-                }
-            } catch {
-                // 缺失文件下载失败属瞬时、可自愈：标记软失败，下轮继续补拉，不立刻报红。
-                softFailureThisRun = true
+    /// 一轮内连续补拉缺失文件，用时间预算封顶而不是固定条数。
+    ///
+    /// 旧实现是 `prefix(8)`：每轮只下 8 个，配合 30 秒的同步循环，
+    /// 导入历史存量（两千多个媒体）要跑几百轮、两个多小时，且必须一直前台开着。
+    /// 改成时间预算后，一轮能连续下完能下的量；`connectAndSync` 有 `syncTask == nil`
+    /// 守卫，单轮跑久不会和下一轮叠加。日常增量只有几个文件，一样是秒回。
+    private static let downloadBudget: TimeInterval = 120
+    private static let downloadCountCap = 500
+
+    /// 单个文件下载任务的输入（只含 Sendable 值，供任务组子任务使用）。
+    private struct DownloadSpec: Sendable {
+        let id: UUID
+        let remoteURL: String
+        let thumb: String?          // PocketBase ?thumb= 尺寸串；nil = 原文件
+        let ext: String
+        let sniff: Bool
+        let makePhotoThumb: Bool
+        let makeVideoThumb: Bool
+        let assignAsThumbnailOnly: Bool  // true：下到的文件写入 thumbnailFileName（预览小图通道）
+    }
+
+    private struct DownloadOutcome: Sendable {
+        let id: UUID
+        let fileName: String?
+        let thumbName: String?
+        let assignAsThumbnailOnly: Bool
+    }
+
+    /// 下载 + 落盘 + 缩略图生成，全程在非主执行器上跑（MediaStore 是 Sendable struct）。
+    /// @concurrent：approachable-concurrency 下 nonisolated async 默认继承调用方执行器，
+    /// 必须显式切到全局并发执行器，图片解码/JPEG 编码才真正离开主线程。
+    @concurrent
+    private nonisolated static func fetchFileOffMain(api: any APIClient, store: MediaStore,
+                                                     spec: DownloadSpec) async -> DownloadOutcome {
+        do {
+            let tempURL = try await api.downloadFileToTemporaryURL(from: spec.remoteURL, thumb: spec.thumb)
+            defer { try? FileManager.default.removeItem(at: tempURL) }
+            let name = try store.importFile(from: tempURL, preferredExtension: spec.ext, sniffImage: spec.sniff)
+            var thumbName: String? = nil
+            if spec.makePhotoThumb,
+               let image = ThumbnailProvider.downsample(url: store.mediaURL(for: name), maxPixel: 600) {
+                thumbName = store.makePhotoThumbnail(fromImage: image)
+            } else if spec.makeVideoThumb {
+                thumbName = await store.makeVideoThumbnail(fromVideo: name)
             }
-            try? context.save()
+            return DownloadOutcome(id: spec.id, fileName: name, thumbName: thumbName,
+                                   assignAsThumbnailOnly: spec.assignAsThumbnailOnly)
+        } catch {
+            return DownloadOutcome(id: spec.id, fileName: nil, thumbName: nil,
+                                   assignAsThumbnailOnly: spec.assignAsThumbnailOnly)
         }
+    }
+
+    /// 并发跑一批下载（固定并发度 + 截止时间），结果回主线程逐条落库。
+    private func runDownloadBatch(_ specs: [DownloadSpec], byID: [UUID: Media],
+                                  context: ModelContext, concurrency: Int,
+                                  deadline: Date, label: String) async {
+        guard !specs.isEmpty else { return }
+        let api = apiClient
+        let store = mediaStore
+        let total = specs.count
+        var done = 0
+        var nextIndex = 0
+        await withTaskGroup(of: DownloadOutcome.self) { group in
+            func addNext() {
+                guard nextIndex < specs.count, Date() < deadline, !Task.isCancelled else { return }
+                let spec = specs[nextIndex]; nextIndex += 1
+                group.addTask { await Self.fetchFileOffMain(api: api, store: store, spec: spec) }
+            }
+            for _ in 0..<min(concurrency, specs.count) { addNext() }
+            for await outcome in group {
+                if let item = byID[outcome.id] {
+                    if let name = outcome.fileName {
+                        if outcome.assignAsThumbnailOnly {
+                            item.thumbnailFileName = name
+                        } else {
+                            item.localFileName = name
+                            if let thumb = outcome.thumbName { item.thumbnailFileName = thumb }
+                        }
+                        done += 1
+                    } else {
+                        // 下载失败属瞬时、可自愈：软失败，下轮继续补拉（字段仍空会被重新选中）。
+                        softFailureThisRun = true
+                    }
+                    try? context.save()
+                }
+                currentSyncLabel = total > 20 ? "\(label) \(done)/\(total)" : label
+                addNext()
+            }
+        }
+    }
+
+    private func downloadMissingFiles(_ context: ModelContext) async {
+        let deadline = Date().addingTimeInterval(Self.downloadBudget)
+
+        // 一次取回全部待补文件（新的在前），内存分组成三批（复合 #Predicate 会让类型检查器超时）。
+        var pendingDescriptor = FetchDescriptor<Media>(
+            predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil },
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+        pendingDescriptor.fetchLimit = Self.downloadCountCap
+        let pendingMedia = (try? context.fetch(pendingDescriptor)) ?? []
+        let pendingPhotos = pendingMedia.filter { $0.type == .photo }
+        let pendingOthers = pendingMedia.filter { $0.type != .photo }
+        var byID: [UUID: Media] = [:]
+        for m in pendingMedia { byID[m.id] = m }
+
+        // ===== 阶段 0 · 预览秒出 =====
+        // 缺图照片先拉 PocketBase 服务端小图（?thumb=600x0，几十 KB/张）：
+        // 时光轴几秒内全部出预览，原图之后慢慢补。这是「同步来的照片一直是占位图」的根治。
+        let thumbSpecs: [DownloadSpec] = pendingPhotos
+            .filter { $0.thumbnailFileName == nil }
+            .compactMap { m in
+                guard let url = m.remoteURL else { return nil }
+                return DownloadSpec(id: m.id, remoteURL: url, thumb: "600x0", ext: "jpg", sniff: true,
+                                    makePhotoThumb: false, makeVideoThumb: false, assignAsThumbnailOnly: true)
+            }
+        await runDownloadBatch(thumbSpecs, byID: byID, context: context,
+                               concurrency: 4, deadline: deadline, label: "同步预览图")
+
+        // ===== 阶段 1 · 照片原图（新的先下，并发 3） =====
+        let photoSpecs: [DownloadSpec] = pendingPhotos.compactMap { m in
+            guard let url = m.remoteURL else { return nil }
+            return DownloadSpec(id: m.id, remoteURL: url,
+                                thumb: nil, ext: Self.pathExtension(from: url, fallback: "jpg"), sniff: true,
+                                makePhotoThumb: m.thumbnailFileName == nil, makeVideoThumb: false,
+                                assignAsThumbnailOnly: false)
+        }
+        await runDownloadBatch(photoSpecs, byID: byID, context: context,
+                               concurrency: 3, deadline: deadline, label: "下载照片")
+
+        // ===== 阶段 2 · 视频/其它原文件（并发 2，排最后不堵照片） =====
+        let videoSpecs: [DownloadSpec] = pendingOthers.compactMap { m in
+            guard let url = m.remoteURL else { return nil }
+            return DownloadSpec(id: m.id, remoteURL: url,
+                                thumb: nil, ext: Self.pathExtension(from: url, fallback: "mp4"), sniff: false,
+                                makePhotoThumb: false, makeVideoThumb: m.type == .video,
+                                assignAsThumbnailOnly: false)
+        }
+        await runDownloadBatch(videoSpecs, byID: byID, context: context,
+                               concurrency: 2, deadline: deadline, label: "下载视频")
 
         let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
         for note in notes.prefix(10) {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, Date() < deadline else { return }
             guard let remoteURL = note.remoteURL else { continue }
             currentSyncLabel = "下载语音"
             do {
@@ -1081,7 +1200,7 @@ final class SyncEngine {
         let comments = (try? context.fetch(FetchDescriptor<Comment>(
             predicate: #Predicate { $0.voiceFileName == nil && $0.remoteURL != nil }))) ?? []
         for comment in comments.prefix(10) {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, Date() < deadline else { return }
             guard let remoteURL = comment.remoteURL else { continue }
             currentSyncLabel = "下载家人语音"
             do {
@@ -1095,7 +1214,7 @@ final class SyncEngine {
         let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
         for memo in memos.prefix(10) {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, Date() < deadline else { return }
             guard let remoteURL = memo.remoteURL else { continue }
             currentSyncLabel = "下载成长之声"
             do {
@@ -1183,7 +1302,29 @@ final class SyncEngine {
             return true
         }
         let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-        guard let entry = try? context.fetch(entryDescriptor).first else { return false }
+        var parent = try? context.fetch(entryDescriptor).first
+        if parent == nil {
+            // 孤儿媒体闭环（存储 P0-1）：本轮 entries 拉取抖动失败而 media 成功时，
+            // 父记录还没落地。原实现直接丢弃这条媒体、游标照推——照片在这台设备永久消失。
+            // 现在当场单条补拉父 Entry：拉到→先合并父记录再挂媒体；
+            // 服务器上父记录已删/不存在→孤儿属被删记录，跳过（游标正常推进）；
+            // 补拉网络失败→挂起本轮游标，下轮从同一窗口幂等重拉。
+            do {
+                if let entryDTO = try await apiClient.fetchEntry(localId: dto.entryLocalId) {
+                    _ = await mergeRemoteEntry(entryDTO)
+                    parent = try? context.fetch(entryDescriptor).first
+                } else {
+                    return true
+                }
+            } catch {
+                holdCursorForCurrentPull = true
+                return false
+            }
+        }
+        guard let entry = parent else {
+            holdCursorForCurrentPull = true
+            return false
+        }
         let media = Media(type: MediaType(rawValue: dto.mediaType) ?? .photo, localFileName: nil)
         media.id = mediaId
         Self.apply(dto, to: media)

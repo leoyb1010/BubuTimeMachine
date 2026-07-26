@@ -65,7 +65,8 @@ final class AppEnvironment {
     private static func makeAPIClient(config: ServerConfig) -> APIClient {
         guard config.isConfigured, let url = config.baseURL else { return MockAPIClient() }
         return PocketBaseClient(baseURL: url, identity: config.accountEmail,
-                                password: config.accountPassword)
+                                password: config.accountPassword,
+                                lanBaseURL: config.lanBaseURL)
     }
 
     private static func makeAIService(config: ServerConfig) -> AIService {

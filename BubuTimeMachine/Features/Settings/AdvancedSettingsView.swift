@@ -44,6 +44,10 @@ struct AdvancedSettingsView: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 }
                 #endif
+                // 局域网直连（可选）：主地址走 Tailscale/隧道回落公网中继时，家里同一 Wi-Fi
+                // 传照片会绕外网。填了这个，照片/视频传输自动与主地址赛跑择优。
+                TextField("局域网直连地址（可选，如 http://192.168.1.10:8090）", text: $config.lanBaseURLString)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 TextField("家庭账户邮箱", text: $config.accountEmail)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
                 SecureField("账户密码", text: $config.accountPassword)

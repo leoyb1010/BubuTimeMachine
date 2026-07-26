@@ -273,23 +273,21 @@ private struct MediaPageView: View {
 
     @ViewBuilder
     private var videoPage: some View {
-        if let url = videoURL {
+        if let url = localVideoURL {
             StableVideoPlayer(url: url)
+                .ignoresSafeArea(edges: .bottom)
+        } else if media.remoteURL != nil {
+            RemoteVideoPage(remoteURL: media.remoteURL!)
                 .ignoresSafeArea(edges: .bottom)
         } else {
             missing("本地视频文件找不到了")
         }
     }
 
-    private var videoURL: URL? {
-        if let name = media.localFileName {
-            let localURL = mediaStore.mediaURL(for: name)
-            if FileManager.default.fileExists(atPath: localURL.path) {
-                return localURL
-            }
-        }
-        guard let remote = media.remoteURL else { return nil }
-        return URL(string: remote)
+    private var localVideoURL: URL? {
+        guard let name = media.localFileName else { return nil }
+        let localURL = mediaStore.mediaURL(for: name)
+        return FileManager.default.fileExists(atPath: localURL.path) ? localURL : nil
     }
 
     private var audioPage: some View {
@@ -421,7 +419,9 @@ private struct RemoteZoomableImage: View {
         errorText = nil
         defer { isLoading = false }
         do {
-            let tempURL = try await env.apiClient.downloadFileToTemporaryURL(from: remoteURL)
+            // 拉 2400px 服务端中图而非原图（几百 KB vs 数 MB）：局域网点开即看。
+            // 只进内存展示不落盘——原图由后台同步照常补齐，30 年档案完整性不受影响。
+            let tempURL = try await env.apiClient.downloadFileToTemporaryURL(from: remoteURL, thumb: "2400x0")
             defer { try? FileManager.default.removeItem(at: tempURL) }
             guard let decoded = await Task.detached(priority: .userInitiated, operation: {
                 ThumbnailProvider.downsample(url: tempURL, maxPixel: 2400)
@@ -435,6 +435,52 @@ private struct RemoteZoomableImage: View {
             #if DEBUG
             print("[MediaViewer] remote image failed:", remoteURL, error)
             #endif
+        }
+    }
+}
+
+/// 远端视频页：protected 文件裸 URL 会被服务器 403（原实现直接把裸 URL 喂 AVPlayer 必黑屏）。
+/// 先取带访问令牌的签名 URL 再流式播放——不用等整个视频下完，点开即播。
+private struct RemoteVideoPage: View {
+    @Environment(AppEnvironment.self) private var env
+
+    let remoteURL: String
+    @State private var playableURL: URL?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let playableURL {
+                StableVideoPlayer(url: playableURL)
+            } else if failed {
+                VStack(spacing: 12) {
+                    Image(systemName: "icloud.slash")
+                        .font(BubuTheme.Font.scaled(42))
+                    Text("视频还没准备好，请稍后重试")
+                        .font(BubuTheme.Font.body)
+                    Button("重试") {
+                        failed = false
+                        Task { await resolve() }
+                    }
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.16), in: Capsule())
+                }
+                .foregroundStyle(.white.opacity(0.9))
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task(id: remoteURL) { await resolve() }
+    }
+
+    private func resolve() async {
+        guard playableURL == nil else { return }
+        do {
+            playableURL = try await env.apiClient.signedFileURL(for: remoteURL)
+        } catch {
+            failed = true
         }
     }
 }

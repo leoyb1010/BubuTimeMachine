@@ -155,5 +155,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- 局域网直连（设置页可填 http://192.168.x.x:8090）：仅豁免本地网络明文，外网仍强制 HTTPS -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>与家里的服务器（同一 Wi-Fi 下）直连传输照片和视频，速度更快、不经过外网。</string>
 </dict>
 </plist>

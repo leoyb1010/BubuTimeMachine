@@ -18,6 +18,18 @@ final class ServerConfig {
         }
     }
 
+    /// 局域网直连地址（可选，如 http://192.168.1.10:8090）。主地址走 Tailscale/隧道回落公网中继时，
+    /// 同一 Wi-Fi 传照片会绕外网——填了这个，照片/视频传输自动与主地址赛跑择优，家里秒传。
+    var lanBaseURLString: String {
+        didSet { UserDefaults.standard.set(lanBaseURLString, forKey: Self.lanBaseURLKey) }
+    }
+
+    var lanBaseURL: URL? {
+        let trimmed = lanBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
     /// 当前家庭身份（爸爸/妈妈/姥姥），用于署名与多视角。
     var currentRoleRaw: String {
         didSet {
@@ -113,6 +125,7 @@ final class ServerConfig {
     }
 
     private static let baseURLKey = "bubu.server.baseURL"
+    private static let lanBaseURLKey = "bubu.server.lanBaseURL"
     private static let roleKey = "bubu.server.role"
     private static let childNameKey = "bubu.child.name"
     private static let emailKey = "bubu.server.email"
@@ -144,6 +157,7 @@ final class ServerConfig {
 
     init() {
         self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
+        self.lanBaseURLString = UserDefaults.standard.string(forKey: Self.lanBaseURLKey) ?? ""
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
         self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""

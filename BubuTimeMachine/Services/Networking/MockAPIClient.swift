@@ -56,12 +56,17 @@ final class MockAPIClient: APIClient {
     }
     func deleteTimeCapsule(remoteId: String) async throws {}
     func downloadFile(from remoteURL: String) async throws -> Data { Data() }
-    func downloadFileToTemporaryURL(from remoteURL: String) async throws -> URL {
+    func downloadFileToTemporaryURL(from remoteURL: String, thumb: String?) async throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("bubu-mock-download-\(UUID().uuidString).bin")
         try Data().write(to: url, options: .atomic)
         return url
     }
+    func signedFileURL(for remoteURL: String) async throws -> URL {
+        guard let url = URL(string: remoteURL) else { throw APIError.network("mock") }
+        return url
+    }
+    func fetchEntry(localId: String) async throws -> EntryDTO? { nil }
 
     private func mockUpload(id: UUID, fileName: String) -> AsyncThrowingStream<UploadEvent, Error> {
         AsyncThrowingStream { continuation in
