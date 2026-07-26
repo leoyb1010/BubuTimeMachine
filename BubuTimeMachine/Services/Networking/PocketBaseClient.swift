@@ -886,12 +886,18 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         ]
         Self.addSyncTimestamp(to: &fields)
         fields = await activeRecordFields(fields)
+        // 缩略图随原文件一并上传（服务端 thumbnail 字段早已就绪）：
+        // 家人设备先拿小图出预览，视频不用下完原片。
+        let extraFile: (field: String, url: URL, name: String)? = file.thumbnailURL.map {
+            ("thumbnail", $0, file.thumbnailFileName ?? "thumb.jpg")
+        }
         let bodyURL = try multipartBodyFile(
             boundary: boundary,
             fields: fields,
             fileField: "file",
             fileURL: file.fileURL,
-            fileName: file.fileName
+            fileName: file.fileName,
+            extraFile: extraFile
         )
         defer { try? FileManager.default.removeItem(at: bodyURL) }
 
@@ -911,7 +917,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     private func multipartBodyFile(boundary: String, fields: [String: String], fileField: String,
-                                   fileURL: URL, fileName: String) throws -> URL {
+                                   fileURL: URL, fileName: String,
+                                   extraFile: (field: String, url: URL, name: String)? = nil) throws -> URL {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("bubu-upload-\(UUID().uuidString).body")
         FileManager.default.createFile(atPath: tempURL.path, contents: nil)
@@ -922,25 +929,33 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             try output.write(contentsOf: Data(string.utf8))
         }
 
+        func writeFilePart(field: String, url: URL, name: String) throws {
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(name)\"\r\n")
+            try write("Content-Type: application/octet-stream\r\n\r\n")
+            let input = try FileHandle(forReadingFrom: url)
+            defer { try? input.close() }
+            while true {
+                let chunk = try input.read(upToCount: 1_048_576)
+                guard let chunk, !chunk.isEmpty else { break }
+                try output.write(contentsOf: chunk)
+            }
+            try write("\r\n")
+        }
+
         for (key, value) in fields.sorted(by: { $0.key < $1.key }) {
             try write("--\(boundary)\r\n")
             try write("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
             try write("\(value)\r\n")
         }
 
-        try write("--\(boundary)\r\n")
-        try write("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n")
-        try write("Content-Type: application/octet-stream\r\n\r\n")
-
-        let input = try FileHandle(forReadingFrom: fileURL)
-        defer { try? input.close() }
-        while true {
-            let chunk = try input.read(upToCount: 1_048_576)
-            guard let chunk, !chunk.isEmpty else { break }
-            try output.write(contentsOf: chunk)
+        try writeFilePart(field: fileField, url: fileURL, name: fileName)
+        // 附带文件（如缩略图）：文件不存在就跳过，不因小图缺失拖垮原文件上传。
+        if let extraFile, FileManager.default.fileExists(atPath: extraFile.url.path) {
+            try writeFilePart(field: extraFile.field, url: extraFile.url, name: extraFile.name)
         }
 
-        try write("\r\n--\(boundary)--\r\n")
+        try write("--\(boundary)--\r\n")
         return tempURL
     }
 
@@ -1037,12 +1052,18 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         let remoteURL = id.flatMap { recordId in
             fileName.isEmpty ? nil : baseURL.appendingPathComponent("api/files/media/\(recordId)/\(fileName)").absoluteString
         }
+        // 服务端缩略图（thumbnail file 字段）：老记录没传过则为空，接收端自动走原有兜底。
+        let thumbName = (obj["thumbnail"] as? String) ?? ""
+        let remoteThumbURL = id.flatMap { recordId in
+            thumbName.isEmpty ? nil : baseURL.appendingPathComponent("api/files/media/\(recordId)/\(thumbName)").absoluteString
+        }
         return MediaDTO(
             id: id,
             localId: obj["localId"] as? String ?? UUID().uuidString,
             entryLocalId: obj["entryLocalId"] as? String ?? "",
             mediaType: obj["mediaType"] as? String ?? "photo",
             remoteURL: remoteURL,
+            remoteThumbURL: remoteThumbURL,
             durationSeconds: obj["durationSeconds"] as? Double,
             width: obj["width"] as? Int,
             height: obj["height"] as? Int,

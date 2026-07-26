@@ -10,6 +10,11 @@ final class Media {
     var localFileName: String?        // 沙盒相对路径
     var remoteURL: String?            // PocketBase file url
     var thumbnailFileName: String?
+    /// 服务端缩略图 URL（media.thumbnail file 字段）。V2 新增：
+    /// 视频的预览图靠它——接收端不用下完整个视频就能出预览。
+    var remoteThumbURL: String?
+    /// 文件内容 SHA256（十六进制）。V2 新增：导入时计算，拦截同一文件被重复收录。
+    var contentHash: String?
     var durationSeconds: Double?      // 视频/音频时长
     var width: Int?
     var height: Int?

@@ -54,6 +54,8 @@ struct MediaDTO: Codable, Sendable, SyncCursorProviding {
     var entryLocalId: String
     var mediaType: String
     var remoteURL: String?
+    /// 服务端缩略图 URL（media.thumbnail file 字段）；视频预览不下原片的关键。
+    var remoteThumbURL: String? = nil
     var durationSeconds: Double?
     var width: Int?
     var height: Int?
@@ -226,6 +228,10 @@ struct MediaUploadRequest: Sendable {
     let fileURL: URL
     let type: MediaType
     let fileName: String
+    /// 本地缩略图文件（可选）：随原文件一并传到服务端 thumbnail 字段，
+    /// 家人设备不用下原片就有预览（视频尤其关键）。
+    var thumbnailURL: URL? = nil
+    var thumbnailFileName: String? = nil
 }
 
 /// 上传过程事件流。

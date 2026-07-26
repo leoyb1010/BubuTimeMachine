@@ -35,14 +35,19 @@ enum BubuSchemaV1: VersionedSchema {
 }
 
 /// 迁移计划：当前只有 V1 一个版本，故 stages 为空。SharedModelContainer 与 App 均用它建容器。
+///
+/// 【2026-07-26 · Media 追加 remoteThumbURL / contentHash 的实践记录】
+/// 两个可选字段属纯 additive：SwiftData 按「类当前形状 vs store 形状」自动轻量迁移，
+/// 不需要（也不能）为此新增 VersionedSchema——V1/V2 引用同一批模型类时，
+/// 两个版本的实体形状完全相同而版本号不同，迁移器直接 abort（真机已验证）。
+/// 规范的 V2 需要把旧类定义快照进 V1 命名空间，而历史旧形状已不可考（见上方铁律注释）；
+/// 因此 additive 变更沿用「类上直接加可选字段 + 自动轻量迁移」，只有破坏性变更才起 V2。
 enum BubuMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
         [BubuSchemaV1.self]
-        // 将来：[BubuSchemaV1.self, BubuSchemaV2.self]
     }
     static var stages: [MigrationStage] {
         []
-        // 将来：[BubuSchemaV1toV2] 等（见文件底部模板）
     }
 }
 

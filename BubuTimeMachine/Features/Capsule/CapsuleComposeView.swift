@@ -22,6 +22,9 @@ struct CapsuleComposeView: View {
     /// 有旧 blob 但解密失败 → 保持 nil 且 decryptFailed=true：此时【绝不】重封，防止空信覆盖原信。
     @State private var loadedPayload: CapsulePayload?
     @State private var decryptFailed = false
+    /// 封存成功的「盖蜡章」仪式（触觉/音效早有，视觉是第三拍）。
+    @State private var showSealCeremony = false
+    @State private var sealStamped = false
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -46,6 +49,7 @@ struct CapsuleComposeView: View {
                     }
                     .padding()
                 }
+                if showSealCeremony { sealCeremonyOverlay }
             }
             .navigationTitle(editing == nil ? "写给未来的布布" : "修改时间胶囊")
             .navigationBarTitleDisplayMode(.inline)
@@ -258,13 +262,57 @@ struct CapsuleComposeView: View {
             capsule.syncState = .local
             if editing == nil { context.insert(capsule) }
             try context.save()
-            // 封存要有「盖章」的确定感
+            // 封存要有「盖章」的确定感：触觉 + 音效 + 蜡章落下动画三拍齐（R4 C2）
             BubuHaptics.stamp()
             BubuSound.play(.seal)
             env.syncEngine.syncNow()
-            dismiss()
+            withAnimation(BubuMotion.gentle) { showSealCeremony = true }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.0))
+                dismiss()
+            }
         } catch {
             errorText = "这封信还没有封存成功：\(error.localizedDescription)。录好的语音仍保留在手机里，可以稍后再试。"
+        }
+    }
+
+    // MARK: 封存蜡章仪式（R4 C2：信封合拢 + 蜡章落下 + 星点迸发）
+    private var sealCeremonyOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.48).ignoresSafeArea()
+            VStack(spacing: 18) {
+                ZStack {
+                    Text(emoji.isEmpty ? "💌" : emoji)
+                        .font(.system(size: 96))
+                        .scaleEffect(sealStamped ? 1 : 0.86)
+                    // 蜡章：从上方重重落下，带一点旋转的「盖章感」
+                    ZStack {
+                        Circle()
+                            .fill(BubuTheme.Color.deepRose)
+                            .frame(width: 58, height: 58)
+                            .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 2).padding(5))
+                            .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+                        Text("布")
+                            .font(BubuTheme.Font.scaled(24, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                    .offset(x: 40, y: 34)
+                    .scaleEffect(sealStamped ? 1 : 2.3)
+                    .rotationEffect(.degrees(sealStamped ? -8 : -30))
+                    .opacity(sealStamped ? 1 : 0)
+                    if sealStamped { BubuBurst(count: 18, radius: 130) }
+                }
+                Text("封存好啦")
+                    .font(BubuTheme.Font.title)
+                    .foregroundStyle(.white)
+                Text("到 \(BubuDateFormat.longDate(unlockAt)) 才能开启")
+                    .font(BubuTheme.Font.body)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .transition(.opacity)
+        .onAppear {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.52)) { sealStamped = true }
         }
     }
 }

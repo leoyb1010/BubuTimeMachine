@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.bubu.timemachine.refresh</string>
+		<string>com.bubu.timemachine.fullsync</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
@@ -139,6 +140,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

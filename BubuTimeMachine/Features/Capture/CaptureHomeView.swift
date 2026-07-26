@@ -62,6 +62,7 @@ struct CaptureHomeView: View {
                 // 问候 → 身份卡 → 主操作 → 紧凑四宫格 → 最近时光/延伸能力。
                 VStack(spacing: 12) {
                     greetingRow
+                    if isBirthdayToday { birthdayBanner }   // 🎂 生日当天全 App 仪式（R4 C4）
                     identityCardTop            // ① 布布身份卡（可翻面看性别/血型/出生地）
                     todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
                     primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
@@ -287,9 +288,38 @@ struct CaptureHomeView: View {
         }.value
     }
 
-    // MARK: 年龄头部（布布个人身份卡）
+    // MARK: 生日仪式（素材早齐：生日图标/音效/迸发组件，只差编排——R4 C4）
 
-    @ViewBuilder
+    private var isBirthdayToday: Bool {
+        guard let birthday = profile?.birthday else { return false }
+        let cal = Calendar.current
+        return cal.component(.month, from: .now) == cal.component(.month, from: birthday)
+            && cal.component(.day, from: .now) == cal.component(.day, from: birthday)
+    }
+
+    private var birthdayBanner: some View {
+        HStack(spacing: 12) {
+            Text("🎂").font(BubuTheme.Font.scaled(32))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(profile?.name ?? "布布")生日快乐！")
+                    .font(BubuTheme.Font.scaled(18, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.paperInk)
+                Text("今天的每一个瞬间都值得收藏 🎈")
+                    .font(BubuTheme.Font.scaled(12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.paperInkSecondary)
+            }
+            Spacer()
+            Text("🎉").font(BubuTheme.Font.scaled(26))
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(
+            LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.pink],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .bubuCardShadow()
+        .overlay { BubuBurst(count: 20, radius: 150) }
+    }
+
     // 顶部问候行（纯展示，对照设计稿「☀︎ 早安呀 + 名字 + 年龄」）
     private var greetingRow: some View {
         HStack(alignment: .center) {
@@ -1031,6 +1061,8 @@ struct CaptureHomeView: View {
             .padding(.horizontal, 18).padding(.vertical, 10)
             .background(BubuTheme.Color.success, in: Capsule())
             .bubuCardShadow()
+            // 保存是核心奖励时刻（R4 C1）：贴纸落下同时星点迸发，一眼「收好了」
+            .overlay { BubuBurst(count: 16, radius: 115) }
             Spacer()
         }
         .padding(.top, 8)

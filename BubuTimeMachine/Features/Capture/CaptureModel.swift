@@ -400,6 +400,9 @@ final class CaptureModel {
            let image = UIImage(data: data) {
             guard let fileName = try? mediaStore.savePhoto(data) else { return nil }
             let media = Media(type: .photo, localFileName: fileName)
+            // 记录内容指纹（V2）：供「今天拍的」收录去重命中；此路径不拦截——
+            // 用户从相册主动再选同一张（配不同文字另开记录）是合法意图。
+            media.contentHash = MediaStore.sha256Hex(data)
             media.width = Int(image.size.width)
             media.height = Int(image.size.height)
             media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)

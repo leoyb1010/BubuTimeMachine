@@ -131,6 +131,13 @@ struct TodayPhotosSheet: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
+    /// 库里是否已有同内容照片（contentHash 命中即重复；老数据 hash 为 nil 不参与判定）。
+    private static func hashExists(_ hash: String, context: ModelContext) -> Bool {
+        var descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.contentHash == hash })
+        descriptor.fetchLimit = 1
+        return ((try? context.fetchCount(descriptor)) ?? 0) > 0
+    }
+
     private var savingOverlay: some View {
         ZStack {
             Color.black.opacity(0.25).ignoresSafeArea()
@@ -155,6 +162,7 @@ struct TodayPhotosSheet: View {
         context.insert(entry)
 
         var okAssets: [PHAsset] = []
+        var duplicateAssets: [PHAsset] = []   // 已收录过（contentHash 命中），跳过但标记已处理
         var earliestCapture: Date?
         var aggregatedTags: [String] = []
 
@@ -170,9 +178,17 @@ struct TodayPhotosSheet: View {
                 media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: imported.fileName)
             } else {
                 // 原始字节：失败（iCloud 没下载 + 无网等）计入失败，不静默
-                guard let data = await PhotoLibraryScanner.loadOriginalData(asset),
-                      let fileName = try? env.mediaStore.savePhoto(data) else { continue }
+                guard let data = await PhotoLibraryScanner.loadOriginalData(asset) else { continue }
+                // 重复收录拦截（V2 contentHash）：同一张照片之前已收过就跳过，
+                // 但仍标记已处理（skippedDuplicates 也进 markHandled），避免明天再被提示。
+                let hash = MediaStore.sha256Hex(data)
+                if Self.hashExists(hash, context: context) {
+                    duplicateAssets.append(asset)
+                    continue
+                }
+                guard let fileName = try? env.mediaStore.savePhoto(data) else { continue }
                 media = Media(type: .photo, localFileName: fileName)
+                media.contentHash = hash
                 if let thumbSource = UIImage(data: data) {
                     media.thumbnailFileName = env.mediaStore.makePhotoThumbnail(fromImage: thumbSource)
                 }
@@ -190,7 +206,16 @@ struct TodayPhotosSheet: View {
             }
         }
 
-        let failedCount = chosen.count - okAssets.count
+        let failedCount = chosen.count - okAssets.count - duplicateAssets.count
+
+        // 全是重复：不落空 Entry，标记已处理后温和告知（不算失败）
+        if okAssets.isEmpty, noteText.isEmpty, !duplicateAssets.isEmpty, failedCount == 0 {
+            context.delete(entry)
+            BubuHaptics.tapLight()
+            importError = "这 \(duplicateAssets.count) 张之前都收录过啦，没有重复保存。"
+            onDone(assets.filter { a in duplicateAssets.contains(where: { $0.localIdentifier == a.localIdentifier }) || !chosen.contains(where: { $0.localIdentifier == a.localIdentifier }) })
+            return
+        }
 
         guard !okAssets.isEmpty || !noteText.isEmpty else {
             // 一张都没成：不落 Entry、不标记、不关面板
@@ -215,12 +240,14 @@ struct TodayPhotosSheet: View {
         env.syncEngine.syncNow()
         env.refreshWidgetSnapshot(context: context)
 
-        // 只标记：成功收录的 + 用户看过但没选的；失败的留着下次再提示
-        let failedIDs = Set(chosen.map(\.localIdentifier)).subtracting(okAssets.map(\.localIdentifier))
+        // 只标记：成功收录的 + 重复跳过的 + 用户看过但没选的；失败的留着下次再提示
+        var failedIDs = Set(chosen.map(\.localIdentifier)).subtracting(okAssets.map(\.localIdentifier))
+        failedIDs.subtract(duplicateAssets.map(\.localIdentifier))
         let toMark = assets.filter { !failedIDs.contains($0.localIdentifier) }
+        let dupNote = duplicateAssets.isEmpty ? "" : "（\(duplicateAssets.count) 张之前收录过，自动跳过）"
 
         if failedCount > 0 {
-            importError = "收好了 \(okAssets.count) 张，另外 \(failedCount) 张没能读取（可能还在 iCloud 上），之后会再提醒你。"
+            importError = "收好了 \(okAssets.count) 张\(dupNote)，另外 \(failedCount) 张没能读取（可能还在 iCloud 上），之后会再提醒你。"
             BubuHaptics.warning()
             onDone(toMark)
             // 不立即 dismiss：让用户看到提示，点"知道了"后自己关

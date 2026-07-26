@@ -10,6 +10,9 @@ import OSLog
 @MainActor
 enum BackgroundRefresher {
     static let refreshID = "com.bubu.timemachine.refresh"
+    /// 长时窗口批量补拉（BGProcessing）：系统在夜间/充电等宽裕时段给几分钟到几十分钟，
+    /// 存量照片视频不用亮屏干等——睡一觉起来基本拉完（R4 G-2 补强）。
+    static let fullSyncID = "com.bubu.timemachine.fullsync"
 
     private static var syncRunner: (@MainActor () async -> Void)?
 
@@ -22,6 +25,11 @@ enum BackgroundRefresher {
                 await handle(task: task)
             }
         }
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: fullSyncID, using: nil) { task in
+            Task { @MainActor in
+                await handle(task: task)
+            }
+        }
     }
 
     /// env 就绪后注入真正「await 到一轮同步跑完」的 runner。
@@ -29,11 +37,18 @@ enum BackgroundRefresher {
         syncRunner = runner
     }
 
-    /// 进后台时排下一次唤醒。
+    /// 进后台时排下一次唤醒：短窗刷新（半小时后随时可能）+ 长窗批量补拉（要网络，
+    /// 系统偏好在充电/夜间给出几分钟到几十分钟——存量照片视频靠它睡一觉拉完）。
     static func scheduleNext() {
         let request = BGAppRefreshTaskRequest(identifier: refreshID)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 30 * 60)   // 最早半小时后
         try? BGTaskScheduler.shared.submit(request)
+
+        let full = BGProcessingTaskRequest(identifier: fullSyncID)
+        full.requiresNetworkConnectivity = true
+        full.requiresExternalPower = false   // 不强制充电：插电时被调度的概率天然更高
+        full.earliestBeginDate = Date(timeIntervalSinceNow: 60 * 60)
+        try? BGTaskScheduler.shared.submit(full)
     }
 
     private static let log = Logger(subsystem: "com.bubu.timemachine", category: "BackgroundRefresher")

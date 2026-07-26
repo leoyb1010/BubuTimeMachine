@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import AVFoundation
+import CryptoKit
 
 // MARK: - 媒体存储
 /// 沙盒文件读写 + 缩略图生成。离线优先：媒体原文件落本地，永不丢失。
@@ -8,6 +9,11 @@ import AVFoundation
 /// nonisolated：缩略图解码在 Task.detached 后台执行，不绑定 MainActor。
 nonisolated struct MediaStore: Sendable {
     static let publicUploadSoftLimitBytes: Int64 = 96 * 1_048_576
+
+    /// 文件内容 SHA256（十六进制小写）。重复收录拦截用：同一张照片的原始字节 hash 恒定。
+    static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 
     // 媒体目录改读 App Group 共享容器（BubuStorage），让 Widget/extension 也能显示照片缩略图。
     // App Group 未就绪时 BubuStorage 自动回退到私有 Documents，与旧行为一致、不崩。

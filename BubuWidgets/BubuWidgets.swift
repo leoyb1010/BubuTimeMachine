@@ -57,6 +57,8 @@ private enum WidgetPalette {
 struct BubuAvatar: View {
     let imageData: Data?
     var size: CGFloat
+    /// 可爱模式（信息卡用）：糖果渐变描边 + 右下角蝴蝶结贴纸。
+    var cute = false
     var body: some View {
         ZStack {
             if let image = Self.downsampledImage(from: imageData, maxPixel: size * 3) {
@@ -79,7 +81,24 @@ struct BubuAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 2))
+        .overlay {
+            if cute {
+                Circle().stroke(
+                    AngularGradient(colors: [WidgetPalette.pink, WidgetPalette.honey, WidgetPalette.mint,
+                                             WidgetPalette.lav, WidgetPalette.pink], center: .center),
+                    lineWidth: 2.5)
+            } else {
+                Circle().stroke(.white.opacity(0.85), lineWidth: 2)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if cute {
+                Text("🎀")
+                    .font(.system(size: max(12, size * 0.28)))
+                    .rotationEffect(.degrees(12))
+                    .offset(x: size * 0.06, y: size * 0.05)
+            }
+        }
         .shadow(color: WidgetPalette.primary.opacity(0.25), radius: 4, y: 2)
     }
 
@@ -369,7 +388,7 @@ private struct BubuDayHeader: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            BubuAvatar(imageData: snapshot.avatarImageData, size: compact ? 38 : 50)
+            BubuAvatar(imageData: snapshot.avatarImageData, size: compact ? 38 : 50, cute: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.name)
                     .font(.system(size: compact ? 18 : 22, weight: .black, design: .rounded))
@@ -393,6 +412,54 @@ private struct BubuDayHeader: View {
 }
 
 // MARK: - 身份陪伴
+// MARK: - 信息卡可爱化装饰（手账贴纸 + 波点底纹）
+
+/// 手账贴纸：低透明 emoji 带轻微旋转散布在卡片边角，像贴在成长手账上的小贴纸。
+/// 位置避开信息区（右上/右中/左下），不遮字。emoji 在染色模式下保持原色，无需降级分支。
+private struct BubuStickerDecor: View {
+    var compact = false
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height
+            Group {
+                Text("☁️").font(.system(size: compact ? 15 : 19)).opacity(0.55)
+                    .rotationEffect(.degrees(-10)).position(x: w * 0.86, y: h * 0.09)
+                Text("🎈").font(.system(size: compact ? 12 : 15)).opacity(0.6)
+                    .rotationEffect(.degrees(12)).position(x: w * 0.95, y: h * 0.42)
+                if !compact {
+                    Text("🧸").font(.system(size: 14)).opacity(0.5)
+                        .rotationEffect(.degrees(-14)).position(x: w * 0.05, y: h * 0.62)
+                }
+                Text("⭐️").font(.system(size: compact ? 10 : 12)).opacity(0.55)
+                    .rotationEffect(.degrees(8)).position(x: w * 0.07, y: h * 0.93)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// 淡淡的波点底纹：给奶油底加一层手帐纸的质感，透明度压得很低不抢内容。
+private struct BubuDotsPattern: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let spacing: CGFloat = 26
+            var y: CGFloat = 6
+            var row = 0
+            while y < size.height {
+                var x: CGFloat = row.isMultiple(of: 2) ? 6 : 6 + spacing / 2
+                while x < size.width {
+                    ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 3.4, height: 3.4)),
+                             with: .color(WidgetPalette.primary.opacity(0.07)))
+                    x += spacing
+                }
+                y += spacing * 0.86
+                row += 1
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 private struct BubuIdentitySmallView: View {
     let snapshot: BubuSnapshot
     /// 生日前 7 天（含当天）进入生日强调态。
@@ -421,6 +488,8 @@ private struct BubuIdentitySmallView: View {
             }
             BubuProgressStars(snapshot: snapshot, compact: true)
         }
+        .background { BubuDotsPattern() }
+        .overlay { BubuStickerDecor(compact: true) }
     }
 
     /// 生日周强调：突出「还有 N 天生日」。
@@ -453,7 +522,7 @@ private struct BubuIdentityMediumView: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(spacing: 7) {
-                BubuAvatar(imageData: snapshot.avatarImageData, size: 70)
+                BubuAvatar(imageData: snapshot.avatarImageData, size: 70, cute: true)
                 Text(snapshot.name)
                     .font(.system(size: 13, weight: .black, design: .rounded))
                     .foregroundColor(.white)
@@ -466,7 +535,7 @@ private struct BubuIdentityMediumView: View {
             VStack(alignment: .leading, spacing: 9) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("BUBU IDENTITY")
+                        Text("❀ 布布小档案")
                             .font(.system(size: 9, weight: .black, design: .rounded))
                             .tracking(1.2)
                             .foregroundColor(WidgetPalette.primary.opacity(0.72))
@@ -485,7 +554,7 @@ private struct BubuIdentityMediumView: View {
                     BubuInfoChip(title: "DAY", value: snapshot.hasProfile ? "第 \(snapshot.daysSinceBirth) 天" : "待同步", tint: WidgetPalette.mint)
                 }
                 HStack {
-                    Text("No.\(snapshot.idNumber)")
+                    Text("🎀 No.\(snapshot.idNumber)")
                         .font(.system(size: 9, weight: .black, design: .rounded))
                         .foregroundColor(WidgetPalette.secondary)
                         .lineLimit(1)
@@ -494,6 +563,8 @@ private struct BubuIdentityMediumView: View {
                 }
             }
         }
+        .background { BubuDotsPattern() }
+        .overlay { BubuStickerDecor() }
     }
 }
 
@@ -504,7 +575,7 @@ private struct BubuIdentityLargeView: View {
         VStack(alignment: .leading, spacing: 11) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("BUBU IDENTITY")
+                    Text("❀ 布布小档案")
                         .font(.system(size: 10, weight: .black, design: .rounded))
                         .tracking(1.5)
                         .foregroundColor(WidgetPalette.primary.opacity(0.72))
@@ -516,7 +587,7 @@ private struct BubuIdentityLargeView: View {
                 }
                 Spacer()
                 BubuPlusLink(size: 26)
-                Text("ACTIVE")
+                Text("元气满满 ✨")
                     .font(.system(size: 10, weight: .black, design: .rounded))
                     .foregroundColor(.white)
                     .padding(.horizontal, 10)
@@ -525,7 +596,7 @@ private struct BubuIdentityLargeView: View {
             }
 
             HStack(alignment: .top, spacing: 12) {
-                BubuAvatar(imageData: snapshot.avatarImageData, size: 90)
+                BubuAvatar(imageData: snapshot.avatarImageData, size: 90, cute: true)
                 VStack(spacing: 8) {
                     HStack(spacing: 8) {
                         BubuInfoChip(title: "AGE", value: snapshot.ageText, tint: WidgetPalette.roseDeep)
@@ -535,7 +606,7 @@ private struct BubuIdentityLargeView: View {
                         BubuInfoChip(title: "BIRTH", value: birthDateText, tint: WidgetPalette.primary)
                         BubuInfoChip(title: "PHOTOS", value: "\(snapshot.totalPhotoCount) 张", tint: WidgetPalette.honey)
                     }
-                    Text("No.\(snapshot.idNumber)")
+                    Text("🎀 No.\(snapshot.idNumber)")
                         .font(.system(size: 10, weight: .black, design: .rounded))
                         .foregroundColor(WidgetPalette.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -550,6 +621,8 @@ private struct BubuIdentityLargeView: View {
             BubuProgressStars(snapshot: snapshot)
             Spacer(minLength: 0)
         }
+        .background { BubuDotsPattern() }
+        .overlay { BubuStickerDecor() }
     }
 
     private var birthDateText: String {

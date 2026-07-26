@@ -780,7 +780,9 @@ final class SyncEngine {
         media.syncState = .uploading
         let request = MediaUploadRequest(
             mediaId: media.id, entryLocalId: entryLocalId,
-            fileURL: url, type: media.type, fileName: fileName)
+            fileURL: url, type: media.type, fileName: fileName,
+            thumbnailURL: media.thumbnailFileName.map { mediaStore.thumbnailURL(for: $0) },
+            thumbnailFileName: media.thumbnailFileName)
         do {
             for try await event in apiClient.uploadMedia(request) {
                 switch event {
@@ -1151,11 +1153,20 @@ final class SyncEngine {
         // ===== 阶段 0 · 预览秒出 =====
         // 缺图照片先拉 PocketBase 服务端小图（?thumb=600x0，几十 KB/张）：
         // 时光轴几秒内全部出预览，原图之后慢慢补。这是「同步来的照片一直是占位图」的根治。
-        let thumbSpecs: [DownloadSpec] = pendingPhotos
+        // 视频：上传端 1.8+ 会把缩略图传到服务端 thumbnail 字段——有 remoteThumbURL 的
+        // 视频同样先拉预览小图，不用等几十 MB 的原片。
+        var thumbSpecs: [DownloadSpec] = pendingPhotos
             .filter { $0.thumbnailFileName == nil }
             .compactMap { m in
                 guard let url = m.remoteURL else { return nil }
                 return DownloadSpec(id: m.id, remoteURL: url, thumb: "600x0", ext: "jpg", sniff: true,
+                                    makePhotoThumb: false, makeVideoThumb: false, assignAsThumbnailOnly: true)
+            }
+        thumbSpecs += pendingOthers
+            .filter { $0.thumbnailFileName == nil }
+            .compactMap { m in
+                guard let thumbURL = m.remoteThumbURL else { return nil }
+                return DownloadSpec(id: m.id, remoteURL: thumbURL, thumb: nil, ext: "jpg", sniff: true,
                                     makePhotoThumb: false, makeVideoThumb: false, assignAsThumbnailOnly: true)
             }
         await runDownloadBatch(thumbSpecs, byID: byID, context: context,
@@ -1620,6 +1631,8 @@ final class SyncEngine {
         media.remoteId = dto.id
         media.typeRaw = dto.mediaType
         media.remoteURL = dto.remoteURL
+        // 只增不清：老服务端记录没有 thumbnail 时保留本地已知值。
+        if let thumb = dto.remoteThumbURL { media.remoteThumbURL = thumb }
         media.durationSeconds = dto.durationSeconds
         media.width = dto.width
         media.height = dto.height
