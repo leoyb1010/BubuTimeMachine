@@ -178,7 +178,7 @@ struct MilestonesHomeView: View {
             Label("已点亮", systemImage: "star.fill").font(BubuTheme.Font.headline).foregroundStyle(theme)
                 // 点亮新里程碑时星标弹跳一下（交互/数据驱动，非持续动画）。
                 .symbolEffect(.bounce, value: achieved.count)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 10)], spacing: 10) {
                 ForEach(achieved) { milestone in
                     medallion(milestone, lit: true)
                         .onTapGesture { detailFor = milestone }
@@ -195,7 +195,7 @@ struct MilestonesHomeView: View {
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 10)], spacing: 10) {
                 ForEach(pending) { milestone in
                     medallion(milestone, lit: false)
                         .onTapGesture { detailFor = milestone }

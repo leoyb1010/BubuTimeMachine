@@ -28,6 +28,7 @@ struct ChildProfileView: View {
             }
         }
         // 脱掉系统灰表格：不加这两行，进档案页会从马卡龙卡片风直接掉进 iOS 默认分组表
+        .bubuContentColumn(760)   // Form 宽屏收口：760 比正文列宽些，容得下右侧输入框
         .scrollContentBackground(.hidden)
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("布布的档案")

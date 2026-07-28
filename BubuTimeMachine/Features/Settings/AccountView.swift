@@ -43,6 +43,7 @@ struct AccountView: View {
                 }
             }
             .padding()
+            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .overlay { if welcomeSync { welcomeOverlay } }

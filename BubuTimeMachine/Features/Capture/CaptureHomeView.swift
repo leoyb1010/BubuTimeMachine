@@ -14,6 +14,7 @@ struct CaptureHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Query private var profiles: [ChildProfile]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
@@ -29,7 +30,10 @@ struct CaptureHomeView: View {
     @State private var photoScanner = PhotoLibraryScanner()
     @State private var showTodayPhotos = false
     @State private var showNaturalCapture = false
-    @State private var naturalCaptureButtonOffset: CGSize = .zero
+    /// 悬浮球位置存**比例**（0…1，相对可移动范围）而非绝对点偏移。
+    /// 绝对值在 iPad 旋转/分屏/台前调度改尺寸后会落到屏幕外且再也点不回来
+    /// （横屏吸左 offset≈-940，转竖屏可移动范围只剩 -680，球停在 -940 处）。
+    @State private var naturalCaptureButtonRatio: CGSize = .zero
     @State private var heroBackgroundImage: UIImage?
     @GestureState private var naturalCaptureButtonDrag: CGSize = .zero
 
@@ -71,7 +75,8 @@ struct CaptureHomeView: View {
                     onThisDaySection
                     SaveHealthStrip()
                     // 给底部悬浮玻璃 Tab 栏留出空间
-                    Spacer(minLength: 150)
+                    // 宽屏走侧栏、没有悬浮底栏，不需要这块预留
+                    Spacer(minLength: BubuAdaptive.value(sizeClass, compact: 150, regular: 40))
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -540,10 +545,11 @@ struct CaptureHomeView: View {
     }
 
     private var dashboardGridTop: some View {
-        LazyVGrid(columns: [
-            GridItem(.flexible(), spacing: 10),
-            GridItem(.flexible(), spacing: 10)
-        ], spacing: 10) {
+        // 宽屏铺 4 列：2 列在 iPad 上每格宽 490pt 却锁死 104pt 高，成了 5:1 的横条。
+        // 宽屏是「多放几个」而不是「把格子撑大」。
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
+                                 count: BubuAdaptive.columns(sizeClass, compact: 2, regular: 4)),
+                  spacing: 10) {
             NavigationLink { MilestonesHomeView() } label: { constellationTile }
                 .buttonStyle(.plain)
             NavigationLink { GrowthCurveView() } label: { growthTile }
@@ -714,7 +720,8 @@ struct CaptureHomeView: View {
         }
         .padding(contentPadding)
         .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
-        .frame(height: 104)
+        // 宽屏放高一点：4 列后每格约 240pt 宽，104pt 高仍偏扁
+        .frame(height: BubuAdaptive.value(sizeClass, compact: 104, regular: 132))
         .frame(maxHeight: .infinity, alignment: centered ? .center : .top)
         .background(surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay {
@@ -1079,6 +1086,9 @@ struct CaptureHomeView: View {
             // 相对右下角静止位的可移动范围：只能往左/上，且不越出屏幕（P2k）
             let minW = -max(0, geo.size.width - bubbleSize - trailing - sideMargin)
             let minH = -max(0, geo.size.height - bubbleSize - bottom - topMargin)
+            // 比例 → 当前尺寸下的绝对偏移。尺寸一变，位置自动跟着重算，永远落在屏内。
+            let baseOffset = CGSize(width: minW * naturalCaptureButtonRatio.width,
+                                    height: minH * naturalCaptureButtonRatio.height)
 
             VStack {
                 Spacer()
@@ -1092,8 +1102,8 @@ struct CaptureHomeView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("一句话智能记录")
-                    .offset(CGSize(width: naturalCaptureButtonOffset.width + naturalCaptureButtonDrag.width,
-                                   height: naturalCaptureButtonOffset.height + naturalCaptureButtonDrag.height))
+                    .offset(CGSize(width: baseOffset.width + naturalCaptureButtonDrag.width,
+                                   height: baseOffset.height + naturalCaptureButtonDrag.height))
                     .transaction { transaction in
                         if naturalCaptureButtonDrag != .zero {
                             transaction.animation = nil
@@ -1106,15 +1116,21 @@ struct CaptureHomeView: View {
                             }
                             .onEnded { value in
                                 var next = CGSize(
-                                    width: naturalCaptureButtonOffset.width + value.translation.width,
-                                    height: naturalCaptureButtonOffset.height + value.translation.height)
+                                    width: baseOffset.width + value.translation.width,
+                                    height: baseOffset.height + value.translation.height)
                                 // 钳制在屏内
                                 next.width = min(0, max(minW, next.width))
                                 next.height = min(0, max(minH, next.height))
-                                // 释放吸边：水平贴最近的左/右缘
-                                next.width = next.width < minW / 2 ? minW : 0
+                                // 释放吸边：拖过 25% 即吸左缘。
+                                // 原来阈值是可移动范围的一半——iPad 上要拖过 470pt 才吸边，
+                                // 手感从「轻轻一推就贴边」退化成「拖过半个屏幕」。
+                                let snapLeft = minW < 0 && next.width < minW * 0.25
+                                next.width = snapLeft ? minW : 0
+                                // 存回比例，尺寸变化后自动换算，不会飞出屏幕
                                 withAnimation(reduceMotion ? nil : BubuMotion.gentle) {
-                                    naturalCaptureButtonOffset = next
+                                    naturalCaptureButtonRatio = CGSize(
+                                        width: minW == 0 ? 0 : next.width / minW,
+                                        height: minH == 0 ? 0 : next.height / minH)
                                 }
                             }
                     )

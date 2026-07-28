@@ -39,6 +39,7 @@ struct VaccineView: View {
                 disclaimer
             }
             .padding()
+            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("疫苗接种")

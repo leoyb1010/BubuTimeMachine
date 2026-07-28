@@ -35,6 +35,7 @@ struct CapsuleHomeView: View {
                         Spacer(minLength: 40)
                     }
                     .padding()
+                    .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
                 }
             }
         }

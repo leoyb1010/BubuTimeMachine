@@ -14,6 +14,9 @@ struct BubuConstellationView: View {
     var onTapStar: (Milestone) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// 容器实际宽度（宽屏下星盘高度按它取比例）。由外层 onGeometryChange 写入。
+    @State private var containerWidth: CGFloat = 360
 
     // 星盘显示一部分未点亮星，避免 0 点亮时空白；已点亮星保持发光并连线。
     private var achieved: [Milestone] { milestones.filter(\.isAchieved) }
@@ -62,6 +65,7 @@ struct BubuConstellationView: View {
                 }
             }
             .frame(height: starboardHeight)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
             .background(
                 LinearGradient(colors: [BubuTheme.Color.lav.opacity(0.20),
                                         BubuTheme.Color.sky.opacity(0.18),
@@ -91,7 +95,11 @@ struct BubuConstellationView: View {
 
     private var starboardHeight: CGFloat {
         // 首页式紧凑星盘：信息够看，但不把底栏附近空间全部吃掉。
-        max(260, min(320, 230 + CGFloat(shown.count) * 4))
+        // 宽屏放宽上限——原来死锁 320pt 而宽度随容器涨到 1000pt+，星星被摊平成一条横线，
+        // 「星座」的视觉完全丢失。宽屏按 0.5 的宽高比走，星盘才立得起来。
+        let base = max(260, min(320, 230 + CGFloat(shown.count) * 4))
+        guard BubuAdaptive.isWide(sizeClass) else { return base }
+        return max(base, min(560, containerWidth * 0.5))
     }
 
     // 锚点布局：前 10 用模板比例；超出部分用黄金角螺旋错落填充。

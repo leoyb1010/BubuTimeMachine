@@ -6,6 +6,7 @@ import SwiftData
 /// 只保留三件事——拍一张 / 说一段 / 看布布，全部大字大按钮、零层级、零选择过载。
 /// 复用现有 CaptureModel / CameraCaptureView / VoiceRecorderBar / MediaGalleryViewer，不重造记录管线。
 struct SimpleModeView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(BubuRouter.self) private var router
@@ -48,7 +49,8 @@ struct SimpleModeView: View {
                 Spacer(minLength: 4)
                 exitButton
             }
-            .padding(.horizontal, 22)
+            .bubuContentColumn(620)   // 长辈模式宽屏收口：按钮按比例放大而不是被拉长
+        .padding(.horizontal, 22)
             .padding(.vertical, 18)
 
             if let confirmation { confirmationOverlay(confirmation) }
@@ -132,7 +134,7 @@ struct SimpleModeView: View {
                 Spacer()
             }
             .padding(.horizontal, 22)
-            .frame(maxWidth: .infinity, minHeight: 118)
+            .frame(maxWidth: .infinity, minHeight: BubuAdaptive.value(sizeClass, compact: 118, regular: 156))
             .background(
                 LinearGradient(colors: [tint, tint.opacity(0.82)],
                                startPoint: .topLeading, endPoint: .bottomTrailing),

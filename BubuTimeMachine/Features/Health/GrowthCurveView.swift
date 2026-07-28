@@ -4,6 +4,7 @@ import Charts
 
 // MARK: - 成长曲线（WHO 百分位 + 布布实测点）
 struct GrowthCurveView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(AppEnvironment.self) private var env
     @Query private var profiles: [ChildProfile]
     @Query(sort: \HealthRecord.recordedAt) private var records: [HealthRecord]
@@ -111,7 +112,8 @@ struct GrowthCurveView: View {
             }
             .chartYAxisLabel("\(metric.title)（\(metric.unit)）")
             .chartXAxisLabel("月龄")
-            .frame(height: 280)
+            // 宽屏放高：横屏 1300pt 宽 × 280pt 高会把曲线压成一条，趋势读不出来
+        .frame(height: BubuAdaptive.value(sizeClass, compact: 280, regular: 420))
             legend
         }
         .padding()

@@ -22,12 +22,14 @@ actor ThumbnailProvider {
         case grid       // 照片墙网格 cell（小）
         case card       // 时光轴卡片大图（中）
         case detail     // 详情/查看器（大）
+        case wall       // 相框模式满屏（超大）：13" iPad 是 2732×2048，1800 会明显发软
 
         var maxPixel: CGFloat {
             switch self {
             case .grid: return 320
             case .card: return 900
             case .detail: return 1800
+            case .wall: return 2600
             }
         }
     }

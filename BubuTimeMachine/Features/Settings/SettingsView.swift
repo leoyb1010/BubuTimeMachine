@@ -10,6 +10,8 @@ struct SettingsView: View {
     @Query private var members: [FamilyMember]
     @State private var soundOn = BubuSound.isEnabled
     @State private var showFrame = false
+    /// 相框每张停留秒数（与 PhotoFrameView 共用同一个 AppStorage 键）
+    @AppStorage("bubu.photoFrame.dwell") private var frameDwell: Double = 8
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
@@ -61,6 +63,20 @@ struct SettingsView: View {
                                         subtitle: "把 iPad / 旧手机变成布布的数字相框，全屏轮播精选照片")
                     }
                     .buttonStyle(.plain)
+                    // 每张停留多久：挂墙当相框时，有人嫌换得快、有人嫌慢
+                    HStack {
+                        settingRowLabel("每张停留", icon: "timer", tint: BubuTheme.Color.info,
+                                        subtitle: nil)
+                        Picker("每张停留", selection: $frameDwell) {
+                            Text("5 秒").tag(5.0)
+                            Text("8 秒").tag(8.0)
+                            Text("15 秒").tag(15.0)
+                            Text("30 秒").tag(30.0)
+                        }
+                        .pickerStyle(.menu)
+                        .tint(env.theme.theme.primary)
+                        .padding(.trailing, 10)
+                    }
                 }
                 reminderCard(config: config)
                 group("苹果手表") {

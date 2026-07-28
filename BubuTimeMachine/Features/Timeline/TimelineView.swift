@@ -38,6 +38,10 @@ struct TimelineView: View {
     /// 未读家庭动态红点：一次性算好缓存，避免每次 body 全表 faulting comments（P2e）。
     @State private var hasUnseenFamilyActivity = false
     @Namespace private var zoomNS
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// 宽屏（iPad 全屏/半屏）：时光轴改双列、封面限高。窄屏（含 iPad 1/3 分屏）保持单列。
+    private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
     var body: some View {
         ZStack {
@@ -137,9 +141,20 @@ struct TimelineView: View {
                                 .padding(.vertical, 18)
                                 .opacity(0.55)
 
-                            LazyVStack(alignment: .leading, spacing: 16) {
-                                ForEach(section.entries) { entry in
-                                    timelineRow(entry, sectionIndex: sectionIndex)
+                            if isWide {
+                                // 宽屏双列：单列在 iPad 上信息密度太低，一屏只能看一两条
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 296), spacing: 16)],
+                                          spacing: 16) {
+                                    ForEach(section.entries) { entry in
+                                        timelineRow(entry, sectionIndex: sectionIndex)
+                                    }
+                                }
+                                .padding(.leading, 30)   // 让开左侧竖轴装饰
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 16) {
+                                    ForEach(section.entries) { entry in
+                                        timelineRow(entry, sectionIndex: sectionIndex)
+                                    }
                                 }
                             }
                         }
@@ -183,16 +198,20 @@ struct TimelineView: View {
                     Label("删除记录", systemImage: "trash")
                 }
             }
-            Button(role: .destructive) {
-                entryPendingDelete = entry
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(.body, design: .rounded).weight(.semibold))
-                    .frame(width: 44, height: 44)
-                    .background(BubuTheme.Color.danger.opacity(0.10), in: Circle())
+            // 行尾删除键只在窄屏显示：宽屏是网格，它会挤占卡片宽度并和相邻列碰撞。
+            // 宽屏删除走长按菜单（contextMenu 里已有「删除记录」）。
+            if !isWide {
+                Button(role: .destructive) {
+                    entryPendingDelete = entry
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(.body, design: .rounded).weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .background(BubuTheme.Color.danger.opacity(0.10), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("删除记录")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("删除记录")
         }
     }
 
@@ -210,7 +229,9 @@ struct TimelineView: View {
                 }
                 // 封面按照片自己的长宽比排版（夹在 4:5 ~ 1.9:1 之间）：
                 // 原来固定 178 高，竖图会被裁成中间一条窄带，看不出拍了什么。
-                .aspectRatio(Self.coverAspect(entry), contentMode: .fit)
+                // 宽屏把最小比例收紧到 1.5（而不是加 maxHeight——那会让封面按比例缩小、两侧留灰边）：
+                // 高度 = 宽 / 比例，天然受控，同时始终填满卡片宽度。
+                .aspectRatio(coverAspect(entry), contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
 
@@ -259,12 +280,14 @@ struct TimelineView: View {
     private static let coverMaxAspect: CGFloat = 1.9
     private static let coverFallbackAspect: CGFloat = 1.5
 
-    private static func coverAspect(_ entry: Entry) -> CGFloat {
+    private func coverAspect(_ entry: Entry) -> CGFloat {
+        // 宽屏最小比例 1.5：卡片宽时若仍允许 0.8 的竖幅，单张封面能顶到近 500pt 高。
+        let minAspect = isWide ? 1.5 : Self.coverMinAspect
         guard let media = entry.coverMedia,
               let w = media.width, let h = media.height, w > 0, h > 0 else {
-            return coverFallbackAspect
+            return max(Self.coverFallbackAspect, minAspect)
         }
-        return min(max(CGFloat(w) / CGFloat(h), coverMinAspect), coverMaxAspect)
+        return min(max(CGFloat(w) / CGFloat(h), minAspect), Self.coverMaxAspect)
     }
 
     /// 月份 + 年龄锚点：翻旧记录时「布布多大」比日期更有感。

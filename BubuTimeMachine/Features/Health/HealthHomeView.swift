@@ -3,6 +3,7 @@ import SwiftData
 
 // MARK: - 布布健康
 struct HealthHomeView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var records: [HealthRecord]
@@ -183,7 +184,8 @@ struct HealthHomeView: View {
     }
 
     private var quickActions: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 10) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
+                                 count: BubuAdaptive.columns(sizeClass, compact: 2, regular: 4)), spacing: 10) {
             ForEach(HealthRecordKind.allCases) { kind in
                 Button { composingKind = kind } label: {
                     HStack(spacing: 10) {

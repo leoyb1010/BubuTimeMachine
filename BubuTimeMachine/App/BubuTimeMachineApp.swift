@@ -13,7 +13,9 @@ struct BubuTimeMachineApp: App {
     /// 全局依赖容器。@State 持有，保证生命周期与 App 一致。
     @State private var env = AppEnvironment()
     /// 桌面小组件 / 通知 deep link 路由。
-    @State private var router = BubuRouter()
+    /// 注意：这里**不能**用 App 结构体上的 @State——那样会跨 scene 共享，
+    /// iPad 开两个窗口时 A 窗口点小组件深链、B 窗口也跟着跳页。
+    /// 改为在 WindowGroup 内为每个 scene 各建一份（见 body）。
     @Environment(\.scenePhase) private var scenePhase
     /// 启动期注册（通知回复 / BGTask handler / WC 激活）前移到这里：后台冷启动也必定执行。
     @UIApplicationDelegateAdaptor(BubuAppDelegate.self) private var appDelegate
@@ -56,14 +58,13 @@ struct BubuTimeMachineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            // 每个窗口一份 router：多窗口下深链只影响收到它的那个窗口
+            SceneRoot()
                 .environment(env)
-                .environment(router)
                 .tint(env.theme.theme.primary)
                 // 选了深色主题（星夜）就整 App 强制深色：动态色 token 统一翻到深色值，
                 // 否则浅色系统下暗渐变底 + 深棕文字 = 全 App 不可读（R4 待核-星夜）
                 .preferredColorScheme(env.theme.theme.isDark ? .dark : nil)
-                .onOpenURL { router.handle($0) }
                 .task {
                     #if DEBUG
                     seedForUITestingIfNeeded()
@@ -108,7 +109,6 @@ struct BubuTimeMachineApp: App {
                     WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                     WidgetRefresher.reload()
-                    consumePendingRecord()
                     pushWatchSnapshot()
                 }
         }
@@ -122,8 +122,7 @@ struct BubuTimeMachineApp: App {
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                 WidgetRefresher.reload()
                 pushWatchSnapshot()
-                consumePendingRecord()
-            case .background:
+                case .background:
                 env.syncEngine.stopPolling()
                 BackgroundRefresher.scheduleNext()   // 系统择机唤醒补一轮同步
             default: break
@@ -131,13 +130,8 @@ struct BubuTimeMachineApp: App {
         }
     }
 
-    /// 消费控制中心/Action Button 置的记录标志：拉起快速记录。
-    @MainActor
-    private func consumePendingRecord() {
-        guard SharedDefaults.pendingRecord else { return }
-        SharedDefaults.pendingRecord = false
-        router.pendingQuickCapture = true
-    }
+    /// 控制中心/Action Button 的记录标志由各 scene 的 SceneRoot 自行消费
+    /// （router 已改为 per-scene，App 结构体这里不再持有）。
 
     /// 读库生成概览快照并推给手表。
     @MainActor
@@ -373,5 +367,31 @@ struct RootView: View {
         } else {
             RootTabView().transition(.opacity)
         }
+    }
+}
+
+// MARK: - 每个窗口的根
+/// router 必须 per-scene：放在 App 结构体上会跨窗口共享，
+/// iPad 开两个布布时 A 窗口点小组件深链、B 窗口也会跟着跳页。
+private struct SceneRoot: View {
+    @State private var router = BubuRouter()
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        RootView()
+            .environment(router)
+            .onOpenURL { router.handle($0) }
+            .onChange(of: scenePhase) { _, phase in
+                // 回前台时消费控制中心/Action Button 置的「记一笔」标志
+                if phase == .active { consumePendingRecord() }
+            }
+            .onAppear { consumePendingRecord() }
+    }
+
+    @MainActor
+    private func consumePendingRecord() {
+        guard SharedDefaults.pendingRecord else { return }
+        SharedDefaults.pendingRecord = false
+        router.pendingQuickCapture = true
     }
 }

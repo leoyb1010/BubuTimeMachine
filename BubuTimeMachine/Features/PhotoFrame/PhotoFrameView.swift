@@ -21,7 +21,9 @@ struct PhotoFrameView: View {
     /// 控制条自动隐藏计时器句柄：每次 bump 先取消上一个，避免旧计时器把操作中的控制条中途隐藏。
     @State private var controlsTask: Task<Void, Never>?
 
-    private let dwell: TimeInterval = 8
+    /// 每张停留秒数：设置可调（原来硬编码 8 秒，挂墙当相框时有人嫌快有人嫌慢）。
+    @AppStorage("bubu.photoFrame.dwell") private var dwellSetting: Double = 8
+    private var dwell: TimeInterval { min(max(dwellSetting, 3), 60) }
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var childName: String { profiles.first?.name ?? env.config.childName }
@@ -255,7 +257,7 @@ struct PhotoFrameView: View {
             if images[s.id] == nil {
                 let img = await env.thumbnails.image(
                     mediaId: s.media.id, thumbnailFileName: s.media.thumbnailFileName,
-                    localFileName: s.media.localFileName, isPhoto: true, size: .detail)
+                    localFileName: s.media.localFileName, isPhoto: true, size: .wall)
                 if let img { images[s.id] = img }
             }
         }
@@ -295,9 +297,15 @@ private struct KenBurnsImage: View {
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // 由 seed 确定性推导起止锚点：避免机械重复，又不受重绘影响
-    private var dx: CGFloat { (seed & 1 == 0 ? 1 : -1) * (10 + CGFloat(abs(seed) % 17)) }
-    private var dy: CGFloat { (seed & 2 == 0 ? 1 : -1) * (8 + CGFloat(abs(seed / 17) % 13)) }
+    // 由 seed 确定性推导起止锚点：避免机械重复，又不受重绘影响。
+    // 幅度按【画面尺寸的百分比】而非绝对点数——原来固定 10~26pt，在 13" iPad（2732px 宽）上
+    // 占比不到 1%，Ken Burns 推拉肉眼完全看不出来，等于没做。
+    private func dx(_ size: CGSize) -> CGFloat {
+        (seed & 1 == 0 ? 1 : -1) * size.width * (0.028 + CGFloat(abs(seed) % 17) * 0.0016)
+    }
+    private func dy(_ size: CGSize) -> CGFloat {
+        (seed & 2 == 0 ? 1 : -1) * size.height * (0.022 + CGFloat(abs(seed / 17) % 13) * 0.0014)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -307,8 +315,8 @@ private struct KenBurnsImage: View {
                 .frame(width: geo.size.width, height: geo.size.height)
                 // reduceMotion 时定格满幅、不推拉（全 App 唯一漏网的动效，参考 GrowthMoviePlayer，P2h）
                 .scaleEffect(reduceMotion ? 1 : (animate ? 1.14 : 1.02))
-                .offset(x: reduceMotion ? 0 : (animate ? dx : -dx),
-                        y: reduceMotion ? 0 : (animate ? dy : -dy))
+                .offset(x: reduceMotion ? 0 : (animate ? dx(geo.size) : -dx(geo.size)),
+                        y: reduceMotion ? 0 : (animate ? dy(geo.size) : -dy(geo.size)))
                 .clipped()
                 .onAppear {
                     animate = false

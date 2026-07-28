@@ -38,6 +38,7 @@ struct BubuStoryView: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 8)
+            .bubuContentColumn()
         }
         .background(BubuThemedBackground().ignoresSafeArea())
         .navigationTitle("布布的故事")

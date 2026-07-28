@@ -100,6 +100,7 @@ struct AdvancedSettingsView: View {
         }
         .navigationTitle("高级 · 自托管")
         .navigationBarTitleDisplayMode(.inline)
+        .bubuContentColumn(760)   // Form 宽屏收口：760 比正文列宽些，容得下右侧输入框
         .scrollContentBackground(.hidden)
         .background(BubuTheme.Color.background)
     }

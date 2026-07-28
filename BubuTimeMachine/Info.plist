@@ -137,6 +137,13 @@
 	<string>把录下的话自动转成文字，方便日后搜索。识别优先在设备上完成。</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<!-- 多窗口：iPad 上可并排开两个布布（左边时光轴、右边相册）。
+		     App 入口早已用 didWireLaunchTasks 做好每 scene 只装配一次的防重。 -->
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
@@ -144,8 +151,6 @@
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>UIRequiresFullScreen</key>
-	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

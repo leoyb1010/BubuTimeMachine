@@ -4,6 +4,7 @@ import SwiftUI
 /// 自托管 AI 的创作中心。当前为完整可玩的 Mock 工作流；
 /// 正式部署接入真实 LLM 后，UI 与交互不变。
 struct AIStudioHomeView: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(AppEnvironment.self) private var env
     private var theme: Color { env.theme.theme.primary }
 
@@ -26,6 +27,7 @@ struct AIStudioHomeView: View {
                 Spacer(minLength: 30)
             }
             .padding()
+            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
         .background(background.ignoresSafeArea())
         .navigationTitle("布布的魔法屋")
@@ -146,10 +148,9 @@ struct AIStudioHomeView: View {
     }
 
     private var creativeGrid: some View {
-        LazyVGrid(columns: [
-            GridItem(.flexible(), spacing: 10),
-            GridItem(.flexible(), spacing: 10)
-        ], spacing: 10) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
+                                 count: BubuAdaptive.columns(sizeClass, compact: 2, regular: 4)),
+                  spacing: 10) {
             capabilityTile(icon: "bubble.left.and.text.bubble.right.fill",
                            title: "问问布布",
                            subtitle: "关于她的都能问",
@@ -219,7 +220,7 @@ struct AIStudioHomeView: View {
             }
             .padding(13)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 112)
+            .frame(height: BubuAdaptive.value(sizeClass, compact: 112, regular: 140))
             .background(
                 LinearGradient(colors: [BubuTheme.Color.card.opacity(0.98), tint.opacity(0.22)],
                                startPoint: .topLeading,

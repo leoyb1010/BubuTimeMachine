@@ -57,6 +57,7 @@ struct EntryDetailView: View {
                 familyEnsembleSection
             }
             .padding()
+            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle(BubuDateFormat.shortDate(entry.happenedAt))
