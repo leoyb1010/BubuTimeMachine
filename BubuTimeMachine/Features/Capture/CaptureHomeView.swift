@@ -1210,7 +1210,8 @@ private struct SaveHealthStrip: View {
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 Spacer()
-                NavigationLink { SettingsView() } label: {
+                // 直达同步中心，而不是设置根页——用户点「查看」是想看同步细节。
+                NavigationLink { SyncCenterView() } label: {
                     Text("查看")
                         .font(BubuTheme.Font.caption.weight(.semibold))
                         .foregroundStyle(theme.primary)

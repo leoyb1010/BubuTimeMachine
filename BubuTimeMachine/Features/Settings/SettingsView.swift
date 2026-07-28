@@ -20,15 +20,23 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 18) {
                 identityCard
-                group("布布") {
+                group("布布", footer: "档案里的名字和生日会驱动全 App 的年龄、生日提醒和身份卡。") {
                     row("布布的档案", icon: "figure.child", tint: env.theme.theme.primary) { ChildProfileView() }
                     row("成长之声", icon: "waveform.badge.mic", tint: BubuTheme.Color.info) { VoiceArchiveView() }
                     row("健康记录", icon: "heart.text.square", tint: BubuTheme.Color.success) { HealthHomeView() }
                 }
-                group("这个家") {
-                    row("家人登录", icon: "person.crop.circle.badge.checkmark",
+                group("这个家", footer: "每位家人各自登录、各自署名，看的是同一个布布。") {
+                    row("账号与安全", icon: "person.crop.circle.badge.checkmark",
                         tint: env.theme.theme.primary) { AccountView() }
                     row("家庭成员", icon: "person.2.fill", tint: env.theme.theme.secondary) { MembersView() }
+                }
+                group("数据与备份", footer: "记录先存在这台手机上，再同步给家人。断网时一切照常，联网自动补传。") {
+                    row("同步与备份", icon: "arrow.triangle.2.circlepath",
+                        tint: BubuTheme.Color.info) { SyncCenterView() }
+                    row("做一本年册", icon: "book.closed.fill",
+                        tint: env.theme.theme.primary) { YearbookView() }
+                    row("导出完整档案", icon: "square.and.arrow.up.on.square.fill",
+                        tint: env.theme.theme.secondary) { ExportView() }
                 }
                 group("外观") {
                     row("主题与外观", icon: "paintpalette.fill", tint: env.theme.theme.primary) { ThemeSettingsView() }
@@ -55,17 +63,16 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                 }
                 reminderCard(config: config)
-                dataCard
-                group("高级 · 自托管") {
+                group("苹果手表") {
+                    row("布布上表盘", icon: "applewatch.watchface", tint: env.theme.theme.primary) { WatchFaceGuideView() }
+                }
+                group("高级", footer: "服务器地址、账号与 AI 服务的技术配置。装服务器的人才需要进来。") {
                     NavigationLink { AdvancedSettingsView() } label: {
                         settingRowLabel("服务器与 AI 配置", icon: "lock.shield.fill",
                                         tint: BubuTheme.Color.secondaryText,
-                                        subtitle: "给装服务器的那个人")
+                                        subtitle: "地址、账号、AI 服务")
                     }
                     .buttonStyle(.plain)
-                }
-                group("Apple Watch") {
-                    row("布布上表盘", icon: "applewatch.watchface", tint: env.theme.theme.primary) { WatchFaceGuideView() }
                 }
                 if BubuStoreHealth.loadFailed {
                     Label("数据保护模式：本次升级打开数据库失败，你的全部数据仍安全保存在手机里，当前修改不会保存。请把 App 升级到最新版或联系管理员修复。",
@@ -74,7 +81,7 @@ struct SettingsView: View {
                         .foregroundStyle(BubuTheme.Color.danger)
                         .padding(12)
                         .background(BubuTheme.Color.danger.opacity(0.10),
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
                 }
                 group("关于") {
                     row("更新记录", icon: "sparkles", tint: env.theme.theme.primary) { WhatsNewListView() }
@@ -131,7 +138,7 @@ struct SettingsView: View {
 
     /// 同步状态徽章：状态正常时不抢注意力，点开进诊断页。
     private var syncBadge: some View {
-        NavigationLink { AdvancedSettingsView() } label: {
+        NavigationLink { SyncCenterView() } label: {
             HStack(spacing: 5) {
                 Circle().fill(syncColor).frame(width: 9, height: 9)
                 Text(syncText).font(BubuTheme.Font.caption.weight(.medium))
@@ -174,18 +181,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: 数据卡
-
-    private var dataCard: some View {
-        group("数据") {
-            BackupHealthCard()
-            row("做一本 PDF 年册", icon: "book.closed.fill",
-                tint: env.theme.theme.primary) { YearbookView() }
-            row("导出布布的全量档案", icon: "square.and.arrow.up.on.square.fill",
-                tint: env.theme.theme.secondary) { ExportView() }
-        }
-    }
-
     private var footer: some View {
         VStack(spacing: 4) {
             Text("布布时光机").font(BubuTheme.Font.caption.weight(.semibold))
@@ -201,8 +196,12 @@ struct SettingsView: View {
 
     // MARK: 卡组与行构件
 
+    /// 卡组：标题 + 卡片 + 可选脚注。
+    /// 脚注是设置页说人话的地方（系统 Form 的 footer 一直在用，自绘卡组过去没有，
+    /// 导致「数据」「高级」这些真正需要解释的分组一句话都放不下）。
     @ViewBuilder
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func group<Content: View>(_ title: String, footer: String? = nil,
+                                      @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(BubuTheme.Font.caption.weight(.semibold))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -211,6 +210,13 @@ struct SettingsView: View {
                 .padding(.vertical, 4)
                 .background(env.themedCard, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 .bubuCardShadow()
+            if let footer {
+                Text(footer)
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .padding(.horizontal, 6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -228,7 +234,7 @@ struct SettingsView: View {
                 .font(BubuTheme.Font.scaled(17, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
-                .background(tint, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(tint, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small * 0.6, style: .continuous))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(BubuTheme.Font.body)
                     .foregroundStyle(BubuTheme.Color.warmBrown)

@@ -15,42 +15,46 @@ struct AdvancedSettingsView: View {
         @Bindable var config = env.config
         Form {
             Section {
-                LabeledContent("当前状态", value: connectionText)
-                LabeledContent("还在等网络",
-                               value: env.syncEngine.pendingCount == 0 ? "都同步好啦" : "\(env.syncEngine.pendingCount) 条")
-                if let last = env.syncEngine.lastSyncedAt {
-                    LabeledContent("上次同步", value: BubuDateFormat.shortTime(last))
+                NavigationLink { SyncCenterView() } label: {
+                    Label("同步与备份中心", systemImage: "arrow.triangle.2.circlepath")
                 }
-                if let failure = env.syncEngine.lastFailureReason {
-                    Text(failure).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.danger)
-                }
-                Button("立即同步") { env.syncEngine.syncNow() }
-                    .disabled(!config.isConfigured)
-            } header: {
-                Text("连接诊断")
+            } footer: {
+                Text("同步状态、进度与「重新拉取 / 重传」都在那里。")
             }
 
             Section {
-                // 服务器地址：Debug 可随时改；Release 若打包时已注入内置地址则只读展示，
-                // 没注入（或被清空）时必须放出输入框兜底——否则新装机永远登录不上。
-                #if DEBUG
-                TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                #else
-                if config.baseURL != nil {
-                    LabeledContent("服务器", value: "已内置 ✓")
-                } else {
-                    TextField(ServerConfig.baseURLPlaceholder, text: $config.baseURLString)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                }
-                #endif
+                // 地址/账号一律走缓冲输入：这些字段的 setter 有副作用——写 UserDefaults、
+                // 写钥匙串，主地址变化还会清空同步游标。逐键触发等于「打字过程中反复清同步状态」。
+                // 缓冲后副作用只在用户输完（失焦/回车）发生一次。
+                //
+                // 服务器地址：始终显示实际值、始终可编辑。旧版「已内置 ✓」只读设计是黑箱——
+                // 地址错了/残留旧值时用户既看不见也改不了（真机踩过：iPad 残留旧地址被藏住，同步彻底卡死）。
+                BubuBufferedField(title: "服务器地址", placeholder: ServerConfig.baseURLPlaceholder,
+                                  value: config.baseURLString,
+                                  onCommit: { config.baseURLString = $0 },
+                                  keyboard: .URL, autocapitalization: .never,
+                                  disableAutocorrection: true, stacked: true)
                 // 局域网直连（可选）：主地址走 Tailscale/隧道回落公网中继时，家里同一 Wi-Fi
                 // 传照片会绕外网。填了这个，照片/视频传输自动与主地址赛跑择优。
-                TextField("局域网直连地址（可选，如 http://192.168.1.10:8090）", text: $config.lanBaseURLString)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                TextField("家庭账户邮箱", text: $config.accountEmail)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
-                SecureField("账户密码", text: $config.accountPassword)
+                BubuBufferedField(title: "局域网直连（可选）", placeholder: "http://192.168.1.10:8090",
+                                  value: config.lanBaseURLString,
+                                  onCommit: { config.lanBaseURLString = $0 },
+                                  keyboard: .URL, autocapitalization: .never,
+                                  disableAutocorrection: true, stacked: true)
+                BubuBufferedField(title: "家庭账户邮箱", placeholder: "family@example.com",
+                                  value: config.accountEmail,
+                                  onCommit: { config.accountEmail = $0 },
+                                  keyboard: .emailAddress, autocapitalization: .never,
+                                  disableAutocorrection: true, stacked: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("账户密码")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                    SecureField("至少 8 位", text: $config.accountPassword)
+                        .textContentType(.password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
                 Button {
                     Task { await testConnection() }
                 } label: {
@@ -61,7 +65,8 @@ struct AdvancedSettingsView: View {
                         else if let testResult { Text(testResult).foregroundStyle(BubuTheme.Color.secondaryText) }
                     }
                 }
-                .disabled(!config.isConfigured || testing)
+                // 只要填了地址就能测连通性——账号还没填时也该允许先验证服务器可达（原来要三项齐全才可点）。
+                .disabled(config.baseURL == nil || testing)
             } header: {
                 Text("家里的服务器（多设备同步）")
             } footer: {
@@ -94,6 +99,7 @@ struct AdvancedSettingsView: View {
             }
         }
         .navigationTitle("高级 · 自托管")
+        .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
         .background(BubuTheme.Color.background)
     }
@@ -106,20 +112,31 @@ struct AdvancedSettingsView: View {
         }
     }
 
+    /// 分两段测：先只验服务器可达（不需要账号），再验账号。
+    /// 这样「地址填对了但账号还没填」能得到确切答复，而不是被按钮禁用挡在门外。
     private func testConnection() async {
         testing = true
         testResult = nil
         defer { testing = false }
-        guard env.config.isConfigured else { testResult = "先填账号密码"; return }
+        guard let baseURL = env.config.baseURL else { testResult = "先填地址"; return }
+        // 直接探 /api/health：不依赖账号，也不受当前 apiClient 是否为 Mock 影响。
+        var req = URLRequest(url: baseURL.appendingPathComponent("api/health"))
+        req.timeoutInterval = 10
+        let reachable: Bool
+        if let (_, resp) = try? await URLSession.shared.data(for: req) {
+            reachable = (resp as? HTTPURLResponse)?.statusCode == 200
+        } else {
+            reachable = false
+        }
+        guard reachable else { testResult = "连不上这个地址"; return }
+        guard env.config.hasServerCredentials else { testResult = "地址通了，还差账号密码"; return }
         env.reloadServices(context: context)
-        let ok = (try? await env.apiClient.ping()) ?? false
-        guard ok else { testResult = "连不上"; return }
         do {
             _ = try await env.apiClient.authenticate(role: env.config.currentRole.rawValue)
             testResult = "通啦 ✓"
             env.syncEngine.syncNow()
         } catch {
-            testResult = "账号不对"
+            testResult = "地址通了，账号或密码不对"
         }
     }
 
@@ -130,69 +147,5 @@ struct AdvancedSettingsView: View {
         env.reloadServices(context: context)
         let ok = (try? await env.aiService.ping()) ?? false
         aiTestResult = ok ? "通啦 ✓" : "连不上"
-    }
-}
-
-// MARK: - 备份健康度卡（Wave L §5.5）
-/// 四项体检：上次同步 / 待同步 / 上次全量导出距今 / 服务器状态。任一超阈值用 warning 色提醒。
-struct BackupHealthCard: View {
-    @Environment(AppEnvironment.self) private var env
-
-    /// 上次全量导出时间戳（ExportView 完成后写入）。
-    @AppStorage("bubu.lastExportAt") private var lastExportAtRaw: Double = 0
-
-    private var daysSinceExport: Int? {
-        guard lastExportAtRaw > 0 else { return nil }
-        let last = Date(timeIntervalSince1970: lastExportAtRaw)
-        return Calendar.current.dateComponents([.day], from: last, to: .now).day
-    }
-
-    /// 导出超 90 天或从未导出 → 提醒。
-    private var exportStale: Bool {
-        guard let d = daysSinceExport else { return true }
-        return d > 90
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: exportStale ? "exclamationmark.shield.fill" : "checkmark.shield.fill")
-                    .font(BubuTheme.Font.scaled(17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(exportStale ? BubuTheme.Color.warning : BubuTheme.Color.success,
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                Text("备份健康度").font(BubuTheme.Font.body)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Spacer()
-            }
-            checkLine("上次同步", value: env.syncEngine.lastSyncedAt.map { BubuDateFormat.shortTime($0) } ?? "未同步",
-                      warn: env.syncEngine.lastSyncedAt == nil)
-            checkLine("还在等网络", value: env.syncEngine.pendingCount == 0 ? "都好啦" : "\(env.syncEngine.pendingCount) 条",
-                      warn: env.syncEngine.pendingCount > 0)
-            checkLine("上次存档", value: exportText, warn: exportStale)
-        }
-        .padding(14)
-    }
-
-    private var exportText: String {
-        guard let d = daysSinceExport else { return "未存档" }
-        if d == 0 { return "今天" }
-        return "\(d) 天前"
-    }
-
-    private func checkLine(_ title: String, value: String, warn: Bool) -> some View {
-        HStack {
-            Text(title).font(BubuTheme.Font.caption)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-            Spacer()
-            Text(value).font(BubuTheme.Font.caption.weight(.medium))
-                .foregroundStyle(warn ? BubuTheme.Color.warning : BubuTheme.Color.warmBrown)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 128, alignment: .trailing)
-        }
-        .padding(.leading, 42)
     }
 }

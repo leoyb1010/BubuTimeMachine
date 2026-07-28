@@ -160,6 +160,9 @@ struct BubuIdentityCard: View {
                     .foregroundStyle(theme.primary)
             }
 
+            if let nickname = profile.nickname, !nickname.isEmpty {
+                backRow(title: "小名", value: nickname)
+            }
             backRow(title: "性别", value: profile.gender?.isEmpty == false ? profile.gender! : "未填写")
             backRow(title: "血型", value: profile.bloodType?.isEmpty == false ? profile.bloodType! : "未填写")
             backRow(title: "出生地", value: profile.birthPlace?.isEmpty == false ? profile.birthPlace! : "未填写")

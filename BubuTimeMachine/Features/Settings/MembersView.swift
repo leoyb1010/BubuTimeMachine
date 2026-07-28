@@ -10,6 +10,9 @@ struct MembersView: View {
 
     @State private var editing: FamilyMember?
     @State private var showingAdd = false
+    /// 待删成员（二次确认用）。删成员会连带同步删到全家设备，不能一划就走。
+    @State private var pendingDelete: FamilyMember?
+    @State private var notice: String?
 
     private var theme: BubuThemeDefinition { env.theme.theme }
 
@@ -19,7 +22,6 @@ struct MembersView: View {
                 ForEach(members) { member in
                     memberRow(member)
                 }
-                .onDelete(perform: deleteMembers)
             } header: {
                 Text("谁在记录布布的成长")
             } footer: {
@@ -35,66 +37,109 @@ struct MembersView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("家庭成员")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingAdd) {
             MemberEditSheet(member: nil)
         }
         .sheet(item: $editing) { member in
             MemberEditSheet(member: member)
         }
+        .confirmationDialog("要删除这位家人吗？", isPresented: Binding(
+            get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible, presenting: pendingDelete) { member in
+            Button("删除「\(member.name)」", role: .destructive) { confirmDelete(member) }
+            Button("再想想", role: .cancel) { pendingDelete = nil }
+        } message: { member in
+            Text("「\(member.name)」会从全家所有设备上移除，TA 记录过的内容仍然保留。")
+        }
+        .alert("提示", isPresented: Binding(
+            get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(notice ?? "")
+        }
     }
 
+    /// 成员行：整行点击 = 切换身份；铅笔 = 编辑。
+    /// 两个动作必须并列而不能嵌套——Button 套 Button 时内层命中区会被外层吞掉，
+    /// 点铅笔常常变成「切换成了这个人」（同类问题在设置主页已修过一次）。
     private func memberRow(_ member: FamilyMember) -> some View {
         let isCurrent = member.id == env.currentMemberId
-        return Button {
-            withAnimation(.smooth) { env.currentMemberId = member.id }
-            env.config.currentRoleRaw = member.relation
-        } label: {
-            HStack(spacing: 14) {
-                Text(member.avatarEmoji)
-                    // 固定圆形头像内的单 emoji，随字号放大会溢出 54pt 圆，保持固定
-                    .font(.system(size: 32))
-                    .frame(width: 54, height: 54)
-                    .background(Color(hex: member.themeColorHex).opacity(0.18), in: Circle())
-                    .overlay { Circle().stroke(isCurrent ? Color(hex: member.themeColorHex) : .clear, lineWidth: 2.5) }
+        return HStack(spacing: 14) {
+            Button {
+                withAnimation(.smooth) { env.currentMemberId = member.id }
+                env.config.currentRoleRaw = member.relation
+            } label: {
+                HStack(spacing: 14) {
+                    Text(member.avatarEmoji)
+                        // 固定圆形头像内的单 emoji，随字号放大会溢出 54pt 圆，保持固定
+                        .font(.system(size: 32))
+                        .frame(width: 54, height: 54)
+                        .background(Color(hex: member.themeColorHex).opacity(0.18), in: Circle())
+                        .overlay { Circle().stroke(isCurrent ? Color(hex: member.themeColorHex) : .clear, lineWidth: 2.5) }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(member.name).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text(member.relation).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(member.name).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text(member.relation).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Spacer(minLength: 0)
+                    if isCurrent {
+                        Text("当前").font(BubuTheme.Font.scaled(13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Color(hex: member.themeColorHex), in: Capsule())
+                    }
                 }
-                Spacer()
-                if isCurrent {
-                    Text("当前").font(BubuTheme.Font.scaled(13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color(hex: member.themeColorHex), in: Capsule())
-                }
-                Button { editing = member } label: {
-                    Image(systemName: "pencil.circle").foregroundStyle(BubuTheme.Color.secondaryText)
-                }
-                .buttonStyle(.plain)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 4)
+            .buttonStyle(.plain)
+            .accessibilityLabel("切换到\(member.name)")
+
+            Button { editing = member } label: {
+                Image(systemName: "pencil.circle.fill")
+                    .font(BubuTheme.Font.scaled(22))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("编辑\(member.name)")
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 4)
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) { requestDelete(member) } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
     }
 
-    private func deleteMembers(_ offsets: IndexSet) {
-        // 不允许删光：至少保留一个
-        guard members.count > 1 else { return }
-        for i in offsets {
-            let m = members[i]
-            if m.id == env.currentMemberId {
-                let fallback = members.first { $0.id != m.id }
-                env.currentMemberId = fallback?.id
-                // 同步署名身份，否则会卡在已删成员的角色（长辈时还会卡在简单模式）。
-                if let relation = fallback?.relation { env.config.currentRoleRaw = relation }
-            }
-            PendingDeletion.enqueue(collection: "members", remoteId: m.remoteId, in: context)
-            context.delete(m)
+    /// 划动删除 → 先做可行性检查，再走二次确认。
+    private func requestDelete(_ member: FamilyMember) {
+        guard members.count > 1 else {
+            // 原来这里静默 return，用户以为 App 卡住了。
+            notice = "至少要留一位家人。可以先添加新成员，再删除这一位。"
+            return
         }
+        pendingDelete = member
+    }
+
+    private func confirmDelete(_ member: FamilyMember) {
+        pendingDelete = nil
+        guard members.count > 1 else { return }
+        if member.id == env.currentMemberId {
+            let fallback = members.first { $0.id != member.id }
+            env.currentMemberId = fallback?.id
+            // 同步署名身份，否则会卡在已删成员的角色（长辈时还会卡在简单模式）。
+            if let relation = fallback?.relation { env.config.currentRoleRaw = relation }
+        }
+        PendingDeletion.enqueue(collection: "members", remoteId: member.remoteId, in: context)
+        context.delete(member)
         try? context.save()
         env.syncEngine.syncNow()
+        BubuHaptics.success()
     }
 }
 
@@ -109,6 +154,7 @@ struct MemberEditSheet: View {
     @State private var relation: Relation = .mama
     @State private var emoji = "🙂"
     @State private var colorHex = "#F28C9E"
+    @FocusState private var nameFocused: Bool
 
     private let emojiChoices = ["👩","👨","👵","👴","🧑","👧","🧒","🙂","🌷","⭐️","🐻","🦊"]
     private let colorChoices = ["#F28C9E","#5B8DEF","#F2B705","#5BB98C","#8E7CC3","#FF9F8E","#E08D79","#73C2FB"]
@@ -145,8 +191,13 @@ struct MemberEditSheet: View {
                         ForEach(Relation.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     TextField("显示名字", text: $name)
+                        .focused($nameFocused)
+                        .submitLabel(.done)
+                        .onSubmit { save() }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(BubuTheme.Color.background.ignoresSafeArea())
             .navigationTitle(member == nil ? "添加成员" : "编辑成员")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -172,7 +223,9 @@ struct MemberEditSheet: View {
     }
 
     private func save() {
-        let finalName = name.isEmpty ? relation.rawValue : name
+        // 去掉首尾空白：纯空格名字过去能存进去，成员列表会出现一行空白
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmed.isEmpty ? relation.rawValue : trimmed
         if let member {
             member.name = finalName
             member.relation = relation.rawValue

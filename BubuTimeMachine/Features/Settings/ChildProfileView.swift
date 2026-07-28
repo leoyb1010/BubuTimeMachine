@@ -7,12 +7,11 @@ import PhotosUI
 struct ChildProfileView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
-    @Query private var profiles: [ChildProfile]
+    /// 按创建时间排序：无序时 `first` 在多档案场景会漂移，输入目标可能在按键间跳到另一条。
+    @Query(sort: \ChildProfile.createdAt) private var profiles: [ChildProfile]
 
     @State private var avatarPick: PhotosPickerItem?
     @State private var heroPick: PhotosPickerItem?
-    @State private var profileRefreshTask: Task<Void, Never>?
-    @State private var profileRefreshDirty = false
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
@@ -20,20 +19,34 @@ struct ChildProfileView: View {
     var body: some View {
         Form {
             if let profile {
+                statSection(profile)     // 先看「此刻的布布」，再往下编辑
                 avatarSection(profile)
                 infoSection(profile)
                 heroSection(profile)
-                statSection(profile)
             } else {
                 Text("还没有布布的档案").foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
+        // 脱掉系统灰表格：不加这两行，进档案页会从马卡龙卡片风直接掉进 iOS 默认分组表
+        .scrollContentBackground(.hidden)
+        .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("布布的档案")
+        .safeAreaInset(edge: .bottom) {
+            if profiles.count > 1 {
+                // 历史上出现过「同一家庭两份档案」，此时编辑的是最早那份，另一份会造成年龄/身份卡不一致。
+                Label("检测到 \(profiles.count) 份布布档案，当前编辑的是最早创建的那份。多余的档案可以联系管理员在服务器上清理。",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.warning)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(BubuTheme.Color.warning.opacity(0.12))
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
         .onChange(of: avatarPick) { _, item in Task { await loadAvatar(item) } }
         .onChange(of: heroPick) { _, item in Task { await loadHero(item) } }
-        .onDisappear {
-            flushProfileRefresh()
-        }
+
     }
 
     private func avatarSection(_ profile: ChildProfile) -> some View {
@@ -66,23 +79,29 @@ struct ChildProfileView: View {
                 Spacer()
             }
             .listRowBackground(Color.clear)
+            if profile.avatarMediaFileName != nil {
+                Button(role: .destructive) {
+                    profile.avatarMediaFileName = nil
+                    profile.avatarRemoteURL = nil
+                    profile.syncState = .local
+                    commitProfile()
+                } label: {
+                    Label("移除头像", systemImage: "person.crop.circle.badge.minus")
+                }
+            }
         }
     }
 
     private func infoSection(_ profile: ChildProfile) -> some View {
         Section("基本信息") {
-            HStack {
-                Text("名字")
-                Spacer()
-                TextField("布布", text: Binding(
-                    get: { profile.name },
-                    set: {
-                        profile.name = $0
-                        profile.syncState = .local
-                        env.config.childName = $0
-                        scheduleProfileRefresh()
-                    }))
-                    .multilineTextAlignment(.trailing)
+            // 文本字段一律走缓冲提交：输入期间不落库，失焦/回车才写一次。
+            // 直接绑 @Model 并逐键 save 会重建视图树、清空中文输入法的拼音（出生地曾因此完全不能输入）。
+            BubuBufferedField(title: "名字", placeholder: "布布", value: profile.name) { newName in
+                guard !newName.isEmpty else { return }
+                profile.name = newName
+                profile.syncState = .local
+                env.config.childName = newName
+                commitProfile()
             }
             DatePicker("生日", selection: Binding(
                 get: { profile.birthday },
@@ -90,18 +109,18 @@ struct ChildProfileView: View {
                     // 保存前归一化到当天 0 点，保持与全 App 年龄口径一致（C-P1-5）。
                     profile.birthday = Calendar.current.startOfDay(for: $0)
                     profile.syncState = .local
-                    try? context.save()
-                    env.refreshWidgetSnapshot(context: context)
-                    WidgetRefresher.reload()
+                    commitProfile()
                 }),
                 in: ...Date.now, displayedComponents: .date)
-            HStack {
-                Text("出生地")
-                Spacer()
-                TextField("选填", text: Binding(
-                    get: { profile.birthPlace ?? "" },
-                    set: { profile.birthPlace = $0.isEmpty ? nil : $0; profile.syncState = .local; try? context.save() }))
-                    .multilineTextAlignment(.trailing)
+            BubuBufferedField(title: "出生地", placeholder: "选填", value: profile.birthPlace ?? "") { place in
+                profile.birthPlace = place.isEmpty ? nil : place
+                profile.syncState = .local
+                commitProfile()
+            }
+            BubuBufferedField(title: "小名", placeholder: "选填", value: profile.nickname ?? "") { nick in
+                profile.nickname = nick.isEmpty ? nil : nick
+                profile.syncState = .local
+                commitProfile()
             }
             // 性别 / 血型：身份卡背面会展示这两项，此前缺少输入入口，导致永远「未填写」。
             Picker("性别", selection: optionalStringBinding(\.gender, on: profile)) {
@@ -122,27 +141,14 @@ struct ChildProfileView: View {
     private static let genderOptions = ["男", "女", "其他"]
     private static let bloodTypeOptions = ["A", "B", "O", "AB"]
 
-    private func scheduleProfileRefresh() {
-        profileRefreshDirty = true
-        profileRefreshTask?.cancel()
-        profileRefreshTask = Task { @MainActor in
-            do {
-                try await Task.sleep(for: .milliseconds(700))
-            } catch {
-                return
-            }
-            flushProfileRefresh()
-        }
-    }
-
-    private func flushProfileRefresh() {
-        profileRefreshTask?.cancel()
-        profileRefreshTask = nil
-        guard profileRefreshDirty else { return }
-        profileRefreshDirty = false
+    /// 档案改动落库 + 刷新小组件快照。
+    /// 输入类字段已在 BubuBufferedField 内缓冲，到这里必定是「用户完成了一次编辑」，
+    /// 因此可以直接同步保存，不需要旧的 700ms 去抖（去抖窗口内被杀还会丢改动）。
+    private func commitProfile() {
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
         WidgetRefresher.reload()
+        env.syncEngine.syncNow()
     }
 
     /// 把 `String?` 字段桥接成 Picker 可用的非可选 `String` 绑定（空串 = nil = 未填写）。
@@ -155,7 +161,7 @@ struct ChildProfileView: View {
             set: {
                 profile[keyPath: keyPath] = $0.isEmpty ? nil : $0
                 profile.syncState = .local
-                try? context.save()
+                commitProfile()
             }
         )
     }
@@ -171,7 +177,7 @@ struct ChildProfileView: View {
                 Button(role: .destructive) {
                     profile.heroBackgroundFileName = nil
                     profile.syncState = .local
-                    try? context.save()
+                    commitProfile()
                 } label: { Label("恢复主题背景", systemImage: "arrow.uturn.backward") }
             }
         } header: {

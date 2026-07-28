@@ -46,6 +46,8 @@ final class ChildProfile {
     var heroBackgroundFileName: String? // 首页背景（布布的照片）
     var bloodType: String?
     var birthPlace: String?
+    /// 小名/乳名（可选）。身份卡背面与问候语可展示，additive 字段走自动轻量迁移。
+    var nickname: String?
     var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
 
