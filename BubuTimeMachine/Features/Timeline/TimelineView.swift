@@ -208,7 +208,9 @@ struct TimelineView: View {
                                        cornerRadius: 0, motif: entry.mood?.emoji ?? "◡")
                     }
                 }
-                .frame(height: 178)
+                // 封面按照片自己的长宽比排版（夹在 4:5 ~ 1.9:1 之间）：
+                // 原来固定 178 高，竖图会被裁成中间一条窄带，看不出拍了什么。
+                .aspectRatio(Self.coverAspect(entry), contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
 
@@ -248,6 +250,21 @@ struct TimelineView: View {
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .bubuCardShadow()
+    }
+
+    /// 封面长宽比：取媒体真实比例并夹在可读区间。
+    /// 下限 0.8（≈4:5 竖幅，再高的竖图会把一屏塞满、时光轴不好翻）；
+    /// 上限 1.9（超宽全景不至于压成一条缝）；缺尺寸的老记录回退 1.5（与旧版观感接近）。
+    private static let coverMinAspect: CGFloat = 0.8
+    private static let coverMaxAspect: CGFloat = 1.9
+    private static let coverFallbackAspect: CGFloat = 1.5
+
+    private static func coverAspect(_ entry: Entry) -> CGFloat {
+        guard let media = entry.coverMedia,
+              let w = media.width, let h = media.height, w > 0, h > 0 else {
+            return coverFallbackAspect
+        }
+        return min(max(CGFloat(w) / CGFloat(h), coverMinAspect), coverMaxAspect)
     }
 
     /// 月份 + 年龄锚点：翻旧记录时「布布多大」比日期更有感。

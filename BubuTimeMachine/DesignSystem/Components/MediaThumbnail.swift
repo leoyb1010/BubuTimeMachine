@@ -16,9 +16,17 @@ struct MediaThumbnail: View {
     var body: some View {
         ZStack {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+                // 关键：用 Color.clear 定尺寸、图片走 overlay 溢出后被裁。
+                // 直接 `.scaledToFill()` 会让 ZStack 自身被撑成图片的真实尺寸——
+                // 竖图在 130×130 的位置上会长到 130×173，调用方若没写 .clipped()
+                // 就会溢出卡片压到下面的文字上（真机可见）。
+                // 这样封装后，本组件永远不会超过被分配的尺寸，所有调用点都不必再自己兜底。
+                Color.clear
+                    .overlay {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    }
             } else {
                 placeholder
             }

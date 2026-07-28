@@ -276,7 +276,7 @@ struct SyncCenterView: View {
     private func performFullPush() async {
         runningFullPush = true
         defer { runningFullPush = false }
-        let summary = await engine.debugForceUploadAllLocalDataToCloud()
+        let summary = await engine.forceUploadAllLocalData()
         BubuHaptics.success()
         actionNotice = summary.contains("FAILED")
             ? "重传没能开始，稍后再试。"

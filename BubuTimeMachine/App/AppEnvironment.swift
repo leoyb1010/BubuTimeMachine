@@ -103,7 +103,7 @@ final class AppEnvironment {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-bubu-force-upload-ios-to-cloud") {
             Task { @MainActor in
-                let result = await syncEngine.debugForceUploadAllLocalDataToCloud()
+                let result = await syncEngine.forceUploadAllLocalData()
                 DebugCloudReconciler.record(result)
             }
         } else if ProcessInfo.processInfo.arguments.contains("-bubu-repair-cloud-from-ios") {

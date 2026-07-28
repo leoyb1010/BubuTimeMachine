@@ -187,10 +187,12 @@ final class SyncEngine {
         await connectAndSync()
     }
 
-    #if DEBUG
-    /// 一次性修复用：本机 iPhone 作为真相源，把除里程碑外的业务数据全部重新标为待上传。
-    /// 里程碑已用标题唯一策略单独修复，避免再次按 localId POST 造成重复。
-    func debugForceUploadAllLocalDataToCloud() async -> String {
+    /// 把本机业务数据全部重新标为待上传（里程碑除外——它用标题唯一策略单独修复，
+    /// 再按 localId POST 会造重复）。服务器缺内容时的正式恢复手段，
+    /// 设置 →「同步与备份」调用；上传按 localId 幂等，不会产生重复记录。
+    /// （原来只有 DEBUG 启动参数能触发，正式用户遇到「服务器少了东西」无路可走。）
+    @discardableResult
+    func forceUploadAllLocalData() async -> String {
         guard let context = modelContext else { return "BUBU_FORCE_UPLOAD_FAILED no_context at=\(Date())" }
         let entries = (try? context.fetch(FetchDescriptor<Entry>())) ?? []
         let media = (try? context.fetch(FetchDescriptor<Media>())) ?? []
@@ -222,7 +224,6 @@ final class SyncEngine {
         await connectAndSync()
         return "BUBU_FORCE_UPLOAD_DONE entries=\(entries.count) media=\(media.count) firstTimes=\(firstTimes.count) members=\(members.count) profiles=\(profiles.count) health=\(health.count) vaccines=\(vaccines.count) growth=\(growth.count) comments=\(comments.count) voiceNotes=\(notes.count) voiceMemos=\(memos.count) capsules=\(capsules.count) failure=\(lastFailureReason ?? "none") at=\(Date())"
     }
-    #endif
 
     // MARK: - 连接
 
