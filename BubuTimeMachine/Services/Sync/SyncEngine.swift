@@ -849,36 +849,73 @@ final class SyncEngine {
     // MARK: - 拉：远端 → 本地
 
     /// 每个集合独立游标：成功才推进，失败下次补拉，互不影响。
+    /// 一个集合本轮拉回来的原始数据（网络阶段产物，尚未落库）。
+    private struct PulledBatch<DTO: SyncCursorProviding>: Sendable {
+        var items: [DTO] = []
+        var tombstones: [RemoteTombstone] = []
+        /// 网络失败：合并阶段据此标软失败并保持游标不动。
+        var failed = false
+        /// 服务端没有这个集合（老服务器）：静默跳过，不算失败。
+        var missingCollection = false
+    }
+
+    /// 网络阶段：把一个集合的「列表 + 墓碑」取回来，不碰数据库。
+    /// 失败在这里被吸收成标记位，让并发阶段不会因为一个集合抖动而整体抛出。
+    private func fetchBatch<DTO: SyncCursorProviding>(
+        _ collection: String,
+        fetch: @escaping @Sendable (Date?) async throws -> [DTO]
+    ) async -> PulledBatch<DTO> {
+        let since = cursor(for: collection)
+        do {
+            async let itemsTask = fetch(since)
+            async let tombstonesTask = apiClient.fetchDeletedTombstones(collection: collection, since: since)
+            return PulledBatch(items: try await itemsTask, tombstones: try await tombstonesTask)
+        } catch {
+            if Self.isMissingOptionalServerCollection(error, collection: collection) {
+                return PulledBatch(missingCollection: true)
+            }
+            return PulledBatch(failed: true)
+        }
+    }
+
+    /// 拉取远端：**网络并发、合并顺序**。
+    ///
+    /// 原来 13 个集合串行 await，每个还各带一次墓碑查询 = 26+ 次串行往返。
+    /// 走公网隧道时单次往返实测 0.65 秒，一轮空同步光路由就要 17~30 秒（人在外面尤其明显）。
+    /// 现在用 async let 让所有集合的网络请求同时出发，墙上时间压到「最慢的那一次」；
+    /// 合并仍按原顺序逐个执行——**顺序不能动**：media 依赖父 entry 已落库，
+    /// 里程碑归一化必须在里程碑合并之后。
     private func pullRemote() async {
-        await pull("entries") { try await self.apiClient.fetchEntries(since: $0) }
-            merge: { await self.mergeRemoteEntry($0) }
-        await pull("media") { try await self.apiClient.fetchMedia(since: $0) }
-            merge: { await self.mergeRemoteMedia($0) }
-        await pull("milestones") { try await self.apiClient.fetchMilestones(since: $0) }
-            merge: { await self.mergeRemoteMilestone($0) }
+        async let entriesBatch = fetchBatch("entries") { try await self.apiClient.fetchEntries(since: $0) }
+        async let mediaBatch = fetchBatch("media") { try await self.apiClient.fetchMedia(since: $0) }
+        async let milestonesBatch = fetchBatch("milestones") { try await self.apiClient.fetchMilestones(since: $0) }
+        async let firstTimesBatch = fetchBatch("firsttimes") { try await self.apiClient.fetchFirstTimes(since: $0) }
+        async let membersBatch = fetchBatch("members") { try await self.apiClient.fetchFamilyMembers(since: $0) }
+        async let profilesBatch = fetchBatch("childprofile") { try await self.apiClient.fetchChildProfiles(since: $0) }
+        async let healthBatch = fetchBatch("healthrecords") { try await self.apiClient.fetchHealthRecords(since: $0) }
+        async let vaccinesBatch = fetchBatch("vaccinerecords") { try await self.apiClient.fetchVaccineRecords(since: $0) }
+        async let growthBatch = fetchBatch("growthmeasurements") { try await self.apiClient.fetchGrowthMeasurements(since: $0) }
+        async let commentsBatch = fetchBatch("comments") { try await self.apiClient.fetchComments(since: $0) }
+        async let voiceNotesBatch = fetchBatch("voicenotes") { try await self.apiClient.fetchVoiceNotes(since: $0) }
+        async let voiceMemosBatch = fetchBatch("voicememos") { try await self.apiClient.fetchVoiceMemos(since: $0) }
+        async let capsulesBatch = fetchBatch("timecapsules") { try await self.apiClient.fetchTimeCapsules(since: $0) }
+
+        await apply(await entriesBatch, collection: "entries") { await self.mergeRemoteEntry($0) }
+        await apply(await mediaBatch, collection: "media") { await self.mergeRemoteMedia($0) }
+        await apply(await milestonesBatch, collection: "milestones") { await self.mergeRemoteMilestone($0) }
         if let context = modelContext {
             normalizeMilestonesByTitle(context)
         }
-        await pull("firsttimes") { try await self.apiClient.fetchFirstTimes(since: $0) }
-            merge: { await self.mergeRemoteFirstTime($0) }
-        await pull("members") { try await self.apiClient.fetchFamilyMembers(since: $0) }
-            merge: { await self.mergeRemoteMember($0) }
-        await pull("childprofile") { try await self.apiClient.fetchChildProfiles(since: $0) }
-            merge: { await self.mergeRemoteChildProfile($0) }
-        await pull("healthrecords") { try await self.apiClient.fetchHealthRecords(since: $0) }
-            merge: { await self.mergeRemoteHealth($0) }
-        await pull("vaccinerecords") { try await self.apiClient.fetchVaccineRecords(since: $0) }
-            merge: { await self.mergeRemoteVaccine($0) }
-        await pull("growthmeasurements") { try await self.apiClient.fetchGrowthMeasurements(since: $0) }
-            merge: { await self.mergeRemoteGrowth($0) }
-        await pull("comments") { try await self.apiClient.fetchComments(since: $0) }
-            merge: { await self.mergeRemoteComment($0) }
-        await pull("voicenotes") { try await self.apiClient.fetchVoiceNotes(since: $0) }
-            merge: { await self.mergeRemoteVoiceNote($0) }
-        await pull("voicememos") { try await self.apiClient.fetchVoiceMemos(since: $0) }
-            merge: { await self.mergeRemoteVoiceMemo($0) }
-        await pull("timecapsules") { try await self.apiClient.fetchTimeCapsules(since: $0) }
-            merge: { await self.mergeRemoteTimeCapsule($0) }
+        await apply(await firstTimesBatch, collection: "firsttimes") { await self.mergeRemoteFirstTime($0) }
+        await apply(await membersBatch, collection: "members") { await self.mergeRemoteMember($0) }
+        await apply(await profilesBatch, collection: "childprofile") { await self.mergeRemoteChildProfile($0) }
+        await apply(await healthBatch, collection: "healthrecords") { await self.mergeRemoteHealth($0) }
+        await apply(await vaccinesBatch, collection: "vaccinerecords") { await self.mergeRemoteVaccine($0) }
+        await apply(await growthBatch, collection: "growthmeasurements") { await self.mergeRemoteGrowth($0) }
+        await apply(await commentsBatch, collection: "comments") { await self.mergeRemoteComment($0) }
+        await apply(await voiceNotesBatch, collection: "voicenotes") { await self.mergeRemoteVoiceNote($0) }
+        await apply(await voiceMemosBatch, collection: "voicememos") { await self.mergeRemoteVoiceMemo($0) }
+        await apply(await capsulesBatch, collection: "timecapsules") { await self.mergeRemoteTimeCapsule($0) }
     }
 
     /// 本次 pull 是否挂起游标推进：merge 过程中出现「可恢复但本轮没消费成功」的记录
@@ -886,44 +923,40 @@ final class SyncEngine {
     /// 杜绝「游标推过去、记录再也拉不到」的永久丢失（存储 P0-1）。
     private var holdCursorForCurrentPull = false
 
-    private func pull<DTO: SyncCursorProviding>(_ collection: String,
-                           fetch: (Date?) async throws -> [DTO],
-                           merge: (DTO) async -> Bool) async {
-        let since = cursor(for: collection)
-        holdCursorForCurrentPull = false
-        do {
-            let items = try await fetch(since)
-            // 远端游标与「本地脏记录是否全部消费」解耦（S-P2）：这一轮把远端项全部拉回并逐条尝试合并后，
-            // 游标就按「本轮拉到的最大服务器 updated」前进。本地未推的脏记录/永久 .failed 记录合并返回 false
-            // 只影响它是否落库，不再卡住整集合游标造成每轮从头全量重拉——那些记录由 pushLocal 负责收敛。
-            var maxUpdated: Date? = nil
-            for dto in items {
-                guard !Task.isCancelled else { return }
-                _ = await merge(dto)
-                maxUpdated = Self.laterDate(maxUpdated, dto.serverUpdatedAt)
-            }
-            // tombstone 传播：别的设备删掉的，这台也要删（R4 P1-8）。
-            // 墓碑的服务器 updated 同样参与游标推进，避免「本轮只有删除」时游标停滞、每轮重复拉同一批墓碑。
-            let tombstones = try await apiClient.fetchDeletedTombstones(collection: collection, since: since)
-            if !tombstones.isEmpty {
-                removeLocals(collection: collection, localIds: tombstones.map(\.localId))
-                for t in tombstones { maxUpdated = Self.laterDate(maxUpdated, t.serverUpdatedAt) }
-            }
-            // 游标推进用「本轮拉到的最大服务器 updated」（服务器单一权威时钟，与过滤字段 updated 同参照系），
-            // 而非本机 Date.now——杜绝读设备时钟偏移把游标推过头、写设备刚写的记录被判旧而永久跳过（S-P1-1）。
-            // setCursor 内部回退 60 秒重叠余量，边界不丢记录、自我重拉幂等（localId 去重 + merge 见已 synced 不回退）。
-            // 无 context 时不推进（没落库不能推进游标）；本轮无任何新记录/墓碑则游标保持不动（下轮空查询极廉价）。
-            if modelContext != nil, let maxUpdated, !holdCursorForCurrentPull {
-                setCursor(maxUpdated, for: collection)
-            }
-            lastSyncedAt = Date.now
-        } catch {
-            if Self.isMissingOptionalServerCollection(error, collection: collection) {
-                return   // 集合在服务端不存在：静默跳过，游标保持不动
-            }
+    /// 合并阶段：把一个集合已取回的数据落库并推进游标。全程在 MainActor 上顺序执行。
+    private func apply<DTO: SyncCursorProviding>(_ batch: PulledBatch<DTO>,
+                                                 collection: String,
+                                                 merge: (DTO) async -> Bool) async {
+        if batch.missingCollection { return }   // 集合在服务端不存在：静默跳过，游标保持不动
+        if batch.failed {
             // 瞬时拉取失败不立刻报红：标记本轮软失败，游标不推进，下轮自动补拉。
             softFailureThisRun = true
+            return
         }
+        holdCursorForCurrentPull = false
+        // 远端游标与「本地脏记录是否全部消费」解耦（S-P2）：这一轮把远端项全部拉回并逐条尝试合并后，
+        // 游标就按「本轮拉到的最大服务器 updated」前进。本地未推的脏记录/永久 .failed 记录合并返回 false
+        // 只影响它是否落库，不再卡住整集合游标造成每轮从头全量重拉——那些记录由 pushLocal 负责收敛。
+        var maxUpdated: Date? = nil
+        for dto in batch.items {
+            guard !Task.isCancelled else { return }
+            _ = await merge(dto)
+            maxUpdated = Self.laterDate(maxUpdated, dto.serverUpdatedAt)
+        }
+        // tombstone 传播：别的设备删掉的，这台也要删（R4 P1-8）。
+        // 墓碑的服务器 updated 同样参与游标推进，避免「本轮只有删除」时游标停滞、每轮重复拉同一批墓碑。
+        if !batch.tombstones.isEmpty {
+            removeLocals(collection: collection, localIds: batch.tombstones.map(\.localId))
+            for t in batch.tombstones { maxUpdated = Self.laterDate(maxUpdated, t.serverUpdatedAt) }
+        }
+        // 游标推进用「本轮拉到的最大服务器 updated」（服务器单一权威时钟，与过滤字段 updated 同参照系），
+        // 而非本机 Date.now——杜绝读设备时钟偏移把游标推过头、写设备刚写的记录被判旧而永久跳过（S-P1-1）。
+        // setCursor 内部回退 60 秒重叠余量，边界不丢记录、自我重拉幂等（localId 去重 + merge 见已 synced 不回退）。
+        // 无 context 时不推进（没落库不能推进游标）；本轮无任何新记录/墓碑则游标保持不动（下轮空查询极廉价）。
+        if modelContext != nil, let maxUpdated, !holdCursorForCurrentPull {
+            setCursor(maxUpdated, for: collection)
+        }
+        lastSyncedAt = Date.now
     }
 
     /// 取两个可选时间里较晚的一个（nil 视作无约束）。
