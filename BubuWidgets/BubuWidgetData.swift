@@ -36,6 +36,8 @@ struct BubuSnapshot: Sendable {
     /// 最近照片数据，用于大尺寸小组件增加内容密度。读不到不影响主内容。
     var recentPhotoImageData: Data?
     var photoImageData: [Data]
+    /// 时光机轮播池的元信息（不含图片数据；图片由 provider 按槽位单独加载，避免多 entry 拷贝撞内存红线）。
+    var moments: [SharedMoment] = []
 
     var milestoneProgress: Double {
         guard totalMilestoneCount > 0 else { return 0 }
@@ -142,8 +144,14 @@ enum BubuWidgetData {
             recentPhotoImageData: imageData(fileName: shared.recentPhotoFileName),
             photoImageData: (shared.photoFileNames ?? shared.recentPhotoFileName.map { [$0] } ?? [])
                 .prefix(Self.maxPhotoDataCount)
-                .compactMap { imageData(fileName: $0) }
+                .compactMap { imageData(fileName: $0) },
+            moments: shared.moments ?? []
         )
+    }
+
+    /// 按文件名读单张图（时光机轮播按槽位取用）。
+    static func momentImageData(fileName: String) -> Data? {
+        imageData(fileName: fileName)
     }
 
     private static func fallback(_ value: String?, _ fallback: String) -> String {

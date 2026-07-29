@@ -10,6 +10,8 @@ struct BubuEntry: TimelineEntry {
     let snapshot: BubuSnapshot
     /// 记忆轮播款用：本 entry 展示第几张照片（多 entry 时间线自动翻页，免刷新预算）。
     var photoIndex: Int = 0
+    /// 时光机轮播款：本槽位展示的那一段回忆（元信息）。
+    var moment: SharedMoment? = nil
     /// 记忆轮播款专用：本槽位要展示的「那一张」照片数据。
     /// 轮播时间线有 12 个 entry，若每个 entry 都带上完整 snapshot（含最多 3×2MB 图），
     /// 会逼近 WidgetKit ~30MB 内存红线导致空白。故轮播 entry 只携带该槽位需要的一张图，
@@ -35,6 +37,68 @@ struct BubuProvider: TimelineProvider {
             matchingPolicy: .nextTime
         ) ?? Date.now.addingTimeInterval(3600)
         completion(Timeline(entries: [entry], policy: .after(nextMidnight)))
+    }
+}
+
+// MARK: - 时光机轮播 provider
+/// 「今日时光」原来用 BubuProvider：单个 entry、明天零点才刷新，
+/// 于是桌面上永远钉着同一条最新记录、同一张照片，一整天纹丝不动。
+/// 改成多 entry 时间线：每 30 分钟翻一段回忆（近期 / 那年今日 / 历史随机混合）。
+struct BubuMomentProvider: TimelineProvider {
+    func placeholder(in context: Context) -> BubuEntry {
+        BubuEntry(date: .now, snapshot: .sample)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (BubuEntry) -> Void) {
+        var snap = BubuWidgetData.loadSnapshot()
+        let first = snap.moments.first
+        snap.photoImageData = []
+        completion(BubuEntry(date: .now, snapshot: snap, moment: first,
+                             carouselPhoto: first.flatMap { BubuWidgetData.momentImageData(fileName: $0.photoFileName) }))
+    }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<BubuEntry>) -> Void) {
+        var snapshot = BubuWidgetData.loadSnapshot()
+        let moments = snapshot.moments
+        // 图片数组从 snapshot 剥掉：12 个 entry 各带一份完整数组会撞 WidgetKit 内存红线。
+        snapshot.photoImageData = []
+
+        guard !moments.isEmpty else {
+            // 还没有带照片的记录：给一个静态 entry，明天零点再看
+            let next = Calendar.current.nextDate(after: .now, matching: DateComponents(hour: 0, minute: 5),
+                                                 matchingPolicy: .nextTime) ?? Date.now.addingTimeInterval(3600)
+            completion(Timeline(entries: [BubuEntry(date: .now, snapshot: snapshot)], policy: .after(next)))
+            return
+        }
+
+        // 每天换一种顺序：用「今天是第几天」做种子洗牌，同一天内各设备顺序一致、跨天自然翻新。
+        let daySeed = Int(Date.now.timeIntervalSince1970 / 86_400)
+        let ordered = Self.shuffled(moments, seed: daySeed)
+
+        var entries: [BubuEntry] = []
+        for slot in 0..<12 {   // 6 小时 × 每 30 分钟
+            let date = Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60)
+            let moment = ordered[slot % ordered.count]
+            entries.append(BubuEntry(date: date, snapshot: snapshot,
+                                     photoIndex: slot % ordered.count,
+                                     moment: moment,
+                                     carouselPhoto: BubuWidgetData.momentImageData(fileName: moment.photoFileName)))
+        }
+        completion(Timeline(entries: entries, policy: .atEnd))
+    }
+
+    /// 确定性洗牌（同一 seed 结果恒定）：不能用 Date/random，否则每次重建时间线顺序都变、画面会跳。
+    private static func shuffled(_ items: [SharedMoment], seed: Int) -> [SharedMoment] {
+        var result = items
+        var state = UInt64(truncatingIfNeeded: seed) &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        var i = result.count - 1
+        while i > 0 {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let j = Int(state >> 33) % (i + 1)
+            result.swapAt(i, j)
+            i -= 1
+        }
+        return result
     }
 }
 
@@ -152,16 +216,16 @@ private extension View {
     }
 }
 
+/// 旧的「按 style 分叉」体系。moment 已独立成 BubuMomentCarouselView（整图轮播），
+/// 不再走这套，故此枚举只剩身份卡与成长一览两款。
 private enum BubuWidgetStyle {
     case identity
-    case moment
     case growth
 
     /// 点击小组件跳转到 App 对应页面的 deep link（App 端 BubuRoute 解析）。
     var deepLink: URL {
         switch self {
         case .identity: return URL(string: "bubu://identity")!
-        case .moment: return URL(string: "bubu://moment")!
         case .growth: return URL(string: "bubu://growth")!
         }
     }
@@ -890,8 +954,6 @@ private struct BubuSmallView: View {
         switch style {
         case .identity:
             BubuIdentitySmallView(snapshot: snapshot)
-        case .moment:
-            BubuMomentSmallView(snapshot: snapshot)
         case .growth:
             BubuGrowthSmallView(snapshot: snapshot)
         }
@@ -906,8 +968,6 @@ private struct BubuMediumView: View {
         switch style {
         case .identity:
             BubuIdentityMediumView(snapshot: snapshot)
-        case .moment:
-            BubuMomentMediumView(snapshot: snapshot)
         case .growth:
             BubuGrowthMediumView(snapshot: snapshot)
         }
@@ -922,8 +982,6 @@ private struct BubuLargeView: View {
         switch style {
         case .identity:
             BubuIdentityLargeView(snapshot: snapshot)
-        case .moment:
-            BubuMomentLargeView(snapshot: snapshot)
         case .growth:
             BubuGrowthLargeView(snapshot: snapshot)
         }
@@ -941,23 +999,11 @@ private struct BubuWidgetEntryView: View {
             .widgetURL(style.deepLink)
             // 沉浸式时光中尺寸：右上角是照片空区，「＋记一笔」用 overlay 悬浮。
             // 其余版式的「＋」内嵌在各自布局的空位里（见各 View），避免盖住生日徽章/ACTIVE/数据 pill。
-            .overlay(alignment: .topTrailing) {
-                if style == .moment, family == .systemMedium {
-                    BubuPlusLink().padding(10)
-                }
-            }
     }
 
     @ViewBuilder
     private var content: some View {
-        // 今日时光 S/M 走整图沉浸：照片自带 containerBackground、出血到边缘、不加内边距。
-        if style == .moment, family == .systemSmall {
-            BubuMomentSmallView(snapshot: entry.snapshot)
-                .immersiveContainerBackground(imageData: entry.snapshot.recentPhotoImageData)
-        } else if style == .moment, family == .systemMedium {
-            BubuMomentMediumView(snapshot: entry.snapshot)
-                .immersiveContainerBackground(imageData: entry.snapshot.recentPhotoImageData)
-        } else {
+        Group {
             switch family {
             case .systemSmall:
                 BubuSmallView(snapshot: entry.snapshot, style: style)
@@ -1044,6 +1090,162 @@ private struct SoftPhotoBackground: ViewModifier {
     }
 }
 
+
+// MARK: - 时光机轮播视图（整图沉浸式）
+/// 旧版是「标题 + 一条 92pt 照片带 + 正文块 + 三个数据胶囊」堆在一起，
+/// 信息很多但照片很小、一整天还不换——桌面上像一张塞满字的表格。
+/// 新版把照片放到最大：整卡就是那张照片，文字压在底部渐变里，只留最必要的三行。
+struct BubuMomentCarouselView: View {
+    var entry: BubuEntry
+    @Environment(\.widgetFamily) private var family
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    private var moment: SharedMoment? { entry.moment }
+    private var image: UIImage? {
+        BubuAvatar.downsampledImage(from: entry.carouselPhoto,
+                                    maxPixel: family == .systemLarge ? 1000 : 600)
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if let image, let moment {
+                Color.clear
+                overlayText(moment)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .containerBackground(for: .widget) {
+                        Image(uiImage: image)
+                            .resizable()
+                            // 染色/淡色模式下照片保持真彩，不被系统涂成色块
+                            .widgetAccentedRenderingMode(.fullColor)
+                            .scaledToFill()
+                            .overlay {
+                                // 底部渐变遮罩：白字压在照片上要始终读得清，深浅照片都成立
+                                LinearGradient(colors: [.clear, .black.opacity(0.15), .black.opacity(0.72)],
+                                               startPoint: .center, endPoint: .bottom)
+                            }
+                    }
+            } else {
+                emptyState
+                    .containerBackground(for: .widget) {
+                        if renderingMode == .fullColor {
+                            LinearGradient(colors: [WidgetPalette.peach.opacity(0.5),
+                                                    WidgetPalette.pink.opacity(0.4),
+                                                    WidgetPalette.cream],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                        } else {
+                            Color.white.opacity(0.06)
+                        }
+                    }
+            }
+        }
+        .widgetURL(URL(string: "bubu://moment"))
+    }
+
+    // MARK: 照片上的文字层
+
+    private func overlayText(_ moment: SharedMoment) -> some View {
+        VStack(alignment: .leading, spacing: family == .systemSmall ? 3 : 5) {
+            Spacer(minLength: 0)
+
+            // 顶部徽章：那年今日优先，否则显示布布当时多大
+            HStack(spacing: 6) {
+                if moment.isOnThisDay {
+                    badge("那年今日", icon: "sparkles", tint: WidgetPalette.honey)
+                } else if let ageText = ageAt(moment.date), family != .systemSmall {
+                    badge(ageText, icon: "figure.child", tint: .white.opacity(0.28))
+                }
+                Spacer(minLength: 0)
+                if let mood = moment.moodEmoji {
+                    Text(mood).font(.system(size: family == .systemSmall ? 14 : 17))
+                }
+            }
+
+            if let title = moment.title, !title.isEmpty {
+                Text(title)
+                    .font(.system(size: titleSize, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(family == .systemLarge ? 2 : 1)
+                    .minimumScaleFactor(0.7)
+            }
+
+            if family != .systemSmall, let note = moment.note, !note.isEmpty {
+                Text(note)
+                    .font(.system(size: family == .systemLarge ? 13 : 11.5,
+                                  weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+
+            HStack(spacing: 8) {
+                Text(moment.date.formatted(.dateTime.year().month().day()))
+                    .font(.system(size: family == .systemSmall ? 10 : 11.5,
+                                  weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+                Spacer(minLength: 0)
+                if family != .systemSmall {
+                    // 轮播位置点：让人知道桌面这块会一直翻，不是坏了
+                    pageDots
+                }
+            }
+            .padding(.top, 1)
+        }
+        .shadow(color: .black.opacity(0.45), radius: 5, y: 1)
+        .padding(family == .systemSmall ? 12 : 16)
+    }
+
+    private var titleSize: CGFloat {
+        switch family {
+        case .systemLarge: return 24
+        case .systemMedium: return 18
+        default: return 14
+        }
+    }
+
+    private func badge(_ text: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9, weight: .black))
+            Text(text).font(.system(size: 10, weight: .black, design: .rounded))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(tint, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.8))
+    }
+
+    private var pageDots: some View {
+        let total = min(entry.snapshot.moments.count, 6)
+        return HStack(spacing: 4) {
+            ForEach(0..<max(total, 1), id: \.self) { i in
+                Circle()
+                    .fill(.white.opacity(i == entry.photoIndex % max(total, 1) ? 0.95 : 0.4))
+                    .frame(width: 5, height: 5)
+            }
+        }
+    }
+
+    private func ageAt(_ date: Date) -> String? {
+        guard let birthday = entry.snapshot.birthday, date >= birthday else { return nil }
+        return AgeCalculator.compactAge(birthday: birthday, at: date)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Text("🕰️").font(.system(size: family == .systemSmall ? 30 : 40))
+            Text("记几条带照片的时光")
+                .font(.system(size: family == .systemSmall ? 11 : 13, weight: .heavy, design: .rounded))
+                .foregroundStyle(WidgetPalette.warmBrown)
+            if family != .systemSmall {
+                Text("桌面就会开始翻回忆给你看")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(WidgetPalette.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 // MARK: - Widget 定义
 struct BubuWidget: Widget {
     let kind = "BubuWidget"
@@ -1062,11 +1264,11 @@ struct BubuWidget: Widget {
 struct BubuMomentWidget: Widget {
     let kind = "BubuMomentWidget"
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
-            BubuWidgetEntryView(entry: entry, style: .moment)
+        StaticConfiguration(kind: kind, provider: BubuMomentProvider()) { entry in
+            BubuMomentCarouselView(entry: entry)
         }
-        .configurationDisplayName("布布今日时光")
-        .description("最近照片、最近记录和本月照片。")
+        .configurationDisplayName("布布时光机")
+        .description("每半小时翻出一段回忆——最近的、那年今日的、还有你可能已经忘了的。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
         .containerBackgroundRemovable(false)

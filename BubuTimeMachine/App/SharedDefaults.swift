@@ -3,6 +3,18 @@ import OSLog
 import SwiftData
 import WidgetKit
 
+/// 桌面「时光机」小组件的一条片段：一张照片 + 当时的一句话。
+/// 小组件轮播这一组，让桌面每半小时换一段回忆，而不是永远钉着最新那一条。
+nonisolated struct SharedMoment: Codable, Sendable, Hashable {
+    var photoFileName: String
+    var title: String?
+    var note: String?
+    var date: Date
+    var moodEmoji: String?
+    /// 「那年今日」标记：同月同日的旧记录，轮到它时小组件会打上徽章。
+    var isOnThisDay: Bool = false
+}
+
 nonisolated struct SharedWidgetSnapshot: Codable, Sendable {
     var name: String
     var birthday: Date?
@@ -25,6 +37,8 @@ nonisolated struct SharedWidgetSnapshot: Codable, Sendable {
     var totalEntryCount: Int?
     var totalPhotoCount: Int?
     var idNumber: String?
+    /// 时光机轮播池（最多 12 段）：近期 + 那年今日 + 历史随机，各占一部分。
+    var moments: [SharedMoment]?
     var updatedAt: Date
 
     var hasRenderableContent: Bool {
@@ -81,8 +95,68 @@ extension SharedWidgetSnapshot {
             totalEntryCount: totalEntryCount(context: context),
             totalPhotoCount: totalPhotoCount(context: context),
             idNumber: defaultIDNumber,
+            moments: buildMoments(context: context, entries: entries),
             updatedAt: .now
         )
+    }
+
+    /// 组装时光机轮播池：**近期 4 段 + 那年今日 + 更早的随机若干**，去重后最多 12 段。
+    /// 只取近期会让桌面永远是同一批照片；掺进历史与「那年今日」，
+    /// 桌面才真的像一台时光机——每隔半小时翻出一段可能已经忘了的回忆。
+    @MainActor
+    private static func buildMoments(context: ModelContext, entries: [Entry]) -> [SharedMoment]? {
+        var pool: [SharedMoment] = []
+        var seenPhotos = Set<String>()
+
+        func append(_ entry: Entry, isOnThisDay: Bool) {
+            guard let media = entry.media.first(where: { $0.type == .photo }),
+                  let name = media.thumbnailFileName ?? media.localFileName,
+                  !seenPhotos.contains(name) else { return }
+            seenPhotos.insert(name)
+            pool.append(SharedMoment(
+                photoFileName: name,
+                title: clean(entry.title, maxLength: 18),
+                note: clean(entry.firstPersonNote, maxLength: 40) ?? clean(entry.note, maxLength: 40),
+                date: entry.happenedAt,
+                moodEmoji: entry.mood?.emoji,
+                isOnThisDay: isOnThisDay))
+        }
+
+        // ① 近期：桌面要能反映「刚发生的事」
+        for entry in entries.prefix(6) { append(entry, isOnThisDay: false) }
+
+        // ② 那年今日：同月同日的旧记录，最有回忆价值，优先掺进来
+        let cal = Calendar.current
+        let todayMonth = cal.component(.month, from: .now)
+        let todayDay = cal.component(.day, from: .now)
+        let all = allEntriesWithPhotos(context: context)
+        for entry in all where cal.component(.month, from: entry.happenedAt) == todayMonth
+            && cal.component(.day, from: entry.happenedAt) == todayDay
+            && !cal.isDateInToday(entry.happenedAt) {
+            append(entry, isOnThisDay: true)
+            if pool.count >= 9 { break }
+        }
+
+        // ③ 历史随机：按天数分散取样，避免全挤在某一段时间
+        if pool.count < 12, all.count > pool.count {
+            let stride = max(1, all.count / 12)
+            for i in Swift.stride(from: 0, to: all.count, by: stride) {
+                append(all[i], isOnThisDay: false)
+                if pool.count >= 12 { break }
+            }
+        }
+        return pool.isEmpty ? nil : Array(pool.prefix(12))
+    }
+
+    /// 带照片的全部未归档记录（按时间倒序）。取样用，上限 400 条防大库开销。
+    @MainActor
+    private static func allEntriesWithPhotos(context: ModelContext) -> [Entry] {
+        var descriptor = FetchDescriptor<Entry>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+        descriptor.fetchLimit = 400
+        let entries = (try? context.fetch(descriptor)) ?? []
+        return entries.filter { entry in entry.media.contains { $0.type == .photo } }
     }
 
     @MainActor
