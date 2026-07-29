@@ -37,7 +37,8 @@ nonisolated struct SharedWidgetSnapshot: Codable, Sendable {
     var totalEntryCount: Int?
     var totalPhotoCount: Int?
     var idNumber: String?
-    /// 时光机轮播池（最多 12 段）：近期 + 那年今日 + 历史随机，各占一部分。
+    /// 时光机照片池（最多 30 段）：近期 + 那年今日 + 历史随机，各占一部分。
+    /// 桌面照片墙一屏就要 9 张，还要能整墙轮换，池子必须够大。
     var moments: [SharedMoment]?
     var updatedAt: Date
 
@@ -108,22 +109,28 @@ extension SharedWidgetSnapshot {
         var pool: [SharedMoment] = []
         var seenPhotos = Set<String>()
 
-        func append(_ entry: Entry, isOnThisDay: Bool) {
-            guard let media = entry.media.first(where: { $0.type == .photo }),
-                  let name = media.thumbnailFileName ?? media.localFileName,
-                  !seenPhotos.contains(name) else { return }
-            seenPhotos.insert(name)
-            pool.append(SharedMoment(
-                photoFileName: name,
-                title: clean(entry.title, maxLength: 18),
-                note: clean(entry.firstPersonNote, maxLength: 40) ?? clean(entry.note, maxLength: 40),
-                date: entry.happenedAt,
-                moodEmoji: entry.mood?.emoji,
-                isOnThisDay: isOnThisDay))
+        /// 每条记录最多取 2 张：只取首图的话，多图记录的其余照片永远上不了墙，
+        /// 照片墙会显得内容很少。
+        func append(_ entry: Entry, isOnThisDay: Bool, maxPerEntry: Int = 2) {
+            var taken = 0
+            for media in entry.media where media.type == .photo {
+                guard taken < maxPerEntry,
+                      let name = media.thumbnailFileName ?? media.localFileName,
+                      !seenPhotos.contains(name) else { continue }
+                seenPhotos.insert(name)
+                taken += 1
+                pool.append(SharedMoment(
+                    photoFileName: name,
+                    title: clean(entry.title, maxLength: 18),
+                    note: clean(entry.firstPersonNote, maxLength: 40) ?? clean(entry.note, maxLength: 40),
+                    date: entry.happenedAt,
+                    moodEmoji: entry.mood?.emoji,
+                    isOnThisDay: isOnThisDay))
+            }
         }
 
         // ① 近期：桌面要能反映「刚发生的事」
-        for entry in entries.prefix(6) { append(entry, isOnThisDay: false) }
+        for entry in entries.prefix(10) { append(entry, isOnThisDay: false) }
 
         // ② 那年今日：同月同日的旧记录，最有回忆价值，优先掺进来
         let cal = Calendar.current
@@ -134,18 +141,18 @@ extension SharedWidgetSnapshot {
             && cal.component(.day, from: entry.happenedAt) == todayDay
             && !cal.isDateInToday(entry.happenedAt) {
             append(entry, isOnThisDay: true)
-            if pool.count >= 9 { break }
+            if pool.count >= 18 { break }
         }
 
         // ③ 历史随机：按天数分散取样，避免全挤在某一段时间
-        if pool.count < 12, all.count > pool.count {
-            let stride = max(1, all.count / 12)
+        if pool.count < 30, all.count > pool.count {
+            let stride = max(1, all.count / 30)
             for i in Swift.stride(from: 0, to: all.count, by: stride) {
                 append(all[i], isOnThisDay: false)
-                if pool.count >= 12 { break }
+                if pool.count >= 30 { break }
             }
         }
-        return pool.isEmpty ? nil : Array(pool.prefix(12))
+        return pool.isEmpty ? nil : Array(pool.prefix(30))
     }
 
     /// 带照片的全部未归档记录（按时间倒序）。取样用，上限 400 条防大库开销。
