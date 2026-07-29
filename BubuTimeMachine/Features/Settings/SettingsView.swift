@@ -79,6 +79,10 @@ struct SettingsView: View {
                     }
                 }
                 reminderCard(config: config)
+                group("桌面小组件", footer: "导入一张桌面截图，小组件就能用你自己的壁纸做底，看起来像是透明的。") {
+                    row("桌面壁纸", icon: "square.on.square.dashed",
+                        tint: BubuTheme.Color.lav) { WidgetWallpaperView() }
+                }
                 group("苹果手表") {
                     row("布布上表盘", icon: "applewatch.watchface", tint: env.theme.theme.primary) { WatchFaceGuideView() }
                 }

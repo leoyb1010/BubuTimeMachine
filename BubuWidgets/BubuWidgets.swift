@@ -220,8 +220,33 @@ struct BubuAvatar: View {
 /// 那是 iOS 26 给全部图标和小组件统一上玻璃，组件这边只要别画实心底就能吃到。
 private struct BubuGlassContainer: View {
     var tintStrength: Double = 1.0
+    @Environment(\.widgetFamily) private var family
 
     var body: some View {
+        // 用户导入过桌面壁纸：直接把它身后那块壁纸铺成底，桌面上小组件就"消失"了。
+        // 这条路不受「壁纸有没有花纹」影响——它本来就是壁纸本身，
+        // 比调不透明度可靠得多（调 alpha 在纯色壁纸区域等于没调）。
+        if let slot = Self.slot(for: family),
+           let data = WidgetWallpaper.backgroundData(for: slot),
+           let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            glass
+        }
+    }
+
+    private static func slot(for family: WidgetFamily) -> WidgetWallpaper.Slot? {
+        switch family {
+        case .systemSmall: return .small
+        case .systemMedium: return .medium
+        case .systemLarge: return .large
+        default: return nil   // 锁屏 / StandBy 位置没有壁纸可透
+        }
+    }
+
+    private var glass: some View {
         ZStack {
             // 近乎全透。为什么压到这么低：真机上壁纸在小组件那一带是接近纯净的浅灰，
             // 底下没有花纹可透——底色留到 27% 时，视觉上和一张不透明的浅粉卡几乎没区别
