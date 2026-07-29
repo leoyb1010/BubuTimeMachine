@@ -15,6 +15,15 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.3.1",
+            date: "2026-07-29",
+            title: "桌面壁纸改成点格子定位",
+            highlights: [
+                "定位方式改了：直接把桌面上小组件能停的那几个格子画出来，点一下就选中——桌面小组件本来就只能落在固定位置，自由拖对不准",
+                "修好了拖动不跟手（框会飞出去）的问题；现在点完还能按住拖着微调"
+            ]
+        ),
+        ReleaseNote(
             version: "2.3.0",
             date: "2026-07-29",
             title: "真·透明小组件：用你自己的壁纸做底",

@@ -102,6 +102,60 @@ struct WidgetWallpaperCropTests {
         #expect(data == nil)
     }
 
+    // MARK: 桌面网格
+
+    /// iPhone 17 Pro Max：440×956pt。用户真机截图上量出来的位置——
+    /// 大卡 (38.7, 99.8) 365×383、中卡第三行 top≈521pt。网格必须落在这些数上。
+    private let proMaxAspect: CGFloat = 956.0 / 440.0
+
+    @Test("候选位数量：中/小卡 3 行、大卡 2 个落位、小卡还分左右两列")
+    func slotCounts() {
+        #expect(WidgetWallpaper.HomeGrid.slots(for: .large, aspect: proMaxAspect).count == 2)
+        #expect(WidgetWallpaper.HomeGrid.slots(for: .medium, aspect: proMaxAspect).count == 3)
+        #expect(WidgetWallpaper.HomeGrid.slots(for: .small, aspect: proMaxAspect).count == 6)
+    }
+
+    @Test("大卡首个落位对上真机量出来的坐标")
+    func largeFirstSlotMatchesDevice() throws {
+        let s = try #require(WidgetWallpaper.HomeGrid.slots(for: .large, aspect: proMaxAspect).first)
+        // 归一化：x=38.7/440、y=99.8/956、w=364/440、h=382/956
+        #expect(abs(s.minX - 38.7 / 440) < 0.005)
+        #expect(abs(s.minY - 99.8 / 956) < 0.005)
+        #expect(abs(s.width - 364.0 / 440) < 0.005)
+        #expect(abs(s.height - 382.0 / 956) < 0.005)
+    }
+
+    @Test("中卡第三行对上真机量出来的 521pt")
+    func mediumThirdRowMatchesDevice() throws {
+        let rows = WidgetWallpaper.HomeGrid.slots(for: .medium, aspect: proMaxAspect)
+        #expect(abs(rows[2].minY - 521.0 / 956) < 0.008)
+        #expect(abs(rows[0].minY - 99.8 / 956) < 0.005)
+    }
+
+    @Test("小卡左右两列关于屏幕中线对称")
+    func smallColumnsAreSymmetric() {
+        let s = WidgetWallpaper.HomeGrid.slots(for: .small, aspect: proMaxAspect)
+        let left = s[0], right = s[1]
+        #expect(abs(left.minY - right.minY) < 0.0001)      // 同一行
+        #expect(abs(left.minX - (1 - right.maxX)) < 0.0001) // 左右边距相等
+        #expect(right.minX > left.maxX)                     // 不重叠
+    }
+
+    @Test("所有候选位都完整落在图内")
+    func slotsStayInsideImage() {
+        for slot in WidgetWallpaper.Slot.allCases {
+            for r in WidgetWallpaper.HomeGrid.slots(for: slot, aspect: proMaxAspect) {
+                #expect(r.minX >= 0 && r.minY >= 0 && r.maxX <= 1.0001 && r.maxY <= 1.0001,
+                        "\(slot) 的候选位越界：\(r)")
+            }
+        }
+    }
+
+    @Test("aspect 非法时返回空，不产生除零的鬼坐标")
+    func rejectsInvalidAspect() {
+        #expect(WidgetWallpaper.HomeGrid.slots(for: .large, aspect: 0).isEmpty)
+    }
+
     @Test("三种尺寸的宽高比与真机小组件一致")
     func slotAspectRatios() {
         #expect(WidgetWallpaper.Slot.small.heightOverWidth == 1.0)

@@ -56,6 +56,45 @@ nonisolated enum WidgetWallpaper {
         }
     }
 
+    // MARK: 桌面网格
+
+    /// iPhone 桌面小组件的落位网格。
+    ///
+    /// 桌面小组件不能停在任意位置——它只能落在固定格子上，所以定位不该让用户自由拖，
+    /// 而该给出候选位让他点。常数实测自 iPhone 17 Pro Max（屏 440×956pt）：
+    /// 大卡左上角 (38.7, 99.8)、364×382；中卡 364×170；相邻两行行距 210.6pt。
+    /// 其余 iPhone 机型这几个比例相差在 1% 内，用同一套即可；
+    /// 点完还能拖着微调，所以即使某个机型略有偏差也有救。
+    ///
+    /// 行数：中/小卡 3 行，大卡占两行高所以只有 2 个落位。
+    enum HomeGrid {
+        static let margin: CGFloat = 38.7 / 440       // 以屏宽为单位
+        static let wideWidth: CGFloat = 364.0 / 440
+        static let smallWidth: CGFloat = 170.0 / 440
+        static let firstRowTop: CGFloat = 99.8 / 440
+        static let rowPitch: CGFloat = 210.6 / 440
+        static let largeHeight: CGFloat = 382.0 / 440
+        static let shortHeight: CGFloat = 170.0 / 440
+
+        /// 某尺寸的全部候选落位，坐标是相对整张截图的归一化矩形。
+        /// - Parameter aspect: 截图的 高÷宽。竖直方向要除以它才能从「屏宽单位」换到归一化。
+        static func slots(for slot: Slot, aspect: CGFloat) -> [CGRect] {
+            guard aspect > 0 else { return [] }
+            let w = slot == .small ? smallWidth : wideWidth
+            let h = slot == .large ? largeHeight : shortHeight
+            let rows = slot == .large ? 2 : 3
+            let columns: [CGFloat] = slot == .small ? [margin, 1 - margin - smallWidth] : [margin]
+            var result: [CGRect] = []
+            for row in 0..<rows {
+                let top = (firstRowTop + CGFloat(row) * rowPitch) / aspect
+                for x in columns {
+                    result.append(CGRect(x: x, y: top, width: w, height: h / aspect))
+                }
+            }
+            return result
+        }
+    }
+
     // MARK: 路径
 
     private static var directory: URL {

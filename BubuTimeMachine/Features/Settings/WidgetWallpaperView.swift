@@ -3,23 +3,38 @@ import PhotosUI
 import UIKit
 
 // MARK: - 桌面壁纸（伪透明小组件）
-/// 导入一张桌面截图 → 拖框圈出小组件实际所在的位置 → App 裁好存进 App Group →
+/// 导入一张桌面截图 → 点中小组件所在的格子 → App 按那格裁好存进 App Group →
 /// 小组件把那块壁纸当底，桌面上看起来就是透明的。
 ///
-/// 为什么要用户自己圈位置：小组件没有任何 API 能知道自己在桌面的哪一格。
-/// 硬编码 iOS 的桌面网格坐标要为每种机型、每种尺寸各算一套，还会被
-/// 「更大的图标」「减少动态效果」等设置改变——拖一下最准，也最省事。
+/// 为什么是「点格子」而不是「自由拖」：桌面小组件只能落在固定的几个位置上
+/// （中/小卡 3 行、大卡 2 个落位、小卡还分左右两列），自由拖必然对不准，
+/// 差几个像素桌面上就会露出错位的边。所以把全部候选位画出来让用户点，
+/// 再留一个拖动做微调——万一某个机型的网格常数有偏差，还有救。
 struct WidgetWallpaperView: View {
     @Environment(AppEnvironment.self) private var env
 
     @State private var pickerItem: PhotosPickerItem?
     @State private var source: UIImage?
     @State private var slot: WidgetWallpaper.Slot = .large
-    /// 拖框左上角在预览里的归一化位置（0–1）。
-    @State private var origin: CGPoint = .init(x: 0.086, y: 0.11)
+    /// 当前选中的裁剪区域，相对整张截图归一化。`.zero` 表示还没选。
+    @State private var rect: CGRect = .zero
+    /// 按下那一刻的 rect。不存这个基准、直接在 onChanged 里累加 translation 的话，
+    /// 位移会被每帧重复叠加（translation 本身就是从按下算起的累计量），框会飞出去——
+    /// 这正是第一版「拖动不跟手」的原因。
+    @State private var dragBase: CGRect?
     @State private var enabled = WidgetWallpaper.isEnabled
     @State private var savedSlots: Set<WidgetWallpaper.Slot> = []
     @State private var showRemoveConfirm = false
+
+    /// 截图的 高÷宽。网格模型按「屏宽」为单位给常数，竖直方向要除以它才能换成归一化坐标。
+    private var aspect: CGFloat {
+        guard let source, source.size.width > 0 else { return 0 }
+        return source.size.height / source.size.width
+    }
+
+    private var candidates: [CGRect] {
+        WidgetWallpaper.HomeGrid.slots(for: slot, aspect: aspect)
+    }
 
     var body: some View {
         ScrollView {
@@ -62,8 +77,8 @@ struct WidgetWallpaperView: View {
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             step(1, "把桌面滑到一页**空白页**（没有图标和小组件的那一页），按电源+音量键截屏。")
             step(2, "回到这里导入那张截图。")
-            step(3, "选尺寸，把方框拖到小组件在桌面上实际待的位置，松手就存好了。")
-            Text("小组件的底会换成那块壁纸，桌面上看起来就是透明的。换了壁纸要重新截一次。")
+            step(3, "选尺寸，**点一下**小组件在桌面上所在的那个虚线格子就存好了。差一点可以按住框拖着微调。")
+            Text("小组件的底会换成那块壁纸，桌面上看起来就是透明的。换了壁纸、或把小组件挪了位置，重新来一次即可。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -88,8 +103,9 @@ struct WidgetWallpaperView: View {
     }
 
     private var importButton: some View {
-        // 注意：PhotosPicker 的 label 是 Sendable 闭包，里面取不到 MainActor 隔离的 env，
-        // 这里必须用静态主题色而不是 env.theme。
+        // PhotosPicker 的 label 是 Sendable 闭包，里面取不到 MainActor 隔离的 env，
+        // 必须用静态主题色。用 .images 而不是 .screenshots：截图被编辑过、
+        // 或从别处存进相册就不算 screenshot，那样选择器会是空的。
         PhotosPicker(selection: $pickerItem, matching: .images) {
             Label("导入桌面截图", systemImage: "photo.badge.plus")
                 .font(BubuTheme.Font.headline)
@@ -101,59 +117,90 @@ struct WidgetWallpaperView: View {
         }
     }
 
-    // MARK: 拖框定位
+    // MARK: 选格子
 
     private func positioner(_ image: UIImage) -> some View {
         VStack(spacing: 10) {
             GeometryReader { geo in
-                let previewW = geo.size.width
-                let previewH = previewW * image.size.height / max(image.size.width, 1)
-                let boxW = previewW * slot.widthRatio
-                let boxH = boxW * slot.heightOverWidth
+                let w = geo.size.width
+                let h = geo.size.height
 
                 ZStack(alignment: .topLeading) {
                     Image(uiImage: image)
-                        .resizable().scaledToFit()
-                        .frame(width: previewW, height: previewH)
+                        .resizable().scaledToFill()
+                        .frame(width: w, height: h)
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(env.theme.theme.primary.opacity(0.18))
-                        .overlay(
+                    // 候选格子：全画出来，点哪个选哪个。
+                    ForEach(Array(candidates.enumerated()), id: \.offset) { _, c in
+                        if !isSelected(c) {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(env.theme.theme.primary, lineWidth: 2)
-                        )
-                        .overlay(
-                            Text(slot.displayName)
-                                .font(BubuTheme.Font.scaled(12, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(env.theme.theme.primary, in: Capsule())
-                        )
-                        .frame(width: boxW, height: boxH)
-                        .offset(x: origin.x * previewW, y: origin.y * previewH)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { v in
-                                    // 直接按位移换算成归一化坐标，并夹在预览范围内——
-                                    // 不夹的话拖出界会裁到空白。
-                                    let nx = origin.x + v.translation.width / previewW
-                                    let ny = origin.y + v.translation.height / previewH
-                                    origin = CGPoint(
-                                        x: min(max(nx, 0), 1 - boxW / previewW),
-                                        y: min(max(ny, 0), 1 - boxH / previewH))
-                                }
-                                .onEnded { _ in save(image: image, boxW: boxW / previewW, boxH: boxH / previewH) }
-                        )
-                }
-                .frame(width: previewW, height: previewH)
-            }
-            .aspectRatio(image.size.width / max(image.size.height, 1), contentMode: .fit)
+                                .fill(.black.opacity(0.20))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(.white.opacity(0.9),
+                                                      style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                                )
+                                .frame(width: c.width * w, height: c.height * h)
+                                .offset(x: c.minX * w, y: c.minY * h)
+                                .onTapGesture { select(c, image: image) }
+                        }
+                    }
 
-            Text(savedSlots.contains(slot) ? "已保存 \(slot.displayName) 的位置" : "拖动方框到小组件的位置，松手保存")
+                    // 选中的框：拖动微调。
+                    if rect != .zero {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(env.theme.theme.primary.opacity(0.22))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(env.theme.theme.primary, lineWidth: 2.5)
+                            )
+                            .overlay(
+                                Label("就是这里", systemImage: "checkmark.circle.fill")
+                                    .font(BubuTheme.Font.scaled(12, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 9).padding(.vertical, 4)
+                                    .background(env.theme.theme.primary, in: Capsule())
+                            )
+                            .frame(width: rect.width * w, height: rect.height * h)
+                            .offset(x: rect.minX * w, y: rect.minY * h)
+                            .gesture(
+                                DragGesture()
+                                    .onChanged { v in
+                                        let base = dragBase ?? rect
+                                        if dragBase == nil { dragBase = rect }
+                                        rect.origin = CGPoint(
+                                            x: min(max(base.minX + v.translation.width / w, 0), 1 - rect.width),
+                                            y: min(max(base.minY + v.translation.height / h, 0), 1 - rect.height))
+                                    }
+                                    .onEnded { _ in
+                                        dragBase = nil
+                                        save(image: image)
+                                    }
+                            )
+                    }
+                }
+                .frame(width: w, height: h)
+            }
+            .aspectRatio(aspect > 0 ? 1 / aspect : 0.46, contentMode: .fit)
+
+            Text(hint)
                 .font(BubuTheme.Font.caption)
-                .foregroundStyle(savedSlots.contains(slot) ? BubuTheme.Color.success : BubuTheme.Color.secondaryText)
+                .foregroundStyle(rect == .zero ? BubuTheme.Color.secondaryText : BubuTheme.Color.success)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var hint: String {
+        rect == .zero
+            ? "点一下「\(slot.displayName)」在桌面上所在的格子"
+            : "已保存 \(slot.displayName) 的位置 · 按住框可拖着微调"
+    }
+
+    /// 某候选位是不是当前选中的。拖过之后会有微小偏移，用容差判定，避免虚线框和实心框重叠画两遍。
+    private func isSelected(_ c: CGRect) -> Bool {
+        abs(c.minX - rect.minX) < 0.01 && abs(c.minY - rect.minY) < 0.01 && abs(c.width - rect.width) < 0.01
     }
 
     private var slotPicker: some View {
@@ -164,8 +211,7 @@ struct WidgetWallpaperView: View {
         }
         .pickerStyle(.segmented)
         .onChange(of: slot) { _, new in
-            origin = WidgetWallpaper.normalizedRect(for: new).map { CGPoint(x: $0.origin.x, y: $0.origin.y) }
-                ?? CGPoint(x: 0.086, y: 0.11)
+            rect = WidgetWallpaper.normalizedRect(for: new) ?? .zero
         }
     }
 
@@ -206,7 +252,7 @@ struct WidgetWallpaperView: View {
               let image = UIImage(data: data) else { return }
         source = image
         savedSlots = Set(WidgetWallpaper.Slot.allCases.filter { WidgetWallpaper.normalizedRect(for: $0) != nil })
-        if let r = WidgetWallpaper.normalizedRect(for: slot) { origin = r.origin }
+        rect = WidgetWallpaper.normalizedRect(for: slot) ?? .zero
     }
 
     private func importPicked(_ item: PhotosPickerItem) async {
@@ -215,13 +261,19 @@ struct WidgetWallpaperView: View {
         try? WidgetWallpaper.saveSource(data)
         source = image
         savedSlots = []
+        rect = .zero
         enabled = true
         WidgetWallpaper.isEnabled = true
     }
 
-    /// 按当前拖框位置裁一张存盘。归一化坐标 → 原图像素矩形 → 缩到 2 倍点尺寸 → JPEG。
-    private func save(image: UIImage, boxW: CGFloat, boxH: CGFloat) {
-        let rect = CGRect(x: origin.x, y: origin.y, width: boxW, height: boxH)
+    private func select(_ candidate: CGRect, image: UIImage) {
+        rect = candidate
+        save(image: image)
+    }
+
+    /// 按当前框裁一张存盘。归一化坐标 → 原图像素矩形 → 缩到 2 倍点尺寸 → JPEG。
+    private func save(image: UIImage) {
+        guard rect != .zero else { return }
         WidgetWallpaper.setNormalizedRect(rect, for: slot)
         guard let data = Self.crop(image, normalized: rect, slot: slot) else { return }
         try? WidgetWallpaper.saveCropped(data, for: slot)
@@ -233,12 +285,13 @@ struct WidgetWallpaperView: View {
         WidgetWallpaper.clear()
         source = nil
         savedSlots = []
+        rect = .zero
         enabled = false
         WidgetRefresher.reload()
     }
 
-    /// UIImage 的 `size` 是点，CGImage 是像素，两者差一个 scale——
-    /// 截图走 Data 进来时 scale 恒为 1，但仍按 cgImage 的真实像素算，避免机型差异裁偏。
+    /// UIImage 的 `size` 是点、CGImage 是像素，两者差一个 scale——
+    /// 一律按 cgImage 的真实像素算，避免机型差异裁偏。
     nonisolated static func crop(_ image: UIImage, normalized: CGRect, slot: WidgetWallpaper.Slot) -> Data? {
         guard let cg = image.cgImage else { return nil }
         let pw = CGFloat(cg.width), ph = CGFloat(cg.height)
