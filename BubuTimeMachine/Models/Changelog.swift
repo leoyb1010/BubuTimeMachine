@@ -15,6 +15,16 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.2.3",
+            date: "2026-07-29",
+            title: "小组件底色几乎全透",
+            highlights: [
+                "卡片底压到约一成透明度：整张卡退进壁纸，只剩头像、数字块和照片浮在上面",
+                "数字块和进度条反过来加重，底没了之后由它们撑起结构和可读性",
+                "玻璃描边加重，卡片形状还在"
+            ]
+        ),
+        ReleaseNote(
             version: "2.2.2",
             date: "2026-07-29",
             title: "小组件加上玻璃描边",

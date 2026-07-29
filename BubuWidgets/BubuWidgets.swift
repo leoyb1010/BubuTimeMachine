@@ -223,13 +223,16 @@ private struct BubuGlassContainer: View {
 
     var body: some View {
         ZStack {
-            // 极淡白霜：只用来托住深色文字，不盖壁纸
-            Color.white.opacity(0.12)
+            // 近乎全透。为什么压到这么低：真机上壁纸在小组件那一带是接近纯净的浅灰，
+            // 底下没有花纹可透——底色留到 27% 时，视觉上和一张不透明的浅粉卡几乎没区别
+            // （2026-07-29 真机反馈）。透明度只有压到 10% 以下，卡片才真的"退到壁纸里"，
+            // 剩下头像、数字块、照片浮在上面。
+            Color.white.opacity(0.06)
             LinearGradient(
-                colors: [WidgetPalette.peach.opacity(0.20 * tintStrength),
-                         WidgetPalette.pink.opacity(0.17 * tintStrength),
-                         WidgetPalette.lav.opacity(0.15 * tintStrength),
-                         WidgetPalette.cream.opacity(0.13 * tintStrength)],
+                colors: [WidgetPalette.peach.opacity(0.06 * tintStrength),
+                         WidgetPalette.pink.opacity(0.05 * tintStrength),
+                         WidgetPalette.lav.opacity(0.045 * tintStrength),
+                         WidgetPalette.cream.opacity(0.04 * tintStrength)],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
             // 玻璃描边。底色透了之后卡片没有边界，会直接糊进壁纸里；
@@ -237,7 +240,7 @@ private struct BubuGlassContainer: View {
             // 用 ContainerRelativeShape 而不是写死圆角：它自动跟随系统给这个尺寸的小组件圆角，
             // 手写半径在不同机型/不同 family 上必然对不齐。
             ContainerRelativeShape()
-                .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(0.55), lineWidth: 1)
         }
     }
 }
@@ -324,7 +327,7 @@ private struct BubuInfoChip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.white.opacity(0.34), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(.white.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -357,7 +360,7 @@ private struct BubuMetricPill: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 36)
-        .background(.white.opacity(0.34), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(.white.opacity(0.42), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -444,7 +447,7 @@ private struct BubuProgressStars: View {
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.4))
+                    Capsule().fill(.white.opacity(0.48))
                     Capsule()
                         .fill(LinearGradient(colors: [WidgetPalette.honey, WidgetPalette.primary],
                                              startPoint: .leading, endPoint: .trailing))
@@ -476,7 +479,7 @@ private struct BubuMotifRow: View {
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(tint)
             .frame(width: 22, height: 22)
-            .background(.white.opacity(0.34), in: Circle())
+            .background(.white.opacity(0.42), in: Circle())
     }
 }
 
@@ -977,7 +980,7 @@ private struct BubuGrowthLargeView: View {
                 BubuMotifRow()
             }
             .padding(11)
-            .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             HStack(spacing: 8) {
                 BubuMetricPill(title: "身高", value: snapshot.latestHeightText, icon: "ruler.fill", tint: WidgetPalette.mint)
@@ -1310,7 +1313,7 @@ struct BubuMomentWallView: View {
                 .foregroundColor(WidgetPalette.primary)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func ageAt(_ date: Date) -> String? {
@@ -1450,7 +1453,7 @@ struct BubuPanoramaView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: 里程碑进度条
@@ -1471,7 +1474,7 @@ struct BubuPanoramaView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.4))
+                    Capsule().fill(.white.opacity(0.48))
                     Capsule()
                         .fill(LinearGradient(colors: [WidgetPalette.honey, WidgetPalette.primary],
                                              startPoint: .leading, endPoint: .trailing))
@@ -1487,7 +1490,7 @@ struct BubuPanoramaView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: 最近一条
@@ -1519,7 +1522,7 @@ struct BubuPanoramaView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
