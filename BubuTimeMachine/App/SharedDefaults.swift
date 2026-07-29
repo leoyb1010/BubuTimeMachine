@@ -113,18 +113,29 @@ extension SharedWidgetSnapshot {
         /// 照片墙会显得内容很少。
         func append(_ entry: Entry, isOnThisDay: Bool, maxPerEntry: Int = 2) {
             var taken = 0
+            // 先把要用的字段全部取成局部量再拼装：`??` 的右侧是 autoclosure，
+            // 直接写 `media.thumbnailFileName ?? media.localFileName` 会让闭包捕获模型对象，
+            // Release（whole-module）下被判成「main actor 闭包捕获 task-isolated 值」而编译失败。
+            let entryTitle = clean(entry.title, maxLength: 18)
+            let entryFirstPerson = clean(entry.firstPersonNote, maxLength: 40)
+            let entryNote = clean(entry.note, maxLength: 40)
+            let entryDate = entry.happenedAt
+            let entryMood = entry.mood?.emoji
+            let caption = entryFirstPerson ?? entryNote
             for media in entry.media where media.type == .photo {
-                guard taken < maxPerEntry,
-                      let name = media.thumbnailFileName ?? media.localFileName,
+                guard taken < maxPerEntry else { break }
+                let thumbName = media.thumbnailFileName
+                let fileName = media.localFileName
+                guard let name = thumbName ?? fileName,
                       !seenPhotos.contains(name) else { continue }
                 seenPhotos.insert(name)
                 taken += 1
                 pool.append(SharedMoment(
                     photoFileName: name,
-                    title: clean(entry.title, maxLength: 18),
-                    note: clean(entry.firstPersonNote, maxLength: 40) ?? clean(entry.note, maxLength: 40),
-                    date: entry.happenedAt,
-                    moodEmoji: entry.mood?.emoji,
+                    title: entryTitle,
+                    note: caption,
+                    date: entryDate,
+                    moodEmoji: entryMood,
                     isOnThisDay: isOnThisDay))
             }
         }
