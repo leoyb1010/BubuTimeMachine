@@ -15,6 +15,15 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.2.1",
+            date: "2026-07-29",
+            title: "桌面小组件换成毛玻璃",
+            highlights: [
+                "所有桌面小组件底色改成毛玻璃：透出壁纸、和桌面融为一体，不再是一块浮在上面的实心粉卡",
+                "卡片里的数据块、进度条、文字底也一并压淡，整张更像一整块玻璃"
+            ]
+        ),
+        ReleaseNote(
             version: "2.2.0",
             date: "2026-07-29",
             title: "桌面照片墙 · 全景卡",

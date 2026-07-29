@@ -204,28 +204,54 @@ struct BubuAvatar: View {
     }
 }
 
-// MARK: - 暖色卡片渐变背景（统一各 family）
+// MARK: - 毛玻璃卡片底（统一各 family）
+/// 【真机验证过的结论，别再改回去】小组件的内容是**离屏渲染成一张图**再交给桌面合成的，
+/// 组件进程拿不到壁纸像素。所以 `.ultraThinMaterial` / `.regularMaterial` 这类材质
+/// 在小组件里**不会**虚化壁纸——系统只会把它画成一块近乎实心的白板（2026-07-29 实测）。
+///
+/// 小组件里唯一能真正透出壁纸的只有 **alpha**：整张卡的通透感必须靠低不透明度叠色做，
+/// 总不透明度控制在 0.3 上下——
+/// 再低，固定深棕色的文字（`warmBrown`，本来是配奶油底设计的）在花壁纸上会读不出来；
+/// 再高，就退回成一块浮在桌面上的实心粉卡。
+///
+/// 想要系统级的真·液态玻璃，是桌面侧的开关：长按桌面 → 编辑 → 自定 → 「清除」，
+/// 那是 iOS 26 给全部图标和小组件统一上玻璃，组件这边只要别画实心底就能吃到。
+private struct BubuGlassContainer: View {
+    var tintStrength: Double = 1.0
+
+    var body: some View {
+        ZStack {
+            // 极淡白霜：只用来托住深色文字，不盖壁纸
+            Color.white.opacity(0.12)
+            LinearGradient(
+                colors: [WidgetPalette.peach.opacity(0.20 * tintStrength),
+                         WidgetPalette.pink.opacity(0.17 * tintStrength),
+                         WidgetPalette.lav.opacity(0.15 * tintStrength),
+                         WidgetPalette.cream.opacity(0.13 * tintStrength)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        }
+    }
+}
+
+private extension View {
+    /// 全彩走毛玻璃；染色(tinted)/vibrant 下系统会把内容单色化，
+    /// 玻璃与渐变都会糊成一坨，降级成极淡中性底，让染色只作用在前景。
+    @ViewBuilder
+    func bubuGlassBackground(_ mode: WidgetRenderingMode, tintStrength: Double = 1.0) -> some View {
+        if mode == .fullColor {
+            containerBackground(for: .widget) { BubuGlassContainer(tintStrength: tintStrength) }
+        } else {
+            containerBackground(for: .widget) { Color.white.opacity(0.06) }
+        }
+    }
+}
+
 private struct BubuWidgetBackground: ViewModifier {
     @Environment(\.widgetRenderingMode) private var renderingMode
 
     func body(content: Content) -> some View {
-        content.containerBackground(for: .widget) {
-            switch renderingMode {
-            case .fullColor:
-                // 桌面全彩：奶油马卡龙 peach → pink → lav 柔粉渐变（与 App 身份卡同源）
-                LinearGradient(
-                    colors: [WidgetPalette.peach.opacity(0.55),
-                             WidgetPalette.pink.opacity(0.45),
-                             WidgetPalette.lav.opacity(0.45),
-                             WidgetPalette.cream],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-            default:
-                // 染色(tinted)/vibrant：系统会把内容单色化，渐变会糊成一坨——改用极淡的中性底，
-                // 让系统的染色算法只作用在前景文字/图标上，保持清爽可读。
-                Color.white.opacity(0.06)
-            }
-        }
+        content.bubuGlassBackground(renderingMode)
     }
 }
 
@@ -290,7 +316,7 @@ private struct BubuInfoChip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(.white.opacity(0.34), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -323,7 +349,7 @@ private struct BubuMetricPill: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 36)
-        .background(.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(.white.opacity(0.34), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -410,7 +436,7 @@ private struct BubuProgressStars: View {
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.66))
+                    Capsule().fill(.white.opacity(0.4))
                     Capsule()
                         .fill(LinearGradient(colors: [WidgetPalette.honey, WidgetPalette.primary],
                                              startPoint: .leading, endPoint: .trailing))
@@ -442,7 +468,7 @@ private struct BubuMotifRow: View {
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(tint)
             .frame(width: 22, height: 22)
-            .background(.white.opacity(0.62), in: Circle())
+            .background(.white.opacity(0.34), in: Circle())
     }
 }
 
@@ -943,7 +969,7 @@ private struct BubuGrowthLargeView: View {
                 BubuMotifRow()
             }
             .padding(11)
-            .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             HStack(spacing: 8) {
                 BubuMetricPill(title: "身高", value: snapshot.latestHeightText, icon: "ruler.fill", tint: WidgetPalette.mint)
@@ -1276,7 +1302,7 @@ struct BubuMomentWallView: View {
                 .foregroundColor(WidgetPalette.primary)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func ageAt(_ date: Date) -> String? {
@@ -1301,20 +1327,11 @@ struct BubuMomentWallView: View {
     }
 }
 
-/// 照片墙底：全彩用奶油马卡龙渐变衬托照片，染色模式降级中性淡底。
+/// 照片墙底：玻璃底衬托照片。粉调再压淡一档——墙上照片本身就够花，
+/// 底色抢戏会让整墙显脏。
 private extension View {
     func bubuWallBackground(_ mode: WidgetRenderingMode) -> some View {
-        containerBackground(for: .widget) {
-            if mode == .fullColor {
-                LinearGradient(colors: [WidgetPalette.peach.opacity(0.45),
-                                        WidgetPalette.pink.opacity(0.38),
-                                        WidgetPalette.lav.opacity(0.35),
-                                        WidgetPalette.cream],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            } else {
-                Color.white.opacity(0.06)
-            }
-        }
+        bubuGlassBackground(mode, tintStrength: 0.7)
     }
 }
 
@@ -1341,17 +1358,7 @@ struct BubuPanoramaView: View {
             Spacer(minLength: 0)
         }
         .padding(15)
-        .containerBackground(for: .widget) {
-            if renderingMode == .fullColor {
-                LinearGradient(colors: [WidgetPalette.peach.opacity(0.5),
-                                        WidgetPalette.pink.opacity(0.4),
-                                        WidgetPalette.lav.opacity(0.4),
-                                        WidgetPalette.cream],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-            } else {
-                Color.white.opacity(0.06)
-            }
-        }
+        .bubuGlassBackground(renderingMode)
         .widgetURL(URL(string: "bubu://identity"))
     }
 
@@ -1435,7 +1442,7 @@ struct BubuPanoramaView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: 里程碑进度条
@@ -1456,7 +1463,7 @@ struct BubuPanoramaView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.55))
+                    Capsule().fill(.white.opacity(0.4))
                     Capsule()
                         .fill(LinearGradient(colors: [WidgetPalette.honey, WidgetPalette.primary],
                                              startPoint: .leading, endPoint: .trailing))
@@ -1472,7 +1479,7 @@ struct BubuPanoramaView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: 最近一条
@@ -1504,7 +1511,7 @@ struct BubuPanoramaView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.32), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
