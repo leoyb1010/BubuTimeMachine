@@ -15,6 +15,15 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.2.2",
+            date: "2026-07-29",
+            title: "小组件加上玻璃描边",
+            highlights: [
+                "透明底之后卡片会糊进壁纸，现在补了一道玻璃亮边，卡片形状立回来了",
+                "卡片里的小字加深一档，压在壁纸上也看得清"
+            ]
+        ),
+        ReleaseNote(
             version: "2.2.1",
             date: "2026-07-29",
             title: "桌面小组件换成毛玻璃",

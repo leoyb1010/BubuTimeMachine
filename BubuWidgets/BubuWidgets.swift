@@ -133,7 +133,9 @@ private enum WidgetPalette {
     static let mint = Color(red: 0.749, green: 0.922, blue: 0.827)
     static let warmBrown = Color(red: 0.353, green: 0.239, blue: 0.204) // ink #5A3D34
     static let cream = Color(red: 1.000, green: 0.969, blue: 0.945)    // #FFF7F1
-    static let secondary = Color(red: 0.663, green: 0.553, blue: 0.510) // ink2
+    /// 次级文字。比 App 内的 ink2 深一档：卡片底改成透明后，
+    /// 小字下面不再有奶油实底兜着，原来的 #A98D82 压在壁纸上会发飘。
+    static let secondary = Color(red: 0.580, green: 0.470, blue: 0.420) // #947869
 }
 
 // MARK: - 布布圆形头像（无头像时回退到吉祥物表情）
@@ -230,6 +232,12 @@ private struct BubuGlassContainer: View {
                          WidgetPalette.cream.opacity(0.13 * tintStrength)],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
+            // 玻璃描边。底色透了之后卡片没有边界，会直接糊进壁纸里；
+            // 这道亮边把「这是一块玻璃」的形状立回来——真玻璃的观感八成来自边缘高光，不是底色。
+            // 用 ContainerRelativeShape 而不是写死圆角：它自动跟随系统给这个尺寸的小组件圆角，
+            // 手写半径在不同机型/不同 family 上必然对不齐。
+            ContainerRelativeShape()
+                .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
         }
     }
 }
