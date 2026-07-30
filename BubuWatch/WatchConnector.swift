@@ -11,6 +11,11 @@ final class WatchConnector: NSObject {
     var snapshot: WatchSnapshot?
     /// 最近一次成功发出的提示时间（UI 显示「已送到手机」）。
     var lastSentLabel: String?
+    /// 照片包落盘次数。视图 onChange 它来重取缓存图——照片总在快照之后才到，
+    /// 没有这个信号，时光机会一直显示「快照有图名、缓存无图」的空格子直到下次重进。
+    var photoVersion = 0
+    /// 上次向手机请求补发照片包的时刻（节流：一分钟最多一次）。
+    private var lastPhotoRequestAt: Date = .distantPast
     /// 会话未激活期间缓存的文字/心情/健康记录，激活后补发（#6：冷启动秒录窗口 session 尚未激活）。
     private var pendingRecords: [WatchRecordRequest] = []
 
@@ -45,6 +50,26 @@ final class WatchConnector: NSObject {
     func sendHealth(kindRaw: String, title: String) {
         send(WatchRecordRequest(type: .health, roleRaw: roleRaw,
                                 healthKindRaw: kindRaw, healthTitle: title), label: "已打卡")
+    }
+
+    /// 撤销刚才那条（防手滑）。localId 传当时发送用的那个。
+    func sendUndo(localId: String) {
+        send(WatchRecordRequest(type: .undo, localId: localId, roleRaw: roleRaw), label: "已撤销")
+    }
+
+    /// 哄睡开始/结束。本地乐观更新 sleepingSince，抬腕立即看到呼吸态，
+    /// 不等手机回推快照（可能要几秒甚至更久）。
+    func sendSleepStart() {
+        let now = Date.now
+        snapshot?.sleepingSince = now
+        if let snap = snapshot { WatchSnapshotStore.save(snap) }
+        send(WatchRecordRequest(type: .sleepStart, roleRaw: roleRaw, happenedAt: now), label: "哄睡计时开始")
+    }
+
+    func sendSleepEnd() {
+        snapshot?.sleepingSince = nil
+        if let snap = snapshot { WatchSnapshotStore.save(snap) }
+        send(WatchRecordRequest(type: .sleepEnd, roleRaw: roleRaw), label: "睡眠已记好")
     }
 
     func sendVoice(fileURL: URL, duration: Double) {
@@ -145,7 +170,10 @@ extension WatchConnector: WCSessionDelegate {
         Task { @MainActor in
             if self.snapshot == nil, let restored { self.snapshot = restored }
             // 激活完成：补发缓存的记录 + 对账残留语音（#6 / P0-2 / W-P1-1 的重发入口）。
-            if activated { self.reconcilePending() }
+            if activated {
+                self.reconcilePending()
+                self.requestPhotosIfMissing()
+            }
         }
     }
 
@@ -155,6 +183,41 @@ extension WatchConnector: WCSessionDelegate {
         // 落到手表本地 App Group 并刷新表盘复杂功能。
         WatchSnapshotStore.save(snap)
         WidgetCenter.shared.reloadAllTimelines()
-        Task { @MainActor in self.snapshot = snap }
+        Task { @MainActor in
+            self.snapshot = snap
+            self.requestPhotosIfMissing()
+        }
+    }
+
+    // MARK: 照片包接收（表冠时光机的图）
+
+    /// 手机 transferFile 过来的回忆照片包。解包失败保留旧缓存——半套照片比一套旧照片难看。
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        guard file.metadata?[WatchLink.photoBundleKey] != nil else { return }
+        // fileURL 只在回调期间有效，必须同步读完。
+        guard let data = try? Data(contentsOf: file.fileURL),
+              let items = WatchPhotoBundle.decode(data), !items.isEmpty else { return }
+        WatchPhotoStore.save(items)
+        WidgetCenter.shared.reloadAllTimelines()
+        Task { @MainActor in
+            // 修剪时护住当前回忆序列还引用的图。
+            let keep = Set((self.snapshot?.memories ?? []).compactMap(\.photoFileName))
+            WatchPhotoStore.prune(keeping: keep)
+            self.photoVersion += 1
+        }
+    }
+
+    /// 快照里引用的照片缓存里没有（手表重装 / LRU 淘汰过头）→ 请求手机重发照片包。
+    /// 手机侧的指纹去重会以为「上次发过了」，这条消息是打破僵局的唯一通道。
+    private func requestPhotosIfMissing() {
+        guard let memories = snapshot?.memories, !memories.isEmpty else { return }
+        let missing = memories.compactMap(\.photoFileName)
+            .filter { WatchPhotoStore.data(for: $0) == nil }
+        guard !missing.isEmpty else { return }
+        guard Date.now.timeIntervalSince(lastPhotoRequestAt) > 60 else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else { return }
+        lastPhotoRequestAt = .now
+        session.sendMessage([WatchLink.photoBundleRequestKey: true], replyHandler: nil)
     }
 }

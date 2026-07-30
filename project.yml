@@ -31,6 +31,7 @@ targets:
           - "BubuTimeMachine.entitlements"
       # 手表通信契约（与 watchOS target 共用）
       - path: WatchShared/WatchLink.swift
+      - path: WatchShared/WatchPhotoBundle.swift
     entitlements:
       path: BubuTimeMachine/BubuTimeMachine.entitlements
       properties:
@@ -53,7 +54,7 @@ targets:
   BubuWatch:
     type: application
     platform: watchOS
-    deploymentTarget: "11.0"
+    deploymentTarget: "26.0"
     sources:
       - path: BubuWatch
         excludes:
@@ -62,6 +63,8 @@ targets:
       # 通信契约 + 手表本地快照存储 + 纯 Foundation 的年龄/枚举（手表不引入 SwiftData）
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchSnapshotStore.swift
+      - path: WatchShared/WatchPhotoBundle.swift
+      - path: WatchShared/WatchPhotoStore.swift
       - path: BubuTimeMachine/Models/AgeCalculator.swift
       - path: BubuTimeMachine/Models/Enums.swift
     entitlements:
@@ -89,7 +92,7 @@ targets:
   BubuWatchWidgets:
     type: app-extension
     platform: watchOS
-    deploymentTarget: "11.0"
+    deploymentTarget: "26.0"
     sources:
       - path: BubuWatchWidgets
         excludes:
@@ -97,6 +100,8 @@ targets:
           - "Info.plist"
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchSnapshotStore.swift
+      - path: WatchShared/WatchPhotoBundle.swift
+      - path: WatchShared/WatchPhotoStore.swift
       # 复用共享 AgeCalculator（只 import Foundation）：删除 widget 内联的年龄/生日副本，
       # 与手表 App、iPhone 小组件同口径（含"生日当天=0天"修复）。
       - path: BubuTimeMachine/Models/AgeCalculator.swift

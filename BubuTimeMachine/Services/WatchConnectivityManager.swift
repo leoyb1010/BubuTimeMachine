@@ -39,6 +39,54 @@ final class WatchConnectivityManager: NSObject {
         } catch {
             log.error("push snapshot failed: \(error.localizedDescription)")
         }
+        pushMemoryPhotos(snapshot.memories, session: session)
+    }
+
+    // MARK: 回忆照片包（transferFile）
+
+    /// 上次已送达手表的照片集合指纹。集合没变就不重传——快照每次进前台都推，
+    /// 但 400KB 的照片包只该在照片真的换了批时走一次。
+    /// nonisolated：didFinish 回调在 WC 队列上作废它。
+    nonisolated private static let sentFingerprintKey = "bubu.watch.photoBundle.sentFingerprint"
+    /// 最近一次组包用的回忆序列，手表请求补发时直接用它重组，不用重读库。
+    private var lastMemories: [WatchMemory]?
+
+    private func pushMemoryPhotos(_ memories: [WatchMemory]?, session: WCSession) {
+        guard let memories, !memories.isEmpty else { return }
+        lastMemories = memories
+        let names = memories.compactMap(\.photoFileName)
+        guard !names.isEmpty else { return }
+        let fingerprint = WatchPhotoBundle.fingerprint(names)
+        guard fingerprint != UserDefaults.standard.string(forKey: Self.sentFingerprintKey) else { return }
+
+        let photos = WatchSnapshotBuilder.memoryPhotos(memories)
+        guard !photos.isEmpty else { return }
+        let bundle = WatchPhotoBundle.encode(photos)
+        // 临时文件交给 WCSession 排队；didFinish 里删。文件名带指纹，重复入队自然同名覆盖。
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-photobundle-\(fingerprint).bin")
+        do {
+            try bundle.write(to: url, options: .atomic)
+        } catch {
+            log.error("photo bundle write failed: \(error.localizedDescription)")
+            return
+        }
+        session.transferFile(url, metadata: [WatchLink.photoBundleKey: fingerprint])
+        // 乐观记账：真正失败时手表侧会走「缺图请求补发」兜底，不会永久卡住。
+        UserDefaults.standard.set(fingerprint, forKey: Self.sentFingerprintKey)
+        log.notice("photo bundle queued: \(photos.count) photos, \(bundle.count) bytes")
+    }
+
+    /// 手表说缓存缺图（重装/LRU 清掉了）：作废指纹并立即重发。
+    private func resendPhotoBundle() {
+        UserDefaults.standard.removeObject(forKey: Self.sentFingerprintKey)
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        if let memories = lastMemories {
+            pushMemoryPhotos(memories, session: session)
+        }
+        // lastMemories 为空（App 刚被 WC 后台唤醒）：什么都不做，
+        // 指纹已清，下次前台 pushWatchSnapshot 自然带上照片包。
     }
 
     // MARK: 落库
@@ -63,6 +111,17 @@ final class WatchConnectivityManager: NSObject {
                                                  localId: localId, happenedAt: request.happenedAt)
             case .voice:
                 try writeVoice(request, fileName: movedVoiceFileName, role: role, in: context)
+            case .undo:
+                try undoRecord(localId: request.localId, in: context)
+            case .sleepStart:
+                // 与 iPhone 健康页共用同一份哄睡状态；灵动岛计时尽力而为
+                //（后台被 WC 唤醒时 ActivityKit 不允许发起，失败无妨——状态在，前台自会接上）。
+                SharedDefaults.sleepStartedAt = request.happenedAt
+                let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
+                BubuActivityController.startSleepTimer(childName: profile?.name ?? "布布",
+                                                       startedAt: request.happenedAt)
+            case .sleepEnd:
+                try endSleep(request, role: role, in: context)
             }
             NotificationCenter.default.post(name: Self.didRecordNotification, object: nil)
         } catch {
@@ -93,6 +152,56 @@ final class WatchConnectivityManager: NSObject {
                                  targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt))
         try context.save()
     }
+
+    /// 手表结束哄睡：落一条带起止时刻的睡眠记录。语义与 iPhone 健康页 endSleep 一致，
+    /// 这样无论从哪端收尾，时光轴里都是同一种「睡了 X 小时」的卡。
+    /// 手机侧状态丢了（重装等）就用手表带来的 happenedAt 兜底记一条无时长的。
+    private func endSleep(_ request: WatchRecordRequest, role: FamilyRole, in context: ModelContext) throws {
+        let end = request.happenedAt
+        let started = SharedDefaults.sleepStartedAt
+        SharedDefaults.sleepStartedAt = nil
+
+        let record = HealthRecord(kind: .sleep, title: "睡觉", recordedAt: end)
+        if let localId = UUID(uuidString: request.localId) { record.id = localId }
+        if let started, started < end {
+            record.startAt = started
+            record.endAt = end
+            record.amountValue = end.timeIntervalSince(started) / 3600
+            record.amountUnit = "小时"
+            record.amountText = HealthRecordDraft.durationText(from: started, to: end)
+        }
+        context.insert(record)
+        let summaryText = record.amountText
+        context.insert(FeedEvent(kind: .healthRecorded, actorRole: role.rawValue,
+                                 summary: "记录了睡眠：\(summaryText ?? "醒来啦")",
+                                 targetLocalId: record.id.uuidString, happenedAt: end))
+        try context.save()
+        BubuActivityController.endSleepTimer(elapsedText: summaryText ?? "")
+    }
+
+    /// 撤销手表刚打的一条（防手滑）。localId 是原记录的幂等键，
+    /// 打卡是 HealthRecord、文字/心情是 Entry——两处都找；删除走 App 标准三件套
+    /// （PendingDeletion 入队 → 本地删 → save），已同步到服务器的也能墓碑掉，不复活。
+    private func undoRecord(localId: String, in context: ModelContext) throws {
+        guard let id = UUID(uuidString: localId) else { return }
+        let idString = id.uuidString
+
+        let healthFetch = FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == id })
+        if let record = try context.fetch(healthFetch).first {
+            PendingDeletion.enqueue(collection: "healthrecords", remoteId: record.remoteId, in: context)
+            context.delete(record)
+        } else {
+            let entryFetch = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+            guard let entry = try context.fetch(entryFetch).first else { return }
+            PendingDeletion.enqueue(collection: "entries", remoteId: entry.remoteId, in: context)
+            context.delete(entry)
+        }
+        // 连带清掉这条在「最近」里的动态，手表/家人不再看到已撤销的事。
+        let eventFetch = FetchDescriptor<FeedEvent>(predicate: #Predicate { $0.targetLocalId == idString })
+        for event in try context.fetch(eventFetch) { context.delete(event) }
+        try context.save()
+        log.notice("watch undo applied: \(localId, privacy: .public)")
+    }
 }
 
 // MARK: - 概览快照构建（iPhone 侧读库 → 手表展示）
@@ -121,7 +230,141 @@ enum WatchSnapshotBuilder {
                              roleRaw: role.rawValue,
                              achievedMilestones: achieved, totalMilestones: milestones.count,
                              recent: Array(recent), avatarData: avatarThumbData(profile.avatarMediaFileName),
-                             updatedAt: .now)
+                             updatedAt: .now,
+                             memories: memories(context: context, birthday: profile.birthday),
+                             todayStats: todayStats(context: context),
+                             sleepingSince: SharedDefaults.sleepStartedAt)
+    }
+
+    // MARK: 回忆序列（表冠时光机）
+
+    /// 一次下发多少段。手表侧一屏一段，20 段大约是拧 3 圈表冠——够远，又不至于让照片包过大。
+    private static let memoryCount = 20
+
+    /// 组装回忆序列：近期 + 那年今日 + 更早的抽样，去重后**按时间倒序**。
+    ///
+    /// 为什么必须单调有序：手表侧拧表冠是「越拧越远」的时间旅行，顶部还有一条年代刻度尺。
+    /// 池子里混序的话，刻度尺会来回跳，那个「往回走」的体感就没了。
+    /// 「那年今日」不单独排在一起，而是就地打标记——它本来就属于它那个年份。
+    @MainActor
+    private static func memories(context: ModelContext, birthday: Date?) -> [WatchMemory]? {
+        var descriptor = FetchDescriptor<Entry>(sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+        descriptor.fetchLimit = 300
+        guard let entries = try? context.fetch(descriptor), !entries.isEmpty else { return nil }
+
+        let cal = Calendar.current
+        let todayMonth = cal.component(.month, from: .now)
+        let todayDay = cal.component(.day, from: .now)
+
+        var picked: [Entry] = []
+        var seen = Set<UUID>()
+        func take(_ entry: Entry) {
+            guard !seen.contains(entry.id) else { return }
+            seen.insert(entry.id)
+            picked.append(entry)
+        }
+
+        // ① 近期 8 条：时光机的起点得是「刚发生的事」，不然一拧就跳到三年前很突兀。
+        for entry in entries.prefix(8) { take(entry) }
+        // ② 那年今日：同月同日的旧记录，是这个功能最有价值的部分。
+        for entry in entries where picked.count < 14 {
+            guard cal.component(.month, from: entry.happenedAt) == todayMonth,
+                  cal.component(.day, from: entry.happenedAt) == todayDay,
+                  !cal.isDateInToday(entry.happenedAt) else { continue }
+            take(entry)
+        }
+        // ③ 更早的等距抽样：让剩下的格子铺满整个时间跨度，而不是全挤在最近一个月。
+        let remaining = entries.filter { !seen.contains($0.id) }
+        if !remaining.isEmpty, picked.count < memoryCount {
+            let need = memoryCount - picked.count
+            let stride = max(1, remaining.count / need)
+            for i in Swift.stride(from: 0, to: remaining.count, by: stride) where picked.count < memoryCount {
+                take(remaining[i])
+            }
+        }
+
+        let onThisDay = Set(picked.filter {
+            cal.component(.month, from: $0.happenedAt) == todayMonth
+                && cal.component(.day, from: $0.happenedAt) == todayDay
+                && !cal.isDateInToday($0.happenedAt)
+        }.map(\.id))
+
+        return picked
+            .sorted { $0.happenedAt > $1.happenedAt }
+            .map { entry in
+                // 【别改回 `a ?? b` 的写法】`??` 右侧是 autoclosure，会捕获 SwiftData 模型对象，
+                // Release（whole-module）下被判成「main actor 闭包捕获 task-isolated 值」而编译失败。
+                // 先取成局部量再拼装。
+                let firstPerson = clip(entry.firstPersonNote, 46)
+                let plain = clip(entry.note, 46)
+                let title = clip(entry.title, 46)
+                let text = firstPerson ?? plain ?? title ?? "这一天"
+                return WatchMemory(
+                    id: entry.id.uuidString,
+                    dateText: BubuDateFormat.monthDay(entry.happenedAt),
+                    note: text,
+                    ageText: birthday.map { AgeCalculator.compactAge(birthday: $0, at: entry.happenedAt) } ?? "",
+                    isOnThisDay: onThisDay.contains(entry.id),
+                    moodEmoji: entry.mood?.emoji,
+                    photoFileName: photoName(for: entry))
+            }
+    }
+
+    /// 这条记录代表哪一张照片。返回的名字同时是手表缓存里的 key，所以必须稳定
+    /// （同一条记录每次都算出同一个名字，手表才不会重复下载同一张图）。
+    @MainActor
+    private static func photoName(for entry: Entry) -> String? {
+        for media in entry.media where media.type == .photo {
+            let thumb = media.thumbnailFileName
+            let original = media.localFileName
+            if let name = thumb ?? original, !name.isEmpty {
+                return (name as NSString).lastPathComponent
+            }
+        }
+        return nil
+    }
+
+    private static func clip(_ value: String?, _ maxLength: Int) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.count <= maxLength ? trimmed : String(trimmed.prefix(maxLength)) + "…"
+    }
+
+    /// 把回忆序列引用到的照片裁成手表尺寸。
+    /// 400px 长边 + JPEG 0.7 ≈ 20–30KB/张：手表最大屏（Ultra 2，410×502pt）显示一张卡够清晰，
+    /// 20 张打包不到 600KB。再大是白给——手表看不出差别，传输却成倍变慢。
+    @MainActor
+    static func memoryPhotos(_ memories: [WatchMemory]) -> [(name: String, data: Data)] {
+        let store = MediaStore()
+        var out: [(name: String, data: Data)] = []
+        for memory in memories {
+            guard let name = memory.photoFileName else { continue }
+            let thumb = store.thumbnailURL(for: name)
+            let url = FileManager.default.fileExists(atPath: thumb.path) ? thumb : store.mediaURL(for: name)
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let image = ThumbnailProvider.downsample(url: url, maxPixel: 400),
+                  let data = image.jpegData(compressionQuality: 0.7) else { continue }
+            out.append((name: name, data: data))
+        }
+        return out
+    }
+
+    // MARK: 今日打卡计数
+
+    /// 今天各类打卡了几次。手表打卡按钮的角标（🍼 ×4）用它——
+    /// 「今天第几次」是喂养场景最常被问的一句，却是原来手表上唯一看不到的信息。
+    @MainActor
+    private static func todayStats(context: ModelContext) -> [String: Int]? {
+        let start = Calendar.current.startOfDay(for: .now)
+        let descriptor = FetchDescriptor<HealthRecord>(
+            predicate: #Predicate { $0.recordedAt >= start })
+        guard let records = try? context.fetch(descriptor), !records.isEmpty else { return [:] }
+        var stats: [String: Int] = [:]
+        for record in records {
+            stats[record.kindRaw, default: 0] += 1
+        }
+        return stats
     }
 
     /// 布布头像小缩略图（120px，jpeg 0.7，<30KB），供手表概览显示。
@@ -156,9 +399,23 @@ extension WatchConnectivityManager: WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        if message[WatchLink.photoBundleRequestKey] != nil {
+            Task { @MainActor in self.resendPhotoBundle() }
+            return
+        }
         guard let data = message[WatchLink.recordKey] as? Data,
               let request = WatchLink.decode(WatchRecordRequest.self, from: data) else { return }
         Task { @MainActor in self.handle(request) }
+    }
+
+    /// 照片包送达（或系统放弃）后清掉临时文件；失败时同时作废指纹，让下轮重推。
+    nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+        let url = fileTransfer.file.fileURL
+        guard url.lastPathComponent.hasPrefix("bubu-photobundle-") else { return }
+        try? FileManager.default.removeItem(at: url)
+        if error != nil {
+            UserDefaults.standard.removeObject(forKey: Self.sentFingerprintKey)
+        }
     }
 
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
