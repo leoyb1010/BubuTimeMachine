@@ -39,7 +39,8 @@ final class WatchConnectivityManager: NSObject {
         } catch {
             log.error("push snapshot failed: \(error.localizedDescription)")
         }
-        pushMemoryPhotos(snapshot.memories, session: session)
+        pushPhotoBundle(names: photoNames(memories: snapshot.memories, recent: snapshot.recent),
+                        session: session)
     }
 
     // MARK: 回忆照片包（transferFile）
@@ -48,18 +49,29 @@ final class WatchConnectivityManager: NSObject {
     /// 但 400KB 的照片包只该在照片真的换了批时走一次。
     /// nonisolated：didFinish 回调在 WC 队列上作废它。
     nonisolated private static let sentFingerprintKey = "bubu.watch.photoBundle.sentFingerprint"
-    /// 最近一次组包用的回忆序列，手表请求补发时直接用它重组，不用重读库。
-    private var lastMemories: [WatchMemory]?
+    /// 最近一次组包用的照片名清单，手表请求补发时直接按它重组，不用重读库。
+    private var lastPhotoNames: [String]?
 
-    private func pushMemoryPhotos(_ memories: [WatchMemory]?, session: WCSession) {
-        guard let memories, !memories.isEmpty else { return }
-        lastMemories = memories
-        let names = memories.compactMap(\.photoFileName)
+    /// 回忆 + 最近 两处引用的照片名并集（去重保序）。
+    private func photoNames(memories: [WatchMemory]?, recent: [WatchRecent]?) -> [String] {
+        var seen = Set<String>()
+        var names: [String] = []
+        for name in (memories ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
+            names.append(name)
+        }
+        for name in (recent ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
+            names.append(name)
+        }
+        return names
+    }
+
+    private func pushPhotoBundle(names: [String], session: WCSession) {
         guard !names.isEmpty else { return }
+        lastPhotoNames = names
         let fingerprint = WatchPhotoBundle.fingerprint(names)
         guard fingerprint != UserDefaults.standard.string(forKey: Self.sentFingerprintKey) else { return }
 
-        let photos = WatchSnapshotBuilder.memoryPhotos(memories)
+        let photos = WatchSnapshotBuilder.photosData(for: names)
         guard !photos.isEmpty else { return }
         let bundle = WatchPhotoBundle.encode(photos)
         // 临时文件交给 WCSession 排队；didFinish 里删。文件名带指纹，重复入队自然同名覆盖。
@@ -82,10 +94,10 @@ final class WatchConnectivityManager: NSObject {
         UserDefaults.standard.removeObject(forKey: Self.sentFingerprintKey)
         let session = WCSession.default
         guard session.activationState == .activated else { return }
-        if let memories = lastMemories {
-            pushMemoryPhotos(memories, session: session)
+        if let names = lastPhotoNames {
+            pushPhotoBundle(names: names, session: session)
         }
-        // lastMemories 为空（App 刚被 WC 后台唤醒）：什么都不做，
+        // lastPhotoNames 为空（App 刚被 WC 后台唤醒）：什么都不做，
         // 指纹已清，下次前台 pushWatchSnapshot 自然带上照片包。
     }
 
@@ -222,7 +234,8 @@ enum WatchSnapshotBuilder {
                 WatchRecent(id: e.id.uuidString,
                             dateText: BubuDateFormat.monthDay(e.createdAt),
                             note: e.summary,
-                            moodEmoji: e.kind.emoji)
+                            moodEmoji: e.kind.emoji,
+                            photoFileName: recentPhotoName(targetLocalId: e.targetLocalId, context: context))
             }
         let milestones = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
         let achieved = milestones.filter { $0.isAchieved }.count
@@ -324,6 +337,15 @@ enum WatchSnapshotBuilder {
         return nil
     }
 
+    /// 「最近」一条动态对应的照片：FeedEvent 只带 targetLocalId，回查 Entry 取首图。
+    @MainActor
+    private static func recentPhotoName(targetLocalId: String?, context: ModelContext) -> String? {
+        guard let targetLocalId, let id = UUID(uuidString: targetLocalId) else { return nil }
+        let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+        guard let entry = try? context.fetch(d).first else { return nil }
+        return photoName(for: entry)
+    }
+
     private static func clip(_ value: String?, _ maxLength: Int) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -331,15 +353,14 @@ enum WatchSnapshotBuilder {
         return trimmed.count <= maxLength ? trimmed : String(trimmed.prefix(maxLength)) + "…"
     }
 
-    /// 把回忆序列引用到的照片裁成手表尺寸。
+    /// 把一批照片按名字裁成手表尺寸。
     /// 400px 长边 + JPEG 0.7 ≈ 20–30KB/张：手表最大屏（Ultra 2，410×502pt）显示一张卡够清晰，
     /// 20 张打包不到 600KB。再大是白给——手表看不出差别，传输却成倍变慢。
     @MainActor
-    static func memoryPhotos(_ memories: [WatchMemory]) -> [(name: String, data: Data)] {
+    static func photosData(for names: [String]) -> [(name: String, data: Data)] {
         let store = MediaStore()
         var out: [(name: String, data: Data)] = []
-        for memory in memories {
-            guard let name = memory.photoFileName else { continue }
+        for name in names {
             let thumb = store.thumbnailURL(for: name)
             let url = FileManager.default.fileExists(atPath: thumb.path) ? thumb : store.mediaURL(for: name)
             guard FileManager.default.fileExists(atPath: url.path),

@@ -36,10 +36,13 @@ final class WatchConnector: NSObject {
     private var roleRaw: String { snapshot?.roleRaw ?? "妈妈" }
 
     // MARK: 发送各类记录
-    func sendText(_ note: String) {
+    @discardableResult
+    func sendText(_ note: String) -> String? {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        send(WatchRecordRequest(type: .text, roleRaw: roleRaw, note: trimmed), label: "已记下")
+        guard !trimmed.isEmpty else { return nil }
+        let req = WatchRecordRequest(type: .text, roleRaw: roleRaw, note: trimmed)
+        send(req, label: "已记下")
+        return req.localId
     }
 
     func sendMood(rawValue: String, emoji: String) {
@@ -47,9 +50,26 @@ final class WatchConnector: NSObject {
                                 note: "\(emoji) \(rawValue)", moodRaw: rawValue), label: "已记下心情")
     }
 
-    func sendHealth(kindRaw: String, title: String) {
-        send(WatchRecordRequest(type: .health, roleRaw: roleRaw,
-                                healthKindRaw: kindRaw, healthTitle: title), label: "已打卡")
+    @discardableResult
+    func sendHealth(kindRaw: String, title: String) -> String {
+        let req = WatchRecordRequest(type: .health, roleRaw: roleRaw,
+                                     healthKindRaw: kindRaw, healthTitle: title)
+        send(req, label: "已打卡")
+        // 乐观 +1：角标立即变，不等手机回推快照。
+        if var stats = snapshot?.todayStats {
+            stats[kindRaw, default: 0] += 1
+            snapshot?.todayStats = stats
+        } else {
+            snapshot?.todayStats = [kindRaw: 1]
+        }
+        return req.localId
+    }
+
+    /// 撤销后的角标回退（乐观 -1）。
+    func revertTodayStat(kindRaw: String) {
+        guard var stats = snapshot?.todayStats else { return }
+        stats[kindRaw] = max(0, (stats[kindRaw] ?? 1) - 1)
+        snapshot?.todayStats = stats
     }
 
     /// 撤销刚才那条（防手滑）。localId 传当时发送用的那个。

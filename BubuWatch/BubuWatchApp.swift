@@ -18,16 +18,30 @@ struct BubuWatchApp: App {
     }
 }
 
-// MARK: - 根导航（纵向分页：概览 / 记录 / 打卡 / 最近）
+// MARK: - 根导航（纵向分页：概览 / 时光机 / 记录 / 打卡 / 最近）
 struct WatchRootView: View {
     @Environment(WatchConnector.self) private var connector
+    @State private var selection = WatchRootView.initialTab
+
+    /// 模拟器截图核验用：`-watch-tab N` 直达第 N 页（手表 UI 无法脚本点击）。仅 DEBUG。
+    private static var initialTab: Int {
+        #if DEBUG
+        if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-watch-tab"),
+           i + 1 < ProcessInfo.processInfo.arguments.count,
+           let tab = Int(ProcessInfo.processInfo.arguments[i + 1]) {
+            return tab
+        }
+        #endif
+        return 0
+    }
 
     var body: some View {
-        TabView {
-            WatchOverviewView()
-            WatchRecordView()
-            WatchQuickLogView()
-            WatchRecentView()
+        TabView(selection: $selection) {
+            WatchOverviewView().tag(0)
+            WatchTimeMachineView().tag(1)   // 表冠时光机：拧表冠穿越回忆
+            WatchRecordView().tag(2)
+            WatchQuickLogView().tag(3)
+            WatchRecentView().tag(4)
         }
         .tabViewStyle(.verticalPage)
         .overlay(alignment: .top) {

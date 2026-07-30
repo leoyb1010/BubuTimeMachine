@@ -83,12 +83,16 @@ public nonisolated struct WatchRecent: Codable, Sendable, Identifiable {
     public var dateText: String
     public var note: String
     public var moodEmoji: String?
+    /// v2：这条动态对应的照片（手表缓存 key）。可选，v1 兼容。
+    public var photoFileName: String?
 
-    public init(id: String, dateText: String, note: String, moodEmoji: String?) {
+    public init(id: String, dateText: String, note: String, moodEmoji: String?,
+                photoFileName: String? = nil) {
         self.id = id
         self.dateText = dateText
         self.note = note
         self.moodEmoji = moodEmoji
+        self.photoFileName = photoFileName
     }
 }
 

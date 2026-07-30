@@ -19,6 +19,17 @@ final class WatchVoiceRecorder: NSObject {
     /// 来电/Siri 等打断时自动收尾保留的录音（View 观察到后当作正常 stop 结果发送，已录的不丢）。
     private(set) var interruptedResult: (url: URL, duration: Double)?
 
+    /// 当前已录时长（波形环上的计时）。
+    var elapsed: TimeInterval { recorder?.currentTime ?? 0 }
+
+    /// 实时电平 0–1（波形环棒长）。-50dB 以下视为静音。
+    func currentLevel() -> Double {
+        guard let recorder, isRecording else { return 0 }
+        recorder.updateMeters()
+        let db = Double(recorder.averagePower(forChannel: 0))
+        return max(0, min(1, (db + 50) / 50))
+    }
+
     func consumeInterruptedResult() -> (url: URL, duration: Double)? {
         defer { interruptedResult = nil }
         return interruptedResult
@@ -53,6 +64,7 @@ final class WatchVoiceRecorder: NSObject {
         ]
         do {
             let rec = try AVAudioRecorder(url: url, settings: settings)
+            rec.isMeteringEnabled = true   // 波形环要实时电平
             rec.record()
             recorder = rec
             fileURL = url
