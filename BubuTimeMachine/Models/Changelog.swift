@@ -15,6 +15,15 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.3.2",
+            date: "2026-07-30",
+            title: "手表 App 补上图标",
+            highlights: [
+                "Apple Watch 上的布布终于有图标了——之前一直是一片空白",
+                "图标为手表单独裁过：表盘上的图标是圆的，直接用手机那张方图会把四角和底部的字切掉"
+            ]
+        ),
+        ReleaseNote(
             version: "2.3.1",
             date: "2026-07-29",
             title: "桌面壁纸改成点格子定位",

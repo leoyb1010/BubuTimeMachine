@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.3.1"
-    CURRENT_PROJECT_VERSION: "2026072907"
+    MARKETING_VERSION: "2.3.2"
+    CURRENT_PROJECT_VERSION: "2026073001"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -72,6 +72,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.watchkitapp
+        # 手表 App 之前压根没配图标，装到表上是一片空白。
+        # 图标单独裁过：iOS 那张是方图、底部压着「布布的时光机」大字，
+        # watchOS 会圆形遮罩，直接用会切掉四角和字。这张以脸为中心裁成圆形安全版。
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: BubuWatch/Info.plist
         CODE_SIGN_ENTITLEMENTS: BubuWatch/BubuWatch.entitlements
