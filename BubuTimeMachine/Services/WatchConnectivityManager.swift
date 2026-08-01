@@ -134,6 +134,8 @@ final class WatchConnectivityManager: NSObject {
                                                        startedAt: request.happenedAt)
             case .sleepEnd:
                 try endSleep(request, role: role, in: context)
+            case .reaction:
+                try applyReaction(request, role: role, in: context)
             }
             NotificationCenter.default.post(name: Self.didRecordNotification, object: nil)
         } catch {
@@ -189,6 +191,33 @@ final class WatchConnectivityManager: NSObject {
                                  targetLocalId: record.id.uuidString, happenedAt: end))
         try context.save()
         BubuActivityController.endSleepTimer(elapsedText: summaryText ?? "")
+    }
+
+    /// 手表在时光机里重温某条 → 给那条记录点一个「亲亲」。
+    ///
+    /// 复用 App 里已有的 Reaction 机制（Comment + `\u{1}RXN:` 哨兵前缀）而不是另造一套：
+    /// 那套已经跨三台手机同步、时光轴卡片上已有 ReactionRow 渲染、且按作者去重
+    /// （同一人重温十次仍是一颗心）——正好避免"重温十次时光轴多十条垃圾"。
+    /// 零 schema 变更、零新 UI。
+    private func applyReaction(_ request: WatchRecordRequest, role: FamilyRole,
+                               in context: ModelContext) throws {
+        guard let targetId = request.note, let entryId = UUID(uuidString: targetId) else { return }
+        let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
+        guard let entry = try context.fetch(d).first else { return }
+
+        let myRole = role.rawValue
+        // 同一人只保留最新一条反应：先清掉自己的旧反应。
+        for comment in entry.comments where comment.authorRole == myRole && Reaction.isReaction(comment) {
+            if Reaction.decode(comment.text) == .heart { return }   // 已经亲过，重复重温不再写库
+            context.delete(comment)
+        }
+        let comment = Comment(authorRole: myRole, text: Reaction.heart.encodedText)
+        comment.entry = entry
+        context.insert(comment)
+        context.insert(FeedEvent(kind: .commentAdded, actorRole: myRole,
+                                 summary: "\(myRole) 在手表上重温了这一刻 ❤️",
+                                 targetLocalId: entry.id.uuidString))
+        try context.save()
     }
 
     /// 撤销手表刚打的一条（防手滑）。localId 是原记录的幂等键，
@@ -261,6 +290,7 @@ enum WatchSnapshotBuilder {
     /// 「那年今日」不单独排在一起，而是就地打标记——它本来就属于它那个年份。
     @MainActor
     private static func memories(context: ModelContext, birthday: Date?) -> [WatchMemory]? {
+        let store = MediaStore()
         var descriptor = FetchDescriptor<Entry>(sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
         descriptor.fetchLimit = 300
         guard let entries = try? context.fetch(descriptor), !entries.isEmpty else { return nil }
@@ -319,22 +349,35 @@ enum WatchSnapshotBuilder {
                     ageText: birthday.map { AgeCalculator.compactAge(birthday: $0, at: entry.happenedAt) } ?? "",
                     isOnThisDay: onThisDay.contains(entry.id),
                     moodEmoji: entry.mood?.emoji,
-                    photoFileName: photoName(for: entry))
+                    photoFileName: photoName(for: entry, store: store))
             }
     }
 
     /// 这条记录代表哪一张照片。返回的名字同时是手表缓存里的 key，所以必须稳定
     /// （同一条记录每次都算出同一个名字，手表才不会重复下载同一张图）。
+    ///
+    /// 【必须校验文件真的在本地】家人发来的照片，缩略图可能还没下载完。
+    /// 若在这里返回一个手机自己都没有的文件名，就会形成死循环：
+    /// 组包时这张被跳过 → 手表数出「快照引用了 N 张、缓存只有 N-1 张」→ 请求补发 →
+    /// 手机作废指纹重传约 600KB → 下一轮再缺 → 无限。所以缺文件的直接跳到下一张。
     @MainActor
-    private static func photoName(for entry: Entry) -> String? {
+    private static func photoName(for entry: Entry, store: MediaStore) -> String? {
         for media in entry.media where media.type == .photo {
             let thumb = media.thumbnailFileName
             let original = media.localFileName
-            if let name = thumb ?? original, !name.isEmpty {
-                return (name as NSString).lastPathComponent
-            }
+            guard let name = thumb ?? original, !name.isEmpty else { continue }
+            let short = (name as NSString).lastPathComponent
+            guard hasLocalFile(short, store: store) else { continue }
+            return short
         }
         return nil
+    }
+
+    /// 缩略图目录或原图目录任一存在即可（组包侧的取图顺序与此一致）。
+    nonisolated static func hasLocalFile(_ name: String, store: MediaStore) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: store.thumbnailURL(for: name).path)
+            || fm.fileExists(atPath: store.mediaURL(for: name).path)
     }
 
     /// 「最近」一条动态对应的照片：FeedEvent 只带 targetLocalId，回查 Entry 取首图。
@@ -343,7 +386,7 @@ enum WatchSnapshotBuilder {
         guard let targetLocalId, let id = UUID(uuidString: targetLocalId) else { return nil }
         let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
         guard let entry = try? context.fetch(d).first else { return nil }
-        return photoName(for: entry)
+        return photoName(for: entry, store: MediaStore())
     }
 
     private static func clip(_ value: String?, _ maxLength: Int) -> String? {

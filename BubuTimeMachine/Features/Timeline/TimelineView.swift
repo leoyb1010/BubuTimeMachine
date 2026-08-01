@@ -31,6 +31,8 @@ struct TimelineView: View {
     @Query private var profiles: [ChildProfile]
     @State private var showFamilyFeed = false
     @State private var entryPendingDelete: Entry?
+    /// 长按「分享这一刻」选中的记录。
+    @State private var entryPendingShare: Entry?
     @State private var sections: [TimelineSection] = []
     @State private var searchText = ""
     /// 排序方式偏好：默认按拍摄时间（成长回顾心智），可切按记录时间（家庭动态心智）。
@@ -100,6 +102,9 @@ struct TimelineView: View {
         }
         .sheet(isPresented: $showFamilyFeed) {
             NavigationStack { FamilyFeedView() }
+        }
+        .sheet(item: $entryPendingShare) { entry in
+            ShareCardSheet(entry: entry)
         }
         .alert("删除这条记录？", isPresented: Binding(
             get: { entryPendingDelete != nil },
@@ -194,6 +199,9 @@ struct TimelineView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .contextMenu {
+                Button { entryPendingShare = entry } label: {
+                    Label("分享这一刻", systemImage: "square.and.arrow.up")
+                }
                 Button(role: .destructive) { entryPendingDelete = entry } label: {
                     Label("删除记录", systemImage: "trash")
                 }

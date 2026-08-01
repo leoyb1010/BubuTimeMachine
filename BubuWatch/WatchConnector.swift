@@ -16,6 +16,10 @@ final class WatchConnector: NSObject {
     var photoVersion = 0
     /// 上次向手机请求补发照片包的时刻（节流：一分钟最多一次）。
     private var lastPhotoRequestAt: Date = .distantPast
+    /// 已经为哪一批照片请求过补发。同一批只求一次——手机若真的没有那张图
+    /// （比如家人的照片这台手机也还没下载），再求多少次也变不出来，
+    /// 求下去只会每分钟白传一次整包。
+    private var requestedFingerprints: Set<String> = []
     /// 会话未激活期间缓存的文字/心情/健康记录，激活后补发（#6：冷启动秒录窗口 session 尚未激活）。
     private var pendingRecords: [WatchRecordRequest] = []
 
@@ -70,6 +74,11 @@ final class WatchConnector: NSObject {
         guard var stats = snapshot?.todayStats else { return }
         stats[kindRaw] = max(0, (stats[kindRaw] ?? 1) - 1)
         snapshot?.todayStats = stats
+    }
+
+    /// 时光机里重温某条 → 给它点个亲亲。note 承载目标 Entry 的 id。
+    func sendReaction(entryId: String) {
+        send(WatchRecordRequest(type: .reaction, roleRaw: roleRaw, note: entryId), label: "❤️ 已送到")
     }
 
     /// 撤销刚才那条（防手滑）。localId 传当时发送用的那个。
@@ -230,13 +239,23 @@ extension WatchConnector: WCSessionDelegate {
     /// 快照里引用的照片缓存里没有（手表重装 / LRU 淘汰过头）→ 请求手机重发照片包。
     /// 手机侧的指纹去重会以为「上次发过了」，这条消息是打破僵局的唯一通道。
     private func requestPhotosIfMissing() {
-        guard let memories = snapshot?.memories, !memories.isEmpty else { return }
-        let missing = memories.compactMap(\.photoFileName)
-            .filter { WatchPhotoStore.data(for: $0) == nil }
+        guard let snapshot else { return }
+        let names = (snapshot.memories ?? []).compactMap(\.photoFileName)
+            + snapshot.recent.compactMap(\.photoFileName)
+        guard !names.isEmpty else { return }
+        let missing = names.filter { WatchPhotoStore.data(for: $0) == nil }
         guard !missing.isEmpty else { return }
+
+        // 同一批照片只请求一次（指纹按整批算，换批自然重新可请求）。
+        let fingerprint = WatchPhotoBundle.fingerprint(names)
+        guard !requestedFingerprints.contains(fingerprint) else { return }
         guard Date.now.timeIntervalSince(lastPhotoRequestAt) > 60 else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
+
+        requestedFingerprints.insert(fingerprint)
+        // 只记最近几批，避免长期驻留内存。
+        if requestedFingerprints.count > 8 { requestedFingerprints.removeFirst() }
         lastPhotoRequestAt = .now
         session.sendMessage([WatchLink.photoBundleRequestKey: true], replyHandler: nil)
     }

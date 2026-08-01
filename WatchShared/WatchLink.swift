@@ -108,6 +108,9 @@ public nonisolated enum WatchRecordType: String, Codable, Sendable {
     /// 手表和手机谁先点都行，另一端看到的是同一场睡眠。
     case sleepStart
     case sleepEnd
+    /// 在时光机里重温某条 → 给它点一个「亲亲」（note 承载目标 Entry 的 UUID 字符串）。
+    /// 落到 App 已有的 Reaction 机制上，不产生新的时光轴记录。
+    case reaction
 }
 
 /// Watch → iPhone：一次记录意图。localId 幂等，重发不重复。

@@ -68,6 +68,7 @@ struct BubuTimeMachineApp: App {
                 .task {
                     #if DEBUG
                     seedForUITestingIfNeeded()
+                    dumpShareCardsIfNeeded()
                     #endif
                     // 只做一次的启动装配（多窗口下 .task 每个 scene 都会跑，需防重）。
                     // 注意：NotificationReplyHandler / BGTask handler / WC 激活已前移到 BubuAppDelegate，
@@ -142,6 +143,46 @@ struct BubuTimeMachineApp: App {
     }
 
     #if DEBUG
+    /// 视觉探针：`-uitest-sharecard` 启动时把三种分享版式渲染到 Documents，
+    /// 供命令行取出来肉眼核验排版（分享卡是唯一会离开这个家的产物，必须眼见为实）。
+    @MainActor
+    private func dumpShareCardsIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("-uitest-sharecard") else { return }
+        let context = modelContainer.mainContext
+        let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
+        var descriptor = FetchDescriptor<Entry>(sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+        descriptor.fetchLimit = 10
+        let entries = (try? context.fetch(descriptor)) ?? []
+        let entry = entries.first { !$0.media.isEmpty } ?? entries.first
+        let store = env.mediaStore
+
+        func photo(_ e: Entry?) -> UIImage? {
+            guard let e else { return nil }
+            for media in e.media where media.type == .photo {
+                guard let name = media.localFileName ?? media.thumbnailFileName else { continue }
+                let url = store.mediaURL(for: name)
+                let alt = store.thumbnailURL(for: name)
+                let target = FileManager.default.fileExists(atPath: url.path) ? url : alt
+                if let img = ThumbnailProvider.downsample(url: target, maxPixel: 1400) { return img }
+            }
+            return nil
+        }
+        let content = ShareCard.Content(
+            childName: profile?.name ?? "布布",
+            dateText: entry.map { BubuDateFormat.monthDay($0.happenedAt) } ?? "7月30日",
+            ageText: (profile?.birthday).flatMap { b in entry.map { AgeCalculator.compactAge(birthday: b, at: $0.happenedAt) } } ?? "2岁2个月",
+            note: entry?.firstPersonNote ?? entry?.note ?? "第一次自己穿上鞋子，站起来转了一圈给我看",
+            photo: photo(entry),
+            thenPhoto: photo(entries.dropFirst().first { !$0.media.isEmpty }),
+            thenDateText: "7月30日", thenAgeText: "1岁2个月")
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        for layout in ShareCard.Layout.allCases {
+            if let img = ShareCard.render(content, layout: layout), let data = img.pngData() {
+                try? data.write(to: dir.appendingPathComponent("sharecard-\(layout.rawValue).png"))
+            }
+        }
+    }
+
     /// 仅供截图/联调：以 `-uitest-seed` 启动时，注入一个布布档案 + 成员 + 几条记录，跳过引导。
     @MainActor
     private func seedForUITestingIfNeeded() {

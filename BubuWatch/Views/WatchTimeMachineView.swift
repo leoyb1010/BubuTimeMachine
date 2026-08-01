@@ -116,12 +116,16 @@ struct WatchTimeMachineView: View {
         .ignoresSafeArea(edges: .bottom)
     }
 
-    /// 点一下 = 告诉家人"又看了一遍这天"。同一段只发一次。
+    /// 点一下 = 给那条记录点个亲亲。
+    ///
+    /// 走 reaction 而不是发一条文字记录：文字记录会变成时光轴里的正式一条，
+    /// 重温十次就多十条「又看了一遍」的垃圾，布布 18 岁翻相册会看到它们。
+    /// reaction 落在 App 已有的亲亲机制上——同一人只算一颗心，家人在时光轴卡片上看得到。
     private func love(_ memory: WatchMemory) {
         heartBurst += 1
         guard !lovedIds.contains(memory.id) else { return }
         lovedIds.insert(memory.id)
-        connector.sendText("❤️ 在手表上又看了一遍 \(memory.dateText) 的这条")
+        connector.sendReaction(entryId: memory.id)
         WKInterfaceDevice.current().play(.success)
     }
 
