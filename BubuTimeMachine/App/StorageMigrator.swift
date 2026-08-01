@@ -264,7 +264,7 @@ nonisolated enum StorageMigrator {
             try fm.copyItem(at: src, to: dst)
             return true
         } catch {
-            log.error("迁移文件失败 \(src.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            log.error("迁移文件失败 \(src.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

@@ -61,7 +61,7 @@ struct WatchRecentView: View {
     private var emptyState: some View {
         VStack(spacing: 6) {
             Text("🌱").font(.system(size: 34))
-            Text("还没有记录\n去「记录」页留下第一条")
+            Text("还没有记录\n打开手机上的布布时光机就好")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

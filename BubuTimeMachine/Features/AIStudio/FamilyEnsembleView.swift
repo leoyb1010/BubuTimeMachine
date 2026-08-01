@@ -16,8 +16,15 @@ struct FamilyEnsembleView: View {
 
     private var theme: Color { env.theme.theme.primary }
     /// 至少有两个视角（原记录作者 + 补充）才值得合奏。
+    /// 反应（亲亲/抱抱那类哨兵评论）不是"视角"：只被亲过的记录不该出现在候选里，
+    /// 更不能把 \u{1}RXN:❤️ 原文喂给 AI 或渲染出来。
     private var candidates: [Entry] {
-        entries.filter { !$0.comments.isEmpty }
+        entries.filter { $0.comments.contains { !Reaction.isReaction($0) } }
+    }
+
+    /// 这条记录里真正的文字/语音补充（滤掉反应哨兵）。
+    private func spokenComments(_ entry: Entry) -> [Comment] {
+        entry.comments.filter { !Reaction.isReaction($0) }
     }
 
     var body: some View {
@@ -64,7 +71,7 @@ struct FamilyEnsembleView: View {
                                 .foregroundStyle(BubuTheme.Color.warmBrown).lineLimit(1)
                         }
                         Spacer()
-                        Text("\(entry.comments.count + 1) 个视角")
+                        Text("\(spokenComments(entry).count + 1) 个视角")
                             .font(BubuTheme.Font.scaled(12, weight: .semibold)).foregroundStyle(theme)
                     }
                     .padding()
@@ -84,7 +91,7 @@ struct FamilyEnsembleView: View {
             // 多视角原料
             VStack(alignment: .leading, spacing: 8) {
                 voiceLine(role: entry.authorRole, text: entry.note ?? "（记录了这一刻）")
-                ForEach(entry.comments.sorted { $0.createdAt < $1.createdAt }) { c in
+                ForEach(spokenComments(entry).sorted { $0.createdAt < $1.createdAt }) { c in
                     voiceLine(role: c.authorRole, text: c.text ?? "（一段语音）")
                 }
             }
@@ -128,7 +135,7 @@ struct FamilyEnsembleView: View {
         defer { generating = false }
         let name = env.config.childName
         let perspectives = [entry.authorRole + "说：" + (entry.note ?? "记录了这一刻")]
-            + entry.comments.compactMap { c in c.text.map { "\(c.authorRole)说：\($0)" } }
+            + spokenComments(entry).compactMap { c in c.text.map { "\(c.authorRole)说：\($0)" } }
 
         // 配置了真实 AI：让服务端把多视角织成完整故事；失败降级到本地模板（明示简易版）
         if env.config.isAIConfigured {

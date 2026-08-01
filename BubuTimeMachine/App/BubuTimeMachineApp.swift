@@ -181,6 +181,13 @@ struct BubuTimeMachineApp: App {
                 try? data.write(to: dir.appendingPathComponent("sharecard-\(layout.rawValue).png"))
             }
         }
+        // 无照片的大字版也各渲一张，核验 textHero 版式。
+        var textOnly = content
+        textOnly.photo = nil
+        textOnly.note = "今天她突然说：妈妈你小时候也有妈妈吗？我愣了三秒，然后抱了她好久。"
+        if let img = ShareCard.render(textOnly, layout: .portrait), let data = img.pngData() {
+            try? data.write(to: dir.appendingPathComponent("sharecard-texthero.png"))
+        }
     }
 
     /// 仅供截图/联调：以 `-uitest-seed` 启动时，注入一个布布档案 + 成员 + 几条记录，跳过引导。

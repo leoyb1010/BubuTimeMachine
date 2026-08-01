@@ -60,7 +60,9 @@ public nonisolated enum WatchPhotoBundle {
     public static func decode(_ data: Data) -> [(name: String, data: Data)]? {
         var cursor = 0
         guard data.count >= magic.count + 4 else { return nil }
-        guard Array(data[0..<magic.count]) == magic else { return nil }
+        // 一律以 startIndex 为基：Data slice 的下标不从 0 开始，用绝对下标会误读/崩溃。
+        let base = data.startIndex
+        guard Array(data[base..<(base + magic.count)]) == magic else { return nil }
         cursor = magic.count
         guard let count = readUInt32(data, &cursor) else { return nil }
         // 条目数当上界用，防被构造的巨大 count 拖进长循环。
@@ -70,12 +72,13 @@ public nonisolated enum WatchPhotoBundle {
         for _ in 0..<count {
             guard let nameLen = readUInt16(data, &cursor) else { return nil }
             guard cursor + Int(nameLen) <= data.count else { return nil }
-            let nameData = data.subdata(in: cursor..<(cursor + Int(nameLen)))
+            // subdata 的区间是绝对索引：slice 上必须加 base，否则起点错位。
+            let nameData = data.subdata(in: (base + cursor)..<(base + cursor + Int(nameLen)))
             guard let name = String(data: nameData, encoding: .utf8) else { return nil }
             cursor += Int(nameLen)
             guard let dataLen = readUInt32(data, &cursor) else { return nil }
             guard cursor + Int(dataLen) <= data.count else { return nil }
-            let payload = data.subdata(in: cursor..<(cursor + Int(dataLen)))
+            let payload = data.subdata(in: (base + cursor)..<(base + cursor + Int(dataLen)))
             cursor += Int(dataLen)
             result.append((name: name, data: payload))
         }

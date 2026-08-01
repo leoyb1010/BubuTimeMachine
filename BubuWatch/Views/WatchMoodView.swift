@@ -17,6 +17,8 @@ struct WatchMoodView: View {
     @State private var crownValue: Double = 0
     @State private var index = 0
     @State private var burst = 0
+    /// 防双发：确认后到 dismiss 的 450ms 窗口内再点/再双捏会重复落两条心情。
+    @State private var sent = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -71,6 +73,8 @@ struct WatchMoodView: View {
     }
 
     private func confirm() {
+        guard !sent else { return }
+        sent = true
         burst += 1
         let mood = moods[index]
         connector.sendMood(rawValue: mood.rawValue, emoji: mood.emoji)

@@ -338,6 +338,20 @@ final class SyncEngine {
             let dto = Self.makeDTO(entry)
             do {
                 let saved = try await apiClient.createEntry(dto)
+                // 撤销竞态根治：await 挂起期间用户可能已撤销（手表 2.6s 窗口/手机删除）。
+                // 此时本地记录已删、删除队列因 remoteId 为 nil 而空转——若不管，
+                // 服务器已有该记录，下轮 pull 会按 localId 重新插入，撤销的记录在全家复活。
+                // 这里重查本地：没了就立刻给刚创建的服务器记录补墓碑，并跳过写回
+                // （顺带避免对已删除模型赋值）。
+                let entryId = entry.id
+                let stillExists = ((try? context.fetchCount(FetchDescriptor<Entry>(
+                    predicate: #Predicate { $0.id == entryId }))) ?? 0) > 0
+                guard stillExists else {
+                    PendingDeletion.enqueue(collection: "entries", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
                 entry.remoteId = saved.id
                 // 并发编辑：服务器上的版本更"新"（别的设备后编辑过）时，
                 // createEntry 会原样带回远端版本——本地也换成新版，旧编辑不吃掉新编辑。
@@ -590,7 +604,23 @@ final class SyncEngine {
         for item in localHealth {
             guard !Task.isCancelled else { return }
             beginItem("同步健康记录")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            do {
+                item.syncState = .uploading
+                saveAndRefresh(context)
+                let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item))
+                // 同 Entry：await 期间被撤销（手表打卡撤销窗口正好压着这段）→ 补墓碑防复活。
+                let itemId = item.id
+                let stillExists = ((try? context.fetchCount(FetchDescriptor<HealthRecord>(
+                    predicate: #Predicate { $0.id == itemId }))) ?? 0) > 0
+                guard stillExists else {
+                    PendingDeletion.enqueue(collection: "healthrecords", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
+                item.remoteId = saved.id
+                item.syncState = .synced
+            }
             catch { item.syncState = .failed; recordFailure(error, item: "健康记录") }
             finishItem()
             saveAndRefresh(context)
@@ -1062,6 +1092,16 @@ final class SyncEngine {
                 }
             default:
                 break
+            }
+            // 记录没了，指着它的家庭动态也该走：否则「最近」和手表快照
+            // （两者都以 FeedEvent 为源）会永久显示一条已删除的内容。
+            // 手表 undo 侧早已这么做（undoRecord），这里补齐墓碑侧。
+            if collection == "entries" || collection == "healthrecords" {
+                let target = localId
+                if let events = try? context.fetch(FetchDescriptor<FeedEvent>(
+                    predicate: #Predicate { $0.targetLocalId == target })) {
+                    for event in events { context.delete(event) }
+                }
             }
         }
         try? context.save()

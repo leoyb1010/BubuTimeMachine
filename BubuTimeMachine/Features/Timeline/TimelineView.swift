@@ -59,7 +59,7 @@ struct TimelineView: View {
         }
         .navigationTitle("时光轴")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "找找布布的记录")
+        .searchable(text: $searchText, prompt: "找找\(profiles.first?.name ?? "布布")的记录")
         // 搜索 300ms 去抖：连打字时只在停顿后重建一次；清空/首屏立即重建（P2e）
         .task(id: searchText) {
             if !searchText.isEmpty {
@@ -305,7 +305,7 @@ struct TimelineView: View {
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             if let profile = profiles.first, let anchor = section.entries.first.map(sortDate) {
-                Text("布布 \(AgeCalculator.compactAge(birthday: profile.birthday, at: anchor))")
+                Text("\(profile.name) \(AgeCalculator.compactAge(birthday: profile.birthday, at: anchor))")
                     .font(BubuTheme.Font.caption.weight(.medium))
                     .foregroundStyle(env.theme.theme.primary)
                     .padding(.horizontal, 10).padding(.vertical, 3)

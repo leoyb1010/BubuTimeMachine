@@ -98,9 +98,14 @@ nonisolated enum WidgetWallpaper {
     // MARK: 路径
 
     private static var directory: URL {
-        let url = BubuStorage.containerURL.appendingPathComponent("WidgetWallpaper", isDirectory: true)
+        var url = BubuStorage.containerURL.appendingPathComponent("WidgetWallpaper", isDirectory: true)
         if !FileManager.default.fileExists(atPath: url.path) {
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            // 整屏截图不进 iCloud/电脑备份：截图里可能有通知横幅等敏感内容，
+            // 而 App Group 容器默认会被备份带走。丢了重截即可，不值得进备份。
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
         }
         return url
     }

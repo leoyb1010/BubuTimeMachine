@@ -18,6 +18,7 @@ struct EntryDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var appendMediaStatus: String?
     @State private var showReactionPicker = false
+    @State private var showShareCard = false
     @State private var storybookToast: String?
 
     private var profile: ChildProfile? { profiles.first }
@@ -86,6 +87,14 @@ struct EntryDetailView: View {
                 .popoverTip(StorybookTip())
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showShareCard = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("分享这一刻")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button(role: .destructive) {
                     showDeleteConfirm = true
                 } label: {
@@ -93,6 +102,9 @@ struct EntryDetailView: View {
                 }
                 .accessibilityLabel("删除记录")
             }
+        }
+        .sheet(isPresented: $showShareCard) {
+            ShareCardSheet(entry: entry)
         }
         .overlay(alignment: .top) {
             if let storybookToast {

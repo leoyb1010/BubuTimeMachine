@@ -30,6 +30,8 @@ struct HealthHomeView: View {
             .padding()
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
+        // 手表可能已替这场哄睡收了尾：回到这页时重读共享状态，别让 @State 停在旧值。
+        .onAppear { sleepStartedAt = SharedDefaults.sleepStartedAt }
         .navigationTitle("布布健康")
         .sheet(item: $composingKind) { kind in
             HealthRecordSheet(kind: kind)
@@ -110,7 +112,16 @@ struct HealthHomeView: View {
         sleepStartedAt = now
         SharedDefaults.sleepStartedAt = now
         BubuActivityController.startSleepTimer(childName: env.config.childName, startedAt: now)
+        pushSleepStateToWatch()
         BubuHaptics.success()
+    }
+
+    /// 哄睡状态变了立刻推手表：不推的话手表快照里的 sleepingSince 还是旧的，
+    /// 手机点了「醒啦」手表仍显示呼吸态，用户再点一下就落出第二条睡眠卡。
+    private func pushSleepStateToWatch() {
+        if let snap = WatchSnapshotBuilder.make(context: context, role: env.config.currentRole) {
+            WatchConnectivityManager.shared.push(snap)
+        }
     }
 
     private func endSleep(startedAt: Date) {
@@ -132,6 +143,7 @@ struct HealthHomeView: View {
                                  summary: "记录了睡眠：\(record.amountText ?? "")"))
         try? context.save()
         BubuActivityController.endSleepTimer(elapsedText: record.amountText ?? "")
+        pushSleepStateToWatch()
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
         BubuHaptics.success()

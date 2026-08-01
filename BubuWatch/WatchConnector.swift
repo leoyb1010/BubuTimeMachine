@@ -19,7 +19,7 @@ final class WatchConnector: NSObject {
     /// 已经为哪一批照片请求过补发。同一批只求一次——手机若真的没有那张图
     /// （比如家人的照片这台手机也还没下载），再求多少次也变不出来，
     /// 求下去只会每分钟白传一次整包。
-    private var requestedFingerprints: Set<String> = []
+    private var requestedFingerprints: [String] = []
     /// 会话未激活期间缓存的文字/心情/健康记录，激活后补发（#6：冷启动秒录窗口 session 尚未激活）。
     private var pendingRecords: [WatchRecordRequest] = []
 
@@ -114,7 +114,7 @@ final class WatchConnector: NSObject {
             return
         }
         transferVoice(fileURL: fileURL, request: req, session: session)
-        flash("语音已送到手机")
+        flash("语音已在路上")
     }
 
     /// 把持久待传文件交给 WCSession；请求随 metadata 一并送达（接收端据 localId 去重）。
@@ -170,11 +170,17 @@ final class WatchConnector: NSObject {
         }
     }
 
+    private var lastFlashAt: Date = .distantPast
+
     private func flash(_ label: String) {
         lastSentLabel = label
+        let stamp = Date.now
+        lastFlashAt = stamp
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if lastSentLabel == label { lastSentLabel = nil }
+            // 按时间戳判断：连打两次卡是同一句「已打卡」，只比字符串会让
+            // 第一条的延时任务提前清掉第二条的横幅。
+            if lastFlashAt == stamp { lastSentLabel = nil }
         }
     }
 }
@@ -190,7 +196,7 @@ extension WatchConnector: WCSessionDelegate {
         if let data = ctx[WatchLink.snapshotKey] as? Data {
             snap = WatchLink.decode(WatchSnapshot.self, from: data)
         }
-        if let snap {
+        if let snap, Self.isNewer(snap) {
             WatchSnapshotStore.save(snap)
             WidgetCenter.shared.reloadAllTimelines()
         }
@@ -206,9 +212,18 @@ extension WatchConnector: WCSessionDelegate {
         }
     }
 
+    /// 只有比本地存的更新才落盘：激活回调给的 receivedApplicationContext 可能是旧的，
+    /// 无条件覆盖会抹掉本地乐观状态（比如断连时在手表开的哄睡计时）；
+    /// 迟到的旧快照同理会让打卡角标闪回。
+    nonisolated static func isNewer(_ snap: WatchSnapshot) -> Bool {
+        guard let stored = WatchSnapshotStore.load() else { return true }
+        return snap.updatedAt >= stored.updatedAt
+    }
+
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         guard let data = context[WatchLink.snapshotKey] as? Data,
-              let snap = WatchLink.decode(WatchSnapshot.self, from: data) else { return }
+              let snap = WatchLink.decode(WatchSnapshot.self, from: data),
+              Self.isNewer(snap) else { return }
         // 落到手表本地 App Group 并刷新表盘复杂功能。
         WatchSnapshotStore.save(snap)
         WidgetCenter.shared.reloadAllTimelines()
@@ -230,7 +245,8 @@ extension WatchConnector: WCSessionDelegate {
         WidgetCenter.shared.reloadAllTimelines()
         Task { @MainActor in
             // 修剪时护住当前回忆序列还引用的图。
-            let keep = Set((self.snapshot?.memories ?? []).compactMap(\.photoFileName))
+            var keep = Set((self.snapshot?.memories ?? []).compactMap(\.photoFileName))
+            keep.formUnion((self.snapshot?.recent ?? []).compactMap(\.photoFileName))
             WatchPhotoStore.prune(keeping: keep)
             self.photoVersion += 1
         }
@@ -253,8 +269,9 @@ extension WatchConnector: WCSessionDelegate {
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
 
-        requestedFingerprints.insert(fingerprint)
-        // 只记最近几批，避免长期驻留内存。
+        requestedFingerprints.append(fingerprint)
+        // 只记最近几批（FIFO）。之前用 Set 时 removeFirst 删的是任意元素，
+        // 可能把刚记的当前指纹删掉导致重复请求整包。
         if requestedFingerprints.count > 8 { requestedFingerprints.removeFirst() }
         lastPhotoRequestAt = .now
         session.sendMessage([WatchLink.photoBundleRequestKey: true], replyHandler: nil)

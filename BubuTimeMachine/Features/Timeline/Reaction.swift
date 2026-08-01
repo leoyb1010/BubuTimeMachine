@@ -7,7 +7,8 @@ import SwiftData
 /// **零迁移设计**：复用现有 `Comment` 模型与同步链路，反应是一条 `text` 以哨兵前缀开头的 Comment
 /// （`\u{1}RXN:❤️`）。这样无需新增数据库列 / DTO 字段 / 服务端迁移，三台手机现成同步。
 /// 同一人同一条只保留最新反应（插入前先删旧）。
-enum Reaction: String, CaseIterable, Identifiable, Sendable {
+// nonisolated：纯值语义（编解码 + 文案），导出器等 nonisolated 上下文也要用。
+nonisolated enum Reaction: String, CaseIterable, Identifiable, Sendable {
     case heart = "❤️"
     case hug = "🤗"
     case laugh = "😂"

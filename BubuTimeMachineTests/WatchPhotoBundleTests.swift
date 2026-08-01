@@ -33,6 +33,20 @@ struct WatchPhotoBundleTests {
         #expect(decoded.map(\.name) == ["p0.jpg", "p1.jpg", "p2.jpg", "p3.jpg"])
     }
 
+    @Test("以 Data slice 传入也能正确解码（startIndex 非零回归）")
+    func decodesFromSlice() throws {
+        let bundle = WatchPhotoBundle.encode([("s.jpg", Data(repeating: 9, count: 64))])
+        // 前面垫 8 字节垃圾再切出 slice：slice 的 startIndex 非 0，
+        // 绝对下标写法会在这里误读或崩溃。
+        var padded = Data([0,1,2,3,4,5,6,7])
+        padded.append(bundle)
+        let slice = padded[8...]
+        let decoded = try #require(WatchPhotoBundle.decode(slice))
+        #expect(decoded.count == 1)
+        #expect(decoded[0].name == "s.jpg")
+        #expect(decoded[0].data == Data(repeating: 9, count: 64))
+    }
+
     @Test("损坏/截断的包返回 nil，不返回半套照片")
     func rejectsCorruptData() {
         let good = WatchPhotoBundle.encode([("a.jpg", Data(repeating: 7, count: 100))])

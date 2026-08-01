@@ -26,7 +26,21 @@ struct WatchRecordView: View {
             connector.sendVoice(fileURL: result.url, duration: result.duration)
             WKInterfaceDevice.current().play(.success)
         }
-        .onDisappear { recorder.cancel() }
+        .onDisappear {
+            // 误触翻页/滑走 ≠ 取消：抱着娃碰到表冠是常态，直接 cancel 会把整段录音
+            // 静默删掉——与「已录部分不丢」的承诺矛盾。改为收尾发送，
+            // 太短的（<0.6s，recorder 内部判定）自然丢弃，不会误发。
+            if recorder.isRecording {
+                Task {
+                    if let result = await recorder.toggle() {
+                        connector.sendVoice(fileURL: result.url, duration: result.duration)
+                        WKInterfaceDevice.current().play(.success)
+                    }
+                }
+            } else {
+                recorder.cancel()
+            }
+        }
         .sheet(isPresented: $showMood) { WatchMoodView() }
     }
 
@@ -145,6 +159,7 @@ struct WatchRecordView: View {
 /// 说话时像涟漪一圈圈荡开。采样 15fps 写环形缓冲，Canvas 一层画完。
 private struct WaveformRing: View {
     let recorder: WatchVoiceRecorder
+    @Environment(\.isLuminanceReduced) private var dimmed
     @State private var history = [Double](repeating: 0, count: 36)
     @State private var head = 0
 
@@ -172,10 +187,14 @@ private struct WaveformRing: View {
             // 15fps 采样电平写入环形缓冲；@State 变更自然触发 Canvas 重绘。
             // View 离屏 task 自动取消，不留常驻定时器。
             while !Task.isCancelled {
-                let level = recorder.currentLevel()
-                head = (head + 1) % 36
-                history[head] = level
-                try? await Task.sleep(for: .milliseconds(66))
+                // 手腕放下（AOD）：录音继续，但停掉 15fps 采样重绘——
+                // 星尘背景的省电纪律（WatchStarfield）同样适用于这里。
+                if !dimmed {
+                    let level = recorder.currentLevel()
+                    head = (head + 1) % 36
+                    history[head] = level
+                }
+                try? await Task.sleep(for: .milliseconds(dimmed ? 500 : 66))
             }
         }
     }

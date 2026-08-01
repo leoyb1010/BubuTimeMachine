@@ -201,7 +201,14 @@ nonisolated struct ArchiveExporter: Sendable {
                 return "<div class=\"audio\"><span>🎙️ \(esc(voice.authorRole))</span><audio controls src=\"media/\(urlEsc(voice.fileName))\"></audio>\(transcript)</div>"
             }.joined()
             let comments = entry.comments.sorted { $0.createdAt < $1.createdAt }.map { comment in
-                let text = comment.text.map { "<p>\(esc($0))</p>" } ?? ""
+                // 反应哨兵（\u{1}RXN:❤️）变成人话：18 岁的布布不该在自己的档案里
+                // 看到一段控制字符——她该看到的是「妈妈 亲亲了这一刻 ❤️」。
+                let text: String
+                if let reaction = Reaction.decode(comment.text) {
+                    text = "<p>\(reaction.rawValue) \(reaction.label)了这一刻</p>"
+                } else {
+                    text = comment.text.map { "<p>\(esc($0))</p>" } ?? ""
+                }
                 let audio = comment.voiceFileName.map { "<audio controls src=\"media/\(urlEsc($0))\"></audio>" } ?? ""
                 return "<div class=\"comment\"><b>\(esc(comment.authorRole))</b>\(text)\(audio)</div>"
             }.joined()
@@ -322,7 +329,11 @@ nonisolated struct ArchiveExporter: Sendable {
                 location: entry.locationName,
                 media: entry.media.map { JSONMedia(type: $0.type, file: "media/\($0.fileName)") },
                 voiceNotes: entry.voiceNotes.map { JSONVoice(author: $0.authorRole, file: "media/\($0.fileName)", duration: $0.duration) },
-                comments: entry.comments.map { JSONComment(author: $0.authorRole, text: $0.text, voice: $0.voiceFileName.map { "media/\($0)" }) },
+                comments: entry.comments.map { c in
+                    // JSON 同款人话化：机器可读档案里也不留哨兵控制字符。
+                    let text = Reaction.decode(c.text).map { "\($0.rawValue) \($0.label)" } ?? c.text
+                    return JSONComment(author: c.authorRole, text: text, voice: c.voiceFileName.map { "media/\($0)" })
+                },
                 tags: entry.tags)
         }
         let root = JSONRoot(childName: input.childName, birthday: iso.string(from: input.birthday), entries: entries)

@@ -19,6 +19,17 @@ final class WatchConnectivityManager: NSObject {
     /// App 正在用的 mainContext（与 @Query/UI 同一个）。激活时注入，保证手表写入能让前台时光轴实时刷新。
     /// 未注入（如后台被 WC 唤醒）时回退到共享容器，数据仍落库、下次前台自会显示。
     var appContext: ModelContext?
+
+    /// 已撤销记录的 localId 名单（保最近 50 条）。
+    /// 手表 deliver 是双保险投递：sendMessage 送达但回执误报失败时，同一 payload
+    /// 会再走 transferUserInfo 迟到几分钟——若用户中途撤销了，迟到副本会因
+    /// 「exists 检查不到」被原样重建。落库前先查这份名单即可挡住。
+    /// 持久化到 UserDefaults：App 被杀后队列里的迟到副本仍会投递。
+    private static let undoneKey = "bubu.watch.undoneLocalIds"
+    private var undoneLocalIds: [String] {
+        get { UserDefaults.standard.stringArray(forKey: Self.undoneKey) ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.suffix(50)), forKey: Self.undoneKey) }
+    }
     private var writeContext: ModelContext? { appContext ?? SharedModelContainer.sharedIfAvailable?.mainContext }
 
     func activate() {
@@ -74,9 +85,11 @@ final class WatchConnectivityManager: NSObject {
         let photos = WatchSnapshotBuilder.photosData(for: names)
         guard !photos.isEmpty else { return }
         let bundle = WatchPhotoBundle.encode(photos)
-        // 临时文件交给 WCSession 排队；didFinish 里删。文件名带指纹，重复入队自然同名覆盖。
+        // 临时文件交给 WCSession 排队；didFinish 里删自己那份。
+        // 文件名带随机后缀：同指纹补发时若复用同名文件，第一笔传输完成的 removeItem
+        // 会把第二笔仍在排队的源文件删掉，第二笔必失败。
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("bubu-photobundle-\(fingerprint).bin")
+            .appendingPathComponent("bubu-photobundle-\(fingerprint)-\(UUID().uuidString.prefix(8)).bin")
         do {
             try bundle.write(to: url, options: .atomic)
         } catch {
@@ -104,6 +117,8 @@ final class WatchConnectivityManager: NSObject {
     // MARK: 落库
     private func handle(_ request: WatchRecordRequest, movedVoiceFileName: String? = nil) {
         guard let context = writeContext else { return }
+        // 已撤销的记录：迟到的重复投递直接丢弃，不得重建。
+        if request.type != .undo, undoneLocalIds.contains(request.localId) { return }
         let role = FamilyRole(rawValue: request.roleRaw) ?? .mama
         let localId = UUID(uuidString: request.localId)
         do {
@@ -128,6 +143,11 @@ final class WatchConnectivityManager: NSObject {
             case .sleepStart:
                 // 与 iPhone 健康页共用同一份哄睡状态；灵动岛计时尽力而为
                 //（后台被 WC 唤醒时 ActivityKit 不允许发起，失败无妨——状态在，前台自会接上）。
+                // 已有进行中的计时（手机先点了、手表快照过期没显示）：保留更早的开始时刻，
+                // 不然已进行 40 分钟的哄睡会被截断重置。
+                if let existing = SharedDefaults.sleepStartedAt, existing < request.happenedAt {
+                    break
+                }
                 SharedDefaults.sleepStartedAt = request.happenedAt
                 let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
                 BubuActivityController.startSleepTimer(childName: profile?.name ?? "布布",
@@ -171,10 +191,21 @@ final class WatchConnectivityManager: NSObject {
     /// 这样无论从哪端收尾，时光轴里都是同一种「睡了 X 小时」的卡。
     /// 手机侧状态丢了（重装等）就用手表带来的 happenedAt 兜底记一条无时长的。
     private func endSleep(_ request: WatchRecordRequest, role: FamilyRole, in context: ModelContext) throws {
+        // 幂等：deliver 双保险可能同 localId 投递两次。第二次时 sleepStartedAt 已清，
+        // 会走"无时长兜底"用 nil 覆盖掉刚记好的时长（unique id 触发 upsert），还多插一条动态。
+        if let localId = UUID(uuidString: request.localId) {
+            let d = FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == localId })
+            if ((try? context.fetchCount(d)) ?? 0) > 0 { return }
+        }
         let end = request.happenedAt
         let started = SharedDefaults.sleepStartedAt
         SharedDefaults.sleepStartedAt = nil
 
+        // 误触保护：不到一分钟就"醒了"多半是手滑连点，清状态但不落一条 0 分钟的睡眠卡。
+        if let started, end.timeIntervalSince(started) < 60 {
+            BubuActivityController.endSleepTimer(elapsedText: "")
+            return
+        }
         let record = HealthRecord(kind: .sleep, title: "睡觉", recordedAt: end)
         if let localId = UUID(uuidString: request.localId) { record.id = localId }
         if let started, started < end {
@@ -209,6 +240,8 @@ final class WatchConnectivityManager: NSObject {
         // 同一人只保留最新一条反应：先清掉自己的旧反应。
         for comment in entry.comments where comment.authorRole == myRole && Reaction.isReaction(comment) {
             if Reaction.decode(comment.text) == .heart { return }   // 已经亲过，重复重温不再写库
+            // 与 App 内 toggleReaction 同款：不入删除队列的话，已同步的旧反应下轮 pull 就复活。
+            PendingDeletion.enqueue(collection: "comments", remoteId: comment.remoteId, in: context)
             context.delete(comment)
         }
         let comment = Comment(authorRole: myRole, text: Reaction.heart.encodedText)
@@ -225,6 +258,7 @@ final class WatchConnectivityManager: NSObject {
     /// （PendingDeletion 入队 → 本地删 → save），已同步到服务器的也能墓碑掉，不复活。
     private func undoRecord(localId: String, in context: ModelContext) throws {
         guard let id = UUID(uuidString: localId) else { return }
+        undoneLocalIds.append(localId)
         let idString = id.uuidString
 
         let healthFetch = FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == id })
@@ -532,9 +566,24 @@ extension WatchConnectivityManager {
         let sidecars = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension == "json" }
         guard !sidecars.isEmpty, let context = writeContext else { return }
+        // 孤儿清理：① 只有 m4a 没边车（拷贝成功但边车写失败）→ 无法导入，超 7 天删；
+        // ② 边车损坏解不出来 → 连同 m4a 一起删。否则这两类会永久滞留在 App Group（进备份）。
+        let all = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+        let sidecarStems = Set(sidecars.map { $0.deletingPathExtension().lastPathComponent })
+        for url in all where url.pathExtension == "m4a" {
+            let stem = url.deletingPathExtension().lastPathComponent
+            guard !sidecarStems.contains(stem) else { continue }
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if Date.now.timeIntervalSince(mtime) > 7 * 86_400 { try? fm.removeItem(at: url) }
+        }
         for sidecar in sidecars {
             guard let data = try? Data(contentsOf: sidecar),
-                  let request = WatchLink.decode(WatchRecordRequest.self, from: data) else { continue }
+                  let request = WatchLink.decode(WatchRecordRequest.self, from: data) else {
+                try? fm.removeItem(at: sidecar)
+                try? fm.removeItem(at: dir.appendingPathComponent(
+                    sidecar.deletingPathExtension().lastPathComponent + ".m4a"))
+                continue
+            }
             let m4a = dir.appendingPathComponent("\(request.localId).m4a")
             guard fm.fileExists(atPath: m4a.path) else {
                 try? fm.removeItem(at: sidecar)   // 边车无对应音频：无可导入，清掉

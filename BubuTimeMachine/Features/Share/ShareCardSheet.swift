@@ -19,9 +19,13 @@ struct ShareCardSheet: View {
 
     /// 有「那年今日」的旧照片才提供对比版式——没有对比对象时这个选项是死的。
     @State private var thenEntry: Entry?
+    /// 两侧照片各解码一次缓存住（换版式/开关年龄时不重解码）。
+    @State private var photo: UIImage?
+    @State private var thenPhoto: UIImage?
 
     private var availableLayouts: [ShareCard.Layout] {
-        thenEntry == nil ? [.portrait, .square] : ShareCard.Layout.allCases
+        // 对比版要求两侧都有图：一半是🧸兜底的"对比"不成立。
+        (photo != nil && thenPhoto != nil) ? ShareCard.Layout.allCases : [.portrait, .square]
     }
 
     var body: some View {
@@ -47,6 +51,9 @@ struct ShareCardSheet: View {
         }
         .task {
             thenEntry = Self.findThenEntry(for: entry, context: context)
+            photo = firstPhoto(of: entry)
+            thenPhoto = thenEntry.flatMap(firstPhoto)
+            if !availableLayouts.contains(layout) { layout = .portrait }
             refresh()
         }
         .onChange(of: layout) { refresh() }
@@ -54,6 +61,8 @@ struct ShareCardSheet: View {
         .sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } },
                              set: { if $0 == nil { shareURL = nil } })) { item in
             ShareSheet(items: [item.url])
+                // 面板收起即删临时 PNG：不清的话每次分享都在 tmp 攒一张含孩子照片的图。
+                .onDisappear { try? FileManager.default.removeItem(at: item.url) }
         }
     }
 
@@ -139,16 +148,35 @@ struct ShareCardSheet: View {
             childName: env.config.childName,
             dateText: BubuDateFormat.monthDay(entry.happenedAt),
             ageText: showAge ? birthday.map { AgeCalculator.compactAge(birthday: $0, at: entry.happenedAt) } : nil,
-            note: entry.firstPersonNote ?? entry.note ?? entry.title,
-            photo: firstPhoto(of: entry),
-            thenPhoto: thenEntry.flatMap(firstPhoto),
+            note: firstNonEmpty(entry.firstPersonNote, entry.note, entry.title),
+            photo: photo,
+            thenPhoto: thenPhoto,
             thenDateText: thenEntry.map { BubuDateFormat.monthDay($0.happenedAt) },
             thenAgeText: showAge ? thenEntry.flatMap { e in
                 birthday.map { AgeCalculator.compactAge(birthday: $0, at: e.happenedAt) }
-            } : nil)
+            } : nil,
+            eraText: Self.eraLabel(for: entry.happenedAt),
+            thenEraText: thenEntry.map { Self.eraLabel(for: $0.happenedAt) } ?? "那年")
+    }
+
+    /// 「今年」只说给今年的记录；分享旧记录时标真实年份，不说谎。
+    private static func eraLabel(for date: Date) -> String {
+        let year = Calendar.current.component(.year, from: date)
+        return year == Calendar.current.component(.year, from: .now) ? "今年" : "\(year)年"
+    }
+
+    /// nil-coalescing 会被空字符串骗过（firstPersonNote 为 "" 时吞掉后备），逐个判空。
+    private func firstNonEmpty(_ candidates: String?...) -> String? {
+        for value in candidates {
+            if let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return value
+            }
+        }
+        return nil
     }
 
     /// 取原图而非缩略图：分享卡是 1080px 输出，缩略图放大会糊。
+    /// 视频记录用它的封面缩略图——时光轴明明显示着封面，分享却出🧸空卡是预期落差。
     private func firstPhoto(of entry: Entry) -> UIImage? {
         let store = env.mediaStore
         for media in entry.media where media.type == .photo {
@@ -157,6 +185,11 @@ struct ShareCardSheet: View {
             let fallback = store.thumbnailURL(for: name)
             let target = FileManager.default.fileExists(atPath: url.path) ? url : fallback
             if let img = ThumbnailProvider.downsample(url: target, maxPixel: 1400) { return img }
+        }
+        for media in entry.media where media.type == .video {
+            guard let name = media.thumbnailFileName else { continue }
+            let url = store.thumbnailURL(for: name)
+            if let img = ThumbnailProvider.downsample(url: url, maxPixel: 1400) { return img }
         }
         return nil
     }

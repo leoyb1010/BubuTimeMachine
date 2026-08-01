@@ -50,6 +50,9 @@ enum ShareCard {
         var thenPhoto: UIImage?
         var thenDateText: String?
         var thenAgeText: String?
+        /// 对比版的年代标签（「今年」或「2024年」）。硬编码「今年」会在分享旧记录时说谎。
+        var eraText: String = "今年"
+        var thenEraText: String = "那年"
     }
 
     /// 渲染成 PNG。@MainActor：ImageRenderer 要在主线程跑。
@@ -62,6 +65,8 @@ enum ShareCard {
         let scale = size.width / designWidth
         let view = ShareCardView(content: content, layout: layout)
             .frame(width: designWidth, height: size.height / scale)
+            // 分享卡是固定纸面：奶油底配深棕墨，与设备深浅色无关（同 paperInk 的先例）。
+            .environment(\.colorScheme, .light)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = scale
@@ -83,7 +88,7 @@ enum ShareCard {
             .replacingOccurrences(of: "月", with: "-")
             .replacingOccurrences(of: "日", with: "")
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("布布_\(stamp).png")
+            .appendingPathComponent("\(content.childName)_\(stamp).png")
         try? data.write(to: url, options: .atomic)
         return url
     }
@@ -106,11 +111,53 @@ private struct ShareCardView: View {
 
     // MARK: 单图版
 
+    @ViewBuilder
     private var single: some View {
-        VStack(spacing: 0) {
-            photoBlock(content.photo, height: layout == .square ? 250 : 360)
-            captionBlock
+        if content.photo == nil {
+            textHero
+        } else {
+            VStack(spacing: 0) {
+                photoBlock(content.photo, height: layout == .square ? 240 : 350)
+                captionBlock
+            }
         }
+    }
+
+    /// 无照片的记录：与其发一张"渐变+🧸"的空卡，不如把那句话本身当主角。
+    /// 大字居中排版——文字记录的分享卡应当像一张手写便签，而不是缺图的照片卡。
+    private var textHero: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Text(content.dateText)
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.primary)
+                if let age = content.ageText, !age.isEmpty {
+                    Text(age)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(BubuTheme.Color.softFill, in: Capsule())
+                }
+            }
+            Spacer(minLength: 0)
+            Text(content.note?.isEmpty == false ? "「\(content.note!)」" : "这一天，也值得记住")
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .multilineTextAlignment(.center)
+                .lineSpacing(6)
+                .lineLimit(7)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, 26)
+            Spacer(minLength: 0)
+            signature
+        }
+        .padding(20)
+        .background(
+            LinearGradient(colors: [BubuTheme.Color.cream,
+                                    BubuTheme.Color.peach.opacity(0.35),
+                                    BubuTheme.Color.pink.opacity(0.25)],
+                           startPoint: .top, endPoint: .bottomTrailing)
+        )
     }
 
     private func photoBlock(_ image: UIImage?, height: CGFloat) -> some View {
@@ -148,28 +195,29 @@ private struct ShareCardView: View {
                 }
             }
             if let note = content.note, !note.isEmpty {
+                // 行数按版式收口 + 允许缩字：fixedSize 会拒绝压缩，长文把落款挤出画布。
                 Text(note)
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(layout == .square ? 2 : 3)
+                    .minimumScaleFactor(0.85)
             }
             Spacer(minLength: 0)
             signature
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
+        .padding(.horizontal, 18).padding(.vertical, 14)
     }
 
     // MARK: 那年今日版（最容易被转发的一张）
 
     private var thenNow: some View {
         VStack(spacing: 0) {
-            comparisonHalf(image: content.thenPhoto, era: "那年",
+            comparisonHalf(image: content.thenPhoto, era: content.thenEraText,
                            label: content.thenDateText ?? "那一年",
                            age: content.thenAgeText, tint: BubuTheme.Color.lav)
             Rectangle().fill(BubuTheme.Color.cream).frame(height: 6)
-            comparisonHalf(image: content.photo, era: "今年",
+            comparisonHalf(image: content.photo, era: content.eraText,
                            label: content.dateText, age: content.ageText,
                            tint: BubuTheme.Color.primary)
             VStack(alignment: .leading, spacing: 8) {
@@ -178,7 +226,7 @@ private struct ShareCardView: View {
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                         .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .minimumScaleFactor(0.85)
                 }
                 signature
             }

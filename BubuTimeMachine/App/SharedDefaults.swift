@@ -352,7 +352,8 @@ nonisolated enum SharedDefaults {
         }
         suite.set(data, forKey: widgetSnapshotKey)
         suite.synchronize()
-        log.notice("widget 快照已写入 name=\(snapshot.name, privacy: .public) birthday=\(snapshot.birthday != nil) avatar=\(snapshot.avatarFileName != nil) photo=\(snapshot.recentPhotoFileName != nil)")
+        // 孩子姓名不进系统日志：unified log 会随 sysdiagnose/诊断分享外带。只记存在性。
+        log.notice("widget 快照已写入 hasName=\(!snapshot.name.isEmpty) birthday=\(snapshot.birthday != nil) avatar=\(snapshot.avatarFileName != nil) photo=\(snapshot.recentPhotoFileName != nil)")
     }
 
     /// 无 UI 写入路径（App Intents / 小组件交互按钮 / Siri）的「写后钩子」：
