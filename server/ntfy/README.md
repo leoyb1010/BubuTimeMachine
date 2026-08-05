@@ -7,6 +7,7 @@
 
 ```bash
 cd server/ntfy
+cp .env.example .env            # 再改成实际 HTTPS 地址
 docker compose up -d
 # 建一个发布/订阅账号（deny-all 模式必须授权）
 docker exec -it bubu-ntfy ntfy user add --role=admin bubu   # 设个密码
@@ -33,8 +34,11 @@ docker exec -it bubu-ntfy ntfy token add bubu                # 生成 token，�
 
 ## 安全
 - 仅 Tailscale 内网可达；`deny-all` + token，未授权不能收发。
+- 若经 Cloudflare Tunnel 暴露，只把 ntfy 绑定在 `127.0.0.1`，由 Tunnel 转发；不要直接开放 8095。
 - 话题名不是安全边界，必须保留 `deny-all`、账号授权和 Tailscale/反向代理访问控制。
 - 告警只含任务类型和健康状态，不含照片、文字、姓名、生日或记录正文。
+- iOS 即时推送会经 `ntfy.sh → Firebase/APNS` 转发 poll request；只包含消息 id 与话题 URL 哈希，
+  正文仍由 iPhone 从自托管服务器拉取。
 
 ## 验证
 mini 上手动发一条，家人手机应立刻收到：

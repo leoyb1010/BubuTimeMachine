@@ -130,6 +130,9 @@ server/ops/healthcheck.sh
 
 `server/ops/healthcheck.sh` 会检查 PocketBase、AI 服务、数据盘剩余空间，以及可选的备份成功时间戳。
 设置 `NTFY_URL/NTFY_TOKEN` 后，失败只推给维护者的 `bubu-ops` 话题；不发送家庭动态或记忆正文。
+生产环境优先设置权限为 `600` 的 `NTFY_TOKEN_FILE`，避免把 token 明文放进 plist。复制
+`com.bubu.healthcheck.plist.example` 后可每小时检查一次；部署时必须主动制造一次无害失败，
+确认 ntfy 收到告警，再恢复正确地址并验证返回码为 0。
 
 每日备份可复制 `server/ops/com.bubu.backup.plist.example` 到 `~/Library/LaunchAgents/`，替换全部
 绝对路径后再加载。macOS 必须让该 LaunchAgent 实际写入一次外接盘；若日志出现

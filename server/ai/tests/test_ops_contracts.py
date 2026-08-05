@@ -59,6 +59,7 @@ def test_healthcheck_supports_backup_age_and_private_ops_alerts():
     assert "Backup is stale" in script
     assert 'NTFY_URL="${NTFY_URL:-}"' in script
     assert "Authorization: Bearer $NTFY_TOKEN" in script
+    assert 'NTFY_TOKEN_FILE="${NTFY_TOKEN_FILE:-}"' in script
 
 
 def test_pb_backup_uses_sqlite_snapshot_and_never_mirror_deletes(tmp_path: Path):
@@ -151,6 +152,40 @@ def test_localhost_ssh_backup_agent_is_noninteractive_and_pinned_to_key():
     assert "IdentitiesOnly=yes" in args
     assert "ConnectTimeout=10" in args
     assert args[-1] == "localhost"
+
+
+def test_ntfy_is_private_pinned_and_does_not_forward_message_body():
+    compose = (REPO_ROOT / "server/ntfy/docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "binwiederhier/ntfy:v2.26.3@sha256:"
+        "081b53dbb20674fcfe05fdb4eb8af9036a2645ef979543d16f7f80803af467b1"
+    ) in compose
+    assert "binwiederhier/ntfy:latest" not in compose
+    assert "NTFY_AUTH_DEFAULT_ACCESS=deny-all" in compose
+    assert 'NTFY_BIND_ADDRESS:-127.0.0.1' in compose
+    assert "NTFY_UPSTREAM_BASE_URL=https://ntfy.sh" in compose
+    assert "iOS 即时通知只向 ntfy.sh 转发 poll id" in compose
+
+
+def test_backup_failure_notification_contains_no_family_data():
+    runner = (REPO_ROOT / "server/ops/run_scheduled_backup.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "PocketBase 自动备份失败，请检查 mini 备份日志。" in runner
+    assert "NTFY_TOKEN_FILE" in runner
+    assert "PB_DATA_DIR" not in runner.split("--data-binary", 1)[1]
+
+
+def test_hourly_healthcheck_uses_token_file_not_inline_secret():
+    path = REPO_ROOT / "server/ops/com.bubu.healthcheck.plist.example"
+    raw = path.read_text(encoding="utf-8")
+    config = plistlib.loads(raw.encode("utf-8"))
+    assert config["StartInterval"] == 3600
+    assert config["RunAtLoad"] is True
+    assert config["EnvironmentVariables"]["NTFY_TOKEN_FILE"]
+    assert "NTFY_TOKEN</key>" not in raw
 
 
 def test_tracked_duplicate_review_was_removed():

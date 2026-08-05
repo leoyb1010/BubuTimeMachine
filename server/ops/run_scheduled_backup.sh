@@ -26,11 +26,28 @@ fi
 while IFS='=' read -r key value || [[ -n "$key" ]]; do
   [[ -z "$key" || "$key" == \#* ]] && continue
   case "$key" in
-    PB_DATA_DIR|MIRROR_DIR|BACKUP_STAMP|LOCK_DIR|WORK_ROOT|RESTIC_REPOSITORY|RESTIC_PASSWORD_FILE)
+    PB_DATA_DIR|MIRROR_DIR|BACKUP_STAMP|LOCK_DIR|WORK_ROOT|RESTIC_REPOSITORY|RESTIC_PASSWORD_FILE|NTFY_URL|NTFY_TOKEN_FILE)
       export "$key=$value"
       ;;
     *) fail "配置包含不允许的键：$key" ;;
   esac
 done < "$CONFIG_FILE"
 
-exec /bin/bash "$SCRIPT_DIR/backup_pb_data.sh"
+if /bin/bash "$SCRIPT_DIR/backup_pb_data.sh"; then
+  exit 0
+else
+  backup_status="$?"
+fi
+
+# 只发送故障类型，不发送数据路径、文件名或家庭内容。告警失败不能掩盖备份失败码。
+if [[ -n "${NTFY_URL:-}" && -f "${NTFY_TOKEN_FILE:-}" ]]; then
+  ntfy_token="$(cat "$NTFY_TOKEN_FILE")"
+  curl -fsS --max-time 8 \
+    -H "Authorization: Bearer $ntfy_token" \
+    -H "Title: 布布服务器 · 自动备份失败" \
+    -H "Tags: warning,computer" \
+    --data-binary "PocketBase 自动备份失败，请检查 mini 备份日志。" \
+    "$NTFY_URL" >/dev/null || true
+  unset ntfy_token
+fi
+exit "$backup_status"

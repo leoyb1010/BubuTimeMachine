@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bubu.healthcheck</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/ABSOLUTE/PATH/BubuTimeMachine/server/ops/healthcheck.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PB_URL</key><string>http://127.0.0.1:8090</string>
+    <key>AI_URL</key><string>http://127.0.0.1:8000</string>
+    <key>DATA_PATH</key><string>/ABSOLUTE/PATH/pocketbase/pb_data</string>
+    <key>MIN_FREE_GB</key><string>20</string>
+    <key>BACKUP_STAMP</key><string>/Users/YOU/Library/Application Support/BubuTimeMachine/backup-success</string>
+    <key>MAX_BACKUP_AGE_HOURS</key><string>30</string>
+    <key>NTFY_URL</key><string>http://127.0.0.1:8095/bubu-ops</string>
+    <key>NTFY_TOKEN_FILE</key><string>/Users/YOU/.config/bubu/ntfy-token</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/BubuTimeMachine/healthcheck.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/BubuTimeMachine/healthcheck-error.log</string>
+</dict>
+</plist>
