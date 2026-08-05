@@ -607,11 +607,13 @@ struct CaptureHomeView: View {
 
     private var litMilestoneCount: Int { milestones.filter(\.isAchieved).count }
     private var latestHeight: Double? {
-        measurements.compactMap(\.heightCm).first ?? latestLegacyGrowthValue(.height)
+        GrowthMeasurementResolver.latestValue(.height, from: measurements)
+        ?? latestLegacyGrowthValue(.height)
     }
 
     private var latestWeight: Double? {
-        measurements.compactMap(\.weightKg).first ?? latestLegacyGrowthValue(.weight)
+        GrowthMeasurementResolver.latestValue(.weight, from: measurements)
+        ?? latestLegacyGrowthValue(.weight)
     }
 
     private func latestLegacyGrowthValue(_ metric: WHOGrowthStandard.Metric) -> Double? {

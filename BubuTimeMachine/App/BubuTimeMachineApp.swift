@@ -69,6 +69,7 @@ struct BubuTimeMachineApp: App {
                     #if DEBUG
                     seedForUITestingIfNeeded()
                     dumpShareCardsIfNeeded()
+                    dumpGrowthAuditIfNeeded()
                     #endif
                     // 只做一次的启动装配（多窗口下 .task 每个 scene 都会跑，需防重）。
                     // 注意：NotificationReplyHandler / BGTask handler / WC 激活已前移到 BubuAppDelegate，
@@ -143,6 +144,49 @@ struct BubuTimeMachineApp: App {
     }
 
     #if DEBUG
+    /// 真机只读诊断探针：把成长测量的数值/时间/来源与当前 widget 快照写进 App Group Documents。
+    /// 不输出姓名、备注、账号或服务器配置；仅在显式 `-uitest-growth-audit` 参数下执行。
+    @MainActor
+    private func dumpGrowthAuditIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("-uitest-growth-audit") else { return }
+        let context = modelContainer.mainContext
+        let descriptor = FetchDescriptor<GrowthMeasurement>(
+            sortBy: [
+                SortDescriptor(\.measuredAt, order: .reverse),
+                SortDescriptor(\.updatedAt, order: .reverse),
+            ]
+        )
+        let measurements = (try? context.fetch(descriptor)) ?? []
+        let rows: [[String: Any]] = measurements.prefix(80).map { item in
+            [
+                "id": item.id.uuidString,
+                "measuredAt": item.measuredAt.timeIntervalSince1970,
+                "heightCm": item.heightCm.map { $0 as Any } ?? NSNull(),
+                "weightKg": item.weightKg.map { $0 as Any } ?? NSNull(),
+                "headCm": item.headCircumferenceCm.map { $0 as Any } ?? NSNull(),
+                "source": item.sourceRaw,
+                "syncState": item.syncStateRaw,
+                "createdAt": item.createdAt.timeIntervalSince1970,
+                "updatedAt": item.updatedAt.timeIntervalSince1970,
+            ]
+        }
+        let snapshot = SharedWidgetSnapshot.make(context: context)
+        let payload: [String: Any] = [
+            "count": measurements.count,
+            "rows": rows,
+            "snapshotHeightCm": snapshot?.latestHeightCm.map { $0 as Any } ?? NSNull(),
+            "snapshotWeightKg": snapshot?.latestWeightKg.map { $0 as Any } ?? NSNull(),
+            "snapshotUpdatedAt": snapshot.map { $0.updatedAt.timeIntervalSince1970 as Any } ?? NSNull(),
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        let directory = BubuStorage.containerURL
+            .appendingPathComponent("Documents", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? data.write(to: directory.appendingPathComponent("growth-audit.json"), options: .atomic)
+    }
+
     /// 视觉探针：`-uitest-sharecard` 启动时把三种分享版式渲染到 Documents，
     /// 供命令行取出来肉眼核验排版（分享卡是唯一会离开这个家的产物，必须眼见为实）。
     @MainActor

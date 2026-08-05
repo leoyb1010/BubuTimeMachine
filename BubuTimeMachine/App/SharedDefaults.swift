@@ -264,17 +264,13 @@ extension SharedWidgetSnapshot {
         return String(trimmed.prefix(maxLength))
     }
 
-    private static func latestNonNil(_ values: [Double]) -> Double? {
-        values.first
-    }
-
     private static func latestHeight(from measurements: [GrowthMeasurement], healthRecords: [HealthRecord]) -> Double? {
-        latestNonNil(measurements.compactMap(\.heightCm))
+        GrowthMeasurementResolver.latestValue(.height, from: measurements)
         ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(GrowthMeasurementExtractor.Metric.height, from: $0) }.first
     }
 
     private static func latestWeight(from measurements: [GrowthMeasurement], healthRecords: [HealthRecord]) -> Double? {
-        latestNonNil(measurements.compactMap(\.weightKg))
+        GrowthMeasurementResolver.latestValue(.weight, from: measurements)
         ?? healthRecords.compactMap { GrowthMeasurementExtractor.value(GrowthMeasurementExtractor.Metric.weight, from: $0) }.first
     }
 }

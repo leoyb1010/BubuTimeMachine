@@ -75,6 +75,81 @@ struct GrowthIntegrityMigrationTests {
         #expect(values.heightCm == nil, "45 已被头围消费，不能被身高复用")
     }
 
+    @Test("同日正式体检覆盖秒级更晚的旧迁移值")
+    func structuredCheckupWinsOverLaterLegacyValueOnSameDay() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let calendar = Calendar(identifier: .gregorian)
+        let day = Date(timeIntervalSince1970: 1_780_100_000)
+
+        let editedCheckup = GrowthMeasurement(measuredAt: day, source: "checkup")
+        editedCheckup.heightCm = 92
+        editedCheckup.weightKg = 13.5
+        editedCheckup.updatedAt = day.addingTimeInterval(86_400)
+
+        let legacyHeight = GrowthMeasurement(
+            measuredAt: day.addingTimeInterval(70), source: "legacy-health")
+        legacyHeight.heightCm = 91
+        let legacyWeight = GrowthMeasurement(
+            measuredAt: day.addingTimeInterval(20), source: "legacy-health")
+        legacyWeight.weightKg = 13
+
+        context.insert(editedCheckup)
+        context.insert(legacyHeight)
+        context.insert(legacyWeight)
+        try context.save()
+        let measurements = try context.fetch(FetchDescriptor<GrowthMeasurement>())
+
+        #expect(GrowthMeasurementResolver.latestValue(
+            .height, from: measurements, calendar: calendar) == 92)
+        #expect(GrowthMeasurementResolver.latestValue(
+            .weight, from: measurements, calendar: calendar) == 13.5)
+    }
+
+    @Test("首页小组件快照与成长曲线共用正式记录优先口径")
+    func widgetAndCurveShareCanonicalGrowthValue() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        let birthday = Date(timeIntervalSince1970: 1_730_000_000)
+        let day = Date(timeIntervalSince1970: 1_780_100_000)
+        context.insert(ChildProfile(name: "布布", birthday: birthday))
+
+        let checkup = GrowthMeasurement(measuredAt: day, source: "checkup")
+        checkup.heightCm = 92
+        checkup.weightKg = 13.5
+        checkup.updatedAt = day.addingTimeInterval(86_400)
+        let fallback = GrowthMeasurement(
+            measuredAt: day.addingTimeInterval(70), source: "health-fallback")
+        fallback.heightCm = 91
+        fallback.weightKg = 13
+        context.insert(checkup)
+        context.insert(fallback)
+        try context.save()
+
+        let snapshot = try #require(SharedWidgetSnapshot.make(context: context))
+        #expect(snapshot.latestHeightCm == 92)
+        #expect(snapshot.latestWeightKg == 13.5)
+
+        let measurements = try context.fetch(FetchDescriptor<GrowthMeasurement>())
+        let monthValues = GrowthMeasurementResolver.valuesByMonth(
+            .height, birthday: birthday, measurements: measurements)
+        #expect(monthValues.values.contains(92))
+        #expect(!monthValues.values.contains(91))
+    }
+
+    @Test("真正晚一天的测量仍然优先于旧日正式记录")
+    func laterDayStillWinsRegardlessOfSource() {
+        let day = Date(timeIntervalSince1970: 1_780_100_000)
+        let checkup = GrowthMeasurement(measuredAt: day, source: "checkup")
+        checkup.heightCm = 92
+        let laterFallback = GrowthMeasurement(
+            measuredAt: day.addingTimeInterval(86_400), source: "legacy-health")
+        laterFallback.heightCm = 93
+
+        #expect(GrowthMeasurementResolver.latestValue(
+            .height, from: [checkup, laterFallback]) == 93)
+    }
+
     // MARK: (b) 回填一次性 / 不复活
 
     @Test("同批健康记录跑两次回填：幂等不新增")

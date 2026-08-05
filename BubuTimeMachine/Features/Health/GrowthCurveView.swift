@@ -11,6 +11,7 @@ struct GrowthCurveView: View {
     @Query(sort: \GrowthMeasurement.measuredAt) private var structuredMeasurements: [GrowthMeasurement]
 
     @State private var metric: WHOGrowthStandard.Metric = .height
+    @State private var showGrowthRecorder = false
 
     init(initialMetric: WHOGrowthStandard.Metric = .height) {
         _metric = State(initialValue: initialMetric)
@@ -23,6 +24,7 @@ struct GrowthCurveView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 metricPicker
+                updateDataButton
                 chartCard
                 latestReading
                 disclaimer
@@ -32,6 +34,9 @@ struct GrowthCurveView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("成长曲线")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showGrowthRecorder) {
+            HealthRecordSheet(kind: .checkup)
+        }
     }
 
     private var metricPicker: some View {
@@ -47,26 +52,54 @@ struct GrowthCurveView: View {
         WHOGrowthStandard.bands(metric: metric, gender: profile?.gender)
     }
 
+    private var updateDataButton: some View {
+        Button {
+            showGrowthRecorder = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill")
+                    .font(BubuTheme.Font.scaled(18, weight: .bold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("更新数据")
+                        .font(BubuTheme.Font.body.weight(.bold))
+                    Text("记录新的身高、体重或头围")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(BubuTheme.Font.caption.weight(.bold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 60)
+            .background(theme.opacity(0.10), in: RoundedRectangle(
+                cornerRadius: BubuTheme.Radius.card, style: .continuous
+            ))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打开体检记录，可以填写身高、体重和头围")
+    }
+
     /// 布布的实测点：(月龄, 数值)，每个月龄唯一——图表点 id 不再重复。
     /// 结构化 GrowthMeasurement 优先（同月取最新一条）；旧 HealthRecord 文本解析只补结构化缺失的月份。
     private var measurements: [(month: Int, value: Double)] {
         guard let profile else { return [] }
         let cal = Calendar.current
 
-        var merged: [Int: Double] = [:]
-        // structuredMeasurements 按 measuredAt 升序：后写覆盖前写 = 同月取最新
-        for measurement in structuredMeasurements {
-            let value: Double?
-            switch metric {
-            case .height: value = measurement.heightCm
-            case .weight: value = measurement.weightKg
-            case .head: value = measurement.headCircumferenceCm
-            }
-            guard let value else { continue }
-            let month = cal.dateComponents([.month], from: profile.birthday, to: measurement.measuredAt).month ?? 0
-            guard month >= 0, month <= 60 else { continue }
-            merged[month] = value
+        let resolvedMetric: GrowthMeasurementResolver.Metric
+        switch metric {
+        case .height: resolvedMetric = .height
+        case .weight: resolvedMetric = .weight
+        case .head: resolvedMetric = .head
         }
+        var merged = GrowthMeasurementResolver.valuesByMonth(
+            resolvedMetric,
+            birthday: profile.birthday,
+            measurements: structuredMeasurements,
+            calendar: cal
+        )
 
         let structuredMonths = Set(merged.keys)
         for record in records {
