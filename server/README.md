@@ -22,14 +22,20 @@
   ```
 - **第二块盘做备份（重要！）**：单盘 = 单点故障，存的是布布的一生，必须定期备份。
   ```bash
-  # 示例：只做日期快照，不用 --delete 覆盖历史备份
-  SNAPSHOT="/Volumes/BubuBackup/pb_data_snapshots/$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$SNAPSHOT"
-  rsync -a /Volumes/BubuSSD/pb_data/ "$SNAPSHOT/"
+  PB_DATA_DIR=/path/to/pb_data \
+  MIRROR_DIR=/Volumes/BubuBackup/BubuTimeMachine/pb_data_mirror \
+  BACKUP_STAMP=~/Library/Application\ Support/BubuTimeMachine/backup-success \
+  ./ops/backup_pb_data.sh
+
+  ./ops/verify_pb_backup.sh /Volumes/BubuBackup/BubuTimeMachine/pb_data_mirror
   ```
-  更推荐在 PocketBase 管理后台开启 **Settings → Backups** 定时备份，并把备份放到另一块盘或 S3 兼容存储。
-  PocketBase 官方说明：内置 backup 会生成完整 `pb_data` ZIP 快照，生成期间服务会临时只读；大于 2GB 的数据目录建议改用 SQLite `.backup` + 文件增量备份策略。
-  不要把 `rsync --delete` 镜像当唯一备份，否则误删、勒索或同步损坏会被原样复制到备份盘。
+  脚本使用 SQLite 在线 backup API，不复制活跃的 WAL；文件做两次不带 `--delete` 的增量同步，
+  目标目录会生成 SHA-256 清单。设置 `RESTIC_REPOSITORY` 与 `RESTIC_PASSWORD_FILE` 后，
+  同一轮还会生成加密、可追溯的异地 restic 快照并执行仓库校验。
+
+  推荐最终结构：mini 内置盘生产数据 + 外接 SSD 镜像 + Cloudflare R2/NAS restic 历史快照。
+  PocketBase 官方说明：内置 ZIP backup 在生成期间会临时只读；2GB 以上数据更适合 SQLite
+  在线 backup + 文件增量策略。不要把带 `--delete` 的镜像当唯一备份，否则误删也会被同步。
 
 ---
 
@@ -124,6 +130,10 @@ server/ops/healthcheck.sh
 
 `server/ops/healthcheck.sh` 会检查 PocketBase、AI 服务、数据盘剩余空间，以及可选的备份成功时间戳。
 设置 `NTFY_URL/NTFY_TOKEN` 后，失败只推给维护者的 `bubu-ops` 话题；不发送家庭动态或记忆正文。
+
+每日备份可复制 `server/ops/com.bubu.backup.plist.example` 到 `~/Library/LaunchAgents/`，替换全部
+绝对路径后再加载。macOS 必须让该 LaunchAgent 实际写入一次外接盘；若日志出现
+`Operation not permitted`，先授予完全磁盘访问权限，不能把“父目录可写”当成备份成功。
 
 ---
 
