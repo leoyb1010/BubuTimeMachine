@@ -117,6 +117,26 @@ final class MockAIService: AIService {
         throw APIError.server(503, "语义搜索需要配置家中的 AI 服务")
     }
 
+    func latestWeeklyReport() async throws -> WeeklyReport? {
+        throw APIError.server(503, "布布周报需要配置家中的 AI 服务")
+    }
+
+    func weeklyReportHistory() async throws -> [WeeklyReport] {
+        throw APIError.server(503, "布布周报需要配置家中的 AI 服务")
+    }
+
+    func generateWeeklyReport() async throws -> WeeklyReport {
+        throw APIError.server(503, "布布周报需要配置家中的 AI 服务")
+    }
+
+    func archiveWeeklyReport(id: String) async throws -> WeeklyReport {
+        throw APIError.server(503, "布布周报需要配置家中的 AI 服务")
+    }
+
+    func weeklyReportEvents() -> AsyncStream<String> {
+        AsyncStream { $0.finish() }
+    }
+
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
         // 无自托管服务器时不支持真实合成：明确抛错，UI 保留本地预览草稿。

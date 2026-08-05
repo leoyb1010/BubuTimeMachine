@@ -181,6 +181,12 @@ struct AIStudioHomeView: View {
                            tint: BubuTheme.Color.butter) {
                 GrowthReportView()
             }
+            capabilityTile(icon: "newspaper.fill",
+                           title: "布布周报",
+                           subtitle: "这一周的小故事",
+                           tint: BubuTheme.Color.peach) {
+                WeeklyReportView()
+            }
         }
     }
 

@@ -21,6 +21,7 @@ final class AppEnvironment {
     let theme: ThemeManager
     let photoAnalyzer: PhotoAnalyzer
     let locationService: LocationService
+    private var weeklyReportMonitor: Task<Void, Never>?
 
     /// 当前身份（成员 id）。nil 表示尚未选择/未完成首启引导。
     var currentMemberId: UUID? {
@@ -122,6 +123,7 @@ final class AppEnvironment {
         installThumbnailBackfill(context: context)
         refreshWidgetSnapshot(context: context)
         logStoreIntegrity(context: context)
+        startWeeklyReportMonitor()
     }
 
     /// store 建成、启动装配完成后做一次轻量完整性统计：各主要实体 fetchCount 写入日志。
@@ -230,12 +232,40 @@ final class AppEnvironment {
         syncEngine.setClient(api)
         syncEngine.attach(context: context)
         syncEngine.start()
+        startWeeklyReportMonitor()
     }
 
     /// AI 设置离开页面时只重建 AI 客户端；不要为改一个语义开关重启同步引擎。
     func reloadAIService() {
         self.aiService = Self.makeAIService(config: config)
         self.aiServiceRevision += 1
+        startWeeklyReportMonitor()
+    }
+
+    private func startWeeklyReportMonitor() {
+        weeklyReportMonitor?.cancel()
+        guard config.isAIConfigured else { return }
+        let service = aiService
+        let revision = aiServiceRevision
+        weeklyReportMonitor = Task { @MainActor in
+            var retrySeconds = 15
+            while !Task.isCancelled {
+                var receivedEvent = false
+                for await _ in service.weeklyReportEvents() {
+                    guard !Task.isCancelled else { return }
+                    receivedEvent = true
+                    if let report = try? await service.latestWeeklyReport() {
+                        guard !Task.isCancelled, aiServiceRevision == revision else { return }
+                        await WeeklyReportNotifier.notifyIfNew(report)
+                    }
+                }
+                guard !Task.isCancelled, aiServiceRevision == revision else { return }
+                // 正常收到过事件说明链路可用；永久错误则指数退避，避免弱网/错地址持续唤醒。
+                let delay = receivedEvent ? 15 : retrySeconds
+                retrySeconds = receivedEvent ? 15 : min(retrySeconds * 2, 300)
+                try? await Task.sleep(for: .seconds(delay))
+            }
+        }
     }
 }
 

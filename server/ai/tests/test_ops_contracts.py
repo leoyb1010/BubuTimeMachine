@@ -17,6 +17,14 @@ def test_automation_collections_are_service_only():
     assert "idx_automation_jobs_jobKey" in migration
     assert "idx_derived_artifacts_artifactKey" in migration
 
+    notification_migration = (
+        REPO_ROOT
+        / "server/pocketbase/migrations/1700000013_add_weekly_notification_state.js"
+    ).read_text(encoding="utf-8")
+    assert "new DateField({ name: 'notifiedAt' })" in notification_migration
+    assert "if (!existing)" in notification_migration
+    assert "removeById(field.id)" in notification_migration
+
 
 def test_ntfy_hook_only_reports_dead_letters_without_memory_content():
     hook = (REPO_ROOT / "server/pocketbase/pb_hooks/notify.pb.js").read_text(

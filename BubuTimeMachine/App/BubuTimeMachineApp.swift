@@ -400,6 +400,12 @@ struct RootView: View {
                 .transition(.opacity)
                 // 升级后首次启动：弹出本版更新内容（全新安装不弹；老用户升级会弹）。
                 .task {
+                    #if DEBUG
+                    // 视觉探针必须直达目标页面；否则升级说明会遮住截图，造成误判。
+                    guard !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-uitest-") }) else {
+                        return
+                    }
+                    #endif
                     if WhatsNewGate.shouldPresent(isReturningUser: env.hasCompletedOnboarding) {
                         // 略等 UI 稳定再弹，避免与首页加载抢呈现。
                         try? await Task.sleep(for: .milliseconds(600))
@@ -431,6 +437,8 @@ struct RootView: View {
             NavigationStack { GrowthMovieView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-report") {
             NavigationStack { GrowthReportView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-weekly-report") {
+            NavigationStack { WeeklyReportView(previewReport: .visualSample) }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-settings") {
             NavigationStack { SettingsView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-advanced-settings") {

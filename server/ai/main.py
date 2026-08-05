@@ -18,10 +18,13 @@
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import secrets
 import time
+import httpx
 from collections import Counter, defaultdict, deque
 from datetime import datetime
 from pathlib import Path
@@ -29,20 +32,22 @@ from threading import Lock
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from llm import LLMClient, LLMError
 import movie_render
 from semantic_index import SemanticIndex
 from semantic_model import MobileCLIPEncoder, SemanticModelUnavailable
+from memory_query import PocketBaseMemoryStore
+from weekly_report import WeeklyReportService, WeeklyReportUnavailable
 
 logging.basicConfig(
     level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="1.2.0")
+app = FastAPI(title="布布时光机 AI 服务", version="1.3.0")
 
 llm = LLMClient()
 
@@ -192,6 +197,43 @@ class SemanticSearchResp(BaseModel):
     hits: list[SemanticSearchHit] = Field(default_factory=list)
 
 
+class WeeklyReportSource(BaseModel):
+    source_id: str
+    collection: str
+    record_id: str
+    local_id: str
+    happened_at: str
+    title: str
+    excerpt: str
+    kind: str
+
+
+class WeeklyReportSection(BaseModel):
+    kind: str
+    title: str
+    text: str
+    sourceIds: list[str] = Field(default_factory=list)
+
+
+class WeeklyReportResp(BaseModel):
+    id: str
+    artifact_key: str
+    status: str
+    title: str
+    summary: str
+    week_start: str
+    week_end: str
+    generated_at: str
+    model_version: str
+    content_hash: str
+    sections: list[WeeklyReportSection] = Field(default_factory=list)
+    source_refs: list[WeeklyReportSource] = Field(default_factory=list)
+
+
+class WeeklyReportArchiveReq(BaseModel):
+    artifact_id: str = Field(..., min_length=1, max_length=64)
+
+
 def _semantic_enabled() -> bool:
     return os.environ.get("SEMANTIC_SEARCH_ENABLED", "false").lower() in {
         "1", "true", "yes", "on"
@@ -212,6 +254,28 @@ def _semantic_components() -> tuple[SemanticIndex, MobileCLIPEncoder]:
                 path = Path(__file__).resolve().parent / path
             _semantic_index = SemanticIndex(path.resolve(), _semantic_encoder.model_version)
     return _semantic_index, _semantic_encoder
+
+
+def _weekly_family_id() -> str:
+    family_id = os.environ.get("WEEKLY_REPORT_FAMILY_ID", "").strip()
+    if not family_id:
+        raise HTTPException(status_code=503, detail="服务器尚未绑定周报家庭。")
+    return family_id
+
+
+def _weekly_report_call(action):
+    try:
+        with PocketBaseMemoryStore() as store:
+            service = WeeklyReportService(store, llm)
+            return action(service)
+    except WeeklyReportUnavailable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        logger.exception("weekly report PocketBase request failed")
+        raise HTTPException(status_code=503, detail="周报暂时无法读取家庭档案。") from exc
+    except RuntimeError as exc:
+        logger.warning("weekly report unavailable: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="周报服务尚未准备好。") from exc
 
 
 # ---------- 路由 ----------
@@ -375,6 +439,83 @@ def semantic_search(req: SemanticSearchReq):
             )
             for hit in hits
         ],
+    )
+
+
+@app.get("/weekly-report/latest", response_model=WeeklyReportResp,
+         dependencies=[Depends(require_api_key)])
+def weekly_report_latest():
+    """返回服务端派生的最新周报。不存在时用 404，客户端显示可理解的空状态。"""
+    family_id = _weekly_family_id()
+    result = _weekly_report_call(lambda service: service.latest(family_id))
+    if result is None:
+        raise HTTPException(status_code=404, detail="还没有生成周报。")
+    return WeeklyReportResp(**result)
+
+
+@app.get("/weekly-report/history", response_model=list[WeeklyReportResp],
+         dependencies=[Depends(require_api_key)])
+def weekly_report_history():
+    """最近一年的周报，含已确认归档项；家庭只由服务端绑定决定。"""
+    family_id = _weekly_family_id()
+    result = _weekly_report_call(lambda service: service.history(family_id, 52))
+    return [WeeklyReportResp(**item) for item in result]
+
+
+@app.post("/weekly-report/generate", response_model=WeeklyReportResp,
+          dependencies=[Depends(require_api_key)])
+def weekly_report_generate():
+    """幂等生成上一个完整自然周；只写派生层，不改家庭事实。"""
+    family_id = _weekly_family_id()
+    child_name = os.environ.get("WEEKLY_REPORT_CHILD_NAME", "布布").strip() or "布布"
+    result = _weekly_report_call(
+        lambda service: service.generate(family_id, child_name)
+    )
+    return WeeklyReportResp(**result)
+
+
+@app.post("/weekly-report/archive", response_model=WeeklyReportResp,
+          dependencies=[Depends(require_api_key)])
+def weekly_report_archive(req: WeeklyReportArchiveReq):
+    """显式确认后把周报标为已归档；仍是可重建作品，不写入事实集合。"""
+    family_id = _weekly_family_id()
+    result = _weekly_report_call(
+        lambda service: service.archive(family_id, req.artifact_id)
+    )
+    return WeeklyReportResp(**result)
+
+
+@app.get("/weekly-report/events", dependencies=[Depends(require_api_key)])
+async def weekly_report_events():
+    """周报轻量 SSE：只发送派生产物 id，不把家庭正文放进事件流。"""
+    family_id = _weekly_family_id()
+
+    async def stream():
+        last_id = ""
+        while True:
+            try:
+                def fetch_latest():
+                    with PocketBaseMemoryStore() as store:
+                        return WeeklyReportService(store, llm).latest(family_id)
+
+                latest = await asyncio.to_thread(fetch_latest)
+                artifact_id = str((latest or {}).get("id") or "")
+                if artifact_id and artifact_id != last_id:
+                    last_id = artifact_id
+                    data = json.dumps({"id": artifact_id}, separators=(",", ":"))
+                    yield "event: weekly-report\ndata: %s\n\n" % data
+                else:
+                    yield ": keep-alive\n\n"
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception("weekly report SSE poll failed")
+                yield ": temporarily-unavailable\n\n"
+            await asyncio.sleep(15)
+
+    return StreamingResponse(
+        stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

@@ -66,6 +66,75 @@ final class BubuAIService: AIService, @unchecked Sendable {
         return try JSONDecoder().decode(SemanticSearchResponse.self, from: data)
     }
 
+    func latestWeeklyReport() async throws -> WeeklyReport? {
+        let url = baseURL.appendingPathComponent("weekly-report/latest")
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse, http.statusCode == 404 { return nil }
+        try Self.check(resp, data)
+        return try JSONDecoder().decode(WeeklyReport.self, from: data)
+    }
+
+    func weeklyReportHistory() async throws -> [WeeklyReport] {
+        let url = baseURL.appendingPathComponent("weekly-report/history")
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode([WeeklyReport].self, from: data)
+    }
+
+    func generateWeeklyReport() async throws -> WeeklyReport {
+        try await weeklyReportPost("weekly-report/generate", body: [:])
+    }
+
+    func archiveWeeklyReport(id: String) async throws -> WeeklyReport {
+        try await weeklyReportPost("weekly-report/archive", body: ["artifact_id": id])
+    }
+
+    func weeklyReportEvents() -> AsyncStream<String> {
+        AsyncStream { continuation in
+            let task = Task {
+                do {
+                    let url = baseURL.appendingPathComponent("weekly-report/events")
+                    var req = URLRequest(url: url)
+                    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    applyAuth(&req)
+                    req.timeoutInterval = 0
+                    let (bytes, response) = try await session.bytes(for: req)
+                    try Self.check(response, Data())
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: "),
+                              let data = line.dropFirst(6).data(using: .utf8),
+                              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let id = object["id"] as? String, !id.isEmpty else { continue }
+                        continuation.yield(id)
+                    }
+                } catch {
+                    // 前后台切换、网络变化或 mini 重启都会断流；上层带退避自动重连。
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func weeklyReportPost(_ path: String, body: [String: Any]) async throws -> WeeklyReport {
+        let url = baseURL.appendingPathComponent(path)
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&req)
+        req.timeoutInterval = 90
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode(WeeklyReport.self, from: data)
+    }
+
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
         let body: [String: Any] = [

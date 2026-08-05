@@ -25,9 +25,21 @@ cp .env.example .env   # 填 DEEPSEEK_API_KEY 与 AI_API_KEY（必填，fail-clo
 | POST | `/movie-narration` | 年度成长电影旁白稿 |
 | POST | `/parse-natural-capture` | 一句话 → 多条结构化记录（疫苗/成长/餐食/睡眠…）；LLM 输出服务端逐条清洗，敏感域强制 `needs_confirmation` |
 | POST | `/transcribe` | 语音转写（需 faster-whisper） |
+| GET | `/weekly-report/latest` | 读取最新布布周报 |
+| GET | `/weekly-report/history` | 读取最近一年的往期周报（含已归档） |
+| POST | `/weekly-report/generate` | 幂等生成上一个完整自然周；证据不足不生成 |
+| POST | `/weekly-report/archive` | 用户确认后只归档派生产物，不改事实集合 |
+| GET | `/weekly-report/events` | 仅发送新周报 id 的 SSE，不承载家庭正文 |
 | GET | `/health` | 健康检查；带正确 `X-API-Key` 时附 `parse_stats`（解析 warnings 累计，监控 LLM 输出漂移） |
 
 业务路由一律要求 `X-API-Key` 请求头 + 每 IP 限流（`AI_RATE_LIMIT_PER_MINUTE`，默认 30/分钟）。
+
+## 周日晚自动生成
+
+`.env` 至少配置 `WEEKLY_REPORT_FAMILY_ID` 和 PocketBase worker 凭证。先手动运行
+`./start_weekly_report.sh` 验证，再把 `server/ops/com.bubu.weekly-report.plist.example`
+替换成绝对路径后交给 launchd。默认每周日 20:30 执行；重复执行命中同一个
+`artifactKey`，不会生成两份。可选 ntfy 通知只发送“已生成”和产物 id，不发送家庭正文。
 
 ## 测试
 

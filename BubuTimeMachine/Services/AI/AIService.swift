@@ -17,12 +17,76 @@ protocol AIService: Sendable {
     func ask(question: String, childName: String, records: [QAContextRecord]) async throws -> QAAnswer
     /// 在家庭自托管索引里同时搜索照片画面与已有文字；不上传照片，返回可追溯到本地记录的来源。
     func semanticSearch(query: String, limit: Int) async throws -> SemanticSearchResponse
+    /// 服务端派生周报：每段都带来源，收进档案只改变派生产物状态。
+    func latestWeeklyReport() async throws -> WeeklyReport?
+    func weeklyReportHistory() async throws -> [WeeklyReport]
+    func generateWeeklyReport() async throws -> WeeklyReport
+    func archiveWeeklyReport(id: String) async throws -> WeeklyReport
+    /// 只推送新周报 id 的 SSE，不承载正文。
+    func weeklyReportEvents() -> AsyncStream<String>
     /// 成长电影服务端合成：照片本就同步在家庭自己的服务器，App 只传【本机照片 URL】。
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus
     func movieRenderStatus(jobId: String) async throws -> MovieRenderStatus
     /// 下载合成好的成片到本地临时文件，供播放/分享。
     func downloadRenderedMovie(jobId: String) async throws -> URL
+}
+
+// MARK: - 布布周报
+struct WeeklyReportSource: Codable, Sendable, Equatable, Identifiable {
+    let sourceId: String
+    let collection: String
+    let recordId: String
+    let localId: String
+    let happenedAt: String
+    let title: String
+    let excerpt: String
+    let kind: String
+
+    var id: String { sourceId }
+
+    enum CodingKeys: String, CodingKey {
+        case collection, title, excerpt, kind
+        case sourceId = "source_id"
+        case recordId = "record_id"
+        case localId = "local_id"
+        case happenedAt = "happened_at"
+    }
+}
+
+struct WeeklyReportSection: Codable, Sendable, Equatable, Identifiable {
+    let kind: String
+    let title: String
+    let text: String
+    let sourceIds: [String]
+
+    var id: String { kind }
+}
+
+struct WeeklyReport: Codable, Sendable, Equatable, Identifiable {
+    let id: String
+    let artifactKey: String
+    let status: String
+    let title: String
+    let summary: String
+    let weekStart: String
+    let weekEnd: String
+    let generatedAt: String
+    let modelVersion: String
+    let contentHash: String
+    let sections: [WeeklyReportSection]
+    let sourceRefs: [WeeklyReportSource]
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, title, summary, sections
+        case artifactKey = "artifact_key"
+        case weekStart = "week_start"
+        case weekEnd = "week_end"
+        case generatedAt = "generated_at"
+        case modelVersion = "model_version"
+        case contentHash = "content_hash"
+        case sourceRefs = "source_refs"
+    }
 }
 
 // MARK: - 语义搜图
