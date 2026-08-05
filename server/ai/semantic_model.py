@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from threading import Lock
 from typing import Sequence
@@ -43,16 +44,32 @@ class MobileCLIPEncoder:
                 )
             try:
                 import torch
-                import mobileclip
+                # Apple MobileCLIP 当前仍从 timm 的兼容命名空间导入；仅压掉这一条已知
+                # 上游 FutureWarning，其他依赖/运行告警继续暴露。
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Importing from timm.models.layers is deprecated.*",
+                        category=FutureWarning,
+                    )
+                    import mobileclip
             except ImportError as exc:
                 raise SemanticModelUnavailable(
                     "未安装 MobileCLIP 可选依赖，请运行 install_semantic_model.sh"
                 ) from exc
 
-            model, _, preprocess = mobileclip.create_model_and_transforms(
-                self.model_name, pretrained=str(self.checkpoint)
-            )
-            tokenizer = mobileclip.get_tokenizer(self.model_name)
+            # 上游 0.1.0 读取内置 JSON 时未用 with 关闭文件；只压掉指向其 configs
+            # 目录的 ResourceWarning，模型/权重/推理告警仍照常暴露。
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="unclosed file .*mobileclip/configs/.*\\.json.*",
+                    category=ResourceWarning,
+                )
+                model, _, preprocess = mobileclip.create_model_and_transforms(
+                    self.model_name, pretrained=str(self.checkpoint)
+                )
+                tokenizer = mobileclip.get_tokenizer(self.model_name)
             device = "mps" if torch.backends.mps.is_available() else "cpu"
             model = model.eval().to(device)
             self._torch = torch

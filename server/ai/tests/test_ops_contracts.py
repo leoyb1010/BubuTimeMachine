@@ -131,6 +131,22 @@ def test_restic_retention_is_versioned_without_automatic_prune():
     assert "restic prune" not in script
 
 
+def test_semantic_runtime_is_locked_and_skips_training_dependencies():
+    installer = (REPO_ROOT / "server/ai/install_semantic_model.sh").read_text(
+        encoding="utf-8"
+    )
+    lock = (REPO_ROOT / "server/ai/requirements-semantic.lock.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "requirements-semantic.lock.txt" in installer
+    assert "pip install --no-deps" in installer
+    assert "torch==2.8.0" in lock
+    assert "urllib3==1.26.20" in lock
+    assert "datasets==" not in lock
+    assert "clip-benchmark==" not in lock
+    assert "pycocoevalcap==" not in lock
+
+
 def test_backup_launch_agent_runs_daily_without_embedded_secrets():
     path = REPO_ROOT / "server/ops/com.bubu.backup.plist.example"
     raw = path.read_text(encoding="utf-8")

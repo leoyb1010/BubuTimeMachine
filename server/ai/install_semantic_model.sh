@@ -10,7 +10,9 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   exit 1
 fi
 
-"$VENV_DIR/bin/python" -m pip install -r "$SCRIPT_DIR/requirements-semantic.txt"
+"$VENV_DIR/bin/python" -m pip install -r "$SCRIPT_DIR/requirements-semantic.lock.txt"
+"$VENV_DIR/bin/python" -m pip install --no-deps \
+  "git+https://github.com/apple/ml-mobileclip.git@aecfb5453d022e9deff12f81a150ea8f35194baa"
 mkdir -p "$MODEL_DIR"
 
 CHECKPOINT="$MODEL_DIR/mobileclip_s0.pt"
