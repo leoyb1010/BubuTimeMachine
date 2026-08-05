@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 import plistlib
+import hashlib
+import json
+import socket
 import sqlite3
 import subprocess
 
@@ -186,6 +189,94 @@ def test_hourly_healthcheck_uses_token_file_not_inline_secret():
     assert config["RunAtLoad"] is True
     assert config["EnvironmentVariables"]["NTFY_TOKEN_FILE"]
     assert "NTFY_TOKEN</key>" not in raw
+
+
+def test_restore_drill_checks_files_and_starts_isolated_server(tmp_path: Path):
+    backup = tmp_path / "backup"
+    storage = backup / "storage/pbc_media/r1"
+    storage.mkdir(parents=True)
+    (storage / "photo.jpg").write_bytes(b"photo-bytes")
+    database = backup / "data.db"
+    fields = json.dumps([{"name": "file", "type": "file"}])
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "CREATE TABLE _collections (id TEXT, system INTEGER, name TEXT, fields TEXT)"
+        )
+        for collection_id, name, schema in (
+            ("pbc_entries", "entries", "CREATE TABLE entries (id TEXT, isDeleted INTEGER)"),
+            (
+                "pbc_media",
+                "media",
+                "CREATE TABLE media (id TEXT, file TEXT, isDeleted INTEGER)",
+            ),
+            (
+                "pbc_growth",
+                "growthmeasurements",
+                "CREATE TABLE growthmeasurements (id TEXT, isDeleted INTEGER)",
+            ),
+            (
+                "pbc_health",
+                "healthrecords",
+                "CREATE TABLE healthrecords (id TEXT, isDeleted INTEGER)",
+            ),
+        ):
+            db.execute(schema)
+            db.execute(
+                "INSERT INTO _collections VALUES (?, 0, ?, ?)",
+                (collection_id, name, fields if name == "media" else "[]"),
+            )
+        db.execute("INSERT INTO entries VALUES ('e1', 0)")
+        db.execute("INSERT INTO media VALUES ('r1', 'photo.jpg', 0)")
+
+    digest = hashlib.sha256(database.read_bytes()).hexdigest()
+    (backup / "backup-manifest.json").write_text(
+        json.dumps(
+            {
+                "completedAtUTC": "test",
+                "databases": {
+                    "data.db": {"bytes": database.stat().st_size, "sha256": digest}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    fake_pb = tmp_path / "pocketbase"
+    fake_pb.write_text(
+        """#!/usr/bin/env python3
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200 if self.path == '/api/health' else 404)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+HTTPServer(('127.0.0.1', int(os.environ['RESTORE_DRILL_FAKE_PORT'])), Handler).serve_forever()
+""",
+        encoding="utf-8",
+    )
+    fake_pb.chmod(0o700)
+    script = REPO_ROOT / "server/ops/restore-drill.sh"
+    env = os.environ | {
+        "POCKETBASE_BIN": str(fake_pb),
+        "RESTORE_DRILL_PORT": str(port),
+        "RESTORE_DRILL_FAKE_PORT": str(port),
+    }
+    result = subprocess.run(
+        ["bash", str(script), str(backup)],
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RESTORE_DRILL_OK" in result.stdout
+    assert "files=1" in result.stdout
 
 
 def test_tracked_duplicate_review_was_removed():

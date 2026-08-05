@@ -33,9 +33,19 @@
   目标目录会生成 SHA-256 清单。设置 `RESTIC_REPOSITORY` 与 `RESTIC_PASSWORD_FILE` 后，
   同一轮还会生成加密、可追溯的异地 restic 快照并执行仓库校验。
 
-  推荐最终结构：mini 内置盘生产数据 + 外接 SSD 镜像 + Cloudflare R2/NAS restic 历史快照。
+推荐最终结构：mini 内置盘生产数据 + 外接 SSD 镜像 + Cloudflare R2/NAS restic 历史快照。
   PocketBase 官方说明：内置 ZIP backup 在生成期间会临时只读；2GB 以上数据更适合 SQLite
   在线 backup + 文件增量策略。不要把带 `--delete` 的镜像当唯一备份，否则误删也会被同步。
+
+半年恢复演练使用隔离端口，不覆盖生产目录：
+
+```bash
+POCKETBASE_BIN=/absolute/path/pocketbase \
+  ./ops/restore-drill.sh /Volumes/BubuBackup/BubuTimeMachine/pb_data_mirror
+```
+
+脚本会校验清单和 SQLite、遍历全部 PocketBase 文件引用、抽读媒体头尾，再从临时副本启动
+独立 PocketBase。只有输出 `RESTORE_DRILL_OK` 才算演练通过。
 
 ---
 
