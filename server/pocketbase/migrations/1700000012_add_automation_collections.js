@@ -1,5 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 // 布布时光机 · 派生任务与作品集合
+// 0012：生产 mini 已有历史 0011_add_autodate_fields.js，绝不能复用同一迁移序号。
 //
 // 安全边界：两张表均不向家庭客户端开放。所有 API rule 保持 null，只有 PocketBase
 // superuser / 服务端 worker 可以读写；照片索引和 AI 产物不能被普通 App 账号枚举或篡改。

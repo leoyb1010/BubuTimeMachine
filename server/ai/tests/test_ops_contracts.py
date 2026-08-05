@@ -7,7 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def test_automation_collections_are_service_only():
     migration = (
         REPO_ROOT
-        / "server/pocketbase/migrations/1700000011_add_automation_collections.js"
+        / "server/pocketbase/migrations/1700000012_add_automation_collections.js"
     ).read_text(encoding="utf-8")
 
     assert "name: 'automation_jobs'" in migration
@@ -24,6 +24,15 @@ def test_automation_collections_are_service_only():
     assert "new DateField({ name: 'notifiedAt' })" in notification_migration
     assert "if (!existing)" in notification_migration
     assert "removeById(field.id)" in notification_migration
+
+
+def test_migration_numbers_are_unique_and_preserve_production_autodate_slot():
+    migration_dir = REPO_ROOT / "server/pocketbase/migrations"
+    files = sorted(migration_dir.glob("*.js"))
+    numbers = [path.name.split("_", 1)[0] for path in files]
+    assert len(numbers) == len(set(numbers))
+    assert not (migration_dir / "1700000011_add_automation_collections.js").exists()
+    assert (migration_dir / "1700000012_add_automation_collections.js").exists()
 
 
 def test_ntfy_hook_only_reports_dead_letters_without_memory_content():
