@@ -122,6 +122,15 @@ def test_pb_backup_uses_sqlite_snapshot_and_never_mirror_deletes(tmp_path: Path)
     assert "SHA-256" in rejected.stderr
 
 
+def test_restic_retention_is_versioned_without_automatic_prune():
+    script = (REPO_ROOT / "server/ops/backup_pb_data.sh").read_text(encoding="utf-8")
+    assert "--keep-daily 14" in script
+    assert "--keep-weekly 8" in script
+    assert "--keep-monthly 24" in script
+    assert "--keep-yearly 18" in script
+    assert "restic prune" not in script
+
+
 def test_backup_launch_agent_runs_daily_without_embedded_secrets():
     path = REPO_ROOT / "server/ops/com.bubu.backup.plist.example"
     raw = path.read_text(encoding="utf-8")

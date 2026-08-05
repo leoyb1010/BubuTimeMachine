@@ -31,7 +31,9 @@
   ```
   脚本使用 SQLite 在线 backup API，不复制活跃的 WAL；文件做两次不带 `--delete` 的增量同步，
   目标目录会生成 SHA-256 清单。设置 `RESTIC_REPOSITORY` 与 `RESTIC_PASSWORD_FILE` 后，
-  同一轮还会生成加密、可追溯的异地 restic 快照并执行仓库校验。
+同一轮还会生成加密、可追溯的异地 restic 快照并执行仓库校验。
+默认保留每日 14 份、每周 8 份、每月 24 份、每年 18 份；`forget` 只移除过期快照，
+不在每日任务里自动 `prune`，避免一次清理失败影响当天备份。空间维护应单独演练后执行。
 
 推荐最终结构：mini 内置盘生产数据 + 外接 SSD 镜像 + Cloudflare R2/NAS restic 历史快照。
   PocketBase 官方说明：内置 ZIP backup 在生成期间会临时只读；2GB 以上数据更适合 SQLite

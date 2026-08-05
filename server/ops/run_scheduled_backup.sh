@@ -6,6 +6,7 @@ set -euo pipefail
 
 CONFIG_FILE="${BUBU_BACKUP_CONFIG:-${HOME:?}/.config/bubu/backup.env}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 fail() {
   printf '定时备份启动失败：%s\n' "$1" >&2

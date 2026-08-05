@@ -147,6 +147,11 @@ if [[ -n "$RESTIC_REPOSITORY" ]]; then
   [[ -f "$RESTIC_PASSWORD_FILE" ]] || fail "RESTIC_PASSWORD_FILE 不存在"
   export RESTIC_REPOSITORY RESTIC_PASSWORD_FILE
   restic backup "$MIRROR_DIR" --tag bubu-pocketbase --tag "$timestamp"
+  restic forget \
+    --keep-daily 14 \
+    --keep-weekly 8 \
+    --keep-monthly 24 \
+    --keep-yearly 18
   restic check
 fi
 
