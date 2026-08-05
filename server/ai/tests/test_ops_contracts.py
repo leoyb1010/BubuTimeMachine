@@ -68,6 +68,7 @@ def test_pb_backup_uses_sqlite_snapshot_and_never_mirror_deletes(tmp_path: Path)
     (source / "storage/records/photo.jpg").write_bytes(b"photo")
     (source / "types.d.ts").write_text("types", encoding="utf-8")
     with sqlite3.connect(source / "data.db") as db:
+        db.execute("PRAGMA journal_mode=WAL")
         db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY, title TEXT)")
         db.execute("INSERT INTO memories VALUES ('1', 'Bubu')")
 
@@ -76,6 +77,7 @@ def test_pb_backup_uses_sqlite_snapshot_and_never_mirror_deletes(tmp_path: Path)
         "PB_DATA_DIR": str(source),
         "MIRROR_DIR": str(mirror),
         "LOCK_DIR": str(tmp_path / "backup.lock"),
+        "WORK_ROOT": str(tmp_path / "work"),
     }
     result = subprocess.run(
         ["bash", str(script)], env=env, text=True, capture_output=True, check=False
@@ -103,6 +105,17 @@ def test_pb_backup_uses_sqlite_snapshot_and_never_mirror_deletes(tmp_path: Path)
         check=False,
     )
     assert verified.returncode == 0, verified.stderr
+
+    with (mirror / "data.db").open("ab") as db_file:
+        db_file.write(b"tamper")
+    rejected = subprocess.run(
+        ["bash", str(verify), str(mirror)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert rejected.returncode != 0
+    assert "SHA-256" in rejected.stderr
 
 
 def test_backup_launch_agent_runs_daily_without_embedded_secrets():

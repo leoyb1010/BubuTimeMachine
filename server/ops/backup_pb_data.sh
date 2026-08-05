@@ -13,6 +13,7 @@ PB_DATA_DIR="${PB_DATA_DIR:?请设置 PB_DATA_DIR}"
 MIRROR_DIR="${MIRROR_DIR:?请设置 MIRROR_DIR}"
 BACKUP_STAMP="${BACKUP_STAMP:-$MIRROR_DIR/.last-success}"
 LOCK_DIR="${LOCK_DIR:-${TMPDIR:-/tmp}/bubu-pb-backup.lock}"
+WORK_ROOT="${WORK_ROOT:-${TMPDIR:-/tmp}}"
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
 RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-}"
 
@@ -37,11 +38,16 @@ fi
 
 work_dir=""
 cleanup() {
+  local status="$?"
   if [[ -n "$work_dir" && -d "$work_dir" ]]; then
-    rm -f "$work_dir/data.db" "$work_dir/auxiliary.db"
+    rm -f \
+      "$work_dir/data.db" "$work_dir/data.db-shm" "$work_dir/data.db-wal" \
+      "$work_dir/auxiliary.db" "$work_dir/auxiliary.db-shm" "$work_dir/auxiliary.db-wal" \
+      "$work_dir/backup-manifest.json"
     rmdir "$work_dir" 2>/dev/null || true
   fi
   rmdir "$LOCK_DIR" 2>/dev/null || true
+  return "$status"
 }
 trap cleanup EXIT INT TERM
 
@@ -59,7 +65,8 @@ fi
 rm -f "$write_probe"
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-work_dir="$MIRROR_DIR/.incomplete-$timestamp-$$"
+mkdir -p "$WORK_ROOT"
+work_dir="$WORK_ROOT/bubu-pb-backup-$timestamp-$$"
 mkdir -p "$work_dir"
 
 sync_files() {
@@ -82,7 +89,9 @@ import sqlite3
 import sys
 
 source, output = sys.argv[1:3]
-with sqlite3.connect(f"file:{source}?mode=ro", uri=True, timeout=30) as src:
+# mode=rw 保证源必须已存在，同时允许 SQLite 为 WAL 数据库打开共享内存；
+# 这里只执行 backup 和 integrity_check，不执行任何写语句。
+with sqlite3.connect(f"file:{source}?mode=rw", uri=True, timeout=30) as src:
     with sqlite3.connect(output) as dst:
         src.backup(dst, pages=256, sleep=0.05)
         result = dst.execute("PRAGMA integrity_check").fetchone()
@@ -100,12 +109,14 @@ if [[ -f "$PB_DATA_DIR/auxiliary.db" ]]; then
 fi
 sync_files
 
-mv -f "$work_dir/data.db" "$MIRROR_DIR/data.db"
+rsync -a "$work_dir/data.db" "$MIRROR_DIR/.data.db.next"
+mv -f "$MIRROR_DIR/.data.db.next" "$MIRROR_DIR/data.db"
 if [[ -f "$work_dir/auxiliary.db" ]]; then
-  mv -f "$work_dir/auxiliary.db" "$MIRROR_DIR/auxiliary.db"
+  rsync -a "$work_dir/auxiliary.db" "$MIRROR_DIR/.auxiliary.db.next"
+  mv -f "$MIRROR_DIR/.auxiliary.db.next" "$MIRROR_DIR/auxiliary.db"
 fi
 
-python3 - "$MIRROR_DIR" "$timestamp" <<'PY'
+python3 - "$work_dir" "$timestamp" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -128,6 +139,8 @@ for name in ("data.db", "auxiliary.db"):
     json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
 PY
+rsync -a "$work_dir/backup-manifest.json" "$MIRROR_DIR/.backup-manifest.json.next"
+mv -f "$MIRROR_DIR/.backup-manifest.json.next" "$MIRROR_DIR/backup-manifest.json"
 
 if [[ -n "$RESTIC_REPOSITORY" ]]; then
   command -v restic >/dev/null 2>&1 || fail "已配置异地仓库但未安装 restic"
