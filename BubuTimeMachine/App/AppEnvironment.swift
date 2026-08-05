@@ -12,6 +12,7 @@ final class AppEnvironment {
     let config: ServerConfig
     private(set) var apiClient: APIClient
     private(set) var aiService: AIService
+    private(set) var aiServiceRevision = 0
     let mediaStore: MediaStore
     let thumbnails: ThumbnailProvider
     let syncEngine: SyncEngine
@@ -225,9 +226,16 @@ final class AppEnvironment {
         let api = Self.makeAPIClient(config: config)
         self.apiClient = api
         self.aiService = Self.makeAIService(config: config)
+        self.aiServiceRevision += 1
         syncEngine.setClient(api)
         syncEngine.attach(context: context)
         syncEngine.start()
+    }
+
+    /// AI 设置离开页面时只重建 AI 客户端；不要为改一个语义开关重启同步引擎。
+    func reloadAIService() {
+        self.aiService = Self.makeAIService(config: config)
+        self.aiServiceRevision += 1
     }
 }
 

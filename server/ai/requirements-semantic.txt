@@ -1,0 +1,6 @@
+# G1 语义搜图可选依赖（只装在运行 worker 的 Apple Silicon mini）
+# MobileCLIP 代码与模型均来自 Apple 官方仓库；模型权重受 Apple ML Research Model TOU 约束。
+torch>=2.4,<3
+torchvision>=0.19,<1
+pillow>=10,<12
+git+https://github.com/apple/ml-mobileclip.git@aecfb5453d022e9deff12f81a150ea8f35194baa

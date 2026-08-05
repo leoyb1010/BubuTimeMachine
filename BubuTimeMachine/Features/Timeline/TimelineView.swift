@@ -34,7 +34,9 @@ struct TimelineView: View {
     /// 长按「分享这一刻」选中的记录。
     @State private var entryPendingShare: Entry?
     @State private var sections: [TimelineSection] = []
-    @State private var searchText = ""
+    @State private var searchText = Self.semanticVisualProbe ? "扶着沙发学走路" : ""
+    @State private var semanticMatches: [UUID: SemanticSearchHit] = [:]
+    @State private var semanticSearchState: SemanticSearchState = .idle
     /// 排序方式偏好：默认按拍摄时间（成长回顾心智），可切按记录时间（家庭动态心智）。
     @AppStorage("bubu.timeline.sortMode") private var sortModeRaw = TimelineSortMode.capture.rawValue
     /// 未读家庭动态红点：一次性算好缓存，避免每次 body 全表 faulting comments（P2e）。
@@ -46,6 +48,12 @@ struct TimelineView: View {
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
     var body: some View {
+        let semanticTaskKey = SemanticSearchTaskKey(
+            query: searchText,
+            enabled: (env.config.semanticSearchEnabled && env.config.isAIConfigured) || Self.semanticVisualProbe,
+            serviceRevision: env.aiServiceRevision,
+            entriesRevision: semanticEntriesRevision
+        )
         ZStack {
             BubuTheme.Color.background.ignoresSafeArea()
 
@@ -59,15 +67,10 @@ struct TimelineView: View {
         }
         .navigationTitle("时光轴")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "找找\(profiles.first?.name ?? "布布")的记录")
-        // 搜索 300ms 去抖：连打字时只在停顿后重建一次；清空/首屏立即重建（P2e）
-        .task(id: searchText) {
-            if !searchText.isEmpty {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
-            }
-            rebuildSections()
-        }
+        .searchable(text: $searchText, prompt: env.config.semanticSearchEnabled
+                    ? "找文字或照片里的画面" : "找找\(profiles.first?.name ?? "布布")的记录")
+        // 本地文字结果立即出现；停顿 300ms 后再请求家中语义索引。请求失败不影响离线结果。
+        .task(id: semanticTaskKey) { await updateSearch(semanticTaskKey) }
         .onAppear { rebuildSectionsIfNeeded(); refreshUnseenBadge() }
         .onChange(of: entries) { _, _ in rebuildSections(); refreshUnseenBadge() }
         .onChange(of: sortModeRaw) { _, _ in rebuildSections() }
@@ -133,6 +136,9 @@ struct TimelineView: View {
     private var timeline: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: BubuTheme.Spacing.section, pinnedViews: [.sectionHeaders]) {
+                if shouldShowSemanticStatus {
+                    semanticStatusBanner
+                }
                 ForEach(Array(sections.enumerated()), id: \.element.key) { sectionIndex, section in
                     Section {
                         // 虚线竖轴 + hue 圆点（对照设计稿 MacTimeline）
@@ -228,7 +234,7 @@ struct TimelineView: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomLeading) {
                 Group {
-                    if let media = entry.coverMedia {
+                    if let media = cardMedia(entry) {
                         MediaThumbnail(media: media, mediaStore: env.mediaStore)
                     } else {
                         BubuDreamPhoto(hue: entry.id.bubuStableHue, height: 178,
@@ -239,7 +245,7 @@ struct TimelineView: View {
                 // 原来固定 178 高，竖图会被裁成中间一条窄带，看不出拍了什么。
                 // 宽屏把最小比例收紧到 1.5（而不是加 maxHeight——那会让封面按比例缩小、两侧留灰边）：
                 // 高度 = 宽 / 比例，天然受控，同时始终填满卡片宽度。
-                .aspectRatio(coverAspect(entry), contentMode: .fit)
+                .aspectRatio(coverAspect(cardMedia(entry)), contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
 
@@ -273,6 +279,15 @@ struct TimelineView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.top, 4)
+                if let hit = semanticMatches[entry.id] {
+                    Label(semanticReason(entry: entry, hit: hit), systemImage: "sparkle.magnifyingglass")
+                        .font(BubuTheme.Font.caption.weight(.semibold))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                        .accessibilityLabel("语义匹配原因：\(semanticReason(entry: entry, hit: hit))")
+                }
             }
             .padding(14)
         }
@@ -288,11 +303,10 @@ struct TimelineView: View {
     private static let coverMaxAspect: CGFloat = 1.9
     private static let coverFallbackAspect: CGFloat = 1.5
 
-    private func coverAspect(_ entry: Entry) -> CGFloat {
+    private func coverAspect(_ media: Media?) -> CGFloat {
         // 宽屏最小比例 1.5：卡片宽时若仍允许 0.8 的竖幅，单张封面能顶到近 500pt 高。
         let minAspect = isWide ? 1.5 : Self.coverMinAspect
-        guard let media = entry.coverMedia,
-              let w = media.width, let h = media.height, w > 0, h > 0 else {
+        guard let media, let w = media.width, let h = media.height, w > 0, h > 0 else {
             return max(Self.coverFallbackAspect, minAspect)
         }
         return min(max(CGFloat(w) / CGFloat(h), minAspect), Self.coverMaxAspect)
@@ -332,10 +346,25 @@ struct TimelineView: View {
     private var searchEmptyState: some View {
         VStack(spacing: 16) {
             BubuMascotBadge(size: 72, expression: .surprised)
-            Text("没找到「\(searchText)」相关的记录")
-                .font(BubuTheme.Font.body)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-                .multilineTextAlignment(.center)
+            if semanticSearchState == .searching {
+                ProgressView("正在理解照片画面…")
+                    .font(BubuTheme.Font.body)
+            } else {
+                Text("没找到「\(searchText)」相关的记录")
+                    .font(BubuTheme.Font.body)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
+            if semanticSearchState == .offlineFallback {
+                Label("语义服务暂时不可用，已完成本地文字搜索", systemImage: "wifi.slash")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            if semanticSearchState == .active {
+                Text("照片画面和文字都找过了，换个说法再试试")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
         }
         .padding(40)
     }
@@ -345,6 +374,73 @@ struct TimelineView: View {
     private struct TimelineSection {
         let key: String
         let entries: [Entry]
+    }
+
+    private struct SemanticSearchTaskKey: Hashable {
+        let query: String
+        let enabled: Bool
+        let serviceRevision: Int
+        let entriesRevision: Int
+    }
+
+    private enum SemanticSearchState: Equatable {
+        case idle
+        case searching
+        case active
+        case offlineFallback
+    }
+
+    private var shouldShowSemanticStatus: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        semanticSearchState != .idle &&
+        ((env.config.semanticSearchEnabled && env.config.isAIConfigured) || Self.semanticVisualProbe)
+    }
+
+    private static var semanticVisualProbe: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-uitest-semantic-result")
+        #else
+        false
+        #endif
+    }
+
+    /// 仅作当前进程 task 失效键：Entry 或媒体/remoteId 后补时，活跃查询自动重跑。
+    private var semanticEntriesRevision: Int {
+        var revision = 0
+        for entry in entries {
+            revision ^= entry.id.hashValue
+            for media in entry.media {
+                revision ^= media.id.hashValue
+                if let remoteID = media.remoteId { revision ^= remoteID.hashValue }
+            }
+        }
+        return revision
+    }
+
+    @ViewBuilder
+    private var semanticStatusBanner: some View {
+        HStack(spacing: 8) {
+            switch semanticSearchState {
+            case .searching:
+                ProgressView().controlSize(.small)
+                Text("正在理解照片画面…")
+            case .active:
+                Image(systemName: "sparkle.magnifyingglass")
+                Text("已同时搜索照片画面与文字")
+            case .offlineFallback:
+                Image(systemName: "wifi.slash")
+                Text("语义服务暂时不可用，已用本地文字搜索")
+            case .idle:
+                EmptyView()
+            }
+            Spacer(minLength: 0)
+        }
+        .font(BubuTheme.Font.caption.weight(.semibold))
+        .foregroundStyle(BubuTheme.Color.secondaryText)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(BubuTheme.Color.card.opacity(0.78), in: Capsule())
+        .accessibilityElement(children: .combine)
     }
 
     /// 仅首屏 section 的前 6 张做错峰入场动画，其余直接呈现。
@@ -359,6 +455,73 @@ struct TimelineView: View {
 
     private func rebuildSectionsIfNeeded() {
         if sections.isEmpty { rebuildSections() }
+    }
+
+    private func updateSearch(_ key: SemanticSearchTaskKey) async {
+        semanticMatches = [:]
+        semanticSearchState = .idle
+        // 本地匹配永远先完成，断网或未开启语义能力时搜索体验不变。
+        rebuildSections()
+
+        let query = key.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, key.enabled else { return }
+#if DEBUG
+        if Self.semanticVisualProbe, let entry = entries.first {
+            semanticMatches = [entry.id: SemanticSearchHit(
+                assetId: "visual-probe",
+                entryLocalId: entry.id.uuidString,
+                mediaRecordId: "visual-probe",
+                capturedAt: ISO8601DateFormatter().string(from: entry.happenedAt),
+                score: 0.93,
+                reason: "画面语义接近“扶着沙发学走路”"
+            )]
+            semanticSearchState = .active
+            rebuildSections()
+            return
+        }
+#endif
+        do {
+            try await Task.sleep(for: .milliseconds(300))
+        } catch {
+            return
+        }
+        guard !Task.isCancelled else { return }
+        semanticSearchState = .searching
+        do {
+            let response = try await env.aiService.semanticSearch(query: query, limit: 30)
+            guard !Task.isCancelled, response.query == query else { return }
+            semanticMatches = TimelineSemanticSearchResolver.bestHits(
+                response.hits,
+                availableEntryIDs: Set(entries.map(\.id))
+            )
+            semanticSearchState = .active
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, searchText == key.query,
+                  env.aiServiceRevision == key.serviceRevision else { return }
+            semanticMatches = [:]
+            semanticSearchState = .offlineFallback
+        }
+        rebuildSections()
+    }
+
+    private func cardMedia(_ entry: Entry) -> Media? {
+        guard let recordID = semanticMatches[entry.id]?.mediaRecordId else { return entry.coverMedia }
+        // 不在 ?? autoclosure 里捕获 SwiftData 模型；Release whole-module 会按严格并发拒绝。
+        let matched = entry.sortedMedia.first(where: { $0.remoteId == recordID })
+        let fallback = entry.coverMedia
+        return matched ?? fallback
+    }
+
+    private func semanticReason(entry: Entry, hit: SemanticSearchHit) -> String {
+        let matchedMedia = entry.sortedMedia.first(where: { $0.remoteId == hit.mediaRecordId })
+        let clean = hit.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "画面语义接近", with: "画面接近")
+        if matchedMedia == nil, entry.coverMedia != nil {
+            return "这条记录中的另一张照片：" + clean
+        }
+        return clean
     }
 
     private var sortMode: TimelineSortMode { TimelineSortMode(rawValue: sortModeRaw) ?? .capture }
@@ -393,7 +556,7 @@ struct TimelineView: View {
         let lower = q.lowercased()
         return entries.filter { e in
             func hit(_ s: String?) -> Bool { s?.lowercased().contains(lower) ?? false }
-            return hit(e.note) || hit(e.firstPersonNote) || hit(e.title)
+            return semanticMatches[e.id] != nil || hit(e.note) || hit(e.firstPersonNote) || hit(e.title)
                 || hit(e.locationName) || hit(e.authorRole)
                 || hit(e.mood?.rawValue) || hit(e.firstTime?.what)
         }

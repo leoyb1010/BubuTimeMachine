@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 启动布布时光机 AI 服务（FastAPI + DeepSeek）
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")"
 
 # 加载 .env

@@ -1,12 +1,11 @@
-# 布布时光机 · 家庭推送（自托管 ntfy）
-# 「爸爸刚记录了 3 张照片」实时推到全家手机/手表。全部跑在自己家 mini，不出家门。
+# 布布时光机 · 运维告警（自托管 ntfy）
+# 只通知维护者备份/磁盘/服务/死信状态；不发送家庭记录正文。
 #
 # 部署：
 #   cd server/ntfy && docker compose up -d
-# 家人订阅：在手机装 ntfy app（App Store / Play），添加服务器 http://<mini的tailscale-ip>:8095，
-#   订阅话题 bubu-family。Apple Watch 会随 iPhone 通知一起转发，抬腕即见。
+# 维护者订阅：在自己的手机添加服务器并订阅 bubu-ops。
 #
-# 安全：仅 Tailscale 内网可达；话题名当口令，别设成公开可猜的词。
+# 安全：仅 Tailscale/受控反代可达；deny-all + 账号授权，话题名不是安全边界。
 services:
   ntfy:
     image: binwiederhier/ntfy:latest
@@ -23,7 +22,7 @@ services:
     volumes:
       - ./data:/var/lib/ntfy
     ports:
-      - "8095:8095"
+      - "127.0.0.1:8095:8095"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q --tries=1 http://localhost:8095/v1/health -O - | grep -q healthy || exit 1"]

@@ -113,6 +113,10 @@ final class MockAIService: AIService {
                         usedIDs: [first.id])
     }
 
+    func semanticSearch(query: String, limit: Int) async throws -> SemanticSearchResponse {
+        throw APIError.server(503, "语义搜索需要配置家中的 AI 服务")
+    }
+
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
         // 无自托管服务器时不支持真实合成：明确抛错，UI 保留本地预览草稿。

@@ -24,6 +24,7 @@ import secrets
 import time
 from collections import Counter, defaultdict, deque
 from datetime import datetime
+from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Optional
 
@@ -33,6 +34,8 @@ from pydantic import BaseModel, Field
 
 from llm import LLMClient, LLMError
 import movie_render
+from semantic_index import SemanticIndex
+from semantic_model import MobileCLIPEncoder, SemanticModelUnavailable
 
 logging.basicConfig(
     level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
@@ -49,6 +52,9 @@ logger = logging.getLogger("bubu.ai")
 # 进程内累计，带鉴权的 /health 返回快照——LLM 输出漂移早发现。
 _parse_stats_lock = Lock()
 _parse_stats: Counter = Counter()
+_semantic_lock = Lock()
+_semantic_index: Optional[SemanticIndex] = None
+_semantic_encoder: Optional[MobileCLIPEncoder] = None
 
 
 def _record_parse_stats(resp: "NaturalParseResp") -> None:
@@ -166,6 +172,48 @@ class AskResp(BaseModel):
     used_ids: list[str] = Field(default_factory=list)   # 答案实际引用到的记录 id
 
 
+class SemanticSearchReq(BaseModel):
+    query: str = Field(..., min_length=1, max_length=200)
+    limit: int = Field(20, ge=1, le=50)
+
+
+class SemanticSearchHit(BaseModel):
+    asset_id: str
+    entry_local_id: str
+    media_record_id: str
+    captured_at: str
+    score: float
+    reason: str
+
+
+class SemanticSearchResp(BaseModel):
+    query: str
+    model_version: str
+    hits: list[SemanticSearchHit] = Field(default_factory=list)
+
+
+def _semantic_enabled() -> bool:
+    return os.environ.get("SEMANTIC_SEARCH_ENABLED", "false").lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _semantic_components() -> tuple[SemanticIndex, MobileCLIPEncoder]:
+    global _semantic_index, _semantic_encoder
+    if not _semantic_enabled():
+        raise HTTPException(status_code=503, detail="语义搜图尚未在服务器开启。")
+    with _semantic_lock:
+        if _semantic_encoder is None:
+            _semantic_encoder = MobileCLIPEncoder()
+        if _semantic_index is None:
+            configured = os.environ.get("SEMANTIC_INDEX_PATH", "../derived/memory_index.sqlite")
+            path = Path(configured).expanduser()
+            if not path.is_absolute():
+                path = Path(__file__).resolve().parent / path
+            _semantic_index = SemanticIndex(path.resolve(), _semantic_encoder.model_version)
+    return _semantic_index, _semantic_encoder
+
+
 # ---------- 路由 ----------
 
 @app.get("/health")
@@ -175,8 +223,10 @@ def health(x_api_key: Optional[str] = Header(default=None)):
     if _API_KEY and secrets.compare_digest(x_api_key or "", _API_KEY):
         with _parse_stats_lock:
             stats = dict(_parse_stats)
+        semantic_count = _semantic_index.active_count() if _semantic_index is not None else 0
         return {"ok": True, "model": llm.model, "configured": llm.is_configured,
-                "auth": True, "parse_stats": stats}
+                "auth": True, "parse_stats": stats,
+                "semantic_search": {"enabled": _semantic_enabled(), "indexed": semantic_count}}
     return {"ok": True, "auth": False}
 
 
@@ -291,6 +341,41 @@ def ask(req: AskReq):
     used_idx = set(int(n) for n in _re.findall(r"【记录(\d+)】", text))
     used_ids = [req.records[i - 1].id for i in sorted(used_idx) if 1 <= i <= len(req.records)]
     return AskResp(answer=text.strip(), used_ids=used_ids)
+
+
+@app.post("/semantic/search", response_model=SemanticSearchResp,
+          dependencies=[Depends(require_api_key)])
+def semantic_search(req: SemanticSearchReq):
+    """在 mini 的可重建索引里检索照片；每个结果必须带回原 Entry/Media 引用。"""
+    query = req.query.strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="搜索内容不能为空。")
+    index, encoder = _semantic_components()
+    try:
+        embedding = encoder.encode_text(query)
+    except SemanticModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    family_id = os.environ.get("SEMANTIC_FAMILY_ID", "").strip()
+    if not family_id:
+        raise HTTPException(status_code=503, detail="服务器尚未绑定语义搜索家庭。")
+    min_score = float(os.environ.get("SEMANTIC_MIN_SCORE", "0.52"))
+    hits = index.search(query, embedding, limit=req.limit, family_id=family_id,
+                        min_score=min_score)
+    return SemanticSearchResp(
+        query=query,
+        model_version=encoder.model_version,
+        hits=[
+            SemanticSearchHit(
+                asset_id=hit.asset_id,
+                entry_local_id=hit.entry_local_id,
+                media_record_id=hit.media_record_id,
+                captured_at=hit.captured_at,
+                score=hit.score,
+                reason=hit.reason,
+            )
+            for hit in hits
+        ],
+    )
 
 
 # ---------- 成长电影 · 服务端合成（ffmpeg）----------

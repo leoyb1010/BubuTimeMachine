@@ -50,6 +50,22 @@ final class BubuAIService: AIService, @unchecked Sendable {
                         usedIDs: obj["used_ids"] as? [String] ?? [])
     }
 
+    func semanticSearch(query: String, limit: Int = 20) async throws -> SemanticSearchResponse {
+        let url = baseURL.appendingPathComponent("semantic/search")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "query": query,
+            "limit": max(1, min(limit, 50)),
+        ])
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode(SemanticSearchResponse.self, from: data)
+    }
+
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
         let body: [String: Any] = [

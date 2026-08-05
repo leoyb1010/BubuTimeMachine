@@ -96,6 +96,10 @@ final class ServerConfig {
     var aiEnabled: Bool {
         didSet { UserDefaults.standard.set(aiEnabled, forKey: Self.aiEnabledKey) }
     }
+    /// 是否允许把搜索词发给家中自托管 AI 服务做照片画面检索。默认关闭，文字搜索始终本地可用。
+    var semanticSearchEnabled: Bool {
+        didSet { UserDefaults.standard.set(semanticSearchEnabled, forKey: Self.semanticSearchEnabledKey) }
+    }
     /// 是否开启"那年今日"每日提醒。
     var dailyReminderEnabled: Bool {
         didSet { UserDefaults.standard.set(dailyReminderEnabled, forKey: Self.reminderKey) }
@@ -133,6 +137,7 @@ final class ServerConfig {
     private static let aiURLKey = "bubu.ai.baseURL"
     private static let aiKeyKey = "bubu.ai.apiKey"
     private static let aiEnabledKey = "bubu.ai.enabled"
+    private static let semanticSearchEnabledKey = "bubu.ai.semanticSearch.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
     private static let simpleModeKey = "bubu.simpleMode.enabled"
     private static let roleBeforeElderKey = "bubu.simpleMode.roleBeforeElder"
@@ -175,6 +180,7 @@ final class ServerConfig {
             KeychainStore.set(initialAIKey, for: Self.aiKeyKey)
         }
         self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
+        self.semanticSearchEnabled = UserDefaults.standard.object(forKey: Self.semanticSearchEnabledKey) as? Bool ?? false
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
         // 简单模式：已存过就用存的；从没存过时，按当前身份是否长辈给默认值（长辈默认开）。
         let storedRole = FamilyRole(rawValue: UserDefaults.standard.string(forKey: Self.roleKey) ?? "") ?? .mama

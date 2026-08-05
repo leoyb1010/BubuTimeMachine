@@ -1,0 +1,22 @@
+[
+  {"query": "布布在公园荡秋千", "expected": "swing", "axis": 0},
+  {"query": "找玩秋千的照片", "expected": "swing", "axis": 0},
+  {"query": "生日吹蜡烛", "expected": "birthday", "axis": 1},
+  {"query": "有蛋糕的生日照片", "expected": "birthday", "axis": 1},
+  {"query": "海边玩水", "expected": "beach", "axis": 2},
+  {"query": "在沙滩踩沙子", "expected": "beach", "axis": 2},
+  {"query": "睡着的样子", "expected": "sleep", "axis": 3},
+  {"query": "午睡小脸", "expected": "sleep", "axis": 3},
+  {"query": "第一次吃草莓", "expected": "strawberry", "axis": 4},
+  {"query": "手里拿着水果", "expected": "strawberry", "axis": 4},
+  {"query": "和妈妈抱抱", "expected": "hug", "axis": 5},
+  {"query": "家人拥抱布布", "expected": "hug", "axis": 5},
+  {"query": "下雪天在外面", "expected": "snow", "axis": 6},
+  {"query": "雪地里的布布", "expected": "snow", "axis": 6},
+  {"query": "和小狗一起玩", "expected": "dog", "axis": 7},
+  {"query": "身边有宠物", "expected": "dog", "axis": 7},
+  {"query": "刚学会走路", "expected": "walking", "axis": 8},
+  {"query": "扶着沙发迈步", "expected": "walking", "axis": 8},
+  {"query": "洗澡玩泡泡", "expected": "bath", "axis": 9},
+  {"query": "坐在浴缸里", "expected": "bath", "axis": 9}
+]

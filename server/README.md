@@ -54,6 +54,14 @@
 每个业务集合都有 `localId`（客户端 UUID）做幂等去重，并有 `authorUserId/familyId/isDeleted/deletedAt` 用于身份追踪、家庭隔离准备和软删除。
 `deleteRule` 默认锁给超管，客户端删除会写 tombstone，不再物理删除远端记录。
 
+派生层另有 `automation_jobs / derived_artifacts`。两张集合的 API rules 全部为 `null`，只有
+PocketBase superuser/服务端 worker 可访问；家庭 App 账号不能读取、创建或篡改派生任务与作品。
+worker 优先使用单独的长期 superuser token，避免常驻保存管理密码。
+
+历史图库与模型升级先运行 `cd server/ai && python semantic_reconcile.py` 预览，确认后再加
+`--enqueue`。它只创建可重建任务，不修改家庭事实记录；重复运行会按媒体、Entry、模型版本幂等去重。
+若 SQLite 索引丢失或损坏，使用 `--enqueue --force` 强制重建。worker 还持有文件锁，第二实例会拒绝启动。
+
 ---
 
 ## 三、部署 AI 服务
@@ -82,6 +90,7 @@ openssl rand -hex 24          # 生成一个 AI_API_KEY，填进 .env，App 设�
 | POST | `/movie-narration` | 年度成长电影旁白 |
 | POST | `/transcribe` | 语音转写（可选） |
 | GET | `/health` | 健康检查 |
+| POST | `/semantic/search` | G1 照片语义检索（默认关闭，结果带 Entry/Media 来源） |
 
 ---
 
@@ -113,7 +122,8 @@ launchctl load ~/Library/LaunchAgents/com.bubu.ai.plist
 server/ops/healthcheck.sh
 ```
 
-`server/ops/healthcheck.sh` 会检查 PocketBase、AI 服务和数据盘剩余空间，可放进 crontab/launchd 后接 Bark、ntfy 或邮件通知。
+`server/ops/healthcheck.sh` 会检查 PocketBase、AI 服务、数据盘剩余空间，以及可选的备份成功时间戳。
+设置 `NTFY_URL/NTFY_TOKEN` 后，失败只推给维护者的 `bubu-ops` 话题；不发送家庭动态或记忆正文。
 
 ---
 

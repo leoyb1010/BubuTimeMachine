@@ -6,3 +6,6 @@ ai/.env
 ai/.venv/
 __pycache__/
 *.pyc
+# 可重建语义索引与模型权重
+derived/
+ai/models/

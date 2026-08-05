@@ -76,6 +76,7 @@ struct AdvancedSettingsView: View {
             Section {
                 Toggle("让 AI 帮忙写故事", isOn: $config.aiEnabled)
                 if config.aiEnabled {
+                    Toggle("搜索照片里的画面", isOn: $config.semanticSearchEnabled)
                     TextField(ServerConfig.aiBaseURLPlaceholder, text: $config.aiBaseURLString)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     SecureField("AI 访问密钥（服务端 AI_API_KEY）", text: $config.aiAPIKey)
@@ -95,7 +96,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("AI 服务（布布的故事）")
             } footer: {
-                Text("关闭时用本地模拟。开启并填好地址和密钥后，改写、旁白、转写走你自托管的服务。密钥与服务器 .env 里的 AI_API_KEY 一致。")
+                Text("照片搜索默认关闭；开启后只把搜索词发给家中自托管服务，照片本身仍留在家里的服务器。服务不可用时自动回到本地文字搜索。密钥与服务器 .env 里的 AI_API_KEY 一致。")
             }
         }
         .navigationTitle("高级 · 自托管")
@@ -103,6 +104,10 @@ struct AdvancedSettingsView: View {
         .bubuContentColumn(760)   // Form 宽屏收口：760 比正文列宽些，容得下右侧输入框
         .scrollContentBackground(.hidden)
         .background(BubuTheme.Color.background)
+        // 打开能力的瞬间就切换到当前配置，避免后台时光轴短暂复用旧 host 的客户端。
+        .onChange(of: env.config.aiEnabled) { _, _ in env.reloadAIService() }
+        .onChange(of: env.config.semanticSearchEnabled) { _, _ in env.reloadAIService() }
+        .onDisappear { env.reloadAIService() }
     }
 
     private var connectionText: String {

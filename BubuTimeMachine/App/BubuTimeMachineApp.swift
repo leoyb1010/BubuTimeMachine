@@ -433,6 +433,8 @@ struct RootView: View {
             NavigationStack { GrowthReportView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-settings") {
             NavigationStack { SettingsView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-advanced-settings") {
+            NavigationStack { AdvancedSettingsView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-capsule") {
             NavigationStack { CapsuleHomeView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth") {
