@@ -29,4 +29,5 @@ PORT="${AI_PORT:-8000}"
 # 或 0.0.0.0，切勿在裸公网上直接放开。
 BIND="${BUBU_AI_BIND:-127.0.0.1}"
 echo "🚀 AI 服务启动： http://${BIND}:${PORT}  （健康检查 /health）"
-exec ./.venv/bin/uvicorn main:app --host "${BIND}" --port "${PORT}"
+# 通过虚拟环境的 Python 模块启动，避免候选目录切换后 uvicorn 脚本里残留旧绝对 shebang。
+exec ./.venv/bin/python -m uvicorn main:app --host "${BIND}" --port "${PORT}"

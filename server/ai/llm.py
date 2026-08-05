@@ -67,7 +67,8 @@ class LLMClient:
         headers = {"Authorization": f"Bearer {self.api_key}",
                    "Content-Type": "application/json"}
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            # 家庭证据只发往显式配置的模型端点，不能被 shell/launchd 的代理环境改道。
+            with httpx.Client(timeout=self.timeout, trust_env=False) as client:
                 resp = client.post(url, json=payload, headers=headers)
         except httpx.HTTPError as e:
             raise LLMError(f"网络错误：{e}") from e

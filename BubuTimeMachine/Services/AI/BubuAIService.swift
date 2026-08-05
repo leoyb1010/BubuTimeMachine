@@ -6,32 +6,32 @@ import Foundation
 final class BubuAIService: AIService, @unchecked Sendable {
 
     private let baseURL: URL
-    private let apiKey: String
+    private let authTokenProvider: @Sendable () async throws -> String
     private let session = URLSession(configuration: .default)
 
-    init(baseURL: URL, apiKey: String = "") {
+    init(baseURL: URL, authTokenProvider: @escaping @Sendable () async throws -> String) {
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.authTokenProvider = authTokenProvider
     }
 
     func ping() async throws -> Bool {
         let url = baseURL.appendingPathComponent("health")
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
-        // 服务端开启鉴权时，health 会回 auth 字段；key 不对则视为未连通。
+        // 服务端开启鉴权时，health 会回 auth 字段；登录态无效则视为未连通。
         if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let auth = obj["auth"] as? Bool, !auth, !apiKey.isEmpty {
+           let auth = obj["auth"] as? Bool, !auth {
             return false
         }
         return true
     }
 
-    private func applyAuth(_ req: inout URLRequest) {
-        if !apiKey.isEmpty {
-            req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
-        }
+    private func applyAuth(_ req: inout URLRequest) async throws {
+        let token = try await authTokenProvider()
+        guard !token.isEmpty else { throw APIError.unauthorized }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     func rewriteFirstPerson(note: String, childName: String) async throws -> String {
@@ -55,7 +55,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "query": query,
@@ -69,7 +69,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func latestWeeklyReport() async throws -> WeeklyReport? {
         let url = baseURL.appendingPathComponent("weekly-report/latest")
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         let (data, resp) = try await session.data(for: req)
         if let http = resp as? HTTPURLResponse, http.statusCode == 404 { return nil }
@@ -80,7 +80,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func weeklyReportHistory() async throws -> [WeeklyReport] {
         let url = baseURL.appendingPathComponent("weekly-report/history")
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
@@ -102,7 +102,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
                     let url = baseURL.appendingPathComponent("weekly-report/events")
                     var req = URLRequest(url: url)
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    applyAuth(&req)
+                    try await applyAuth(&req)
                     req.timeoutInterval = 0
                     let (bytes, response) = try await session.bytes(for: req)
                     try Self.check(response, Data())
@@ -127,7 +127,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 90
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await session.data(for: req)
@@ -138,7 +138,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func latestSoundRing() async throws -> SoundRing? {
         let url = baseURL.appendingPathComponent("sound-ring/latest")
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         let (data, resp) = try await session.data(for: req)
         if let http = resp as? HTTPURLResponse, http.statusCode == 404 { return nil }
@@ -149,7 +149,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func soundRingHistory() async throws -> [SoundRing] {
         let url = baseURL.appendingPathComponent("sound-ring/history")
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
@@ -160,6 +160,13 @@ final class BubuAIService: AIService, @unchecked Sendable {
         try await soundRingPost("sound-ring/draft", body: [:])
     }
 
+    func removeSoundRingClip(id: String, sourceId: String) async throws -> SoundRing {
+        try await soundRingPost(
+            "sound-ring/remove",
+            body: ["artifact_id": id, "source_id": sourceId]
+        )
+    }
+
     func renderSoundRing(id: String) async throws -> SoundRing {
         try await soundRingPost("sound-ring/render", body: ["artifact_id": id])
     }
@@ -167,7 +174,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func soundRingStatus(id: String) async throws -> SoundRing {
         let url = baseURL.appendingPathComponent("sound-ring/status").appendingPathComponent(id)
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
@@ -181,7 +188,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func downloadSoundRing(id: String) async throws -> URL {
         let url = baseURL.appendingPathComponent("sound-ring/file").appendingPathComponent(id)
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 300
         let (temporary, resp) = try await session.download(for: req)
         try Self.check(resp, Data())
@@ -196,7 +203,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 90
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await session.data(for: req)
@@ -222,7 +229,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     func downloadRenderedMovie(jobId: String) async throws -> URL {
         let url = baseURL.appendingPathComponent("movie/file/\(jobId)")
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 300
         // 流式落盘：长片整段读进内存会触发内存告警（R4 待核-mp4）
         let (tempURL, resp) = try await session.download(for: req)
@@ -274,7 +281,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         // 长语音服务端转写可能远超默认 60s（P3-32）：与 downloadRenderedMovie 同档放宽。
         req.timeoutInterval = 300
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        applyAuth(&req)
+        try await applyAuth(&req)
         // 分块把音频写进临时 multipart 请求体文件，再 upload(fromFile:) 流式上传，
         // 避免整段大录音一次性读进内存拼 body 的内存峰值（沿用 PocketBaseClient 的成熟做法）。
         let bodyURL = try Self.multipartBodyFile(boundary: boundary, audioURL: audioURL)
@@ -338,7 +345,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 90
         req.httpBody = bodyData
 
@@ -352,7 +359,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
     private func get(_ path: String) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent(path)
         var req = URLRequest(url: url)
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 30
         let (data, resp) = try await session.data(for: req)
         try Self.check(resp, data)
@@ -364,7 +371,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(&req)
+        try await applyAuth(&req)
         req.timeoutInterval = 90
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await session.data(for: req)

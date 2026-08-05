@@ -5,13 +5,15 @@ import hashlib
 import json
 import os
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any, Callable, Optional
 
 from artifact_workflow import ArtifactUnavailable, ArtifactWorkflow
 from memory_query import (
     MemoryEvidence, MemoryQuery, PocketBaseMemoryStore, SoundRingMaterial,
-    sound_source_revision,
+    fact_record_belongs_to_family, sound_source_revision,
 )
 
 
@@ -20,6 +22,17 @@ MIN_ORIGINAL_SECONDS = 180.0
 MAX_ORIGINAL_SECONDS = 400.0
 MAX_CLIPS = 24
 MAX_SINGLE_CLIP_SECONDS = 120.0
+_artifact_locks_guard = Lock()
+_artifact_locks: dict[str, Lock] = {}
+
+
+@contextmanager
+def _artifact_edit_lock(artifact_id: str):
+    """单进程 launchd 服务内把草稿编辑与 draft→rendering 转换串行化。"""
+    with _artifact_locks_guard:
+        lock = _artifact_locks.setdefault(artifact_id, Lock())
+    with lock:
+        yield
 
 
 class SoundRingUnavailable(RuntimeError):
@@ -48,7 +61,7 @@ def validate_sound_sources(
         current_file = _single_file_name(record.get("file"))
         current_revision = sound_source_revision(record)
         if (
-            str(record.get("familyId") or "") != family_id
+            not fact_record_belongs_to_family(record, family_id)
             or _truthy(record.get("isDeleted"))
             or str(record.get("localId") or "") != expected_local_id
             or current_file != expected_file
@@ -164,6 +177,10 @@ class SoundRingService:
         return public_artifact(record)
 
     def render(self, family_id: str, artifact_id: str) -> dict[str, Any]:
+        with _artifact_edit_lock(artifact_id):
+            return self._render_locked(family_id, artifact_id)
+
+    def _render_locked(self, family_id: str, artifact_id: str) -> dict[str, Any]:
         try:
             current = self.workflow.owned(family_id, artifact_id)
         except ArtifactUnavailable as exc:
@@ -203,6 +220,60 @@ class SoundRingService:
                 family_id, artifact_id, {"status": "failed", "payload": payload}
             )
             raise SoundRingUnavailable(payload["error"]) from None
+        return public_artifact(updated)
+
+    def remove_clip(
+        self, family_id: str, artifact_id: str, source_id: str
+    ) -> dict[str, Any]:
+        """从草稿清单移除一段，绝不修改 voicememos 事实记录。"""
+        with _artifact_edit_lock(artifact_id):
+            return self._remove_clip_locked(family_id, artifact_id, source_id)
+
+    def _remove_clip_locked(
+        self, family_id: str, artifact_id: str, source_id: str
+    ) -> dict[str, Any]:
+        try:
+            current = self.workflow.owned(family_id, artifact_id)
+        except ArtifactUnavailable as exc:
+            raise SoundRingUnavailable(str(exc)) from exc
+        if str(current.get("status") or "") != "draft":
+            raise SoundRingUnavailable("只有等待确认的素材清单可以调整。")
+        payload = _payload(current)
+        raw_clips = payload.get("clips")
+        clips = [item for item in raw_clips if isinstance(item, dict)] \
+            if isinstance(raw_clips, list) else []
+        kept = [item for item in clips if str(item.get("sourceId") or "") != source_id]
+        if len(kept) == len(clips):
+            raise SoundRingUnavailable("这段原声已经不在当前清单里。")
+        remaining_seconds = sum(float(item.get("durationSeconds") or 0) for item in kept)
+        if remaining_seconds < MIN_ORIGINAL_SECONDS:
+            raise SoundRingUnavailable(
+                "移除后真实原声不足 3 分钟；可以先继续录几段，再重新整理。"
+            )
+        payload["clips"] = kept
+        payload["originalDurationSeconds"] = round(remaining_seconds, 3)
+        payload["timeline"] = []
+        payload["renderedDurationSeconds"] = 0
+        payload["error"] = ""
+
+        kept_source_ids = {
+            str(item.get("sourceId") or "") for item in kept
+        } | {
+            str(item.get("photoSourceId") or "") for item in kept
+        }
+        refs = current.get("sourceRefs")
+        source_refs = [
+            item for item in refs
+            if isinstance(item, dict)
+            and str(item.get("source_id") or item.get("sourceId") or "") in kept_source_ids
+        ] if isinstance(refs, list) else []
+        summary = "%d 段真实原声 · %s" % (len(kept), _duration_text(remaining_seconds))
+        updated = self.workflow.update(
+            family_id,
+            artifact_id,
+            {"status": "draft", "summary": summary,
+             "sourceRefs": source_refs, "payload": payload},
+        )
         return public_artifact(updated)
 
     def archive(self, family_id: str, artifact_id: str) -> dict[str, Any]:

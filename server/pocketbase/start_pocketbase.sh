@@ -18,10 +18,6 @@ if [ ! -x "$PB_BIN" ]; then
   exit 1
 fi
 
-# 把迁移文件软链到 PocketBase 期望的 pb_migrations 目录
-mkdir -p pb_migrations
-cp -f migrations/*.js pb_migrations/ 2>/dev/null || true
-
 echo "📦 数据目录：$DATA_DIR"
 echo "🚀 启动 PocketBase，管理后台： http://$PB_HTTP_ADDR/_/"
 echo "   首次启动请在后台创建管理员账号，并新建一个家庭登录用户（members 用）。"
@@ -31,4 +27,5 @@ echo "   首次启动请在后台创建管理员账号，并新建一个家庭�
 # 家庭内多设备想走局域网直连（App 设置页的「局域网直连地址」）时，监听所有网卡：
 #   PB_HTTP_ADDR="0.0.0.0:8090" ./start_pocketbase.sh /path/to/pb_data
 # ——0.0.0.0 同时覆盖 Tailscale IP 与 192.168.x.x，App 侧会自动赛跑择快。
-exec "$PB_BIN" serve --http="$PB_HTTP_ADDR" --dir="$DATA_DIR" --migrationsDir="./pb_migrations"
+# 直接使用受 Git 管理的迁移目录，避免运行时副本残留已改号或已删除的旧迁移。
+exec "$PB_BIN" serve --http="$PB_HTTP_ADDR" --dir="$DATA_DIR" --migrationsDir="./migrations"

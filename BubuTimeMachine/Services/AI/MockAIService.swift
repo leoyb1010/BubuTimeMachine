@@ -149,6 +149,10 @@ final class MockAIService: AIService {
         throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
     }
 
+    func removeSoundRingClip(id: String, sourceId: String) async throws -> SoundRing {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
     func renderSoundRing(id: String) async throws -> SoundRing {
         throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
     }

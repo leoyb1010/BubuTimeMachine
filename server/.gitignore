@@ -4,6 +4,9 @@ pocketbase/pb_data/
 pocketbase/pb_migrations/
 ai/.env
 ai/.venv/
+ntfy/.env
+ntfy/data/
+ops/backup.env
 __pycache__/
 *.pyc
 # 可重建语义索引与模型权重

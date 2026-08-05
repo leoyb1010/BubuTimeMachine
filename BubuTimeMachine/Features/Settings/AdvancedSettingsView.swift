@@ -79,8 +79,6 @@ struct AdvancedSettingsView: View {
                     Toggle("搜索照片里的画面", isOn: $config.semanticSearchEnabled)
                     TextField(ServerConfig.aiBaseURLPlaceholder, text: $config.aiBaseURLString)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    SecureField("AI 访问密钥（服务端 AI_API_KEY）", text: $config.aiAPIKey)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button {
                         Task { await testAIConnection() }
                     } label: {
@@ -96,7 +94,7 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("AI 服务（布布的故事）")
             } footer: {
-                Text("照片搜索默认关闭；开启后只把搜索词发给家中自托管服务，照片本身仍留在家里的服务器。服务不可用时自动回到本地文字搜索。密钥与服务器 .env 里的 AI_API_KEY 一致。")
+                Text("照片搜索默认关闭；开启后只把搜索词发给家中自托管服务，照片本身仍留在家里的服务器。AI 复用家庭服务器登录态，不需要在 App 保存共享密钥；服务不可用时自动回到本地文字搜索。")
             }
         }
         .navigationTitle("高级 · 自托管")

@@ -19,6 +19,9 @@ final class HealthRecord {
     var severityRaw: String?
     var temperatureCelsius: Double?
     var tags: [String] = []
+    /// 本机稳定关联到这次体检生成的成长测量。旧数据为 nil 时会按同日体检记录回填。
+    /// 这是纯 additive 可选字段，不改变既有数据，也不要求破坏性迁移。
+    var growthMeasurementId: UUID?
     var syncStateRaw: String = SyncState.local.rawValue
     var createdAt: Date
 

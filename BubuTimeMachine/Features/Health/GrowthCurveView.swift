@@ -35,7 +35,7 @@ struct GrowthCurveView: View {
         .navigationTitle("成长曲线")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showGrowthRecorder) {
-            HealthRecordSheet(kind: .checkup)
+            HealthRecordSheet(kind: .checkup, growthOnly: true)
         }
     }
 
@@ -79,7 +79,7 @@ struct GrowthCurveView: View {
             ))
         }
         .buttonStyle(.plain)
-        .accessibilityHint("打开体检记录，可以填写身高、体重和头围")
+        .accessibilityHint("打开成长数据表单，可以填写身高、体重和头围")
     }
 
     /// 布布的实测点：(月龄, 数值)，每个月龄唯一——图表点 id 不再重复。

@@ -21,6 +21,7 @@ struct SoundRingView: View {
     @State private var isOfflineCache = false
     @State private var showRenderConfirmation = false
     @State private var showArchiveConfirmation = false
+    @State private var pendingRemovalSourceId: String?
     @State private var showAdvancedSettings = false
     @State private var jumpEntry: Entry?
     @State private var sourceDetail: WeeklyReportSource?
@@ -36,6 +37,7 @@ struct SoundRingView: View {
 
     private enum Operation {
         case drafting
+        case editingDraft
         case rendering
         case downloading
         case archiving
@@ -85,6 +87,23 @@ struct SoundRingView: View {
             Button("再看看", role: .cancel) {}
         } message: {
             Text("只会把这份音频章标为已归档，原声、照片和文字都保持不变。")
+        }
+        .confirmationDialog(
+            "从本次清单移除这段？",
+            isPresented: Binding(
+                get: { pendingRemovalSourceId != nil },
+                set: { if !$0 { pendingRemovalSourceId = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("只从本次清单移除", role: .destructive) {
+                guard let sourceId = pendingRemovalSourceId else { return }
+                pendingRemovalSourceId = nil
+                removeClip(sourceId)
+            }
+            Button("保留", role: .cancel) { pendingRemovalSourceId = nil }
+        } message: {
+            Text("原声记录不会删除，只影响这一次声音年轮清单。")
         }
         .alert("操作没有完成", isPresented: Binding(
             get: { operationError != nil },
@@ -217,6 +236,7 @@ struct SoundRingView: View {
                         .frame(minHeight: 44)
                 }
                 .accessibilityHint("选择以前的声音年轮")
+                .disabled(operation != nil)
             }
         }
         .padding(.horizontal, 4)
@@ -330,7 +350,8 @@ struct SoundRingView: View {
             if let fileName = memo?.localFileName {
                 VoicePlayerBubble(fileName: fileName,
                                   duration: memo?.durationSeconds ?? clip.durationSeconds,
-                                  waveform: [], mediaStore: env.mediaStore, tint: theme)
+                                  waveform: [], mediaStore: env.mediaStore,
+                                  tint: BubuTheme.Color.deepRose)
             } else if let url = audioURL, clip.endSeconds > clip.startSeconds {
                 Button {
                     player.play(url: url, from: clip.startSeconds)
@@ -348,6 +369,18 @@ struct SoundRingView: View {
                 }
                 if let photoSource {
                     sourceButton(photoSource, title: "看当天照片")
+                }
+                if ring.status == "draft" {
+                    Button(role: .destructive) {
+                        pendingRemovalSourceId = clip.sourceId
+                    } label: {
+                        Label("移除这段", systemImage: "minus.circle")
+                            .font(BubuTheme.Font.scaled(11, weight: .semibold))
+                            .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(operation != nil)
+                    .accessibilityHint("只从本次声音年轮清单移除，不会删除原声记录")
                 }
             }
         }
@@ -621,6 +654,42 @@ struct SoundRingView: View {
         }
     }
 
+    private func removeClip(_ sourceId: String) {
+        guard let id = ring?.id, ring?.status == "draft", operation == nil else { return }
+        operation = .editingDraft
+        let service = env.aiService
+        let revision = env.aiServiceRevision
+        let token = UUID()
+        mutationTask?.cancel()
+        mutationToken = token
+        mutationTask = Task { @MainActor in
+            defer {
+                if mutationToken == token {
+                    operation = nil
+                    mutationTask = nil
+                    mutationToken = nil
+                }
+            }
+            do {
+                let value = try await service.removeSoundRingClip(
+                    id: id, sourceId: sourceId
+                )
+                guard !Task.isCancelled, env.aiServiceRevision == revision else { return }
+                setCurrentRing(value)
+                upsertHistory(value)
+                BubuHaptics.tapLight()
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: "这段已从本次清单移除，原声记录仍然保留"
+                )
+            } catch {
+                guard !Self.isCancellation(error), !Task.isCancelled,
+                      env.aiServiceRevision == revision else { return }
+                operationError = Self.readable(error)
+            }
+        }
+    }
+
     private func startPolling(_ id: String) {
         guard !previewMode else { return }
         pollTask?.cancel()
@@ -713,7 +782,7 @@ struct SoundRingView: View {
         let service = env.aiService
         let revision = env.aiServiceRevision
         let token = UUID()
-        downloadTask?.cancel()
+        cancelDownload(resetOperation: true)
         downloadToken = token
         operation = .downloading
         downloadTask = Task { @MainActor in
@@ -793,13 +862,22 @@ struct SoundRingView: View {
 
     private func setCurrentRing(_ item: SoundRing?) {
         if ringIdentity(ring) != ringIdentity(item) {
-            downloadTask?.cancel()
-            downloadTask = nil
-            downloadToken = nil
+            cancelDownload(resetOperation: true)
             player.stop()
             audioURL = item.flatMap { Self.existingAudio(for: $0) }
         }
         ring = item
+    }
+
+    /// 下载任务和 UI 锁必须作为一个状态一起取消；否则切换往期时旧 token 的 defer
+    /// 不再拥有清理权，页面会永久停在 `.downloading`。
+    private func cancelDownload(resetOperation: Bool) {
+        downloadTask?.cancel()
+        downloadTask = nil
+        downloadToken = nil
+        if resetOperation, operation == .downloading {
+            operation = nil
+        }
     }
 
     private func ringIdentity(_ item: SoundRing?) -> String {

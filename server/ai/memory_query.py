@@ -74,7 +74,8 @@ class PocketBaseMemoryStore:
         self.password = os.environ.get("PB_WORKER_PASSWORD", "")
         self._token = self.api_token
         self._file_token_value = ""
-        self._client = httpx.Client(base_url=self.base_url, timeout=30)
+        # PocketBase 永远是本机/家庭内服务；不得被系统 HTTP_PROXY 转发到代理进程。
+        self._client = httpx.Client(base_url=self.base_url, timeout=30, trust_env=False)
 
     def close(self) -> None:
         self._client.close()
@@ -318,7 +319,7 @@ class MemoryQuery:
             raise ValueError("family_id 不能为空")
         if end <= start:
             raise ValueError("周报时间范围无效")
-        family = _pb_quote(family_id)
+        family = _pb_quote(fact_family_value(family_id))
         start_text = _pb_date(start)
         end_text = _pb_date(end)
         evidence: list[MemoryEvidence] = []
@@ -351,7 +352,7 @@ class MemoryQuery:
         """
         if not family_id.strip():
             raise ValueError("family_id 不能为空")
-        family = _pb_quote(family_id)
+        family = _pb_quote(fact_family_value(family_id))
         voice_records = self.store.list_records(
             "voicememos",
             filter_value="familyId='%s' && isDeleted=false && file!=''" % family,
@@ -605,6 +606,18 @@ def _parse_date(value: Any) -> Optional[datetime]:
 
 def _pb_quote(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def fact_family_value(logical_family_id: str) -> str:
+    """旧单家庭库可只读空 familyId，派生产物仍使用非空逻辑家庭 id。"""
+    legacy = os.environ.get("FACTS_LEGACY_EMPTY_FAMILY", "false").strip().lower()
+    return "" if legacy in {"1", "true", "yes", "on"} else logical_family_id
+
+
+def fact_record_belongs_to_family(
+    record: dict[str, Any], logical_family_id: str
+) -> bool:
+    return str(record.get("familyId") or "") == fact_family_value(logical_family_id)
 
 
 def _pb_date(value: datetime) -> str:

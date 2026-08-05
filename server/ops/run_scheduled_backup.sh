@@ -27,7 +27,7 @@ fi
 while IFS='=' read -r key value || [[ -n "$key" ]]; do
   [[ -z "$key" || "$key" == \#* ]] && continue
   case "$key" in
-    PB_DATA_DIR|MIRROR_DIR|BACKUP_STAMP|LOCK_DIR|WORK_ROOT|RESTIC_REPOSITORY|RESTIC_PASSWORD_FILE|NTFY_URL|NTFY_TOKEN_FILE)
+    PB_DATA_DIR|MIRROR_DIR|BACKUP_STAMP|LOCK_DIR|WORK_ROOT|RESTIC_REPOSITORY|RESTIC_SECONDARY_REPOSITORY|RESTIC_PASSWORD_FILE|REQUIRE_RESTIC_REPOSITORIES|NTFY_URL|NTFY_TOKEN_FILE)
       export "$key=$value"
       ;;
     *) fail "配置包含不允许的键：$key" ;;

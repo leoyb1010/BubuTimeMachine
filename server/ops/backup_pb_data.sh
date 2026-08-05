@@ -15,7 +15,9 @@ BACKUP_STAMP="${BACKUP_STAMP:-$MIRROR_DIR/.last-success}"
 LOCK_DIR="${LOCK_DIR:-${TMPDIR:-/tmp}/bubu-pb-backup.lock}"
 WORK_ROOT="${WORK_ROOT:-${TMPDIR:-/tmp}}"
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-}"
+RESTIC_SECONDARY_REPOSITORY="${RESTIC_SECONDARY_REPOSITORY:-}"
 RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-}"
+REQUIRE_RESTIC_REPOSITORIES="${REQUIRE_RESTIC_REPOSITORIES:-false}"
 
 fail() {
   printf '备份失败：%s\n' "$1" >&2
@@ -27,6 +29,18 @@ fail() {
 [[ -d "$PB_DATA_DIR/storage" ]] || fail "找不到 storage 目录"
 [[ "$PB_DATA_DIR" != "$MIRROR_DIR" ]] || fail "源目录与镜像目录不能相同"
 [[ "$MIRROR_DIR" != "/" && "$MIRROR_DIR" != "${HOME:-}" ]] || fail "镜像目录范围过大"
+[[ ! -L "$MIRROR_DIR" ]] || fail "镜像目录不能是符号链接"
+
+case "$REQUIRE_RESTIC_REPOSITORIES" in
+  1|true|yes|on)
+    [[ -n "$RESTIC_REPOSITORY" ]] || fail "安全门要求本地 restic 仓库"
+    [[ -n "$RESTIC_SECONDARY_REPOSITORY" ]] || fail "安全门要求异地 restic 仓库"
+    [[ "$RESTIC_REPOSITORY" != "$RESTIC_SECONDARY_REPOSITORY" ]] \
+      || fail "本地与异地 restic 仓库不能相同"
+    ;;
+  0|false|no|off) ;;
+  *) fail "REQUIRE_RESTIC_REPOSITORIES 只能为 true/false" ;;
+esac
 
 for required in python3 rsync; do
   command -v "$required" >/dev/null 2>&1 || fail "缺少命令：$required"
@@ -51,13 +65,59 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# 首次只允许初始化空目录；已有宽目录必须由维护者核对后手工放置 sentinel。
+# 这样误把 Desktop、卷根等填成 MIRROR_DIR 时不会覆盖同名 data.db 或整目录送入 restic。
+sentinel="$MIRROR_DIR/.bubu-pocketbase-backup-target"
+if [[ ! -e "$MIRROR_DIR" ]]; then
+  mkdir -p "$MIRROR_DIR"
+fi
+if [[ ! -f "$sentinel" ]]; then
+  if find "$MIRROR_DIR" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    fail "镜像目录非空且缺少专用标记，请核对路径后手工初始化"
+  fi
+  printf 'bubu-pocketbase-backup-v1\n' > "$sentinel"
+fi
+[[ "$(cat "$sentinel")" == "bubu-pocketbase-backup-v1" ]] || fail "镜像目录专用标记无效"
+
 # 必须真的写入目标目录；只检查父目录 -w 会被 macOS 外置盘 TCC 误导。
-mkdir -p "$MIRROR_DIR"
 source_real="$(cd "$PB_DATA_DIR" && pwd -P)"
 mirror_real="$(cd "$MIRROR_DIR" && pwd -P)"
 case "$mirror_real/" in
   "$source_real/"*) fail "镜像目录不能位于 PocketBase 数据目录内" ;;
 esac
+
+# 本地仓库必须与镜像真正分离。远程 s3/rest/http 仓库没有本机路径，跳过路径判断；
+# 绝不能让两个变量指向同一个本地目录，也不能把 restic 仓库嵌进待备份镜像形成递归。
+local_repository_real() {
+  local repository="$1"
+  case "$repository" in
+    /*)
+      python3 - "$repository" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).resolve(strict=False))
+PY
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+primary_repo_real="$(local_repository_real "$RESTIC_REPOSITORY" 2>/dev/null || true)"
+secondary_repo_real="$(local_repository_real "$RESTIC_SECONDARY_REPOSITORY" 2>/dev/null || true)"
+if [[ -n "$primary_repo_real" && -n "$secondary_repo_real" ]]; then
+  [[ "$primary_repo_real" != "$secondary_repo_real" ]] \
+    || fail "本地与异地 restic 仓库解析后指向同一目录"
+fi
+for repo_real in "$primary_repo_real" "$secondary_repo_real"; do
+  [[ -n "$repo_real" ]] || continue
+  case "$repo_real/" in
+    "$mirror_real/"*) fail "restic 仓库不能位于镜像目录内" ;;
+  esac
+  case "$mirror_real/" in
+    "$repo_real/"*) fail "镜像目录不能位于 restic 仓库内" ;;
+  esac
+done
+
 write_probe="$MIRROR_DIR/.write-probe-$$"
 if ! (umask 077 && : > "$write_probe"); then
   fail "镜像目录不可写（请检查磁盘挂载与 macOS 完全磁盘访问权限）"
@@ -77,6 +137,7 @@ sync_files() {
     --exclude '/auxiliary.db-*' \
     --exclude '/backups/' \
     --exclude '/.last-success' \
+    --exclude '/.bubu-pocketbase-backup-target' \
     --exclude '/.incomplete-*' \
     "$PB_DATA_DIR/" "$MIRROR_DIR/"
 }
@@ -142,9 +203,13 @@ PY
 rsync -a "$work_dir/backup-manifest.json" "$MIRROR_DIR/.backup-manifest.json.next"
 mv -f "$MIRROR_DIR/.backup-manifest.json.next" "$MIRROR_DIR/backup-manifest.json"
 
-if [[ -n "$RESTIC_REPOSITORY" ]]; then
+backup_restic_repository() {
+  local repository="$1"
+  local role="$2"
+  [[ -n "$repository" ]] || return 0
   command -v restic >/dev/null 2>&1 || fail "已配置异地仓库但未安装 restic"
   [[ -f "$RESTIC_PASSWORD_FILE" ]] || fail "RESTIC_PASSWORD_FILE 不存在"
+  RESTIC_REPOSITORY="$repository"
   export RESTIC_REPOSITORY RESTIC_PASSWORD_FILE
   restic backup "$MIRROR_DIR" --tag bubu-pocketbase --tag "$timestamp"
   restic forget \
@@ -153,7 +218,12 @@ if [[ -n "$RESTIC_REPOSITORY" ]]; then
     --keep-monthly 24 \
     --keep-yearly 18
   restic check
-fi
+  printf 'restic %s仓库完成完整性检查\n' "$role"
+}
+
+# 本地第二介质与异地仓库必须分别成功；任一失败都不更新成功时间戳，避免健康检查误报。
+backup_restic_repository "$RESTIC_REPOSITORY" "本地"
+backup_restic_repository "$RESTIC_SECONDARY_REPOSITORY" "异地"
 
 mkdir -p "$(dirname "$BACKUP_STAMP")"
 printf '%s\n' "$timestamp" > "$BACKUP_STAMP"

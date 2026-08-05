@@ -29,12 +29,12 @@ docker exec -it bubu-ntfy ntfy token add bubu                # 生成 token，�
 ## 三、维护者订阅
 
 只在维护者手机安装 **ntfy** app：
-- 添加服务器 `http://<mini的tailscale-ip>:8095`
+- 添加服务器 `https://bubu-ops.leoyuan.top`（Cloudflare Tunnel 只反代本机 `127.0.0.1:8095`）
 - 用账号 `bubu` 登录，订阅话题 `bubu-ops`
 
 ## 安全
-- 仅 Tailscale 内网可达；`deny-all` + token，未授权不能收发。
-- 若经 Cloudflare Tunnel 暴露，只把 ntfy 绑定在 `127.0.0.1`，由 Tunnel 转发；不要直接开放 8095。
+- ntfy 只绑定 `127.0.0.1`，8095 不对局域网或公网监听；手机统一走受控的 Cloudflare Tunnel HTTPS 地址。
+- `deny-all` + token，未授权不能收发；Tunnel 只提供传输入口，不替代 ntfy 自身鉴权。
 - 话题名不是安全边界，必须保留 `deny-all`、账号授权和 Tailscale/反向代理访问控制。
 - 告警只含任务类型和健康状态，不含照片、文字、姓名、生日或记录正文。
 - iOS 即时推送会经 `ntfy.sh → Firebase/APNS` 转发 poll request；只包含消息 id 与话题 URL 哈希，

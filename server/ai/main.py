@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -81,12 +82,17 @@ def _record_parse_stats(resp: "NaturalParseResp") -> None:
 
 _API_KEY = os.environ.get("AI_API_KEY", "")
 _RATE_LIMIT = int(os.environ.get("AI_RATE_LIMIT_PER_MINUTE", "30"))
+_PREAUTH_RATE_LIMIT = int(os.environ.get("AI_PREAUTH_RATE_LIMIT_PER_MINUTE", "120"))
 _rate_lock = Lock()
 _rate_buckets: dict[str, deque] = defaultdict(deque)
+_pb_auth_lock = Lock()
+_pb_auth_cache: dict[str, tuple[float, str]] = {}
+_PB_AUTH_CACHE_SECONDS = max(30, int(os.environ.get("PB_AUTH_CACHE_SECONDS", "300")))
 
 
-def _check_rate(bucket_key: str) -> None:
+def _check_rate(bucket_key: str, limit: Optional[int] = None) -> None:
     now = time.monotonic()
+    effective_limit = _RATE_LIMIT if limit is None else limit
     with _rate_lock:
         for key, bucket in list(_rate_buckets.items()):
             while bucket and now - bucket[0] > 60:
@@ -94,25 +100,80 @@ def _check_rate(bucket_key: str) -> None:
             if not bucket:
                 del _rate_buckets[key]
         bucket = _rate_buckets[bucket_key]
-        if len(bucket) >= _RATE_LIMIT:
+        if len(bucket) >= effective_limit:
             raise HTTPException(status_code=429, detail="请求太频繁，请稍后再试。")
         bucket.append(now)
 
 
-def require_api_key(request: Request,
-                    x_api_key: Optional[str] = Header(default=None)) -> None:
-    """业务路由必须带 X-API-Key。未配置 AI_API_KEY 时拒绝服务（fail-closed），
-    防止把无鉴权服务误暴露到公网。"""
-    if not _API_KEY:
-        raise HTTPException(status_code=503,
-                            detail="服务端未配置 AI_API_KEY，请在 .env 设置后重启。")
-    if not secrets.compare_digest(x_api_key or "", _API_KEY):
+def _pocketbase_principal(
+    authorization: Optional[str], preauth_bucket: str = "preauth:unknown"
+) -> Optional[str]:
+    """把 App 已有的 PocketBase 登录态换成 AI 服务主体；只缓存 token 摘要，不落原文。"""
+    value = (authorization or "").strip()
+    if not value.lower().startswith("bearer "):
+        return None
+    token = value[7:].strip()
+    if not token:
+        return None
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    with _pb_auth_lock:
+        cached = _pb_auth_cache.get(digest)
+        if cached and cached[0] > now:
+            return "pb:" + cached[1]
+        if cached:
+            _pb_auth_cache.pop(digest, None)
+
+    # 只有未命中合法 token 缓存、确实要打到 PocketBase 时才计数，避免伪造 Bearer
+    # 把公网一次请求放大成一次本机 auth-refresh；缓存内的家庭正常请求不占该桶。
+    _check_rate(preauth_bucket, _PREAUTH_RATE_LIMIT)
+    base_url = os.environ.get("PB_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+    try:
+        with httpx.Client(timeout=5, trust_env=False) as client:
+            response = client.post(
+                base_url + "/api/collections/users/auth-refresh",
+                headers={"Authorization": "Bearer " + token},
+            )
+    except httpx.HTTPError:
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        record = response.json().get("record") or {}
+        user_id = str(record.get("id") or "")
+    except (TypeError, ValueError):
+        return None
+    if not user_id:
+        return None
+    with _pb_auth_lock:
+        _pb_auth_cache[digest] = (now + _PB_AUTH_CACHE_SECONDS, user_id)
+    return "pb:" + user_id
+
+
+def _authorized_principal(
+    x_api_key: Optional[str], authorization: Optional[str], preauth_bucket: str
+) -> Optional[str]:
+    if _API_KEY and secrets.compare_digest(x_api_key or "", _API_KEY):
+        return "service:" + hashlib.sha256(_API_KEY.encode("utf-8")).hexdigest()
+    return _pocketbase_principal(authorization, preauth_bucket)
+
+
+def require_api_key(
+    request: Request,
+    x_api_key: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """业务路由接受服务账号 key 或 App 的 PocketBase 用户登录态；两者都没有时 fail-closed。"""
+    client_host = request.client.host if request.client else "unknown"
+    principal = _authorized_principal(
+        x_api_key, authorization, "preauth:" + client_host
+    )
+    if principal is None:
         logger.warning("unauthorized request path=%s ip=%s",
                        request.url.path, request.client.host if request.client else "unknown")
-        raise HTTPException(status_code=401, detail="鉴权失败：X-API-Key 不正确。")
-    # 限流放在鉴权【之后】，且按 API key 计数（家庭共用一个 key）：
-    # 避免隧道/反代后全家共享一个源 IP 时相互挤占额度，也避免无 key 的探测流量白占家庭额度。
-    _check_rate(x_api_key)
+        raise HTTPException(status_code=401, detail="鉴权失败：请先登录家庭服务器。")
+    # 鉴权后按服务主体/用户计数，反代后的共享源 IP 不会让全家互相挤占额度。
+    _check_rate(principal)
 
 
 # ---------- 请求/响应模型 ----------
@@ -275,6 +336,10 @@ class SoundRingArtifactReq(BaseModel):
     artifact_id: str = Field(..., min_length=1, max_length=64)
 
 
+class SoundRingRemoveReq(SoundRingArtifactReq):
+    source_id: str = Field(..., min_length=1, max_length=160)
+
+
 def _semantic_enabled() -> bool:
     return os.environ.get("SEMANTIC_SEARCH_ENABLED", "false").lower() in {
         "1", "true", "yes", "on"
@@ -345,10 +410,16 @@ def _sound_ring_call(action):
 # ---------- 路由 ----------
 
 @app.get("/health")
-def health(x_api_key: Optional[str] = Header(default=None)):
-    # 连通性检查无需鉴权，但只有带正确 key 才返回服务详情。
-    # 用 secrets.compare_digest 做常量时间比较，避免 == 的定时侧信道（与业务路由一致）。
-    if _API_KEY and secrets.compare_digest(x_api_key or "", _API_KEY):
+def health(
+    request: Request,
+    x_api_key: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    # 连通性检查无需鉴权；服务 key 或 App 登录态有效时才返回服务详情。
+    client_host = request.client.host if request.client else "unknown"
+    if _authorized_principal(
+        x_api_key, authorization, "preauth:" + client_host
+    ) is not None:
         with _parse_stats_lock:
             stats = dict(_parse_stats)
         semantic_count = _semantic_index.active_count() if _semantic_index is not None else 0
@@ -621,6 +692,19 @@ def sound_ring_render(req: SoundRingArtifactReq):
     """家庭确认后发起渲染；失败可用同一个 artifact id 重试。"""
     family_id = _sound_ring_family_id()
     result = _sound_ring_call(lambda service: service.render(family_id, req.artifact_id))
+    return SoundRingResp(**result)
+
+
+@app.post("/sound-ring/remove", response_model=SoundRingResp,
+          dependencies=[Depends(require_api_key)])
+def sound_ring_remove(req: SoundRingRemoveReq):
+    """只从尚未渲染的清单移除一段；不会删除或修改原声事实。"""
+    family_id = _sound_ring_family_id()
+    result = _sound_ring_call(
+        lambda service: service.remove_clip(
+            family_id, req.artifact_id, req.source_id
+        )
+    )
     return SoundRingResp(**result)
 
 

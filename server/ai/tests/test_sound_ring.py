@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -19,7 +21,7 @@ from sound_ring import (  # noqa: E402
     public_artifact,
     select_materials,
 )
-from main import SoundRingArtifactReq, SoundRingResp, app  # noqa: E402
+from main import SoundRingArtifactReq, SoundRingRemoveReq, SoundRingResp, app  # noqa: E402
 
 
 def material(
@@ -232,6 +234,89 @@ def test_deleted_source_after_draft_is_failed_and_never_submitted():
     assert store.get_artifact(draft["id"])["status"] == "failed"
 
 
+def test_draft_can_remove_one_clip_without_touching_source_facts():
+    store = FakeStore()
+    service = SoundRingService(store, submitter=lambda *_: None)
+    service.query = FakeQuery([
+        material("zero", age=0, duration=100, photo=True),
+        material("one", age=1, duration=100),
+        material("two", age=2, duration=100),
+    ])
+    draft = service.draft("family", "布布")
+    result = service.remove_clip("family", draft["id"], "voicememos:zero")
+
+    assert [item["source_id"] for item in result["clips"]] == [
+        "voicememos:one", "voicememos:two"
+    ]
+    assert result["original_duration_seconds"] == 200
+    assert "entries:photozero" not in {
+        item["source_id"] for item in result["source_refs"]
+    }
+    assert store.sources == {}
+
+
+def test_render_transition_and_clip_edit_are_serialized():
+    store = FakeStore()
+    render_entered = threading.Event()
+    release_render = threading.Event()
+
+    def submitter(*_):
+        render_entered.set()
+        assert release_render.wait(timeout=2)
+
+    service = SoundRingService(store, submitter=submitter)
+    service.query = FakeQuery([
+        material("zero", age=0, duration=100),
+        material("one", age=1, duration=100),
+        material("two", age=2, duration=100),
+    ])
+    draft = service.draft("family", "布布")
+    render_thread = threading.Thread(
+        target=lambda: service.render("family", draft["id"]), daemon=True
+    )
+    render_thread.start()
+    assert render_entered.wait(timeout=2)
+
+    remove_finished = threading.Event()
+    remove_errors = []
+
+    def remove():
+        try:
+            service.remove_clip("family", draft["id"], "voicememos:zero")
+        except Exception as exc:  # noqa: BLE001
+            remove_errors.append(exc)
+        finally:
+            remove_finished.set()
+
+    remove_thread = threading.Thread(target=remove, daemon=True)
+    remove_thread.start()
+    time.sleep(0.05)
+    assert not remove_finished.is_set()
+
+    release_render.set()
+    render_thread.join(timeout=2)
+    remove_thread.join(timeout=2)
+    assert remove_finished.is_set()
+    assert isinstance(remove_errors[0], SoundRingUnavailable)
+    assert service.get("family", draft["id"])["status"] == "rendering"
+
+
+def test_draft_refuses_clip_removal_below_three_real_minutes():
+    store = FakeStore()
+    service = SoundRingService(store, submitter=lambda *_: None)
+    service.query = FakeQuery([
+        material("zero", age=0, duration=100),
+        material("one", age=1, duration=100),
+    ])
+    draft = service.draft("family", "布布")
+    try:
+        service.remove_clip("family", draft["id"], "voicememos:zero")
+        raise AssertionError("不能把清单缩到少于三分钟")
+    except SoundRingUnavailable as exc:
+        assert "不足 3 分钟" in str(exc)
+    assert len(service.get("family", draft["id"])["clips"]) == 2
+
+
 def test_replaced_source_revision_after_draft_is_rejected():
     store = FakeStore()
     service = SoundRingService(store, submitter=lambda *_: None)
@@ -272,13 +357,33 @@ def test_source_moved_to_another_family_after_draft_is_rejected():
     assert store.get_artifact(draft["id"])["status"] == "failed"
 
 
+def test_legacy_empty_fact_family_is_accepted_only_when_explicit(monkeypatch):
+    store = FakeStore()
+    submitted = []
+    service = SoundRingService(store, submitter=lambda *args: submitted.append(args))
+    service.query = FakeQuery([
+        material("zero", age=0, duration=100),
+        material("one", age=1, duration=100),
+    ])
+    draft = service.draft("bubu-logical-family", "布布")
+    for suffix in ("zero", "one"):
+        store.sources["record" + suffix] = {
+            "familyId": "", "localId": suffix, "isDeleted": False,
+            "file": suffix + ".m4a", "updated": "2026-08-06T08:00:00Z",
+        }
+    monkeypatch.setenv("FACTS_LEGACY_EMPTY_FAMILY", "true")
+    assert service.render("bubu-logical-family", draft["id"])["status"] == "rendering"
+    assert len(submitted) == 1
+
+
 def test_http_contract_keeps_family_server_bound_and_routes_complete():
     assert set(SoundRingArtifactReq.model_fields) == {"artifact_id"}
+    assert set(SoundRingRemoveReq.model_fields) == {"artifact_id", "source_id"}
     paths = {route.path for route in app.routes}
     assert {
         "/sound-ring/latest", "/sound-ring/history", "/sound-ring/draft",
         "/sound-ring/render", "/sound-ring/status/{artifact_id}",
-        "/sound-ring/archive", "/sound-ring/file/{artifact_id}",
+        "/sound-ring/remove", "/sound-ring/archive", "/sound-ring/file/{artifact_id}",
     }.issubset(paths)
 
     payload = {

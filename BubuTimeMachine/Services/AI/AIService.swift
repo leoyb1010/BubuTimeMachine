@@ -28,6 +28,7 @@ protocol AIService: Sendable {
     func latestSoundRing() async throws -> SoundRing?
     func soundRingHistory() async throws -> [SoundRing]
     func createSoundRingDraft() async throws -> SoundRing
+    func removeSoundRingClip(id: String, sourceId: String) async throws -> SoundRing
     func renderSoundRing(id: String) async throws -> SoundRing
     func soundRingStatus(id: String) async throws -> SoundRing
     func archiveSoundRing(id: String) async throws -> SoundRing

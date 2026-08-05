@@ -5,16 +5,19 @@ import SwiftData
 struct HealthRecordSheet: View {
     let kind: HealthRecordKind
     let existingRecord: HealthRecord?
+    let growthOnly: Bool
     @Environment(\.modelContext) private var context
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var records: [HealthRecord]
 
     @State private var draft = HealthRecordDraft()
+    @State private var saveError: String?
 
-    init(kind: HealthRecordKind, record: HealthRecord? = nil) {
+    init(kind: HealthRecordKind, record: HealthRecord? = nil, growthOnly: Bool = false) {
         self.kind = kind
         self.existingRecord = record
+        self.growthOnly = growthOnly
     }
 
     private var theme: Color { env.theme.theme.primary }
@@ -30,7 +33,7 @@ struct HealthRecordSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    HealthHeroCard(kind: kind, tint: theme)
+                    HealthHeroCard(kind: kind, growthOnly: growthOnly, tint: theme)
 
                     switch kind {
                     case .meal:
@@ -46,7 +49,7 @@ struct HealthRecordSheet: View {
                     case .symptom:
                         SymptomComposer(draft: $draft, tint: theme)
                     case .checkup:
-                        CheckupComposer(draft: $draft, tint: theme)
+                        CheckupComposer(draft: $draft, growthOnly: growthOnly, tint: theme)
                     }
 
                     DetailNoteCard(draft: $draft, tint: theme)
@@ -55,7 +58,7 @@ struct HealthRecordSheet: View {
                 .padding()
             }
             .background(BubuTheme.Color.background.ignoresSafeArea())
-            .navigationTitle("记录\(kind.title)")
+            .navigationTitle(growthOnly ? "更新成长数据" : "记录\(kind.title)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -69,11 +72,19 @@ struct HealthRecordSheet: View {
             }
         }
         .tint(theme)
+        .alert("这次没有保存好", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("知道了") { saveError = nil }
+        } message: {
+            Text(saveError ?? "请检查设备空间后再试。刚才填写的内容仍保留在页面里。")
+        }
         .onAppear {
             if let existingRecord {
                 draft = HealthRecordDraft(record: existingRecord)
                 // 编辑体检：把同日的成长测量值回填进表单，改动才能同步回成长曲线
-                if kind == .checkup, let m = checkupMeasurement(on: existingRecord.recordedAt) {
+                if kind == .checkup, let m = checkupMeasurement(for: existingRecord) {
                     draft.heightCm = m.heightCm
                     draft.weightKg = m.weightKg
                     draft.headCircumferenceCm = m.headCircumferenceCm
@@ -82,46 +93,185 @@ struct HealthRecordSheet: View {
         }
     }
 
-    /// 同一天、来源为体检的成长测量（编辑回填 / 更新用）。
-    private func checkupMeasurement(on day: Date) -> GrowthMeasurement? {
+    /// 优先走稳定关联；旧数据没有关联时，才按同日 + 时间距离做确定性回填。
+    private func checkupMeasurement(for record: HealthRecord) -> GrowthMeasurement? {
+        if let linkedId = record.growthMeasurementId {
+            let linkedDescriptor = FetchDescriptor<GrowthMeasurement>(
+                predicate: #Predicate { $0.id == linkedId })
+            if let linked = try? context.fetch(linkedDescriptor).first {
+                return linked
+            }
+        }
         let cal = Calendar.current
-        let start = cal.startOfDay(for: day)
-        let end = cal.date(byAdding: .day, value: 1, to: start) ?? day
+        let start = cal.startOfDay(for: record.recordedAt)
+        let end = cal.date(byAdding: .day, value: 1, to: start) ?? record.recordedAt
         let descriptor = FetchDescriptor<GrowthMeasurement>(
             predicate: #Predicate { $0.sourceRaw == "checkup" && $0.measuredAt >= start && $0.measuredAt < end })
-        return (try? context.fetch(descriptor))?.first
+        let candidates = (try? context.fetch(descriptor)) ?? []
+        return HealthRecordGrowthLink.preferredMeasurement(for: record, from: candidates, calendar: cal)
     }
 
     private func save() {
         let record = existingRecord ?? HealthRecord(kind: kind, title: kind.title, recordedAt: draft.recordedAt)
+        let recordSnapshot = existingRecord.map(HealthRecordEditSnapshot.init)
+        let linkedMeasurement = existingRecord.flatMap(checkupMeasurement(for:))
+        let measurementSnapshot = linkedMeasurement.map(GrowthMeasurementEditSnapshot.init)
+        var insertedMeasurement: GrowthMeasurement?
+        var insertedFeedEvent: FeedEvent?
+
         draft.apply(to: record, kind: kind)
         record.syncState = .local
         if existingRecord == nil {
             context.insert(record)
         }
         if kind == .checkup, draft.hasGrowthMeasurement {
-            // 新建插入；编辑则更新同日测量（找不到就补建）——曲线与记录不再脱节
-            if let m = existingRecord == nil ? nil : checkupMeasurement(on: record.recordedAt) {
-                m.heightCm = draft.heightCm
-                m.weightKg = draft.weightKg
-                m.headCircumferenceCm = draft.headCircumferenceCm
-                m.measuredAt = draft.recordedAt
-                m.updatedAt = .now
-                m.syncState = .local
+            if let linkedMeasurement {
+                draft.apply(to: linkedMeasurement)
+                record.growthMeasurementId = linkedMeasurement.id
             } else {
-                context.insert(draft.makeGrowthMeasurement())
+                let measurement = draft.makeGrowthMeasurement()
+                record.growthMeasurementId = measurement.id
+                insertedMeasurement = measurement
+                context.insert(measurement)
             }
         }
         if existingRecord == nil {
-            context.insert(FeedEvent(kind: .healthRecorded,
-                                     actorRole: env.config.currentRole.rawValue,
-                                     summary: "记录了\(kind.title)：\(record.title)"))
+            let event = FeedEvent(kind: .healthRecorded,
+                                  actorRole: env.config.currentRole.rawValue,
+                                  summary: "记录了\(kind.title)：\(record.title)")
+            insertedFeedEvent = event
+            context.insert(event)
         }
-        try? context.save()
-        env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
-        env.syncEngine.syncNow()
-        dismiss()
+        do {
+            try context.save()
+            env.refreshWidgetSnapshot(context: context)
+            WidgetRefresher.reload()
+            env.syncEngine.syncNow()
+            dismiss()
+        } catch {
+            // 只撤销这张表单的对象，不能 rollback 整个主 context 里别处尚未保存的工作。
+            if existingRecord == nil {
+                context.delete(record)
+            } else {
+                recordSnapshot?.restore(record)
+            }
+            if let insertedMeasurement { context.delete(insertedMeasurement) }
+            if let linkedMeasurement { measurementSnapshot?.restore(linkedMeasurement) }
+            if let insertedFeedEvent { context.delete(insertedFeedEvent) }
+            saveError = "设备暂时没能写入这条记录。请确认存储空间充足后重试；刚才填写的数值没有丢。"
+        }
+    }
+}
+
+/// 旧记录的一次性确定性配对规则；一旦找到，保存时就把 UUID 钉回 HealthRecord。
+enum HealthRecordGrowthLink {
+    static func preferredMeasurement(
+        for record: HealthRecord,
+        from measurements: [GrowthMeasurement],
+        calendar: Calendar = .current
+    ) -> GrowthMeasurement? {
+        if let linkedId = record.growthMeasurementId,
+           let linked = measurements.first(where: { $0.id == linkedId }) {
+            return linked
+        }
+        return measurements
+            .filter {
+                $0.sourceRaw == "checkup"
+                    && calendar.isDate($0.measuredAt, inSameDayAs: record.recordedAt)
+            }
+            .sorted {
+                let lhsDistance = abs($0.measuredAt.timeIntervalSince(record.recordedAt))
+                let rhsDistance = abs($1.measuredAt.timeIntervalSince(record.recordedAt))
+                if lhsDistance != rhsDistance { return lhsDistance < rhsDistance }
+                if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+                if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            .first
+    }
+}
+
+private struct HealthRecordEditSnapshot {
+    let kind: HealthRecordKind
+    let title: String
+    let detail: String?
+    let recordedAt: Date
+    let amountText: String?
+    let reaction: String?
+    let amountValue: Double?
+    let amountUnit: String?
+    let startAt: Date?
+    let endAt: Date?
+    let severityRaw: String?
+    let temperatureCelsius: Double?
+    let tags: [String]
+    let growthMeasurementId: UUID?
+    let syncState: SyncState
+
+    init(_ record: HealthRecord) {
+        kind = record.kind
+        title = record.title
+        detail = record.detail
+        recordedAt = record.recordedAt
+        amountText = record.amountText
+        reaction = record.reaction
+        amountValue = record.amountValue
+        amountUnit = record.amountUnit
+        startAt = record.startAt
+        endAt = record.endAt
+        severityRaw = record.severityRaw
+        temperatureCelsius = record.temperatureCelsius
+        tags = record.tags
+        growthMeasurementId = record.growthMeasurementId
+        syncState = record.syncState
+    }
+
+    func restore(_ record: HealthRecord) {
+        record.kind = kind
+        record.title = title
+        record.detail = detail
+        record.recordedAt = recordedAt
+        record.amountText = amountText
+        record.reaction = reaction
+        record.amountValue = amountValue
+        record.amountUnit = amountUnit
+        record.startAt = startAt
+        record.endAt = endAt
+        record.severityRaw = severityRaw
+        record.temperatureCelsius = temperatureCelsius
+        record.tags = tags
+        record.growthMeasurementId = growthMeasurementId
+        record.syncState = syncState
+    }
+}
+
+private struct GrowthMeasurementEditSnapshot {
+    let measuredAt: Date
+    let heightCm: Double?
+    let weightKg: Double?
+    let headCircumferenceCm: Double?
+    let note: String?
+    let syncState: SyncState
+    let updatedAt: Date
+
+    init(_ measurement: GrowthMeasurement) {
+        measuredAt = measurement.measuredAt
+        heightCm = measurement.heightCm
+        weightKg = measurement.weightKg
+        headCircumferenceCm = measurement.headCircumferenceCm
+        note = measurement.note
+        syncState = measurement.syncState
+        updatedAt = measurement.updatedAt
+    }
+
+    func restore(_ measurement: GrowthMeasurement) {
+        measurement.measuredAt = measuredAt
+        measurement.heightCm = heightCm
+        measurement.weightKg = weightKg
+        measurement.headCircumferenceCm = headCircumferenceCm
+        measurement.note = note
+        measurement.syncState = syncState
+        measurement.updatedAt = updatedAt
     }
 }
 
@@ -139,12 +289,20 @@ struct HealthRecordDraft: Equatable {
     var heightCm: Double?
     var weightKg: Double?
     var headCircumferenceCm: Double?
+    var amountInputInvalid = false
+    var heightInputInvalid = false
+    var weightInputInvalid = false
+    var headInputInvalid = false
     var tags: [String] = []
     /// 编辑时的原 amountText：本次没有产生新的摘要就沿用旧值（AI 记的「半碗」不再被清空）。
     var originalAmountText: String?
 
     var hasGrowthMeasurement: Bool {
         heightCm != nil || weightKg != nil || headCircumferenceCm != nil
+    }
+
+    var hasInvalidNumericInput: Bool {
+        amountInputInvalid || heightInputInvalid || weightInputInvalid || headInputInvalid
     }
 
     init() {}
@@ -165,6 +323,7 @@ struct HealthRecordDraft: Equatable {
     }
 
     func canSave(kind: HealthRecordKind) -> Bool {
+        guard !hasInvalidNumericInput else { return false }
         switch kind {
         case .water:
             return amountValue != nil
@@ -247,6 +406,12 @@ struct HealthRecordDraft: Equatable {
 
     func makeGrowthMeasurement() -> GrowthMeasurement {
         let measurement = GrowthMeasurement(measuredAt: recordedAt, source: "checkup")
+        apply(to: measurement)
+        return measurement
+    }
+
+    func apply(to measurement: GrowthMeasurement) {
+        measurement.measuredAt = recordedAt
         measurement.heightCm = heightCm
         measurement.weightKg = weightKg
         measurement.headCircumferenceCm = headCircumferenceCm
@@ -255,8 +420,8 @@ struct HealthRecordDraft: Equatable {
             detail.trimmed.isEmpty ? nil : detail.trimmed
         ].compactMap { $0 }
         measurement.note = noteParts.isEmpty ? nil : noteParts.joined(separator: " · ")
+        measurement.updatedAt = .now
         measurement.syncState = .local
-        return measurement
     }
 
     static func durationText(from start: Date, to end: Date) -> String {
@@ -275,6 +440,7 @@ struct HealthRecordDraft: Equatable {
 
 private struct HealthHeroCard: View {
     let kind: HealthRecordKind
+    let growthOnly: Bool
     let tint: Color
 
     var body: some View {
@@ -282,10 +448,10 @@ private struct HealthHeroCard: View {
         HStack(spacing: 14) {
             BubuMascotBadge(size: 62, expression: design.mascot)
             VStack(alignment: .leading, spacing: 5) {
-                Label(design.heroTitle, systemImage: design.icon)
+                Label(growthOnly ? "成长数据" : design.heroTitle, systemImage: design.icon)
                     .font(BubuTheme.Font.headline)
                     .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text(design.heroSubtitle)
+                Text(growthOnly ? "记录新的身高、体重或头围，保存后马上更新成长曲线。" : design.heroSubtitle)
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -357,7 +523,7 @@ private struct SupplementComposer: View {
             TagGrid(chips: HealthRecordKind.supplement.design.chips, selected: $draft.tags, tint: tint)
             TextField("比如：维D、益生菌", text: $draft.title)
                 .healthTextField()
-            AmountStepper(title: "本次剂量", value: $draft.amountValue, unit: draft.amountUnit ?? "滴", range: 0...20, step: 1, tint: tint)
+            AmountStepper(title: "本次剂量", value: $draft.amountValue, unit: draft.amountUnit ?? "滴", range: 0...20, step: 1, isInvalid: $draft.amountInputInvalid, tint: tint)
             HStack {
                 ForEach(units, id: \.self) { unit in
                     SelectableChip(text: unit, selected: draft.amountUnit == unit, tint: tint) {
@@ -419,7 +585,7 @@ private struct WaterComposer: View {
                     .buttonStyle(.plain)
                 }
             }
-            AmountStepper(title: "微调水量", value: $draft.amountValue, unit: "ml", range: 10...500, step: 10, tint: tint)
+            AmountStepper(title: "微调水量", value: $draft.amountValue, unit: "ml", range: 10...500, step: 10, isInvalid: $draft.amountInputInvalid, tint: tint)
             TagGrid(chips: HealthRecordKind.water.design.chips, selected: $draft.tags, tint: tint)
         }
     }
@@ -484,29 +650,34 @@ private struct SymptomComposer: View {
 
 private struct CheckupComposer: View {
     @Binding var draft: HealthRecordDraft
+    let growthOnly: Bool
     let tint: Color
 
     var body: some View {
-        ComposerCard(title: "体检数据", icon: "stethoscope", tint: tint) {
-            TagGrid(chips: HealthRecordKind.checkup.design.chips, selected: $draft.tags, tint: tint)
-            TextField("体检项目或疫苗名称", text: $draft.title)
-                .healthTextField()
-            VStack(spacing: 10) {
-                AmountStepper(title: "身高", value: $draft.heightCm, unit: "cm", range: 30...140, step: 0.5, tint: tint)
-                AmountStepper(title: "体重", value: $draft.weightKg, unit: "kg", range: 1...40, step: 0.1, tint: tint)
-                AmountStepper(title: "头围", value: $draft.headCircumferenceCm, unit: "cm", range: 20...70, step: 0.5, tint: tint)
+        ComposerCard(title: growthOnly ? "成长数据" : "体检数据", icon: "stethoscope", tint: tint) {
+            if !growthOnly {
+                TagGrid(chips: HealthRecordKind.checkup.design.chips, selected: $draft.tags, tint: tint)
+                TextField("体检项目或疫苗名称", text: $draft.title)
+                    .healthTextField()
             }
-            AmountStepper(title: "其它数值", value: $draft.amountValue, unit: draft.amountUnit ?? "cm", range: 0...130, step: 0.5, tint: tint)
-            HStack {
-                ForEach(["cm", "kg", "针", "颗"], id: \.self) { unit in
-                    SelectableChip(text: unit, selected: draft.amountUnit == unit, tint: tint) {
-                        draft.amountUnit = unit
+            VStack(spacing: 10) {
+                AmountStepper(title: "身高", value: $draft.heightCm, unit: "cm", range: 30...140, step: 0.5, isInvalid: $draft.heightInputInvalid, tint: tint)
+                AmountStepper(title: "体重", value: $draft.weightKg, unit: "kg", range: 1...40, step: 0.1, isInvalid: $draft.weightInputInvalid, tint: tint)
+                AmountStepper(title: "头围", value: $draft.headCircumferenceCm, unit: "cm", range: 20...70, step: 0.5, isInvalid: $draft.headInputInvalid, tint: tint)
+            }
+            if !growthOnly {
+                AmountStepper(title: "其它数值", value: $draft.amountValue, unit: draft.amountUnit ?? "cm", range: 0...130, step: 0.5, isInvalid: $draft.amountInputInvalid, tint: tint)
+                HStack {
+                    ForEach(["cm", "kg", "针", "颗"], id: \.self) { unit in
+                        SelectableChip(text: unit, selected: draft.amountUnit == unit, tint: tint) {
+                            draft.amountUnit = unit
+                        }
                     }
                 }
+                TextField("医生建议、牙齿等补充", text: $draft.detail, axis: .vertical)
+                    .lineLimit(3...6)
+                    .healthTextField()
             }
-            TextField("医生建议、头围、体重、牙齿等补充", text: $draft.detail, axis: .vertical)
-                .lineLimit(3...6)
-                .healthTextField()
         }
         .onAppear {
             if draft.amountUnit == nil { draft.amountUnit = "cm" }
@@ -631,6 +802,7 @@ private struct AmountStepper: View {
     let unit: String
     let range: ClosedRange<Double>
     let step: Double
+    @Binding var isInvalid: Bool
     let tint: Color
 
     // 输入期间只写本地缓存，失焦/回车才 parse+clamp——
@@ -644,19 +816,22 @@ private struct AmountStepper: View {
                 Text(title)
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
-                Text(value.map { "\(HealthRecordDraft.cleanAmount($0))\(unit)" } ?? "未填写")
+                Text(isInvalid
+                     ? "请输入 \(HealthRecordDraft.cleanAmount(range.lowerBound))–\(HealthRecordDraft.cleanAmount(range.upperBound))\(unit)"
+                     : value.map { "\(HealthRecordDraft.cleanAmount($0))\(unit)" } ?? "未填写")
                     .font(BubuTheme.Font.headline)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .foregroundStyle(isInvalid ? BubuTheme.Color.danger : BubuTheme.Color.warmBrown)
             }
             Spacer()
             HStack(spacing: 4) {
                 TextField("输入", text: $editingText)
                     .font(BubuTheme.Font.scaled(16, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .foregroundStyle(isInvalid ? BubuTheme.Color.danger : BubuTheme.Color.warmBrown)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 62)
                     .focused($focused)
+                    .accessibilityLabel("\(title)，\(unit)")
                     .onSubmit { commit() }
                 if value != nil {
                     Text(unit)
@@ -669,16 +844,52 @@ private struct AmountStepper: View {
             .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? range.lowerBound },
-                set: { value = min(max($0, range.lowerBound), range.upperBound); syncText() }
+                set: {
+                    value = min(max($0, range.lowerBound), range.upperBound)
+                    isInvalid = false
+                    syncText()
+                }
             ), in: range, step: step)
             .labelsHidden()
             .tint(tint)
+            .accessibilityLabel("调整\(title)，单位\(unit)")
         }
         .padding(12)
         .background(BubuTheme.Color.cream.opacity(0.65), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
         .onAppear { syncText() }
         .onChange(of: focused) { _, isFocused in
             if !isFocused { commit() }
+        }
+        .onChange(of: editingText) { _, text in
+            guard focused else { return }
+            let normalized = text
+                .replacingOccurrences(of: "，", with: ".")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalized.isEmpty {
+                value = nil
+                isInvalid = false
+            } else if let parsed = Double(normalized), range.contains(parsed) {
+                // 只在输入已经落进合法范围时实时写回，不把敲到一半的「3」钳成 30。
+                value = parsed
+                isInvalid = false
+            } else {
+                // 不能保留上一次合法值，否则界面显示 99，保存的却仍是 9。
+                value = nil
+                isInvalid = true
+            }
+        }
+        .toolbar {
+            if focused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") {
+                        commit()
+                        focused = false
+                    }
+                    .fontWeight(.semibold)
+                    .accessibilityHint("保存当前\(title)输入值并收起键盘")
+                }
+            }
         }
     }
 
@@ -690,10 +901,18 @@ private struct AmountStepper: View {
         let text = editingText
             .replacingOccurrences(of: "，", with: ".")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { value = nil; return }
-        if let parsed = Double(text) {
-            value = min(max(parsed, range.lowerBound), range.upperBound)
+        guard !text.isEmpty else {
+            value = nil
+            isInvalid = false
+            return
         }
+        guard let parsed = Double(text), range.contains(parsed) else {
+            value = nil
+            isInvalid = true
+            return
+        }
+        value = parsed
+        isInvalid = false
         syncText()
     }
 }

@@ -10,7 +10,8 @@
   </array>
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Weekday</key><integer>1</integer>
+    <!-- launchd: 1=周日、2=周一；自然周结束后周一 00:05 再生成。 -->
+    <key>Weekday</key><integer>2</integer>
     <key>Hour</key><integer>0</integer>
     <key>Minute</key><integer>5</integer>
   </dict>

@@ -455,6 +455,8 @@ struct RootView: View {
             NavigationStack { AdvancedSettingsView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-capsule") {
             NavigationStack { CapsuleHomeView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth-entry") {
+            HealthRecordSheet(kind: .checkup, growthOnly: true)
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth") {
             NavigationStack { GrowthCurveView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-diary") {

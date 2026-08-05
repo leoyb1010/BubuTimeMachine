@@ -85,13 +85,6 @@ final class ServerConfig {
     var aiBaseURLString: String {
         didSet { UserDefaults.standard.set(aiBaseURLString, forKey: Self.aiURLKey) }
     }
-    /// AI 服务访问密钥（与服务端 .env 的 AI_API_KEY 一致），存 Keychain。
-    var aiAPIKey: String {
-        didSet {
-            if aiAPIKey.isEmpty { KeychainStore.delete(Self.aiKeyKey) }
-            else { KeychainStore.set(aiAPIKey, for: Self.aiKeyKey) }
-        }
-    }
     /// 是否启用真实 AI（关闭则用 Mock，离线可玩）。
     var aiEnabled: Bool {
         didSet { UserDefaults.standard.set(aiEnabled, forKey: Self.aiEnabledKey) }
@@ -125,7 +118,7 @@ final class ServerConfig {
 
     /// 是否可用真实 AI。
     var isAIConfigured: Bool {
-        aiEnabled && aiBaseURL != nil && !aiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        aiEnabled && aiBaseURL != nil && isConfigured
     }
 
     private static let baseURLKey = "bubu.server.baseURL"
@@ -135,7 +128,7 @@ final class ServerConfig {
     private static let emailKey = "bubu.server.email"
     private static let passwordKey = "bubu.server.password"
     private static let aiURLKey = "bubu.ai.baseURL"
-    private static let aiKeyKey = "bubu.ai.apiKey"
+    private static let legacyAIKeyKey = "bubu.ai.apiKey"
     private static let aiEnabledKey = "bubu.ai.enabled"
     private static let semanticSearchEnabledKey = "bubu.ai.semanticSearch.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
@@ -146,9 +139,6 @@ final class ServerConfig {
     /// 之前 Release 分支只显示"已内置 ✓"却是空串、又没有输入框——新装机永远登录不上。
     static var defaultBaseURL: String { injectedValue("BUBU_DEFAULT_BASE_URL") }
     static var defaultAIBaseURL: String { injectedValue("BUBU_DEFAULT_AI_BASE_URL") }
-    /// 可用 Info.plist 或调试环境注入，避免把真实密钥提交到 GitHub。
-    private static var defaultAIAPIKey: String { injectedValue("BUBU_DEFAULT_AI_API_KEY") }
-
     private static func injectedValue(_ key: String) -> String {
         let infoValue = Bundle.main.object(forInfoDictionaryKey: key) as? String
         let envValue = ProcessInfo.processInfo.environment[key]
@@ -161,26 +151,34 @@ final class ServerConfig {
     static let aiBaseURLPlaceholder = "https://你的AI服务地址:8000"
 
     init() {
-        self.baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
+        let initialBaseURL = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.defaultBaseURL
+        self.baseURLString = initialBaseURL
         self.lanBaseURLString = UserDefaults.standard.string(forKey: Self.lanBaseURLKey) ?? ""
         self.currentRoleRaw = UserDefaults.standard.string(forKey: Self.roleKey) ?? FamilyRole.mama.rawValue
         self.childName = UserDefaults.standard.string(forKey: Self.childNameKey) ?? "布布"
-        self.accountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""
+        let initialAccountEmail = UserDefaults.standard.string(forKey: Self.emailKey) ?? ""
+        self.accountEmail = initialAccountEmail
         let legacyPassword = UserDefaults.standard.string(forKey: Self.passwordKey)
         if let legacyPassword, !legacyPassword.isEmpty {
             KeychainStore.set(legacyPassword, for: Self.passwordKey)
             UserDefaults.standard.removeObject(forKey: Self.passwordKey)
         }
-        self.accountPassword = KeychainStore.string(for: Self.passwordKey) ?? legacyPassword ?? ""
-        self.aiBaseURLString = UserDefaults.standard.string(forKey: Self.aiURLKey) ?? Self.defaultAIBaseURL
-        let storedAIKey = KeychainStore.string(for: Self.aiKeyKey) ?? ""
-        let initialAIKey = storedAIKey.isEmpty ? Self.defaultAIAPIKey : storedAIKey
-        self.aiAPIKey = initialAIKey
-        if storedAIKey.isEmpty, !initialAIKey.isEmpty {
-            KeychainStore.set(initialAIKey, for: Self.aiKeyKey)
-        }
-        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
-        self.semanticSearchEnabled = UserDefaults.standard.object(forKey: Self.semanticSearchEnabledKey) as? Bool ?? false
+        let initialAccountPassword = KeychainStore.string(for: Self.passwordKey) ?? legacyPassword ?? ""
+        self.accountPassword = initialAccountPassword
+        let initialAIBaseURL = UserDefaults.standard.string(forKey: Self.aiURLKey)
+            ?? Self.defaultAIBaseURL
+        self.aiBaseURLString = initialAIBaseURL
+        // v2.7 起 AI 复用 PocketBase 用户登录态；清掉旧共享 key，避免被发往误填的主机。
+        KeychainStore.delete(Self.legacyAIKeyKey)
+        let packagedFamilyAI = !initialAIBaseURL.isEmpty
+            && URL(string: initialBaseURL) != nil
+            && !initialAccountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !initialAccountPassword.isEmpty
+        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool
+            ?? packagedFamilyAI
+        self.semanticSearchEnabled = UserDefaults.standard.object(
+            forKey: Self.semanticSearchEnabledKey
+        ) as? Bool ?? false
         self.dailyReminderEnabled = UserDefaults.standard.bool(forKey: Self.reminderKey)
         // 简单模式：已存过就用存的；从没存过时，按当前身份是否长辈给默认值（长辈默认开）。
         let storedRole = FamilyRole(rawValue: UserDefaults.standard.string(forKey: Self.roleKey) ?? "") ?? .mama

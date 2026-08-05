@@ -48,7 +48,7 @@ final class AppEnvironment {
         let api = Self.makeAPIClient(config: config)
         let media = MediaStore()
         self.apiClient = api
-        self.aiService = Self.makeAIService(config: config)
+        self.aiService = Self.makeAIService(config: config, apiClient: api)
         self.mediaStore = media
         self.thumbnails = ThumbnailProvider(store: media)
         self.syncEngine = SyncEngine(apiClient: api, config: config, mediaStore: media)
@@ -71,9 +71,11 @@ final class AppEnvironment {
                                 lanBaseURL: config.lanBaseURL)
     }
 
-    private static func makeAIService(config: ServerConfig) -> AIService {
+    private static func makeAIService(config: ServerConfig, apiClient: APIClient) -> AIService {
         guard config.isAIConfigured, let url = config.aiBaseURL else { return MockAIService() }
-        return BubuAIService(baseURL: url, apiKey: config.aiAPIKey)
+        return BubuAIService(baseURL: url) {
+            try await apiClient.authenticate(role: "ai").token
+        }
     }
 
     /// 注册的一次性数据迁移。后续批次往这里追加即可。
@@ -227,7 +229,7 @@ final class AppEnvironment {
     func reloadServices(context: ModelContext) {
         let api = Self.makeAPIClient(config: config)
         self.apiClient = api
-        self.aiService = Self.makeAIService(config: config)
+        self.aiService = Self.makeAIService(config: config, apiClient: api)
         self.aiServiceRevision += 1
         syncEngine.setClient(api)
         syncEngine.attach(context: context)
@@ -237,7 +239,7 @@ final class AppEnvironment {
 
     /// AI 设置离开页面时只重建 AI 客户端；不要为改一个语义开关重启同步引擎。
     func reloadAIService() {
-        self.aiService = Self.makeAIService(config: config)
+        self.aiService = Self.makeAIService(config: config, apiClient: apiClient)
         self.aiServiceRevision += 1
         startWeeklyReportMonitor()
     }

@@ -95,7 +95,7 @@ class WeeklyReportService:
         if not any(item.kind == "voice" for item in evidence):
             raise WeeklyReportUnavailable("这一周没有原声记录，暂不生成不完整周报。")
 
-        sections = self._compose(child_name, evidence)
+        sections, model_version = self._compose(child_name, evidence)
         cited_ids = {
             source_id
             for section in sections
@@ -119,7 +119,7 @@ class WeeklyReportService:
             "sourceRefs": source_refs,
             "payload": payload,
             "generatedAt": datetime.now(UTC).isoformat(),
-            "modelVersion": self.llm.model,
+            "modelVersion": model_version,
         }
         record = self.workflow.create_idempotent(artifact_payload)
         return public_artifact(record)
@@ -132,7 +132,7 @@ class WeeklyReportService:
 
     def _compose(
         self, child_name: str, evidence: list[MemoryEvidence]
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str]:
         source_map = {item.source_id: item for item in evidence}
         evidence_json = json.dumps(
             [item.public() for item in evidence], ensure_ascii=False, separators=(",", ":")
@@ -151,11 +151,13 @@ class WeeklyReportService:
         )
         try:
             raw = self.llm.complete_json(system, user, max_tokens=1400)
-        except LLMError as exc:
-            raise WeeklyReportUnavailable(str(exc)) from exc
+        except LLMError:
+            # 周报不能因为云端模型欠费、换 key 或短时断网而完全停摆。
+            # 降级版只做确定性的证据编排，不续写、不猜测，也仍然保留全部来源引用。
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
         raw_sections = raw.get("sections") if isinstance(raw, dict) else None
         if not isinstance(raw_sections, list):
-            raise WeeklyReportUnavailable("周报模型输出无法解析。")
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
 
         by_kind: dict[str, dict[str, Any]] = {}
         for item in raw_sections:
@@ -172,11 +174,11 @@ class WeeklyReportService:
                     "sourceIds": list(dict.fromkeys(valid_ids))[:8],
                 }
         if set(by_kind) != set(SECTION_ORDER):
-            raise WeeklyReportUnavailable("证据不足以生成完整的五段周报。")
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
 
         small_ids = by_kind["small_things"]["sourceIds"]
         if len(small_ids) < 3:
-            raise WeeklyReportUnavailable("本周不足三条不同事实，暂不生成周报。")
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
         small_sources = [source_map[source_id] for source_id in small_ids[:3]]
         by_kind["small_things"]["sourceIds"] = [item.source_id for item in small_sources]
         by_kind["small_things"]["text"] = "\n".join(
@@ -190,7 +192,7 @@ class WeeklyReportService:
             None,
         )
         if growth_source is None:
-            raise WeeklyReportUnavailable("本周没有可核对的成长事实。")
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
         by_kind["growth"]["sourceIds"] = [growth_source.source_id]
         by_kind["growth"]["text"] = _fact_text(growth_source)
 
@@ -200,11 +202,11 @@ class WeeklyReportService:
             None,
         )
         if voice_source is None:
-            raise WeeklyReportUnavailable("原声段落没有引用真实语音。")
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
         # 原声是档案事实，不让模型改写。模型只负责选择引用，正文由真实转写确定性回填。
         exact_quote = voice_source.excerpt.strip()
         if not exact_quote:
-            raise WeeklyReportUnavailable("原声记录没有可引用的转写。")
+            return _deterministic_sections(evidence), "deterministic-evidence-v1"
         by_kind["voice"]["text"] = "“%s”" % exact_quote[:300]
         by_kind["voice"]["sourceIds"] = [voice_source.source_id]
 
@@ -219,7 +221,59 @@ class WeeklyReportService:
             "下周如果又遇见类似「%s」的时刻，可以顺手留一句原话或一张照片。"
             % suggestion_source.title
         )
-        return [by_kind[kind] for kind in SECTION_ORDER]
+        return [by_kind[kind] for kind in SECTION_ORDER], self.llm.model
+
+
+def _deterministic_sections(evidence: list[MemoryEvidence]) -> list[dict[str, Any]]:
+    unique = list({item.source_id: item for item in evidence}.values())
+    if len(unique) < 3:
+        raise WeeklyReportUnavailable("本周不足三条不同事实，暂不生成周报。")
+    growth = next((item for item in unique if item.kind in {"growth", "milestone"}), None)
+    voice = next((item for item in unique if item.kind == "voice" and item.excerpt.strip()), None)
+    if growth is None:
+        raise WeeklyReportUnavailable("本周没有可核对的成长事实。")
+    if voice is None:
+        raise WeeklyReportUnavailable("原声记录没有可引用的转写。")
+
+    small_sources = unique[:3]
+    question_source = small_sources[0]
+    suggestion_source = voice
+    return [
+        {
+            "kind": "small_things",
+            "title": SECTION_TITLES["small_things"],
+            "text": "\n".join(
+                "%s、%s" % (label, _fact_text(item))
+                for label, item in zip(("一", "二", "三"), small_sources)
+            ),
+            "sourceIds": [item.source_id for item in small_sources],
+        },
+        {
+            "kind": "growth",
+            "title": SECTION_TITLES["growth"],
+            "text": _fact_text(growth),
+            "sourceIds": [growth.source_id],
+        },
+        {
+            "kind": "voice",
+            "title": SECTION_TITLES["voice"],
+            "text": "“%s”" % voice.excerpt.strip()[:300],
+            "sourceIds": [voice.source_id],
+        },
+        {
+            "kind": "family_question",
+            "title": SECTION_TITLES["family_question"],
+            "text": "关于「%s」，家里还有哪个小细节想补进来？" % question_source.title,
+            "sourceIds": [question_source.source_id],
+        },
+        {
+            "kind": "gentle_suggestion",
+            "title": SECTION_TITLES["gentle_suggestion"],
+            "text": "下周如果又遇见类似「%s」的时刻，可以顺手留一句原话或一张照片。"
+            % suggestion_source.title,
+            "sourceIds": [suggestion_source.source_id],
+        },
+    ]
 
 
 def _fact_text(item: MemoryEvidence) -> str:

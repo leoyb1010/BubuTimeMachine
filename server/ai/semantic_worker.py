@@ -37,6 +37,16 @@ def retry_delay_seconds(attempts: int) -> int:
     return min(3600, 60 * (2 ** max(0, attempts - 1)))
 
 
+def safe_error_summary(error: Exception) -> str:
+    """持久化/日志只保留可排障类型，绝不带 protected-file URL 或 token。"""
+    if isinstance(error, httpx.HTTPStatusError):
+        return "%s: status=%s" % (type(error).__name__, error.response.status_code)
+    if isinstance(error, httpx.HTTPError):
+        return type(error).__name__
+    message = re.sub(r"([?&]token=)[^&\s]+", r"\1<redacted>", str(error))
+    return (type(error).__name__ + ": " + message)[:500]
+
+
 @dataclass(frozen=True)
 class ClaimedJob:
     id: str
@@ -58,7 +68,8 @@ class PocketBaseWorkerClient:
         self.worker_id = os.environ.get(
             "SEMANTIC_WORKER_ID", "%s-%d" % (socket.gethostname(), os.getpid())
         )
-        self._client = httpx.Client(base_url=self.base_url, timeout=30)
+        # 本地事实与 protected-file token 不应经过系统代理。
+        self._client = httpx.Client(base_url=self.base_url, timeout=30, trust_env=False)
         self._token = self.api_token
         self._file_token = ""
         self._file_token_expires_at = 0.0
@@ -161,7 +172,7 @@ class PocketBaseWorkerClient:
                 "availableAt": iso_now(retry_delay_seconds(attempts)),
                 "leaseOwner": "",
                 "leaseUntil": "",
-                "lastError": (type(error).__name__ + ": " + str(error))[:500],
+                "lastError": safe_error_summary(error),
             },
         )
 
@@ -258,7 +269,10 @@ class SemanticWorker:
             self._process(job)
             self.client.complete(job, self.encoder.model_version)
         except Exception as exc:
-            logger.exception("semantic job failed id=%s kind=%s", job.id, job.kind)
+            logger.error(
+                "semantic job failed id=%s kind=%s error=%s",
+                job.id, job.kind, safe_error_summary(exc),
+            )
             self.client.fail(job, exc)
 
     def _process(self, job: ClaimedJob) -> None:
@@ -275,7 +289,8 @@ class SemanticWorker:
         if not entry_local_id:
             raise RuntimeError("媒体缺少 entryLocalId")
         entry = self.client.fetch_entry(entry_local_id)
-        media_family = str(media.get("familyId") or job.family_id)
+        configured_family = os.environ.get("SEMANTIC_FAMILY_ID", "").strip()
+        media_family = str(media.get("familyId") or job.family_id or configured_family)
         entry_family = str(entry.get("familyId") or "")
         if entry.get("isDeleted"):
             self.index.remove(job.source_record_id)
@@ -327,6 +342,10 @@ def main() -> None:
         level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
+    # httpx 的 INFO 日志会打印 protected-file URL（其中含短期 token）。
+    # 业务日志保留 INFO，但传输层只记录 warning 以上，避免凭证落盘。
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     if os.environ.get("SEMANTIC_SEARCH_ENABLED", "false").lower() not in {
         "1", "true", "yes", "on"
     }:

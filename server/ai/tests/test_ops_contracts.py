@@ -88,6 +88,9 @@ def test_pb_backup_uses_sqlite_snapshot_and_never_mirror_deletes(tmp_path: Path)
     )
     assert result.returncode == 0, result.stderr
     assert (mirror / "storage/records/photo.jpg").read_bytes() == b"photo"
+    assert (mirror / ".bubu-pocketbase-backup-target").read_text().strip() == (
+        "bubu-pocketbase-backup-v1"
+    )
     assert (mirror / "backup-manifest.json").is_file()
     assert not (mirror / "data.db-wal").exists()
     with sqlite3.connect(mirror / "data.db") as db:
@@ -129,6 +132,162 @@ def test_restic_retention_is_versioned_without_automatic_prune():
     assert "--keep-monthly 24" in script
     assert "--keep-yearly 18" in script
     assert "restic prune" not in script
+    assert 'backup_restic_repository "$RESTIC_REPOSITORY" "本地"' in script
+    assert (
+        'backup_restic_repository "$RESTIC_SECONDARY_REPOSITORY" "异地"'
+        in script
+    )
+    assert 'REQUIRE_RESTIC_REPOSITORIES="${REQUIRE_RESTIC_REPOSITORIES:-false}"' in script
+
+
+def test_launchd_backup_template_uses_hardened_runner():
+    template = (
+        REPO_ROOT / "server/ops/com.bubu.backup.plist.example"
+    ).read_text(encoding="utf-8")
+    assert "run_scheduled_backup.sh" in template
+    assert "BUBU_BACKUP_CONFIG" in template
+    assert "backup_pb_data.sh</string>" not in template
+
+
+def test_backup_rejects_nonempty_target_without_sentinel(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    mirror = tmp_path / "wrong-wide-directory"
+    (source / "storage").mkdir(parents=True)
+    mirror.mkdir()
+    (mirror / "unrelated.txt").write_text("keep me", encoding="utf-8")
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "server/ops/backup_pb_data.sh")],
+        env=os.environ | {
+            "PB_DATA_DIR": str(source),
+            "MIRROR_DIR": str(mirror),
+            "LOCK_DIR": str(tmp_path / "backup.lock"),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "缺少专用标记" in result.stderr
+    assert (mirror / "unrelated.txt").read_text(encoding="utf-8") == "keep me"
+    assert not (mirror / "data.db").exists()
+
+
+def test_production_restic_gate_requires_local_and_offsite_repositories(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    (source / "storage").mkdir(parents=True)
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "server/ops/backup_pb_data.sh")],
+        env=os.environ | {
+            "PB_DATA_DIR": str(source),
+            "MIRROR_DIR": str(tmp_path / "mirror"),
+            "LOCK_DIR": str(tmp_path / "backup.lock"),
+            "REQUIRE_RESTIC_REPOSITORIES": "true",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "要求本地 restic 仓库" in result.stderr
+
+
+def test_production_restic_gate_rejects_same_repository(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    (source / "storage").mkdir(parents=True)
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+    repository = tmp_path / "same-restic"
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "server/ops/backup_pb_data.sh")],
+        env=os.environ | {
+            "PB_DATA_DIR": str(source),
+            "MIRROR_DIR": str(tmp_path / "mirror"),
+            "LOCK_DIR": str(tmp_path / "backup.lock"),
+            "REQUIRE_RESTIC_REPOSITORIES": "true",
+            "RESTIC_REPOSITORY": str(repository),
+            "RESTIC_SECONDARY_REPOSITORY": str(repository),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "不能相同" in result.stderr
+
+
+def test_backup_rejects_restic_repository_inside_mirror(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    mirror = tmp_path / "mirror"
+    (source / "storage").mkdir(parents=True)
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "server/ops/backup_pb_data.sh")],
+        env=os.environ | {
+            "PB_DATA_DIR": str(source),
+            "MIRROR_DIR": str(mirror),
+            "LOCK_DIR": str(tmp_path / "backup.lock"),
+            "RESTIC_REPOSITORY": str(mirror / "restic"),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "不能位于镜像目录内" in result.stderr
+
+
+def test_backup_runs_and_checks_both_restic_repositories(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    mirror = tmp_path / "mirror"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (source / "storage").mkdir(parents=True)
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO memories VALUES ('one')")
+    password = tmp_path / "restic-password"
+    password.write_text("test-only", encoding="utf-8")
+    calls = tmp_path / "restic-calls"
+    fake_restic = fake_bin / "restic"
+    fake_restic.write_text(
+        "#!/bin/sh\nprintf '%s|%s\\n' \"$RESTIC_REPOSITORY\" \"$1\" >> \"$FAKE_RESTIC_CALLS\"\n",
+        encoding="utf-8",
+    )
+    fake_restic.chmod(0o700)
+
+    script = REPO_ROOT / "server/ops/backup_pb_data.sh"
+    env = os.environ | {
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "PB_DATA_DIR": str(source),
+        "MIRROR_DIR": str(mirror),
+        "BACKUP_STAMP": str(tmp_path / "success"),
+        "LOCK_DIR": str(tmp_path / "backup.lock"),
+        "WORK_ROOT": str(tmp_path / "work"),
+        "RESTIC_REPOSITORY": str(tmp_path / "local-restic"),
+        "RESTIC_SECONDARY_REPOSITORY": str(tmp_path / "offsite-restic"),
+        "RESTIC_PASSWORD_FILE": str(password),
+        "FAKE_RESTIC_CALLS": str(calls),
+    }
+    result = subprocess.run(
+        ["bash", str(script)], env=env, text=True, capture_output=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "success").is_file()
+    rows = calls.read_text(encoding="utf-8").splitlines()
+    assert rows == [
+        f"{tmp_path / 'local-restic'}|backup",
+        f"{tmp_path / 'local-restic'}|forget",
+        f"{tmp_path / 'local-restic'}|check",
+        f"{tmp_path / 'offsite-restic'}|backup",
+        f"{tmp_path / 'offsite-restic'}|forget",
+        f"{tmp_path / 'offsite-restic'}|check",
+    ]
 
 
 def test_semantic_runtime_is_locked_and_skips_training_dependencies():
@@ -147,13 +306,20 @@ def test_semantic_runtime_is_locked_and_skips_training_dependencies():
     assert "pycocoevalcap==" not in lock
 
 
+def test_private_pocketbase_clients_ignore_system_http_proxy():
+    memory = (REPO_ROOT / "server/ai/memory_query.py").read_text(encoding="utf-8")
+    worker = (REPO_ROOT / "server/ai/semantic_worker.py").read_text(encoding="utf-8")
+    assert "httpx.Client(base_url=self.base_url, timeout=30, trust_env=False)" in memory
+    assert "httpx.Client(base_url=self.base_url, timeout=30, trust_env=False)" in worker
+
+
 def test_backup_launch_agent_runs_daily_without_embedded_secrets():
     path = REPO_ROOT / "server/ops/com.bubu.backup.plist.example"
     raw = path.read_text(encoding="utf-8")
     config = plistlib.loads(raw.encode("utf-8"))
     assert config["StartCalendarInterval"] == {"Hour": 3, "Minute": 17}
-    assert config["EnvironmentVariables"]["PB_DATA_DIR"]
-    assert config["EnvironmentVariables"]["MIRROR_DIR"]
+    assert config["EnvironmentVariables"]["BUBU_BACKUP_CONFIG"]
+    assert "run_scheduled_backup.sh" in config["ProgramArguments"][-1]
     assert "RESTIC_PASSWORD=" not in raw
 
 
@@ -195,6 +361,24 @@ def test_ntfy_is_private_pinned_and_does_not_forward_message_body():
     assert 'NTFY_BIND_ADDRESS:-127.0.0.1' in compose
     assert "NTFY_UPSTREAM_BASE_URL=https://ntfy.sh" in compose
     assert "iOS 即时通知只向 ntfy.sh 转发 poll id" in compose
+    readme = (REPO_ROOT / "server/ntfy/README.md").read_text(encoding="utf-8")
+    assert "https://bubu-ops.leoyuan.top" in readme
+    assert "http://<mini的tailscale-ip>:8095" not in readme
+
+
+def test_runtime_secrets_and_ntfy_cache_are_git_ignored():
+    ignore = (REPO_ROOT / "server/.gitignore").read_text(encoding="utf-8")
+    for path in ("ntfy/.env", "ntfy/data/", "ops/backup.env"):
+        assert path in ignore
+
+
+def test_pocketbase_uses_tracked_migrations_without_stale_runtime_copy():
+    script = (REPO_ROOT / "server/pocketbase/start_pocketbase.sh").read_text(
+        encoding="utf-8"
+    )
+    assert '--migrationsDir="./migrations"' in script
+    assert "cp -f migrations/*.js" not in script
+    assert "|| true" not in script
 
 
 def test_backup_failure_notification_contains_no_family_data():
@@ -307,6 +491,29 @@ HTTPServer(('127.0.0.1', int(os.environ['RESTORE_DRILL_FAKE_PORT'])), Handler).s
 def test_tracked_duplicate_review_was_removed():
     assert not (REPO_ROOT / "REVIEW_2026-07-12 2.md").exists()
     assert (REPO_ROOT / "REVIEW_2026-07-12.md").exists()
+
+
+def test_ai_launcher_uses_relocatable_python_module():
+    launcher = (REPO_ROOT / "server/ai/start_ai.sh").read_text(encoding="utf-8")
+
+    assert "./.venv/bin/python -m uvicorn" in launcher
+    assert "exec ./.venv/bin/uvicorn" not in launcher
+
+
+def test_weekly_report_runs_after_the_natural_week_has_finished():
+    schedule = (REPO_ROOT / "server/ops/com.bubu.weekly-report.plist.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert "<key>Weekday</key><integer>2</integer>" in schedule
+    assert "<key>Hour</key><integer>0</integer>" in schedule
+
+
+def test_semantic_worker_does_not_persist_protected_file_tokens_in_http_logs():
+    worker = (REPO_ROOT / "server/ai/semantic_worker.py").read_text(encoding="utf-8")
+
+    assert 'logging.getLogger("httpx").setLevel(logging.WARNING)' in worker
+    assert 'logging.getLogger("httpcore").setLevel(logging.WARNING)' in worker
 
 
 def test_semantic_queue_is_append_only_and_ignores_audio():

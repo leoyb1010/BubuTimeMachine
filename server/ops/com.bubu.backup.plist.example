@@ -8,24 +8,17 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/ABSOLUTE/PATH/BubuTimeMachine/server/ops/backup_pb_data.sh</string>
+    <string>/ABSOLUTE/PATH/BubuTimeMachine/server/ops/run_scheduled_backup.sh</string>
   </array>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>PB_DATA_DIR</key>
-    <string>/ABSOLUTE/PATH/pocketbase/pb_data</string>
-    <key>MIRROR_DIR</key>
-    <string>/Volumes/BubuBackup/BubuTimeMachine/pb_data_mirror</string>
-    <key>BACKUP_STAMP</key>
-    <string>/Users/YOU/Library/Application Support/BubuTimeMachine/backup-success</string>
-    <!-- 配好异地仓库后再取消下面四行注释，密码文件权限必须为 600。 -->
-    <!-- <key>RESTIC_REPOSITORY</key> -->
-    <!-- <string>s3:https://YOUR-R2-ENDPOINT/bubu-backup</string> -->
-    <!-- <key>RESTIC_PASSWORD_FILE</key> -->
-    <!-- <string>/Users/YOU/.config/bubu/restic-password</string> -->
+    <!-- 配置文件必须归当前用户所有且权限为 600；模板见 backup.env.example。 -->
+    <!-- 正式环境必须在其中设置 REQUIRE_RESTIC_REPOSITORIES=true，并配置两个不同仓库。 -->
+    <key>BUBU_BACKUP_CONFIG</key>
+    <string>/Users/YOU/.config/bubu/backup.env</string>
   </dict>
 
   <key>StartCalendarInterval</key>
