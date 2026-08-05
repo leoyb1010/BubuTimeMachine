@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -30,6 +31,11 @@ nonisolated struct PhotoIntakeCandidate: Sendable, Equatable {
     let isLivePhoto: Bool
 }
 
+nonisolated struct PhotoIdentitySample: Sendable, Equatable {
+    let label: Int
+    let featureData: Data
+}
+
 /// App 与未来 PhotoKit 后台扩展共享的独立摄取库。
 /// 候选是可重建派生状态，绝不为它修改 SwiftData 事实 schema。
 nonisolated struct PhotoIntakeStore: Sendable {
@@ -46,9 +52,14 @@ nonisolated struct PhotoIntakeStore: Sendable {
     }
 
     let databaseURL: URL
+    private let excludeFromBackup: Bool
 
-    init(databaseURL: URL = BubuStorage.intakeDatabaseURL) {
+    init(
+        databaseURL: URL = BubuStorage.intakeDatabaseURL,
+        excludeFromBackup: Bool = false
+    ) {
         self.databaseURL = databaseURL
+        self.excludeFromBackup = excludeFromBackup
     }
 
     func upsertDiscovered(_ candidates: [PhotoIntakeCandidate]) throws {
@@ -214,6 +225,82 @@ nonisolated struct PhotoIntakeStore: Sendable {
         }
     }
 
+    // MARK: - 本机身份样本
+
+    /// `label`: 1 = 这是布布，-1 = 不是布布。每类只保留最近 40 张脸，避免模型无限增长。
+    func addIdentitySamples(_ featurePrints: [Data], label: Int) throws {
+        guard !featurePrints.isEmpty, label == 1 || label == -1 else { return }
+        try withDatabase { db in
+            try execute("BEGIN IMMEDIATE", db: db)
+            do {
+                let statement = try prepare(
+                    """
+                    INSERT INTO identity_samples(id, label, feature_print, created_at)
+                    VALUES(?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET label = excluded.label, created_at = excluded.created_at
+                    """, db: db)
+                defer { sqlite3_finalize(statement) }
+                let now = Date().timeIntervalSince1970
+                for feature in featurePrints {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    let digest = SHA256.hash(data: feature).map { String(format: "%02x", $0) }.joined()
+                    bind(digest, at: 1, to: statement)
+                    sqlite3_bind_int(statement, 2, Int32(label))
+                    _ = feature.withUnsafeBytes { raw in
+                        sqlite3_bind_blob(statement, 3, raw.baseAddress, Int32(raw.count), Self.transient)
+                    }
+                    sqlite3_bind_double(statement, 4, now)
+                    try stepDone(statement, db: db)
+                }
+                let prune = try prepare(
+                    """
+                    DELETE FROM identity_samples
+                    WHERE label = ? AND id NOT IN (
+                        SELECT id FROM identity_samples WHERE label = ?
+                        ORDER BY created_at DESC LIMIT 40
+                    )
+                    """, db: db)
+                defer { sqlite3_finalize(prune) }
+                sqlite3_bind_int(prune, 1, Int32(label))
+                sqlite3_bind_int(prune, 2, Int32(label))
+                try stepDone(prune, db: db)
+                try execute("COMMIT", db: db)
+            } catch {
+                try? execute("ROLLBACK", db: db)
+                throw error
+            }
+        }
+    }
+
+    func identitySamples() throws -> [PhotoIdentitySample] {
+        try withDatabase { db in
+            let statement = try prepare(
+                "SELECT label, feature_print FROM identity_samples ORDER BY created_at DESC", db: db)
+            defer { sqlite3_finalize(statement) }
+            var result: [PhotoIdentitySample] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let label = Int(sqlite3_column_int(statement, 0))
+                let count = Int(sqlite3_column_bytes(statement, 1))
+                guard count > 0, let bytes = sqlite3_column_blob(statement, 1) else { continue }
+                result.append(PhotoIdentitySample(
+                    label: label,
+                    featureData: Data(bytes: bytes, count: count)
+                ))
+            }
+            return result
+        }
+    }
+
+    func identitySampleCounts() throws -> (positive: Int, negative: Int) {
+        let samples = try identitySamples()
+        return (samples.count { $0.label == 1 }, samples.count { $0.label == -1 })
+    }
+
+    func clearIdentitySamples() throws {
+        try withDatabase { db in try execute("DELETE FROM identity_samples", db: db) }
+    }
+
     // MARK: SQLite
 
     private func withDatabase<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
@@ -238,6 +325,7 @@ nonisolated struct PhotoIntakeStore: Sendable {
     }
 
     /// 候选库含拍摄时间与可选 GPS，使用系统数据保护；后台任务在首次解锁后仍可继续。
+    /// 身份库额外标记为不进入系统备份，保证人脸特征只留在当前设备。
     private func applyFileProtection() {
         #if os(iOS)
         let attributes: [FileAttributeKey: Any] = [
@@ -247,6 +335,12 @@ nonisolated struct PhotoIntakeStore: Sendable {
             let path = databaseURL.path + suffix
             guard FileManager.default.fileExists(atPath: path) else { continue }
             try? FileManager.default.setAttributes(attributes, ofItemAtPath: path)
+            if excludeFromBackup {
+                var fileURL = URL(fileURLWithPath: path)
+                var values = URLResourceValues()
+                values.isExcludedFromBackup = true
+                try? fileURL.setResourceValues(values)
+            }
         }
         #endif
     }
@@ -278,6 +372,14 @@ nonisolated struct PhotoIntakeStore: Sendable {
             );
             CREATE INDEX IF NOT EXISTS idx_intake_assets_state_created
                 ON intake_assets(state, created_at DESC);
+            CREATE TABLE IF NOT EXISTS identity_samples(
+                id TEXT PRIMARY KEY NOT NULL,
+                label INTEGER NOT NULL CHECK(label IN (-1, 1)),
+                feature_print BLOB NOT NULL,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_identity_samples_label_created
+                ON identity_samples(label, created_at DESC);
             """, db: db)
     }
 

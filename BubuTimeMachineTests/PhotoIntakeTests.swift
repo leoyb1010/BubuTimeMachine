@@ -3,6 +3,26 @@ import Testing
 @testable import BubuTimeMachine
 
 struct PhotoIntakeTests {
+    @Test("身份特征与照片候选物理分库")
+    func identityDatabaseIsIsolated() {
+        #expect(BubuStorage.identityDatabaseURL != BubuStorage.intakeDatabaseURL)
+        #expect(BubuStorage.identityDatabaseURL.lastPathComponent == "PhotoIdentity.sqlite")
+    }
+
+    @Test("身份特征库明确排除系统备份")
+    func identityDatabaseIsExcludedFromBackup() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-identity-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("PhotoIdentity.sqlite")
+        let store = PhotoIntakeStore(databaseURL: databaseURL, excludeFromBackup: true)
+
+        try store.addIdentitySamples([Data("face".utf8)], label: 1)
+
+        let values = try databaseURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        #expect(values.isExcludedFromBackup == true)
+    }
+
     private func candidate(
         _ id: String,
         minute: Int,
@@ -128,5 +148,68 @@ struct PhotoIntakeTests {
         let groups = PhotoEventClusterer.cluster(items)
         #expect(groups.reduce(0) { $0 + $1.totalCount } == items.count)
         #expect(Set(groups.flatMap(\.assetIdentifiers)).count == items.count)
+    }
+
+    @Test("身份样本正负分离、去重且可一键清除")
+    func identitySamplesAreLocalAndClearable() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try store.addIdentitySamples([Data("bubu-face".utf8), Data("bubu-face".utf8)], label: 1)
+        try store.addIdentitySamples([Data("other-face".utf8)], label: -1)
+
+        let counts = try store.identitySampleCounts()
+        #expect(counts.positive == 1)
+        #expect(counts.negative == 1)
+        #expect(try store.identitySamples().count == 2)
+
+        try store.clearIdentitySamples()
+        #expect(try store.identitySamples().isEmpty)
+    }
+
+    @Test("每类身份样本最多保留最近四十张脸")
+    func identitySampleCap() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let samples = (0..<55).map { Data("face-\($0)".utf8) }
+
+        try store.addIdentitySamples(samples, label: 1)
+
+        #expect(try store.identitySampleCounts().positive == 40)
+    }
+
+    @Test("感知哈希距离与相似组代表图选择稳定")
+    func perceptualHashGrouping() throws {
+        let base = PhotoSelectionSignals(
+            perceptualHash: 0b1111, sharpness: 0.4, exposure: 0.8,
+            qualityScore: 0.5, shouldSuppress: false, suppressionReason: nil)
+        let better = PhotoSelectionSignals(
+            perceptualHash: 0b1110, sharpness: 0.8, exposure: 0.8,
+            qualityScore: 0.8, shouldSuppress: false, suppressionReason: nil)
+        let far = PhotoSelectionSignals(
+            perceptualHash: UInt64.max, sharpness: 0.9, exposure: 0.9,
+            qualityScore: 0.9, shouldSuppress: false, suppressionReason: nil)
+
+        #expect(PhotoSelectionAnalyzer.hammingDistance(base.perceptualHash, better.perceptualHash) == 1)
+        let groups = PhotoSelectionAnalyzer.groupSimilar([
+            PhotoSelectionItem(identifier: "a", signals: base),
+            PhotoSelectionItem(identifier: "b", signals: better),
+            PhotoSelectionItem(identifier: "c", signals: far),
+        ], maximumHammingDistance: 2)
+
+        #expect(groups.count == 2)
+        #expect(try #require(groups.first { $0.memberIdentifiers.contains("a") })
+            .representativeIdentifier == "b")
+    }
+
+    @Test("截图信号不会进入精选相似组")
+    func screenshotsAreNotRecommended() {
+        let screenshot = PhotoSelectionSignals(
+            perceptualHash: 1, sharpness: 1, exposure: 1,
+            qualityScore: 1, shouldSuppress: true, suppressionReason: "截图默认不推荐")
+        let groups = PhotoSelectionAnalyzer.groupSimilar([
+            PhotoSelectionItem(identifier: "screen", signals: screenshot)
+        ])
+        #expect(groups.isEmpty)
     }
 }

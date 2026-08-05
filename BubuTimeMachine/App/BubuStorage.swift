@@ -43,6 +43,11 @@ nonisolated enum BubuStorage {
         containerURL.appendingPathComponent("PhotoIntake.sqlite")
     }
 
+    /// “认布布”的本机人脸特征库。与照片候选状态物理分库，且由存储层标记为不进入系统备份。
+    static var identityDatabaseURL: URL {
+        containerURL.appendingPathComponent("PhotoIdentity.sqlite")
+    }
+
     /// 媒体原文件目录（共享容器内）。
     static var mediaDirectory: URL {
         directory(named: "Media")

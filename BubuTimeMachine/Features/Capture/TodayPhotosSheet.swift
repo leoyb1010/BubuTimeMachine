@@ -26,6 +26,14 @@ struct TodayPhotosSheet: View {
     @State private var saving = false
     @State private var importError: String?
     @State private var groupToIgnore: PhotoEventGroup?
+    @State private var selectionSignals: [String: PhotoSelectionSignals] = [:]
+    @State private var identityMatches: [String: ChildIdentityMatch] = [:]
+    @State private var hiddenSimilarIDs: Set<String> = []
+    @State private var expandedGroupIDs: Set<String> = []
+    @State private var analyzingSuggestions = false
+    @State private var suggestionMessage: String?
+
+    private let identityRecognizer = ChildIdentityRecognizer()
 
     private let columns = [GridItem(.adaptive(minimum: 88), spacing: 6)]
 
@@ -38,9 +46,22 @@ struct TodayPhotosSheet: View {
                         VStack(alignment: .leading, spacing: 8) {
                             groupHeader(group)
                             LazyVGrid(columns: columns, spacing: 6) {
-                                ForEach(assets(in: group), id: \.localIdentifier) { asset in
+                                ForEach(visibleAssets(in: group), id: \.localIdentifier) { asset in
                                     cell(asset)
                                 }
+                            }
+                            if hiddenSimilarCount(in: group) > 0 {
+                                Button(expandedGroupIDs.contains(group.id)
+                                       ? "收起相似照片"
+                                       : "展开另外 \(hiddenSimilarCount(in: group)) 张相似照片") {
+                                    if expandedGroupIDs.contains(group.id) {
+                                        expandedGroupIDs.remove(group.id)
+                                    } else {
+                                        expandedGroupIDs.insert(group.id)
+                                    }
+                                }
+                                .font(BubuTheme.Font.scaled(12.5, weight: .bold))
+                                .foregroundStyle(BubuTheme.Color.primary)
                             }
                         }
                     }
@@ -116,18 +137,49 @@ struct TodayPhotosSheet: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text("📸").font(BubuTheme.Font.scaled(30))
-            Text("已经按时间和地点整理成 \(groups.count) 段。选好一段，一次收进时光轴。")
-                .font(BubuTheme.Font.caption)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("📸").font(BubuTheme.Font.scaled(30))
+                Text("已经按时间和地点整理成 \(groups.count) 段。选好一段，一次收进时光轴。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                Spacer(minLength: 0)
+            }
+            Button {
+                Task { await analyzeAndSelectSuggestions() }
+            } label: {
+                HStack {
+                    Label(analyzingSuggestions ? "正在端侧精选…" : "帮我精选",
+                          systemImage: "wand.and.stars")
+                    Spacer()
+                    if analyzingSuggestions { ProgressView() }
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(BubuTheme.Color.primary)
+            .disabled(analyzingSuggestions)
+            if let suggestionMessage {
+                Text(suggestionMessage)
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
     private func assets(in group: PhotoEventGroup) -> [PHAsset] {
         let wanted = Set(group.assetIdentifiers)
         return assets.filter { wanted.contains($0.localIdentifier) }
+    }
+
+    private func visibleAssets(in group: PhotoEventGroup) -> [PHAsset] {
+        let groupAssets = assets(in: group)
+        guard !expandedGroupIDs.contains(group.id) else { return groupAssets }
+        return groupAssets.filter { !hiddenSimilarIDs.contains($0.localIdentifier) }
+    }
+
+    private func hiddenSimilarCount(in group: PhotoEventGroup) -> Int {
+        assets(in: group).count { hiddenSimilarIDs.contains($0.localIdentifier) }
     }
 
     private func groupHeader(_ group: PhotoEventGroup) -> some View {
@@ -227,6 +279,21 @@ struct TodayPhotosSheet: View {
                         .padding(6)
                     }
                 }
+
+                VStack {
+                    Spacer()
+                    HStack {
+                        if let reason = selectionSignals[asset.localIdentifier]?.suppressionReason {
+                            badge(Self.shortSuppressionLabel(reason), icon: "rectangle.on.rectangle.slash")
+                        } else if Self.isScreenCapture(asset) {
+                            badge("截图", icon: "rectangle.on.rectangle.slash")
+                        } else if identityMatches[asset.localIdentifier]?.isLikelyChild == true {
+                            badge("可能是布布", icon: "sparkles")
+                        }
+                        Spacer()
+                    }
+                    .padding(5)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -234,11 +301,139 @@ struct TodayPhotosSheet: View {
         .accessibilityValue(isOn ? "已选择" : "未选择")
         .accessibilityHint("双击切换选择")
         .accessibilityAddTraits(isOn ? .isSelected : [])
+        .contextMenu {
+            if asset.mediaType == .image, identityRecognizer.isEnabled {
+                Button("这是布布") { Task { await learnIdentity(asset, isChild: true) } }
+                Button("不是布布") { Task { await learnIdentity(asset, isChild: false) } }
+            }
+        }
         .task {
             if thumbs[asset.localIdentifier] == nil {
                 thumbs[asset.localIdentifier] = await PhotoLibraryScanner.loadImage(asset, targetPixel: 200)
             }
         }
+    }
+
+    private func badge(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(BubuTheme.Font.scaled(8.5, weight: .heavy, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background(BubuTheme.Color.warmBrown.opacity(0.82), in: Capsule())
+    }
+
+    private static func isScreenCapture(_ asset: PHAsset) -> Bool {
+        asset.mediaSubtypes.contains(.photoScreenshot)
+            || asset.mediaSubtypes.contains(.videoScreenRecording)
+    }
+
+    private static func shortSuppressionLabel(_ reason: String) -> String {
+        if reason.contains("二维码") { return "二维码" }
+        if reason.contains("文档") || reason.contains("票据") { return "文档" }
+        return "截图"
+    }
+
+    /// 用户主动触发后才运行端侧精选：截图降级、近似照折叠、布布候选加标。
+    /// 分析只用 ≤900px 预览，不读取或上传整批原片；视频在本版保留为独立候选。
+    private func analyzeAndSelectSuggestions() async {
+        analyzingSuggestions = true
+        suggestionMessage = nil
+        defer { analyzingSuggestions = false }
+
+        var nextSignals: [String: PhotoSelectionSignals] = [:]
+        var nextMatches: [String: ChildIdentityMatch] = [:]
+        for asset in assets {
+            let analysisFrames: [Data]
+            if asset.mediaType == .video {
+                analysisFrames = await PhotoLibraryScanner.loadVideoKeyframes(asset)
+            } else if let image = await analysisImage(for: asset, targetPixel: 900),
+                      let data = image.jpegData(compressionQuality: 0.82) {
+                analysisFrames = [data]
+            } else {
+                analysisFrames = []
+            }
+            let frameSignals = analysisFrames.compactMap {
+                PhotoSelectionAnalyzer.analyze(
+                    imageData: $0, isScreenshot: Self.isScreenCapture(asset))
+            }
+            if let bestSignals = frameSignals.max(by: { $0.qualityScore < $1.qualityScore }) {
+                nextSignals[asset.localIdentifier] = bestSignals
+            }
+            if identityRecognizer.isEnabled {
+                var matches: [ChildIdentityMatch] = []
+                for frame in analysisFrames {
+                    matches.append(await identityRecognizer.match(imageData: frame))
+                }
+                if let bestMatch = matches.max(by: { $0.confidence < $1.confidence }) {
+                    nextMatches[asset.localIdentifier] = bestMatch
+                }
+            }
+        }
+
+        var suggestions = Set<String>()
+        var hidden = Set<String>()
+        for group in groups {
+            let groupAssets = assets(in: group)
+            let items = groupAssets.compactMap { asset -> PhotoSelectionItem? in
+                guard asset.mediaType == .image else { return nil }
+                guard let signals = nextSignals[asset.localIdentifier] else { return nil }
+                return PhotoSelectionItem(identifier: asset.localIdentifier, signals: signals)
+            }
+            for similar in PhotoSelectionAnalyzer.groupSimilar(items) {
+                suggestions.insert(similar.representativeIdentifier)
+                hidden.formUnion(similar.memberIdentifiers.filter {
+                    $0 != similar.representativeIdentifier
+                })
+            }
+            // 视频不逐帧全扫；作为完整事实保留在精选结果中，后续只提取有限关键帧加标。
+            for video in groupAssets where video.mediaType == .video
+                && nextSignals[video.localIdentifier]?.shouldSuppress != true
+                && !Self.isScreenCapture(video) {
+                suggestions.insert(video.localIdentifier)
+            }
+        }
+
+        selectionSignals = nextSignals
+        identityMatches = nextMatches
+        hiddenSimilarIDs = hidden
+        expandedGroupIDs = []
+        selected = suggestions
+        let childCount = nextMatches.values.count { $0.isLikelyChild }
+        let suppressedCount = nextSignals.values.count { $0.shouldSuppress }
+        suggestionMessage = "精选了 \(suggestions.count) 个代表素材，折叠 \(hidden.count) 张近似照"
+            + (suppressedCount > 0 ? "，默认跳过 \(suppressedCount) 个截图、录屏、二维码或文档" : "")
+            + (childCount > 0 ? "；其中 \(childCount) 张可能是布布" : "")
+            + "。原片一张也没有删除。"
+        BubuHaptics.success()
+    }
+
+    private func learnIdentity(_ asset: PHAsset, isChild: Bool) async {
+        guard let image = await analysisImage(for: asset, targetPixel: 1_200),
+              let data = image.jpegData(compressionQuality: 0.9) else { return }
+        do {
+            let learned = try await identityRecognizer.learn(imageData: data, isChild: isChild)
+            guard learned > 0 else {
+                suggestionMessage = "这张照片没有检测到清楚的人脸，本机模型没有改动。"
+                return
+            }
+            identityMatches[asset.localIdentifier] = await identityRecognizer.match(imageData: data)
+            suggestionMessage = isChild
+                ? "已在这台 iPhone 上记住“这是布布”。"
+                : "已在这台 iPhone 上记住“不是布布”。"
+            BubuHaptics.success()
+        } catch {
+            suggestionMessage = "本机反馈暂时没能保存，照片没有改动。"
+        }
+    }
+
+    /// `??` 右侧是 autoclosure，不能放 async 调用；先取局部量也避免 Release
+    /// whole-module 下捕获 PHAsset 时触发 Swift 6 sending 风险。
+    private func analysisImage(for asset: PHAsset, targetPixel: CGFloat) async -> UIImage? {
+        let identifier = asset.localIdentifier
+        let analyzed = await PhotoLibraryScanner.loadImage(asset, targetPixel: targetPixel)
+        if let analyzed { return analyzed }
+        return thumbs[identifier]
     }
 
     private static func durationText(_ seconds: TimeInterval) -> String {
@@ -284,6 +479,7 @@ struct TodayPhotosSheet: View {
 
         for asset in chosen {
             let media: Media
+            var pairedLivePhotoMedia: Media?
             if asset.mediaType == .video {
                 // 视频：导出原文件 → 压缩沙盒导入 + 视频缩略图（R4 E-6）
                 guard let tmpURL = await PhotoLibraryScanner.loadVideoFile(asset) else { continue }
@@ -313,12 +509,42 @@ struct TodayPhotosSheet: View {
                 let analysis = await env.photoAnalyzer.analyze(imageData: data, includeLocation: false)
                 media.aiTags = analysis.tags
                 aggregatedTags.append(contentsOf: analysis.tags)
+
+                if asset.mediaSubtypes.contains(.photoLive) {
+                    // Live Photo 必须静态原片 + paired video 一起成功；任一失败都回滚静态文件，
+                    // 候选保留到下次重试，不把“只有一半”的实况照片标成已收录。
+                    guard let temporaryPair = await PhotoLibraryScanner.loadLivePhotoPairedVideo(asset) else {
+                        env.mediaStore.deleteLocalFiles(media: media.localFileName,
+                                                        thumbnail: media.thumbnailFileName)
+                        continue
+                    }
+                    let importedPair = try? await env.mediaStore.importVideoForSync(from: temporaryPair)
+                    try? FileManager.default.removeItem(at: temporaryPair)
+                    guard let importedPair else {
+                        env.mediaStore.deleteLocalFiles(media: media.localFileName,
+                                                        thumbnail: media.thumbnailFileName)
+                        continue
+                    }
+                    let pair = Media(type: .video, localFileName: importedPair.fileName)
+                    pair.durationSeconds = asset.duration
+                    pair.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(
+                        fromVideo: importedPair.fileName)
+                    pair.aiTags = ["实况照片动态片段"]
+                    pairedLivePhotoMedia = pair
+                }
             }
             media.width = asset.pixelWidth
             media.height = asset.pixelHeight
             media.entry = entry
             context.insert(media)
             createdMedia.append(media)
+            if let pairedLivePhotoMedia {
+                pairedLivePhotoMedia.width = asset.pixelWidth
+                pairedLivePhotoMedia.height = asset.pixelHeight
+                pairedLivePhotoMedia.entry = entry
+                context.insert(pairedLivePhotoMedia)
+                createdMedia.append(pairedLivePhotoMedia)
+            }
             okAssets.append(asset)
             if let taken = asset.creationDate {
                 earliestCapture = min(earliestCapture ?? taken, taken)

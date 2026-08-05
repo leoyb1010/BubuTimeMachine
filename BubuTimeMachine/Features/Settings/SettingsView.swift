@@ -24,6 +24,8 @@ struct SettingsView: View {
                 identityCard
                 group("布布", footer: "档案里的名字和生日会驱动全 App 的年龄、生日提醒和身份卡。") {
                     row("布布的档案", icon: "figure.child", tint: env.theme.theme.primary) { ChildProfileView() }
+                    row("认布布与精选", icon: "person.crop.rectangle.stack.fill",
+                        tint: BubuTheme.Color.pink) { ChildIdentitySettingsView() }
                     row("成长之声", icon: "waveform.badge.mic", tint: BubuTheme.Color.info) { VoiceArchiveView() }
                     row("健康记录", icon: "heart.text.square", tint: BubuTheme.Color.success) { HealthHomeView() }
                 }

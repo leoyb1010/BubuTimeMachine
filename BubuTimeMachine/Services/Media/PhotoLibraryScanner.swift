@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import OSLog
 import Photos
@@ -218,6 +219,7 @@ final class PhotoLibraryScanner {
             let options = PHImageRequestOptions()
             options.isNetworkAccessAllowed = true
             options.deliveryMode = .highQualityFormat
+            options.version = .original
             var resumed = false
             PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, _ in
                 guard !resumed else { return }
@@ -244,6 +246,62 @@ final class PhotoLibraryScanner {
             try? FileManager.default.removeItem(at: tmp)
             return nil
         }
+    }
+
+    /// Live Photo 的动态原片资源。静态图与 paired video 必须一起成功才算保真收录。
+    nonisolated static func loadLivePhotoPairedVideo(_ asset: PHAsset) async -> URL? {
+        guard asset.mediaType == .image, asset.mediaSubtypes.contains(.photoLive) else { return nil }
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard let resource = resources.first(where: {
+            $0.type == .pairedVideo || $0.type == .fullSizePairedVideo
+        }) else { return nil }
+        let originalExtension = (resource.originalFilename as NSString).pathExtension.lowercased()
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).\(originalExtension.isEmpty ? "mov" : originalExtension)")
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        do {
+            try await PHAssetResourceManager.default().writeData(
+                for: resource, toFile: temporaryURL, options: options)
+            return temporaryURL
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            return nil
+        }
+    }
+
+    /// 视频精选只抽有限关键帧，不逐帧推理。临时视频无论成功失败都会清理。
+    nonisolated static func loadVideoKeyframes(
+        _ asset: PHAsset,
+        maximumCount: Int = 4,
+        targetPixel: CGFloat = 900
+    ) async -> [Data] {
+        guard maximumCount > 0, let temporaryURL = await loadVideoFile(asset) else { return [] }
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+        let videoAsset = AVURLAsset(url: temporaryURL)
+        guard let duration = try? await videoAsset.load(.duration) else { return [] }
+        let seconds = CMTimeGetSeconds(duration)
+        guard seconds.isFinite, seconds > 0 else { return [] }
+        let count = min(maximumCount, max(1, Int(ceil(seconds / 8))))
+        let generator = AVAssetImageGenerator(asset: videoAsset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: targetPixel, height: targetPixel)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.35, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.35, preferredTimescale: 600)
+
+        var frames: [Data] = []
+        for index in 0..<count {
+            // 避开绝对首尾的黑帧；短视频至少取中点。
+            let fraction = Double(index + 1) / Double(count + 1)
+            let time = CMTime(seconds: seconds * fraction, preferredTimescale: 600)
+            guard let generated = try? await generator.image(at: time),
+                  let data = UIImage(cgImage: generated.image).jpegData(compressionQuality: 0.82) else {
+                continue
+            }
+            frames.append(data)
+        }
+        return frames
     }
 
     /// 把资产加载成 UIImage（导入用）。失败返回 nil。
