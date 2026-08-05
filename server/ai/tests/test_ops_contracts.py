@@ -128,6 +128,31 @@ def test_backup_launch_agent_runs_daily_without_embedded_secrets():
     assert "RESTIC_PASSWORD=" not in raw
 
 
+def test_scheduled_backup_runner_rejects_unknown_config_keys(tmp_path: Path):
+    config = tmp_path / "backup.env"
+    config.write_text("PB_DATA_DIR=/tmp\nEVIL_COMMAND=touch /tmp/nope\n", encoding="utf-8")
+    config.chmod(0o600)
+    runner = REPO_ROOT / "server/ops/run_scheduled_backup.sh"
+    env = os.environ | {"BUBU_BACKUP_CONFIG": str(config)}
+    result = subprocess.run(
+        ["bash", str(runner)], env=env, text=True, capture_output=True, check=False
+    )
+    assert result.returncode != 0
+    assert "不允许的键" in result.stderr
+
+
+def test_localhost_ssh_backup_agent_is_noninteractive_and_pinned_to_key():
+    path = REPO_ROOT / "server/ops/com.bubu.backup-localhost-ssh.plist.example"
+    config = plistlib.loads(path.read_bytes())
+    args = config["ProgramArguments"]
+    assert args[0] == "/usr/bin/ssh"
+    assert "-T" in args
+    assert "BatchMode=yes" in args
+    assert "IdentitiesOnly=yes" in args
+    assert "ConnectTimeout=10" in args
+    assert args[-1] == "localhost"
+
+
 def test_tracked_duplicate_review_was_removed():
     assert not (REPO_ROOT / "REVIEW_2026-07-12 2.md").exists()
     assert (REPO_ROOT / "REVIEW_2026-07-12.md").exists()

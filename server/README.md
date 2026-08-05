@@ -134,6 +134,17 @@ server/ops/healthcheck.sh
 每日备份可复制 `server/ops/com.bubu.backup.plist.example` 到 `~/Library/LaunchAgents/`，替换全部
 绝对路径后再加载。macOS 必须让该 LaunchAgent 实际写入一次外接盘；若日志出现
 `Operation not permitted`，先授予完全磁盘访问权限，不能把“父目录可写”当成备份成功。
+若普通 LaunchAgent 受“可移除卷”TCC 限制，可让它通过仅限 localhost、仅允许执行
+`run_scheduled_backup.sh` 的 SSH forced-command 运行；专用 key 必须同时限制来源、禁用转发和 PTY。
+对应调度模板是 `com.bubu.backup-localhost-ssh.plist.example`。`authorized_keys` 条目必须采用：
+
+```text
+from="127.0.0.1,::1",command="/ABSOLUTE/PATH/run_scheduled_backup.sh",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding ssh-ed25519 PUBLIC_KEY bubu-backup-local
+```
+
+配置文件使用 `backup.env.example`，复制后权限必须是 `600`；runner 只接受备份白名单键，
+不会 `source` 或 `eval` 配置内容。部署后必须用带伪造远程命令的 SSH 调用验证 forced-command，
+并核对该命令未被执行、备份成功时间戳确实更新。
 
 ---
 
