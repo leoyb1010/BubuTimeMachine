@@ -9,8 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import httpx
-
+from artifact_workflow import ArtifactUnavailable, ArtifactWorkflow
 from llm import LLMClient, LLMError
 from memory_query import MemoryEvidence, MemoryQuery, PocketBaseMemoryStore
 
@@ -70,15 +69,16 @@ class WeeklyReportService:
         self.store = store
         self.query = MemoryQuery(store)
         self.llm = llm
+        self.workflow = ArtifactWorkflow(store, "weekly_report")
 
     def latest(self, family_id: str) -> Optional[dict[str, Any]]:
-        artifact = self.store.latest_artifact(family_id, "weekly_report")
+        artifact = self.workflow.latest(family_id)
         return public_artifact(artifact) if artifact else None
 
     def history(self, family_id: str, limit: int = 52) -> list[dict[str, Any]]:
         return [
             public_artifact(item)
-            for item in self.store.recent_artifacts(family_id, "weekly_report", limit)
+            for item in self.workflow.history(family_id, limit)
         ]
 
     def generate(
@@ -89,7 +89,6 @@ class WeeklyReportService:
         existing = self.store.find_artifact(artifact_key)
         if existing:
             return public_artifact(existing)
-
         evidence = self.query.weekly_evidence(family_id, week.start, week.end)
         if not evidence:
             raise WeeklyReportUnavailable("这一周还没有可引用的家庭记录。")
@@ -122,27 +121,14 @@ class WeeklyReportService:
             "generatedAt": datetime.now(UTC).isoformat(),
             "modelVersion": self.llm.model,
         }
-        try:
-            record = self.store.create_artifact(artifact_payload)
-        except httpx.HTTPStatusError as exc:
-            # API 与定时 worker 同时生成时，唯一键只允许一个胜者；输家重读同一产物。
-            if exc.response.status_code not in {400, 409}:
-                raise
-            concurrent = self.store.find_artifact(artifact_key)
-            if concurrent is None:
-                raise
-            record = concurrent
+        record = self.workflow.create_idempotent(artifact_payload)
         return public_artifact(record)
 
     def archive(self, family_id: str, artifact_id: str) -> dict[str, Any]:
         try:
-            current = self.store.get_artifact(artifact_id)
-        except (httpx.HTTPError, ValueError) as exc:
+            return public_artifact(self.workflow.archive(family_id, artifact_id))
+        except ArtifactUnavailable as exc:
             raise WeeklyReportUnavailable("周报不存在或不属于当前家庭。") from exc
-        if (current.get("familyId") != family_id
-                or current.get("kind") != "weekly_report"):
-            raise WeeklyReportUnavailable("周报不存在或不属于当前家庭。")
-        return public_artifact(self.store.archive_artifact(artifact_id))
 
     def _compose(
         self, child_name: str, evidence: list[MemoryEvidence]

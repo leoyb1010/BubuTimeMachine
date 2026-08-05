@@ -439,6 +439,16 @@ struct RootView: View {
             NavigationStack { GrowthReportView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-weekly-report") {
             NavigationStack { WeeklyReportView(previewReport: .visualSample) }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-sound-ring-failed") {
+            NavigationStack { SoundRingView(previewRing: .visualSample(status: "failed")) }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-sound-ring-draft") {
+            NavigationStack { SoundRingView(previewRing: .visualSample(status: "draft")) }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-sound-ring-rendering") {
+            NavigationStack { SoundRingView(previewRing: .visualSample(status: "rendering")) }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-sound-ring-archived") {
+            NavigationStack { SoundRingView(previewRing: .visualSample(status: "archived")) }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-sound-ring") {
+            NavigationStack { SoundRingView(previewRing: .visualSample) }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-settings") {
             NavigationStack { SettingsView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-advanced-settings") {

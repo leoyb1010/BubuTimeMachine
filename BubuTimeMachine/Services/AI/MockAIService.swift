@@ -137,6 +137,34 @@ final class MockAIService: AIService {
         AsyncStream { $0.finish() }
     }
 
+    func latestSoundRing() async throws -> SoundRing? {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
+    func soundRingHistory() async throws -> [SoundRing] {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
+    func createSoundRingDraft() async throws -> SoundRing {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
+    func renderSoundRing(id: String) async throws -> SoundRing {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
+    func soundRingStatus(id: String) async throws -> SoundRing {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
+    func archiveSoundRing(id: String) async throws -> SoundRing {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
+    func downloadSoundRing(id: String) async throws -> URL {
+        throw APIError.server(503, "声音年轮需要配置家中的 AI 服务")
+    }
+
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
         // 无自托管服务器时不支持真实合成：明确抛错，UI 保留本地预览草稿。

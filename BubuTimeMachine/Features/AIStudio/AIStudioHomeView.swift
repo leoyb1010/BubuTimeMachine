@@ -187,6 +187,12 @@ struct AIStudioHomeView: View {
                            tint: BubuTheme.Color.peach) {
                 WeeklyReportView()
             }
+            capabilityTile(icon: "waveform.path",
+                           title: "声音年轮",
+                           subtitle: "听见声音慢慢长大",
+                           tint: BubuTheme.Color.lav) {
+                SoundRingView()
+            }
         }
     }
 

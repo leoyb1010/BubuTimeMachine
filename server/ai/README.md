@@ -30,6 +30,13 @@ cp .env.example .env   # 填 DEEPSEEK_API_KEY 与 AI_API_KEY（必填，fail-clo
 | POST | `/weekly-report/generate` | 幂等生成上一个完整自然周；证据不足不生成 |
 | POST | `/weekly-report/archive` | 用户确认后只归档派生产物，不改事实集合 |
 | GET | `/weekly-report/events` | 仅发送新周报 id 的 SSE，不承载家庭正文 |
+| GET | `/sound-ring/latest` | 最新声音年轮草稿/成片 |
+| GET | `/sound-ring/history` | 往期声音年轮 |
+| POST | `/sound-ring/draft` | 从真实原声生成可核对素材清单，不渲染 |
+| POST | `/sound-ring/render` | 家庭确认后异步渲染；失败可按同一 id 重试 |
+| GET | `/sound-ring/status/{id}` | 查询渲染状态与带来源时间轴 |
+| GET | `/sound-ring/file/{id}` | 鉴权下载 protected 成片 |
+| POST | `/sound-ring/archive` | 只归档派生音频，不修改原声与照片 |
 | GET | `/health` | 健康检查；带正确 `X-API-Key` 时附 `parse_stats`（解析 warnings 累计，监控 LLM 输出漂移） |
 
 业务路由一律要求 `X-API-Key` 请求头 + 每 IP 限流（`AI_RATE_LIMIT_PER_MINUTE`，默认 30/分钟）。
@@ -38,8 +45,15 @@ cp .env.example .env   # 填 DEEPSEEK_API_KEY 与 AI_API_KEY（必填，fail-clo
 
 `.env` 至少配置 `WEEKLY_REPORT_FAMILY_ID` 和 PocketBase worker 凭证。先手动运行
 `./start_weekly_report.sh` 验证，再把 `server/ops/com.bubu.weekly-report.plist.example`
-替换成绝对路径后交给 launchd。默认每周日 20:30 执行；重复执行命中同一个
+替换成绝对路径后交给 launchd。默认每周一 00:05 执行，确保自然周完整结束；重复执行命中同一个
 `artifactKey`，不会生成两份。可选 ntfy 通知只发送“已生成”和产物 id，不发送家庭正文。
+
+## 声音年轮
+
+mini 需要 `ffmpeg` / `ffprobe`；macOS 自带 `say` 用中性系统声音念“接下来是 N 岁”的衔接语。
+作品必须有至少约 3 分钟真实原声，最多约 8 分钟；不会用静音、AI 编故事或克隆布布声音凑时长。
+流程固定为“素材清单 → 家庭确认 → 异步渲染 → 来源时间轴 → 归档”。服务重启或网络中断后，
+失败状态仍保留在 PocketBase，可在 App 用同一作品 id 重试；临时渲染目录始终清理。
 
 ## 测试
 

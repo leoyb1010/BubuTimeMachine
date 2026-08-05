@@ -154,6 +154,7 @@ struct VoicePlayerBubble: View {
                 Image(systemName: isThis && player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(BubuTheme.Font.scaled(36))
                     .foregroundStyle(tint)
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isThis && player.isPlaying ? "暂停语音" : "播放语音")

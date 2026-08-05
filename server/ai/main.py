@@ -12,6 +12,8 @@
   POST /movie-narration        年度成长电影旁白稿
   POST /transcribe             语音转写（Whisper，可选；未装则降级提示）
   POST /parse-natural-capture  一句话自然语言 → 多条结构化记录（疫苗/成长/餐食/睡眠…）
+  POST /sound-ring/draft       真实原声清单（家庭确认前不渲染）
+  POST /sound-ring/render      声音年轮异步渲染
   GET  /health                 健康检查
 
 默认接 DeepSeek（OpenAI 兼容协议）。环境变量见 .env.example。
@@ -32,22 +34,24 @@ from threading import Lock
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from llm import LLMClient, LLMError
+from artifact_workflow import ArtifactUnavailable
 import movie_render
 from semantic_index import SemanticIndex
 from semantic_model import MobileCLIPEncoder, SemanticModelUnavailable
 from memory_query import PocketBaseMemoryStore
 from weekly_report import WeeklyReportService, WeeklyReportUnavailable
+from sound_ring import SoundRingService, SoundRingUnavailable
 
 logging.basicConfig(
     level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="1.3.0")
+app = FastAPI(title="布布时光机 AI 服务", version="1.4.0")
 
 llm = LLMClient()
 
@@ -234,6 +238,43 @@ class WeeklyReportArchiveReq(BaseModel):
     artifact_id: str = Field(..., min_length=1, max_length=64)
 
 
+class SoundRingClipResp(BaseModel):
+    source_id: str
+    photo_source_id: str
+    age_years: int
+    kind: str
+    title: str
+    recorded_at: str
+    transcript: str
+    duration_seconds: float
+    start_seconds: float
+    end_seconds: float
+
+
+class SoundRingResp(BaseModel):
+    id: str
+    artifact_key: str
+    status: str
+    title: str
+    summary: str
+    generated_at: str
+    model_version: str
+    original_duration_seconds: float
+    rendered_duration_seconds: float
+    attempts: int
+    error: str
+    narrator: str
+    voice_cloning: bool
+    has_audio: bool
+    clips: list[SoundRingClipResp] = Field(default_factory=list)
+    source_refs: list[WeeklyReportSource] = Field(default_factory=list)
+    content_hash: str
+
+
+class SoundRingArtifactReq(BaseModel):
+    artifact_id: str = Field(..., min_length=1, max_length=64)
+
+
 def _semantic_enabled() -> bool:
     return os.environ.get("SEMANTIC_SEARCH_ENABLED", "false").lower() in {
         "1", "true", "yes", "on"
@@ -276,6 +317,29 @@ def _weekly_report_call(action):
     except RuntimeError as exc:
         logger.warning("weekly report unavailable: %s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="周报服务尚未准备好。") from exc
+
+
+def _sound_ring_family_id() -> str:
+    family_id = os.environ.get("SOUND_RING_FAMILY_ID", "").strip()
+    if not family_id:
+        family_id = os.environ.get("WEEKLY_REPORT_FAMILY_ID", "").strip()
+    if not family_id:
+        raise HTTPException(status_code=503, detail="服务器尚未绑定声音年轮家庭。")
+    return family_id
+
+
+def _sound_ring_call(action):
+    try:
+        with PocketBaseMemoryStore() as store:
+            return action(SoundRingService(store))
+    except (SoundRingUnavailable, ArtifactUnavailable) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        logger.exception("sound ring PocketBase request failed")
+        raise HTTPException(status_code=503, detail="声音年轮暂时无法读取家庭档案。") from exc
+    except RuntimeError as exc:
+        logger.warning("sound ring unavailable: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="声音年轮服务尚未准备好。") from exc
 
 
 # ---------- 路由 ----------
@@ -516,6 +580,92 @@ async def weekly_report_events():
     return StreamingResponse(
         stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------- 声音年轮 · 原声优先音频章 ----------
+
+@app.get("/sound-ring/latest", response_model=SoundRingResp,
+         dependencies=[Depends(require_api_key)])
+def sound_ring_latest():
+    family_id = _sound_ring_family_id()
+    result = _sound_ring_call(lambda service: service.latest(family_id))
+    if result is None:
+        raise HTTPException(status_code=404, detail="还没有声音年轮。")
+    return SoundRingResp(**result)
+
+
+@app.get("/sound-ring/history", response_model=list[SoundRingResp],
+         dependencies=[Depends(require_api_key)])
+def sound_ring_history():
+    family_id = _sound_ring_family_id()
+    result = _sound_ring_call(lambda service: service.history(family_id, 24))
+    return [SoundRingResp(**item) for item in result]
+
+
+@app.post("/sound-ring/draft", response_model=SoundRingResp,
+          dependencies=[Depends(require_api_key)])
+def sound_ring_draft():
+    """只挑选并展示来源，用户确认前不开始渲染。"""
+    family_id = _sound_ring_family_id()
+    child_name = os.environ.get("SOUND_RING_CHILD_NAME", "").strip()
+    if not child_name:
+        child_name = os.environ.get("WEEKLY_REPORT_CHILD_NAME", "布布").strip() or "布布"
+    result = _sound_ring_call(lambda service: service.draft(family_id, child_name))
+    return SoundRingResp(**result)
+
+
+@app.post("/sound-ring/render", response_model=SoundRingResp,
+          dependencies=[Depends(require_api_key)])
+def sound_ring_render(req: SoundRingArtifactReq):
+    """家庭确认后发起渲染；失败可用同一个 artifact id 重试。"""
+    family_id = _sound_ring_family_id()
+    result = _sound_ring_call(lambda service: service.render(family_id, req.artifact_id))
+    return SoundRingResp(**result)
+
+
+@app.get("/sound-ring/status/{artifact_id}", response_model=SoundRingResp,
+         dependencies=[Depends(require_api_key)])
+def sound_ring_status(artifact_id: str):
+    family_id = _sound_ring_family_id()
+    result = _sound_ring_call(lambda service: service.get(family_id, artifact_id))
+    return SoundRingResp(**result)
+
+
+@app.post("/sound-ring/archive", response_model=SoundRingResp,
+          dependencies=[Depends(require_api_key)])
+def sound_ring_archive(req: SoundRingArtifactReq):
+    family_id = _sound_ring_family_id()
+    result = _sound_ring_call(lambda service: service.archive(family_id, req.artifact_id))
+    return SoundRingResp(**result)
+
+
+@app.get("/sound-ring/file/{artifact_id}", dependencies=[Depends(require_api_key)])
+def sound_ring_file(artifact_id: str):
+    family_id = _sound_ring_family_id()
+
+    def fetch(service: SoundRingService):
+        current = service.workflow.owned(family_id, artifact_id)
+        if str(current.get("status") or "") not in {"ready", "archived"}:
+            raise SoundRingUnavailable("声音年轮尚未准备好。")
+        file_value = current.get("file")
+        if isinstance(file_value, list):
+            file_name = str(file_value[0] if file_value else "")
+        else:
+            file_name = str(file_value or "")
+        if not file_name:
+            raise SoundRingUnavailable("声音年轮文件不存在。")
+        response = service.store.artifact_file_response(artifact_id, file_name)
+        return response.content, response.headers.get("content-type", "audio/mp4")
+
+    data, media_type = _sound_ring_call(fetch)
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": 'attachment; filename="bubu-sound-ring.m4a"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 

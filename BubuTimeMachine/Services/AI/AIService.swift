@@ -24,6 +24,14 @@ protocol AIService: Sendable {
     func archiveWeeklyReport(id: String) async throws -> WeeklyReport
     /// 只推送新周报 id 的 SSE，不承载正文。
     func weeklyReportEvents() -> AsyncStream<String>
+    /// 声音年轮：先生成可核对的原声清单，家庭确认后再渲染；失败可按同一 id 重试。
+    func latestSoundRing() async throws -> SoundRing?
+    func soundRingHistory() async throws -> [SoundRing]
+    func createSoundRingDraft() async throws -> SoundRing
+    func renderSoundRing(id: String) async throws -> SoundRing
+    func soundRingStatus(id: String) async throws -> SoundRing
+    func archiveSoundRing(id: String) async throws -> SoundRing
+    func downloadSoundRing(id: String) async throws -> URL
     /// 成长电影服务端合成：照片本就同步在家庭自己的服务器，App 只传【本机照片 URL】。
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus
@@ -32,8 +40,9 @@ protocol AIService: Sendable {
     func downloadRenderedMovie(jobId: String) async throws -> URL
 }
 
-// MARK: - 布布周报
-struct WeeklyReportSource: Codable, Sendable, Equatable, Identifiable {
+// MARK: - 派生作品来源
+/// 周报、声音年轮和后续成长电影共用的可回查事实引用；作品层不复制或改写事实。
+struct ArtifactSourceReference: Codable, Sendable, Equatable, Identifiable {
     let sourceId: String
     let collection: String
     let recordId: String
@@ -53,6 +62,11 @@ struct WeeklyReportSource: Codable, Sendable, Equatable, Identifiable {
         case happenedAt = "happened_at"
     }
 }
+
+/// 保留旧名称，现有周报视图无需一次性重命名；真实类型已经是公共作品来源。
+typealias WeeklyReportSource = ArtifactSourceReference
+
+// MARK: - 布布周报
 
 struct WeeklyReportSection: Codable, Sendable, Equatable, Identifiable {
     let kind: String
@@ -75,7 +89,7 @@ struct WeeklyReport: Codable, Sendable, Equatable, Identifiable {
     let modelVersion: String
     let contentHash: String
     let sections: [WeeklyReportSection]
-    let sourceRefs: [WeeklyReportSource]
+    let sourceRefs: [ArtifactSourceReference]
 
     enum CodingKeys: String, CodingKey {
         case id, status, title, summary, sections
@@ -86,6 +100,66 @@ struct WeeklyReport: Codable, Sendable, Equatable, Identifiable {
         case modelVersion = "model_version"
         case contentHash = "content_hash"
         case sourceRefs = "source_refs"
+    }
+}
+
+// MARK: - 声音年轮
+struct SoundRingClip: Codable, Sendable, Equatable, Identifiable {
+    let sourceId: String
+    let photoSourceId: String
+    let ageYears: Int
+    let kind: String
+    let title: String
+    let recordedAt: String
+    let transcript: String
+    let durationSeconds: Double
+    let startSeconds: Double
+    let endSeconds: Double
+
+    var id: String { sourceId }
+
+    enum CodingKeys: String, CodingKey {
+        case title, kind, transcript
+        case sourceId = "source_id"
+        case photoSourceId = "photo_source_id"
+        case ageYears = "age_years"
+        case recordedAt = "recorded_at"
+        case durationSeconds = "duration_seconds"
+        case startSeconds = "start_seconds"
+        case endSeconds = "end_seconds"
+    }
+}
+
+struct SoundRing: Codable, Sendable, Equatable, Identifiable {
+    let id: String
+    let artifactKey: String
+    let status: String
+    let title: String
+    let summary: String
+    let generatedAt: String
+    let modelVersion: String
+    let originalDurationSeconds: Double
+    let renderedDurationSeconds: Double
+    let attempts: Int
+    let error: String
+    let narrator: String
+    let voiceCloning: Bool
+    let hasAudio: Bool
+    let clips: [SoundRingClip]
+    let sourceRefs: [ArtifactSourceReference]
+    let contentHash: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, title, summary, attempts, error, narrator, clips
+        case artifactKey = "artifact_key"
+        case generatedAt = "generated_at"
+        case modelVersion = "model_version"
+        case originalDurationSeconds = "original_duration_seconds"
+        case renderedDurationSeconds = "rendered_duration_seconds"
+        case voiceCloning = "voice_cloning"
+        case hasAudio = "has_audio"
+        case sourceRefs = "source_refs"
+        case contentHash = "content_hash"
     }
 }
 

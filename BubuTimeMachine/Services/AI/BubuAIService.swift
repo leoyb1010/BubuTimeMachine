@@ -135,6 +135,75 @@ final class BubuAIService: AIService, @unchecked Sendable {
         return try JSONDecoder().decode(WeeklyReport.self, from: data)
     }
 
+    func latestSoundRing() async throws -> SoundRing? {
+        let url = baseURL.appendingPathComponent("sound-ring/latest")
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse, http.statusCode == 404 { return nil }
+        try Self.check(resp, data)
+        return try JSONDecoder().decode(SoundRing.self, from: data)
+    }
+
+    func soundRingHistory() async throws -> [SoundRing] {
+        let url = baseURL.appendingPathComponent("sound-ring/history")
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode([SoundRing].self, from: data)
+    }
+
+    func createSoundRingDraft() async throws -> SoundRing {
+        try await soundRingPost("sound-ring/draft", body: [:])
+    }
+
+    func renderSoundRing(id: String) async throws -> SoundRing {
+        try await soundRingPost("sound-ring/render", body: ["artifact_id": id])
+    }
+
+    func soundRingStatus(id: String) async throws -> SoundRing {
+        let url = baseURL.appendingPathComponent("sound-ring/status").appendingPathComponent(id)
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode(SoundRing.self, from: data)
+    }
+
+    func archiveSoundRing(id: String) async throws -> SoundRing {
+        try await soundRingPost("sound-ring/archive", body: ["artifact_id": id])
+    }
+
+    func downloadSoundRing(id: String) async throws -> URL {
+        let url = baseURL.appendingPathComponent("sound-ring/file").appendingPathComponent(id)
+        var req = URLRequest(url: url)
+        applyAuth(&req)
+        req.timeoutInterval = 300
+        let (temporary, resp) = try await session.download(for: req)
+        try Self.check(resp, Data())
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu_sound_ring_\(id)_\(UUID().uuidString).m4a")
+        try FileManager.default.moveItem(at: temporary, to: destination)
+        return destination
+    }
+
+    private func soundRingPost(_ path: String, body: [String: Any]) async throws -> SoundRing {
+        let url = baseURL.appendingPathComponent(path)
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&req)
+        req.timeoutInterval = 90
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode(SoundRing.self, from: data)
+    }
+
     func startMovieRender(childName: String, year: Int, template: String,
                           photos: [MovieRenderPhoto], narration: String) async throws -> MovieRenderStatus {
         let body: [String: Any] = [

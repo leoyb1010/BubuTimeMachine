@@ -10,6 +10,7 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     private(set) var isPlaying = false
     private(set) var progress: Double = 0       // 0...1
     private(set) var playingURL: URL?
+    private(set) var duration: Double = 0
 
     private var player: AVAudioPlayer?
     private var timer: Timer?
@@ -20,13 +21,48 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
 
     func toggle(url: URL) {
         if isPlaying && playingURL == url {
-            stop()
+            pause()
+        } else if !isPlaying && playingURL == url && player != nil {
+            resume()
         } else {
             play(url: url)
         }
     }
 
+    func pause() {
+        guard let player, player.isPlaying else { return }
+        player.pause()
+        timer?.invalidate(); timer = nil
+        isPlaying = false
+        tick()
+    }
+
+    func resume() {
+        guard let player else { return }
+        if let other = Self.active, other !== self { other.stop() }
+        Self.active = self
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback)
+            try AVAudioSession.sharedInstance().setActive(true)
+            player.play()
+            isPlaying = true
+            startTimer()
+        } catch {
+            stop()
+        }
+    }
+
+    func seek(to progress: Double) {
+        guard let player, player.duration > 0 else { return }
+        player.currentTime = min(max(progress, 0), 1) * player.duration
+        tick()
+    }
+
     func play(url: URL) {
+        play(url: url, from: 0)
+    }
+
+    func play(url: URL, from seconds: Double) {
         if let other = Self.active, other !== self { other.stop() }
         Self.active = self
         stop()
@@ -35,9 +71,11 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
             try AVAudioSession.sharedInstance().setActive(true)
             let p = try AVAudioPlayer(contentsOf: url)
             p.delegate = self
+            p.currentTime = min(max(seconds, 0), max(p.duration - 0.05, 0))
             p.play()
             self.player = p
             self.playingURL = url
+            self.duration = p.duration
             self.isPlaying = true
             startTimer()
         } catch {
@@ -47,12 +85,14 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
 
     func stop() {
         let wasActive = player != nil
+        player?.delegate = nil
         player?.stop()
         player = nil
         timer?.invalidate(); timer = nil
         isPlaying = false
         progress = 0
         playingURL = nil
+        duration = 0
         // 播放语音会用 .playback 抢占音频会话；结束时必须归还，
         // 否则用户原本在放的音乐/播客会被永久掐断。notifyOthersOnDeactivation 让别的音频恢复。
         if wasActive {
@@ -61,6 +101,7 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     private func startTimer() {
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
