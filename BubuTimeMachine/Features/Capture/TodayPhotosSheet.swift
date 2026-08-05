@@ -3,21 +3,29 @@ import SwiftData
 import Photos
 import UIKit
 
-// MARK: - 今天拍的照片 · 一键收进时光机
-/// 首页卡片点进来：网格展示今天新增的照片，多选后一键收录成时光轴记录（可加一句话）。
+struct PhotoImportOutcome {
+    let accepted: [PHAsset]
+    let ignored: [PHAsset]
+}
+
+// MARK: - 智能照片收件箱 · 一组收进时光机
+/// 自动按事件分段展示最近新增素材；用户一次确认一组，未选择的素材继续保留待处理。
 struct TodayPhotosSheet: View {
     let assets: [PHAsset]
+    let groups: [PhotoEventGroup]
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let onDone: ([PHAsset]) -> Void   // 处理过的资产（收录或全部忽略）回传给首页标记
+    let onDone: (PhotoImportOutcome) -> Void
 
     @State private var selected: Set<String> = []
     @State private var thumbs: [String: UIImage] = [:]
     @State private var note = ""
     @State private var saving = false
     @State private var importError: String?
+    @State private var groupToIgnore: PhotoEventGroup?
 
     private let columns = [GridItem(.adaptive(minimum: 88), spacing: 6)]
 
@@ -26,35 +34,60 @@ struct TodayPhotosSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     header
-                    LazyVGrid(columns: columns, spacing: 6) {
-                        ForEach(assets, id: \.localIdentifier) { asset in
-                            cell(asset)
+                    ForEach(groups) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            groupHeader(group)
+                            LazyVGrid(columns: columns, spacing: 6) {
+                                ForEach(assets(in: group), id: \.localIdentifier) { asset in
+                                    cell(asset)
+                                }
+                            }
                         }
                     }
                     if !selected.isEmpty {
-                        TextField("给这些照片配一句话（可选）", text: $note, axis: .vertical)
-                            .font(BubuTheme.Font.body)
-                            .padding(12)
-                            .background(BubuTheme.Color.softFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("这一段发生了什么？（可选）")
+                                .font(BubuTheme.Font.scaled(13, weight: .bold))
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                            TextField("写一句话", text: $note, axis: .vertical)
+                                .font(BubuTheme.Font.body)
+                                .padding(12)
+                                .background(BubuTheme.Color.softFill,
+                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
                     }
                 }
                 .padding()
             }
             .background(BubuTheme.Color.background.ignoresSafeArea())
-            .navigationTitle("今天拍的")
+            .navigationTitle("待收进时光")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("全部忽略") { onDone(assets); dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(selected.isEmpty ? "收好" : "收好 \(selected.count) 张") {
-                        Task { await importSelected() }
-                    }
-                    .fontWeight(.bold)
-                    .disabled(selected.isEmpty || saving)
+                    Button("稍后") { dismiss() }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if !selected.isEmpty {
+                    Button {
+                        Task { await importSelected() }
+                    } label: {
+                        Label("收好 \(selected.count) 个", systemImage: "tray.and.arrow.down.fill")
+                            .font(BubuTheme.Font.scaled(16, weight: .heavy, design: .rounded))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(BubuTheme.Color.primary)
+                    .disabled(saving)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(BubuTheme.Color.background.opacity(0.96))
+                    .accessibilityLabel("收好 \(selected.count) 个照片和视频")
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: selected.isEmpty)
             .overlay { if saving { savingOverlay } }
             .alert("有照片没能收录", isPresented: Binding(
                 get: { importError != nil }, set: { if !$0 { importError = nil } })) {
@@ -62,63 +95,145 @@ struct TodayPhotosSheet: View {
             } message: {
                 Text(importError ?? "")
             }
+            .confirmationDialog("不再提示这段时光？", isPresented: Binding(
+                get: { groupToIgnore != nil },
+                set: { if !$0 { groupToIgnore = nil } }
+            ), titleVisibility: .visible) {
+                Button("忽略这组", role: .destructive) {
+                    guard let group = groupToIgnore else { return }
+                    onDone(PhotoImportOutcome(accepted: [], ignored: assets(in: group)))
+                    groupToIgnore = nil
+                    dismiss()
+                }
+                Button("取消", role: .cancel) { groupToIgnore = nil }
+            } message: {
+                Text("只会从待整理列表隐藏，不会删除系统相册里的原片。")
+            }
         }
+        // 照片网格是高密度选择器；无障碍超大字号继续由 VoiceOver 完整读出，
+        // 视觉字号夹到 xxLarge，避免导航按钮、缩略图和主要操作彼此挤出屏幕。
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             Text("📸").font(BubuTheme.Font.scaled(30))
-            Text("挑出布布的照片，点「收好」就进时光轴啦")
+            Text("已经按时间和地点整理成 \(groups.count) 段。选好一段，一次收进时光轴。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             Spacer(minLength: 0)
         }
     }
 
+    private func assets(in group: PhotoEventGroup) -> [PHAsset] {
+        let wanted = Set(group.assetIdentifiers)
+        return assets.filter { wanted.contains($0.localIdentifier) }
+    }
+
+    private func groupHeader(_ group: PhotoEventGroup) -> some View {
+        let groupAssets = assets(in: group)
+        let allSelected = groupAssets.allSatisfy { selected.contains($0.localIdentifier) }
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.groupTimeText(group))
+                    .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(Self.groupCountText(group))
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            Spacer()
+            Menu {
+                Button("不再提示这组", role: .destructive) { groupToIgnore = group }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(BubuTheme.Font.scaled(16, weight: .bold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .accessibilityLabel("这组的更多操作")
+            Button(allSelected ? "取消" : "全选") {
+                if allSelected {
+                    groupAssets.forEach { selected.remove($0.localIdentifier) }
+                } else {
+                    groupAssets.forEach { selected.insert($0.localIdentifier) }
+                }
+                BubuHaptics.selection()
+            }
+            .font(BubuTheme.Font.scaled(13, weight: .bold))
+            .buttonStyle(.borderless)
+        }
+        .padding(.top, 6)
+    }
+
+    private static func groupTimeText(_ group: PhotoEventGroup) -> String {
+        let locale = Locale(identifier: "zh_CN")
+        let day = group.startedAt.formatted(.dateTime.month().day().locale(locale))
+        let start = group.startedAt.formatted(.dateTime.hour().minute().locale(locale))
+        let end = group.endedAt.formatted(.dateTime.hour().minute().locale(locale))
+        return start == end ? "\(day) \(start)" : "\(day) \(start)-\(end)"
+    }
+
+    private static func groupCountText(_ group: PhotoEventGroup) -> String {
+        var parts: [String] = []
+        if group.photoCount > 0 { parts.append("\(group.photoCount) 张照片") }
+        if group.videoCount > 0 { parts.append("\(group.videoCount) 段视频") }
+        if group.livePhotoCount > 0 { parts.append("\(group.livePhotoCount) 张实况") }
+        return parts.joined(separator: "，")
+    }
+
     private func cell(_ asset: PHAsset) -> some View {
         let isOn = selected.contains(asset.localIdentifier)
-        return ZStack(alignment: .topTrailing) {
-            Group {
-                if let img = thumbs[asset.localIdentifier] {
-                    Image(uiImage: img).resizable().scaledToFill()
-                } else {
-                    BubuTheme.Color.softFill
-                }
-            }
-            .frame(width: 88, height: 88)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isOn ? BubuTheme.Color.primary : .clear, lineWidth: 3)
-            }
-            Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                .font(BubuTheme.Font.scaled(20))
-                .foregroundStyle(isOn ? BubuTheme.Color.primary : .white.opacity(0.9))
-                .shadow(radius: 2)
-                .padding(4)
-
-            if asset.mediaType == .video {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Image(systemName: "video.fill")
-                            .font(BubuTheme.Font.scaled(12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 2)
-                        Spacer()
-                        Text(Self.durationText(asset.duration))
-                            .font(BubuTheme.Font.scaled(10, weight: .bold, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .shadow(radius: 2)
-                    }
-                    .padding(6)
-                }
-            }
-        }
-        .onTapGesture {
+        let kind = asset.mediaType == .video ? "视频" : "照片"
+        let timestamp = asset.creationDate?.formatted(
+            .dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN"))) ?? ""
+        return Button {
             if isOn { selected.remove(asset.localIdentifier) } else { selected.insert(asset.localIdentifier) }
             BubuHaptics.selection()
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let img = thumbs[asset.localIdentifier] {
+                        Image(uiImage: img).resizable().scaledToFill()
+                    } else {
+                        BubuTheme.Color.softFill
+                    }
+                }
+                .frame(width: 88, height: 88)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(isOn ? BubuTheme.Color.primary : .clear, lineWidth: 3)
+                }
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(BubuTheme.Font.scaled(20))
+                    .foregroundStyle(isOn ? BubuTheme.Color.primary : .white.opacity(0.9))
+                    .shadow(radius: 2)
+                    .padding(4)
+
+                if asset.mediaType == .video {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Image(systemName: "video.fill")
+                                .font(BubuTheme.Font.scaled(12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .shadow(radius: 2)
+                            Spacer()
+                            Text(Self.durationText(asset.duration))
+                                .font(BubuTheme.Font.scaled(10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .shadow(radius: 2)
+                        }
+                        .padding(6)
+                    }
+                }
+            }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(timestamp) \(kind)")
+        .accessibilityValue(isOn ? "已选择" : "未选择")
+        .accessibilityHint("双击切换选择")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
         .task {
             if thumbs[asset.localIdentifier] == nil {
                 thumbs[asset.localIdentifier] = await PhotoLibraryScanner.loadImage(asset, targetPixel: 200)
@@ -165,14 +280,17 @@ struct TodayPhotosSheet: View {
         var duplicateAssets: [PHAsset] = []   // 已收录过（contentHash 命中），跳过但标记已处理
         var earliestCapture: Date?
         var aggregatedTags: [String] = []
+        var createdMedia: [Media] = []
 
         for asset in chosen {
             let media: Media
             if asset.mediaType == .video {
                 // 视频：导出原文件 → 压缩沙盒导入 + 视频缩略图（R4 E-6）
-                guard let tmpURL = await PhotoLibraryScanner.loadVideoFile(asset),
-                      let imported = try? await env.mediaStore.importVideoForSync(from: tmpURL) else { continue }
+                guard let tmpURL = await PhotoLibraryScanner.loadVideoFile(asset) else { continue }
+                // 无论后续导入成功与否都清理 PhotoKit 导出的临时原片，避免失败重试累积孤儿文件。
+                let importedResult = try? await env.mediaStore.importVideoForSync(from: tmpURL)
                 try? FileManager.default.removeItem(at: tmpURL)
+                guard let imported = importedResult else { continue }
                 media = Media(type: .video, localFileName: imported.fileName)
                 media.durationSeconds = asset.duration
                 media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: imported.fileName)
@@ -200,6 +318,7 @@ struct TodayPhotosSheet: View {
             media.height = asset.pixelHeight
             media.entry = entry
             context.insert(media)
+            createdMedia.append(media)
             okAssets.append(asset)
             if let taken = asset.creationDate {
                 earliestCapture = min(earliestCapture ?? taken, taken)
@@ -209,23 +328,31 @@ struct TodayPhotosSheet: View {
         let failedCount = chosen.count - okAssets.count - duplicateAssets.count
 
         // 全是重复：不落空 Entry，标记已处理后温和告知（不算失败）
-        if okAssets.isEmpty, noteText.isEmpty, !duplicateAssets.isEmpty, failedCount == 0 {
+        if okAssets.isEmpty, !duplicateAssets.isEmpty, failedCount == 0 {
             context.delete(entry)
             BubuHaptics.tapLight()
             importError = "这 \(duplicateAssets.count) 张之前都收录过啦，没有重复保存。"
-            onDone(assets.filter { a in duplicateAssets.contains(where: { $0.localIdentifier == a.localIdentifier }) || !chosen.contains(where: { $0.localIdentifier == a.localIdentifier }) })
+            onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: []))
             return
         }
 
-        guard !okAssets.isEmpty || !noteText.isEmpty else {
-            // 一张都没成：不落 Entry、不标记、不关面板
+        guard !okAssets.isEmpty else {
+            // 一张都没成：即使填过附言也不落空 Entry；重复项可安全从候选移除，失败项保留重试。
             context.delete(entry)
-            importError = "选中的 \(chosen.count) 张都没能读取（照片可能还在 iCloud 上没下载，连上网络后再试）。"
+            if !duplicateAssets.isEmpty {
+                onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: []))
+            }
+            importError = "选中的素材没有成功读取（照片可能还在 iCloud 上没下载，连上网络后再试）。"
             return
         }
 
         if let capture = earliestCapture { entry.happenedAt = capture }   // 记"拍摄那一刻"
         do { try context.save() } catch {
+            for media in createdMedia {
+                env.mediaStore.deleteLocalFiles(media: media.localFileName,
+                                                thumbnail: media.thumbnailFileName)
+                context.delete(media)
+            }
             context.delete(entry)
             importError = "保存失败：\(error.localizedDescription)"
             return
@@ -240,21 +367,19 @@ struct TodayPhotosSheet: View {
         env.syncEngine.syncNow()
         env.refreshWidgetSnapshot(context: context)
 
-        // 只标记：成功收录的 + 重复跳过的 + 用户看过但没选的；失败的留着下次再提示
-        var failedIDs = Set(chosen.map(\.localIdentifier)).subtracting(okAssets.map(\.localIdentifier))
-        failedIDs.subtract(duplicateAssets.map(\.localIdentifier))
-        let toMark = assets.filter { !failedIDs.contains($0.localIdentifier) }
+        // 只标记成功与重复；未选择、读取失败的素材继续留在智能收件箱。
+        let acceptedAssets = okAssets + duplicateAssets
         let dupNote = duplicateAssets.isEmpty ? "" : "（\(duplicateAssets.count) 张之前收录过，自动跳过）"
 
         if failedCount > 0 {
             importError = "收好了 \(okAssets.count) 张\(dupNote)，另外 \(failedCount) 张没能读取（可能还在 iCloud 上），之后会再提醒你。"
             BubuHaptics.warning()
-            onDone(toMark)
+            onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: []))
             // 不立即 dismiss：让用户看到提示，点"知道了"后自己关
             return
         }
         BubuHaptics.success()
-        onDone(toMark)
+        onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: []))
         dismiss()
     }
 }

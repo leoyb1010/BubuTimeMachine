@@ -14,6 +14,7 @@ struct CaptureHomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Query private var profiles: [ChildProfile]
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
@@ -117,6 +118,11 @@ struct CaptureHomeView: View {
             photoScanner.refreshAuthorizationState()
             if photoScanner.authorized { _ = photoScanner.scan() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // 拍完照切回 App 时立即消费 PhotoKit 增量，不等重启；仍只生成候选，不自动发布。
+            photoScanner.refreshAuthorizationState()
+            if photoScanner.authorized { _ = photoScanner.scan() }
+        }
         .onChange(of: quickCaptureTrigger) { _, _ in
             startQuickCapture()
         }
@@ -149,8 +155,9 @@ struct CaptureHomeView: View {
             NaturalCapturePanel()
         }
         .sheet(isPresented: $showTodayPhotos) {
-            TodayPhotosSheet(assets: photoScanner.todayAssets) { handled in
-                photoScanner.markHandled(handled)
+            TodayPhotosSheet(assets: photoScanner.pendingAssets, groups: photoScanner.eventGroups) { outcome in
+                photoScanner.markAccepted(outcome.accepted)
+                photoScanner.markIgnored(outcome.ignored)
             }
         }
     }
@@ -158,7 +165,15 @@ struct CaptureHomeView: View {
     // MARK: 今天拍的照片卡（零操作记录）
     @ViewBuilder
     private var todayPhotosCard: some View {
-        if photoScanner.authorized, !photoScanner.todayAssets.isEmpty {
+        if photoScanner.authorized, photoScanner.lastError != nil {
+            photoIntakePermissionCard(
+                title: "照片自动整理暂时停住了",
+                subtitle: "没有处理或发布任何照片，原片仍在系统相册里；可以稍后重试",
+                actionTitle: "重试"
+            ) {
+                _ = photoScanner.scan()
+            }
+        } else if photoScanner.authorized, !photoScanner.pendingAssets.isEmpty {
             Button {
                 showTodayPhotos = true
             } label: {
@@ -170,10 +185,12 @@ struct CaptureHomeView: View {
                             .foregroundStyle(BubuTheme.Color.primary)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("今天拍了 \(photoScanner.todayAssets.count) 个瞬间")
+                        Text("有 \(photoScanner.eventGroups.count) 段时光待收好")
                             .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text("挑几张收进布布的时光轴？")
+                        Text(photoScanner.hasFullAccess
+                             ? "共 \(photoScanner.pendingAssets.count) 个照片和视频，已自动整理"
+                             : "已整理授权范围内的 \(photoScanner.pendingAssets.count) 个素材；完整访问可自动发现全部")
                             .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
@@ -189,7 +206,66 @@ struct CaptureHomeView: View {
             }
             .buttonStyle(.plain)
             .popoverTip(TodayPhotosTip())
+        } else if photoScanner.authorizationStatus == .limited {
+            photoIntakePermissionCard(
+                title: "目前只看得到部分照片",
+                subtitle: "改为完整访问后，才能自动发现之后拍摄的全部照片和视频",
+                actionTitle: "管理"
+            ) {
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+            }
+        } else if photoScanner.authorizationStatus == .notDetermined {
+            photoIntakePermissionCard(
+                title: "让照片自己排好队",
+                subtitle: "一次授权，自动发现新照片和视频；确认后才会收进时光",
+                actionTitle: "开启"
+            ) {
+                Task { _ = await photoScanner.requestAndScan() }
+            }
+        } else if photoScanner.authorizationStatus == .denied ||
+                    photoScanner.authorizationStatus == .restricted {
+            photoIntakePermissionCard(
+                title: "照片自动整理还没开启",
+                subtitle: "到系统设置允许读取照片，原片仍只在你确认后收录",
+                actionTitle: "去设置"
+            ) {
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+            }
         }
+    }
+
+    private func photoIntakePermissionCard(
+        title: String,
+        subtitle: String,
+        actionTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(BubuTheme.Color.primary.opacity(0.16)).frame(width: 44, height: 44)
+                Image(systemName: "photo.stack.fill")
+                    .font(BubuTheme.Font.scaled(18, weight: .bold))
+                    .foregroundStyle(BubuTheme.Color.primary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(subtitle)
+                    .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Button(actionTitle, action: action)
+                .font(BubuTheme.Font.scaled(13, weight: .bold))
+                .buttonStyle(.borderedProminent)
+                .tint(BubuTheme.Color.primary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .bubuCardShadow()
     }
 
     /// 保存后调用 AI 识别"第一次"（仅在启用真实 AI 时）。
@@ -358,6 +434,9 @@ struct CaptureHomeView: View {
             .accessibilityLabel("设置")
         }
         .padding(.top, 2)
+        // 顶部四个并列信息在无障碍超大字号会互相挤压；保留完整 VoiceOver 语义，
+        // 视觉字号夹到 xxxLarge，避免姓名逐字断行和设置按钮被推出屏幕。
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
     private var todayStatusPill: some View {

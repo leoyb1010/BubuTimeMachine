@@ -20,7 +20,7 @@ xcodegen generate   # 改 project.yml 或增删文件后必跑
 
 # clean build（验证一律 clean，增量会缓存误报；目标零 error 零 warning）
 xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
-  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   clean build 2>&1 | grep -E ": error:|BubuTimeMachine.*: warning:|BUILD SUCCEEDED|BUILD FAILED" | sort -u
 
 # 单元测试（BubuTimeMachine scheme 挂了 BubuTimeMachineTests）

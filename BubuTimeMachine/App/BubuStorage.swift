@@ -38,6 +38,11 @@ nonisolated enum BubuStorage {
         containerURL.appendingPathComponent(storeFileName)
     }
 
+    /// 智能照片收件箱的可重建候选库。与 SwiftData 事实库分离，供未来后台扩展共享。
+    static var intakeDatabaseURL: URL {
+        containerURL.appendingPathComponent("PhotoIntake.sqlite")
+    }
+
     /// 媒体原文件目录（共享容器内）。
     static var mediaDirectory: URL {
         directory(named: "Media")

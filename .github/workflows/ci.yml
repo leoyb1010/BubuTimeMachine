@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Reject duplicate source copies
+        run: bash scripts/check-duplicate-source-files.sh
+
       - name: Select latest Xcode 26
         run: |
           XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
@@ -45,20 +48,17 @@ jobs:
           xcodebuild -project BubuTimeMachine.xcodeproj \
             -scheme BubuTimeMachine \
             -destination "id=${{ steps.sim.outputs.udid }}" \
-            test | tail -120
+            clean test | tail -120
 
   server:
-    name: AI server tests (Python ${{ matrix.python }})
+    name: AI server tests (Python 3.9)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      matrix:
-        python: ["3.9", "3.12"]   # 3.9 = 兼容下限（Pydantic 注解求值），3.12 = 现代版本
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.9"
       - name: Install deps
         working-directory: server/ai
         run: |

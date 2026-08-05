@@ -10,6 +10,7 @@ struct BubuIdentityCard: View {
 
     /// 翻面：轻点头像看背面（血型/性别/出生地/完整 ID）；背面任意处轻点翻回。
     @State private var isFlipped = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var ageText: String {
         AgeCalculator.ageDescription(birthday: profile.birthday, at: .now)
@@ -74,11 +75,14 @@ struct BubuIdentityCard: View {
             ? "布布身份卡背面，性别、血型、出生地，轻点翻回正面"
             : "布布身份卡，\(profile.name)，\(ageText)，\(daysText)，轻点翻面查看性别、血型、出生地")
         .accessibilityAction { flip() }
+        // 身份卡是固定比例的高密度证件版式；视觉字号需限幅，完整内容仍由合并后的
+        // VoiceOver 标签一次读出，避免生日和编号在无障碍超大字号下被裁切。
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
     private func flip() {
         // 统一用 BubuMotion.ceremony（可打断 spring，典礼感节奏）——翻面途中可随时再点反向翻回。
-        withAnimation(BubuMotion.ceremony) {
+        withAnimation(reduceMotion ? nil : BubuMotion.ceremony) {
             isFlipped.toggle()
         }
     }

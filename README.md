@@ -89,11 +89,11 @@ xcodegen generate
 
 # 编译并运行（命令行）
 xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
-  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' clean build
 
 # 单元测试（加密/格式嗅探等回归）
 xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
-  -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 
 # 或直接 open BubuTimeMachine.xcodeproj 用 Xcode 运行
 ```
