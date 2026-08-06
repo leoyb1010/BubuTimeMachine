@@ -144,6 +144,14 @@ struct ReliablePhotoIntakeService {
 
         let jobs = try resources.map { spec -> PhotoUploadJob in
             guard let destination = byKey[spec.assetKey] else { throw IntakeError.invalidResponse }
+            // 服务器下发的上传目的地必须过同一套主机信任（Bearer 只能发往受信主机）。
+            // 之前唯一防线是 Photos 按 plist 前缀 pin——那是系统行为，
+            // 拒绝后 job 会长期 queued 直到 7 天兜底；这里前置拒绝，错误立即可见。
+            guard let destinationURL = URL(string: destination.url),
+                  ServerConfig.isTrustedAIURL(destinationURL,
+                                              serverURL: nil,
+                                              packagedAIURL: baseURL)
+            else { throw IntakeError.invalidResponse }
             return PhotoUploadJob(
                 assetKey: spec.assetKey,
                 batchID: batchID,

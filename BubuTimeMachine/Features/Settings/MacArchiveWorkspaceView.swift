@@ -84,6 +84,7 @@ nonisolated enum OpenArchiveVerifier {
             // sha256 循环永不返回（校验卡死在"正在逐个核对"）。异类一律按不匹配计。
             let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
             guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+                checked += 1   // 评估过了，只是判不匹配；不计的话单条目档案会误判成格式错误
                 mismatched.append(relative)
                 continue
             }
@@ -218,6 +219,20 @@ struct MacArchiveWorkspaceView: View {
             }
         }
         .onChange(of: filter) { _, _ in selectedIDs.removeAll() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(selectedIDs.count == visibleEntries.count && !visibleEntries.isEmpty
+                       ? "取消全选" : "全选当前") {
+                    if selectedIDs.count == visibleEntries.count {
+                        selectedIDs.removeAll()
+                    } else {
+                        selectedIDs = Set(visibleEntries.map(\.id))
+                    }
+                }
+                .disabled(visibleEntries.isEmpty)
+                .keyboardShortcut("a", modifiers: .command)
+            }
+        }
         // 搜索词变化同样清空选择：否则选中的条目被过滤隐藏后仍会被批量操作到——
         // 用户以为在操作眼前 2 条，实际连同看不见的 3 条一起动了。
         .onChange(of: searchText) { _, _ in selectedIDs.removeAll() }
@@ -249,6 +264,7 @@ struct MacArchiveWorkspaceView: View {
                         archiveRow(entry)
                     }
                     .buttonStyle(.plain)
+                .hoverEffect(.highlight)
                     .accessibilityAddTraits(selectedIDs.contains(entry.id) ? .isSelected : [])
                     .listRowBackground(
                         selectedIDs.contains(entry.id)
@@ -377,7 +393,7 @@ struct MacArchiveWorkspaceView: View {
                     Button { applyArchive(false) } label: { Label("恢复到时光轴", systemImage: "arrow.uturn.backward") }
                         .buttonStyle(.bordered)
                 } else {
-                    Button(role: .destructive) { showArchiveConfirmation = true } label: { Label("移入归档", systemImage: "archivebox") }
+                    Button { showArchiveConfirmation = true } label: { Label("移入归档", systemImage: "archivebox") }
                         .buttonStyle(.bordered)
                 }
             }
@@ -415,7 +431,7 @@ struct MacArchiveWorkspaceView: View {
                         Button { applyArchive(false) } label: { Label("恢复到时光轴", systemImage: "arrow.uturn.backward") }
                             .buttonStyle(.bordered)
                     } else {
-                        Button(role: .destructive) { showArchiveConfirmation = true } label: { Label("移入归档", systemImage: "archivebox") }
+                        Button { showArchiveConfirmation = true } label: { Label("移入归档", systemImage: "archivebox") }
                             .buttonStyle(.bordered)
                     }
                 }

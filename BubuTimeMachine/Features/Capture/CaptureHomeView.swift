@@ -258,14 +258,25 @@ struct CaptureHomeView: View {
     }
 
     private func refreshUploadQueueSummary() {
-        uploadQueueSummary = (try? PhotoIntakeStore().uploadQueueSummary())
-            ?? PhotoUploadQueueSummary(pendingBatches: 0, failedBatches: 0)
+        // 这是与 BubuPhotoUpload 扩展跨进程共享的 WAL 库（busy_timeout 5s）：
+        // 扩展正持有写锁的瞬间（didBecomeActive 恰是双方同时活跃的时刻），
+        // 主线程同步读最长会卡整整 5 秒。读移到后台，结果回主线程。
+        Task {
+            let summary = await Task.detached(priority: .utility) {
+                (try? PhotoIntakeStore().uploadQueueSummary())
+                    ?? PhotoUploadQueueSummary(pendingBatches: 0, failedBatches: 0)
+            }.value
+            uploadQueueSummary = summary
+        }
     }
 
     private func retryFailedUploads() {
         Task {
             do {
-                try PhotoIntakeStore().resetFailedUploadBatches()
+                // BEGIN IMMEDIATE 逐批写事务：同样下移，别在主线程等跨进程锁。
+                try await Task.detached(priority: .userInitiated) {
+                    try PhotoIntakeStore().resetFailedUploadBatches()
+                }.value
                 _ = await photoScanner.scan()
                 refreshUploadQueueSummary()
                 BubuHaptics.success()

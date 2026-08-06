@@ -533,6 +533,18 @@ nonisolated struct PhotoIntakeStore: Sendable {
                 if sqlite3_step(stateStmt) == SQLITE_ROW,
                    let cState = sqlite3_column_text(stateStmt, 0),
                    String(cString: cState) == "committed" {
+                    // 顺手把迟到的非终态 job 行中性化：summary 与"重新整理"都按
+                    // job 状态数 failed——留一行 failed 会让已发布的批次显示可重试，
+                    // 用户一点就把同一批照片再传一遍。
+                    let neutralize = try prepare(
+                        """
+                        UPDATE upload_jobs SET state='acknowledged', updated_at=?
+                        WHERE batch_id=? AND state NOT IN ('succeeded','acknowledged')
+                        """, db: db)
+                    defer { sqlite3_finalize(neutralize) }
+                    sqlite3_bind_double(neutralize, 1, Date().timeIntervalSince1970)
+                    bind(batchID, at: 2, to: neutralize)
+                    try stepDone(neutralize, db: db)
                     try execute("COMMIT", db: db)
                     return
                 }

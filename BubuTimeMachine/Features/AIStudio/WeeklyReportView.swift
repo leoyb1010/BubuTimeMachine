@@ -6,8 +6,9 @@ import UIKit
 /// 只展示服务端证据约束后的派生作品，不在本地新增事实模型。
 struct WeeklyReportView: View {
     @Environment(AppEnvironment.self) private var env
-    @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
-    private var entries: [Entry]
+    // 不再全量 @Query Entry：本页只按 sourceId 找零星几条，
+    // 全量拉会把整库 faulting 的成本塞进这个纯展示页。改按需单条查。
+    @Environment(\.modelContext) private var context
 
     private let previewMode: Bool
     @State private var report: WeeklyReport?
@@ -265,7 +266,7 @@ struct WeeklyReportView: View {
     private func open(_ source: WeeklyReportSource) {
         if source.collection == "entries",
            let id = UUID(uuidString: source.localId),
-           let entry = entries.first(where: { $0.id == id }) {
+           let entry = fetchEntry(id) {
             jumpEntry = entry
         } else {
             sourceDetail = source
@@ -428,6 +429,13 @@ struct WeeklyReportView: View {
         }
         return "家里的周报服务暂时没有回应。已有记录不会受影响。"
     }
+    /// 按 id 单条取 Entry（fetchLimit 1），替代全量 @Query。
+    private func fetchEntry(_ id: UUID) -> Entry? {
+        var d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+        d.fetchLimit = 1
+        return try? context.fetch(d).first
+    }
+
 }
 
 #if DEBUG

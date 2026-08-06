@@ -6,10 +6,13 @@ import SwiftData
 /// 不复制数据、不新建模型，只把已经存在的事实组织成家人一眼能懂的成长域。
 struct GrowthHomeView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.modelContext) private var context
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Query(sort: \Milestone.createdAt, order: .reverse) private var milestones: [Milestone]
     @Query(sort: \GrowthMeasurement.measuredAt, order: .reverse) private var measurements: [GrowthMeasurement]
-    @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var healthRecords: [HealthRecord]
+    /// 健康记录只用来显示条数：日打卡量级几年就是万行，@Query 全量拉太重，
+    /// 改 fetchCount（出现时刷新，返回本页自然重算）。
+    @State private var healthRecordCount = 0
     @Query(sort: \VaccineRecord.injectedAt, order: .reverse) private var vaccines: [VaccineRecord]
     @Query(sort: \FirstTime.happenedAt, order: .reverse) private var firstTimes: [FirstTime]
 
@@ -45,6 +48,9 @@ struct GrowthHomeView: View {
         }
         .background(BubuThemedBackground().ignoresSafeArea())
         .navigationTitle("成长")
+        .onAppear {
+            healthRecordCount = (try? context.fetchCount(FetchDescriptor<HealthRecord>())) ?? 0
+        }
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -110,7 +116,7 @@ struct GrowthHomeView: View {
                 growthLink(icon: "star.fill", title: "里程碑", subtitle: "已点亮 \(achievedMilestones.count) 个")
             }
             NavigationLink { HealthHomeView() } label: {
-                growthLink(icon: "heart.text.square.fill", title: "健康照护", subtitle: "共 \(healthRecords.count) 条记录")
+                growthLink(icon: "heart.text.square.fill", title: "健康照护", subtitle: "共 \(healthRecordCount) 条记录")
             }
             NavigationLink { VaccineView() } label: {
                 growthLink(icon: "syringe.fill", title: "疫苗接种", subtitle: "已记录 \(vaccines.count) 剂")
