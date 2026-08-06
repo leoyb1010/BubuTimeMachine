@@ -1,5 +1,33 @@
 import Foundation
 
+nonisolated struct SSDIntakeCandidate: Decodable, Identifiable, Sendable {
+    struct EntryInfo: Decodable, Sendable {
+        let happenedAt: String
+        let sourcePaths: [String]
+        let captureTimeSources: [String]?
+
+        enum CodingKeys: String, CodingKey {
+            case happenedAt = "happened_at"
+            case sourcePaths = "source_paths"
+            case captureTimeSources = "capture_time_sources"
+        }
+    }
+
+    struct Item: Decodable, Sendable {
+        let fileName: String
+        let mediaType: String
+        enum CodingKeys: String, CodingKey {
+            case fileName = "file_name"
+            case mediaType = "media_type"
+        }
+    }
+
+    let id: String
+    let state: String
+    let entry: EntryInfo
+    let items: [Item]
+}
+
 // MARK: - BubuAIService（AIService 真实实现）
 /// 调用自托管 FastAPI（背后接 DeepSeek）。隐私：只发文字，不上传照片。
 /// 任意一步失败都抛错，UI 层各视图自行降级（保留 Mock 体验或提示稍后再试）。
@@ -26,6 +54,29 @@ final class BubuAIService: AIService, @unchecked Sendable {
             return false
         }
         return true
+    }
+
+    func intakeCandidates() async throws -> [SSDIntakeCandidate] {
+        let url = baseURL.appendingPathComponent("intake/candidates")
+        var req = URLRequest(url: url)
+        try await applyAuth(&req)
+        req.timeoutInterval = 30
+        let (data, resp) = try await session.data(for: req)
+        try Self.check(resp, data)
+        return try JSONDecoder().decode([SSDIntakeCandidate].self, from: data)
+    }
+
+    func updateIntakeCandidate(id: String, happenedAt: Date) async throws {
+        let iso = ISO8601DateFormatter().string(from: happenedAt)
+        _ = try await post("intake/candidates/update", ["batch_id": id, "happened_at": iso])
+    }
+
+    func confirmIntakeCandidate(id: String) async throws {
+        _ = try await post("intake/confirm", ["batch_id": id])
+    }
+
+    func cancelIntakeCandidate(id: String) async throws {
+        _ = try await post("intake/cancel", ["batch_id": id])
     }
 
     private func applyAuth(_ req: inout URLRequest) async throws {

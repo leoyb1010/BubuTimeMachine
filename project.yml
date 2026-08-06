@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.7.0"
-    CURRENT_PROJECT_VERSION: "2026080602"
+    MARKETING_VERSION: "2.8.0"
+    CURRENT_PROJECT_VERSION: "2026080603"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -51,8 +51,42 @@ targets:
     dependencies:
       - target: BubuWidgetsExtension
         embed: true
+      - target: BubuPhotoUpload
+        embed: true
       - target: BubuWatch
         embed: true
+
+  BubuPhotoUpload:
+    type: extensionkit-extension
+    platform: iOS
+    deploymentTarget: "26.1"
+    sources:
+      - path: BubuPhotoUpload
+        excludes:
+          - "Info.plist"
+          - "BubuPhotoUpload.entitlements"
+      - path: BubuTimeMachine/App/BubuStorage.swift
+      - path: BubuTimeMachine/Services/Media/PhotoIntakeStore.swift
+    entitlements:
+      path: BubuPhotoUpload/BubuPhotoUpload.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.bubu.timemachine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.photo-upload
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: BubuPhotoUpload/Info.plist
+        CODE_SIGN_ENTITLEMENTS: BubuPhotoUpload/BubuPhotoUpload.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        IPHONEOS_DEPLOYMENT_TARGET: "26.1"
+    dependencies:
+      - sdk: Photos.framework
+      - sdk: ExtensionFoundation.framework
+      # Xcode 会为 ExtensionKit target 固定运行 AppIntents 元数据提取器；显式链接
+      # 系统框架可避免“未找到依赖、已跳过”的构建 warning。
+      - sdk: AppIntents.framework
+      - sdk: libsqlite3.tbd
 
   BubuWatch:
     type: application

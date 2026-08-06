@@ -172,7 +172,7 @@ struct EntryDetailView: View {
 
     @ViewBuilder
     private var mediaSection: some View {
-        if !entry.media.isEmpty {
+        if !entry.sortedMedia.isEmpty {
             let columns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(sortedMedia) { media in
@@ -401,7 +401,7 @@ struct EntryDetailView: View {
 
     @ViewBuilder
     private var tagsSection: some View {
-        let tags = Array(Set(entry.media.flatMap { $0.aiTags }))
+        let tags = Array(Set(entry.sortedMedia.flatMap { $0.aiTags }))
         if !tags.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Label("自动识别", systemImage: "tag")

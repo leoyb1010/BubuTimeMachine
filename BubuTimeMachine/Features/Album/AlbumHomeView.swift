@@ -21,7 +21,7 @@ struct AlbumHomeView: View {
     /// 轻量指纹：一遍整型累加，不构建数组；变化即触发重建。
     private var fingerprint: String {
         var mediaCount = 0
-        for entry in entries { mediaCount += entry.media.count }
+        for entry in entries { mediaCount += entry.sortedMedia.count }
         let birthday = profiles.first?.birthday.timeIntervalSince1970 ?? 0
         return "\(entries.count)-\(mediaCount)-\(Int(birthday))"
     }
@@ -56,7 +56,7 @@ struct AlbumHomeView: View {
 
     private func rebuildAlbums() {
         let items = entries.flatMap { entry in
-            entry.media
+            entry.sortedMedia
                 .filter { $0.type == .photo || $0.type == .video }
                 .sorted { $0.createdAt < $1.createdAt }
                 .map { AlbumMediaItem(media: $0, entry: entry) }

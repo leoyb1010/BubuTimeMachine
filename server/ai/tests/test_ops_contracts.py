@@ -6,6 +6,7 @@ import json
 import socket
 import sqlite3
 import subprocess
+import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -376,7 +377,9 @@ def test_pocketbase_uses_tracked_migrations_without_stale_runtime_copy():
     script = (REPO_ROOT / "server/pocketbase/start_pocketbase.sh").read_text(
         encoding="utf-8"
     )
-    assert '--migrationsDir="./migrations"' in script
+    assert 'PB_MIGRATIONS_DIR="${PB_MIGRATIONS_DIR:-./migrations}"' in script
+    assert '--migrationsDir="$PB_MIGRATIONS_DIR"' in script
+    assert 'PB_HOOKS_DIR="${PB_HOOKS_DIR:-./pb_hooks}"' in script
     assert "cp -f migrations/*.js" not in script
     assert "|| true" not in script
 
@@ -498,6 +501,74 @@ def test_ai_launcher_uses_relocatable_python_module():
 
     assert "./.venv/bin/python -m uvicorn" in launcher
     assert "exec ./.venv/bin/uvicorn" not in launcher
+
+
+def test_release_launchd_renderer_keeps_secrets_out_of_plists(tmp_path: Path):
+    server = tmp_path / "server-root"
+    release = server / "releases/v-test"
+    ai = release / "server/ai"
+    pocketbase = release / "server/pocketbase"
+    ai.mkdir(parents=True)
+    pocketbase.mkdir(parents=True)
+    for name in (
+        "start_ai.sh", "start_semantic_worker.sh", "start_weekly_report.sh",
+        "start_ssd_intake.sh", ".env",
+    ):
+        (ai / name).write_text("INTAKE_COMMIT_KEY=must-not-leak\n", encoding="utf-8")
+    (pocketbase / "start_pocketbase.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (server / "pocketbase/pb_data").mkdir(parents=True)
+    (server / "pocketbase/pocketbase").write_text("binary", encoding="utf-8")
+    (server / "pocketbase/pb_data/data.db").write_bytes(b"db")
+    agents = tmp_path / "agents"
+    backup = tmp_path / "backup"
+    script = REPO_ROOT / "server/ops/install_release_launchd.py"
+    result = subprocess.run(
+        [
+            sys.executable, str(script), "--server-root", str(server),
+            "--release-root", str(release), "--launch-agents", str(agents),
+            "--backup-dir", str(backup),
+        ],
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    pocketbase_plist = plistlib.loads(
+        (agents / "top.leoyuan.bubu.pocketbase.plist").read_bytes()
+    )
+    raw = (agents / "top.leoyuan.bubu.pocketbase.plist").read_text(encoding="utf-8")
+    assert "must-not-leak" not in raw
+    assert pocketbase_plist["EnvironmentVariables"]["BUBU_SERVER_ENV_FILE"] == str(ai / ".env")
+    assert len(list(agents.glob("*.plist"))) == 5
+
+
+def test_intake_env_renderer_shell_quotes_paths_with_spaces(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("SEMANTIC_FAMILY_ID=family-test\n", encoding="utf-8")
+    database = tmp_path / "data.db"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE users(id TEXT PRIMARY KEY, verified INTEGER NOT NULL)")
+        db.execute("INSERT INTO users(id,verified) VALUES('user-test',1)")
+    script = REPO_ROOT / "server/ops/configure_intake_env.py"
+    inbox = tmp_path / "Bubu Inbox"
+    result = subprocess.run(
+        [
+            sys.executable, str(script), "--env", str(env),
+            "--database", str(database), "--public-base", "https://example.test",
+            "--staging-root", str(tmp_path / "staging"),
+            "--inbox-root", str(inbox),
+            "--allowed-pb-user-id", "user-test",
+        ],
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    raw = env.read_text(encoding="utf-8")
+    assert f"BUBU_INBOX_ROOT='{inbox}'" in raw
+    sourced = subprocess.run(
+        ["/bin/bash", "-c", 'set -a; source "$1"; printf "%s" "$BUBU_INBOX_ROOT"', "_", str(env)],
+        text=True, capture_output=True, check=False,
+    )
+    assert sourced.returncode == 0, sourced.stderr
+    assert sourced.stdout == str(inbox)
+    assert "INTAKE_ALLOWED_PB_USER_IDS=user-test" in raw
 
 
 def test_weekly_report_runs_after_the_natural_week_has_finished():

@@ -179,14 +179,14 @@ struct ShareCardSheet: View {
     /// 视频记录用它的封面缩略图——时光轴明明显示着封面，分享却出🧸空卡是预期落差。
     private func firstPhoto(of entry: Entry) -> UIImage? {
         let store = env.mediaStore
-        for media in entry.media where media.type == .photo {
+        for media in entry.sortedMedia where media.type == .photo {
             guard let name = media.localFileName ?? media.thumbnailFileName else { continue }
             let url = store.mediaURL(for: name)
             let fallback = store.thumbnailURL(for: name)
             let target = FileManager.default.fileExists(atPath: url.path) ? url : fallback
             if let img = ThumbnailProvider.downsample(url: target, maxPixel: 1400) { return img }
         }
-        for media in entry.media where media.type == .video {
+        for media in entry.sortedMedia where media.type == .video {
             guard let name = media.thumbnailFileName else { continue }
             let url = store.thumbnailURL(for: name)
             if let img = ThumbnailProvider.downsample(url: url, maxPixel: 1400) { return img }

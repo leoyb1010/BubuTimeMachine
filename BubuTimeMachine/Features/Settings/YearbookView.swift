@@ -96,7 +96,7 @@ struct YearbookView: View {
         let list = entriesInRange
         return HStack(spacing: 12) {
             BubuMascotBadge(size: 44, expression: .reading)
-            Text("这一年有 \(list.count) 条记录、\(list.reduce(0) { $0 + $1.media.count }) 张照片")
+            Text("这一年有 \(list.count) 条记录、\(list.reduce(0) { $0 + $1.sortedMedia.count }) 张照片")
                 .font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
             Spacer()
         }
@@ -138,7 +138,7 @@ struct YearbookView: View {
                 note: e.firstPersonNote ?? e.note,
                 ageText: AgeCalculator.compactAge(birthday: profile.birthday, at: e.happenedAt),
                 authorRole: e.authorRole,
-                imageFileNames: e.media.filter { $0.type == .photo }.compactMap { $0.localFileName },
+                imageFileNames: e.sortedMedia.filter { $0.type == .photo }.compactMap { $0.localFileName },
                 mood: e.mood?.emoji)
         }
         let rangeStart = cal.date(byAdding: .year, value: selectedYear, to: profile.birthday) ?? profile.birthday

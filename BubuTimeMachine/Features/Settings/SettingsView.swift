@@ -39,7 +39,7 @@ struct SettingsView: View {
                         tint: BubuTheme.Color.info) { SyncCenterView() }
                     row("做一本年册", icon: "book.closed.fill",
                         tint: env.theme.theme.primary) { YearbookView() }
-                    row("导出完整档案", icon: "square.and.arrow.up.on.square.fill",
+                    row("导出开放阅读档案", icon: "square.and.arrow.up.on.square.fill",
                         tint: env.theme.theme.secondary) { ExportView() }
                 }
                 group("外观") {

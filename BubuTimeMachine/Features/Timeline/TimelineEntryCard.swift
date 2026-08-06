@@ -10,7 +10,7 @@ struct TimelineEntryCard: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if !entry.media.isEmpty {
+            if !entry.sortedMedia.isEmpty {
                 mediaGrid
             } else {
                 noteOnlyMascot
@@ -61,7 +61,7 @@ struct TimelineEntryCard: View {
 
     @ViewBuilder
     private var mediaGrid: some View {
-        let count = min(entry.media.count, 9)
+        let count = min(entry.sortedMedia.count, 9)
         if count == 1, let media = entry.coverMedia {
             MediaThumbnail(media: media, mediaStore: mediaStore)
                 .aspectRatio(1, contentMode: .fit)

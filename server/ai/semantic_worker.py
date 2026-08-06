@@ -285,6 +285,10 @@ class SemanticWorker:
         if not media or media.get("isDeleted"):
             self.index.remove(job.source_record_id)
             return
+        role = str(media.get("resourceRole") or "display")
+        if role != "display":
+            self.index.remove(job.source_record_id)
+            return
         entry_local_id = media.get("entryLocalId")
         if not entry_local_id:
             raise RuntimeError("媒体缺少 entryLocalId")

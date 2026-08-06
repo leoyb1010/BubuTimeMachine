@@ -813,7 +813,10 @@ final class SyncEngine {
             mediaId: media.id, entryLocalId: entryLocalId,
             fileURL: url, type: media.type, fileName: fileName,
             thumbnailURL: media.thumbnailFileName.map { mediaStore.thumbnailURL(for: $0) },
-            thumbnailFileName: media.thumbnailFileName)
+            thumbnailFileName: media.thumbnailFileName,
+            contentHash: media.contentHash,
+            resourceRole: media.resourceRoleRaw,
+            assetGroupId: media.assetGroupID)
         do {
             for try await event in apiClient.uploadMedia(request) {
                 switch event {
@@ -1707,6 +1710,9 @@ final class SyncEngine {
         media.remoteURL = dto.remoteURL
         // 只增不清：老服务端记录没有 thumbnail 时保留本地已知值。
         if let thumb = dto.remoteThumbURL { media.remoteThumbURL = thumb }
+        if let hash = dto.contentHash { media.contentHash = hash }
+        if let role = dto.resourceRole { media.resourceRoleRaw = role }
+        if let group = dto.assetGroupId { media.assetGroupID = group }
         media.durationSeconds = dto.durationSeconds
         media.width = dto.width
         media.height = dto.height

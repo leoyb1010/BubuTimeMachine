@@ -435,7 +435,7 @@ struct GrowthMovieView: View {
     }
 
     private var selectedPreviewMedia: [Media] {
-        filteredEntries.flatMap { $0.media.filter { $0.type == .photo && $0.localFileName != nil } }
+        filteredEntries.flatMap { $0.sortedMedia.filter { $0.type == .photo && $0.localFileName != nil } }
     }
 
     private var selectedPhotoFiles: [String] {
@@ -479,7 +479,7 @@ struct GrowthMovieView: View {
     private func buildCaptions() -> [String] {
         var caps: [String] = []
         for entry in filteredEntries {
-            let count = entry.media.filter { $0.type == .photo && $0.localFileName != nil }.count
+            let count = entry.sortedMedia.filter { $0.type == .photo && $0.localFileName != nil }.count
             guard count > 0 else { continue }
             let text = entry.note?.isEmpty == false ? entry.note! : BubuDateFormat.shortDate(entry.happenedAt)
             caps.append(contentsOf: Array(repeating: text, count: count))

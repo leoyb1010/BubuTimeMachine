@@ -396,7 +396,7 @@ enum WatchSnapshotBuilder {
     /// 手机作废指纹重传约 600KB → 下一轮再缺 → 无限。所以缺文件的直接跳到下一张。
     @MainActor
     private static func photoName(for entry: Entry, store: MediaStore) -> String? {
-        for media in entry.media where media.type == .photo {
+        for media in entry.sortedMedia where media.type == .photo {
             let thumb = media.thumbnailFileName
             let original = media.localFileName
             guard let name = thumb ?? original, !name.isEmpty else { continue }

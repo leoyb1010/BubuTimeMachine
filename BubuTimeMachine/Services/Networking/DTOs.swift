@@ -56,6 +56,9 @@ struct MediaDTO: Codable, Sendable, SyncCursorProviding {
     var remoteURL: String?
     /// 服务端缩略图 URL（media.thumbnail file 字段）；视频预览不下原片的关键。
     var remoteThumbURL: String? = nil
+    var contentHash: String? = nil
+    var resourceRole: String? = nil
+    var assetGroupId: String? = nil
     var durationSeconds: Double?
     var width: Int?
     var height: Int?
@@ -232,6 +235,9 @@ struct MediaUploadRequest: Sendable {
     /// 家人设备不用下原片就有预览（视频尤其关键）。
     var thumbnailURL: URL? = nil
     var thumbnailFileName: String? = nil
+    var contentHash: String? = nil
+    var resourceRole: String? = nil
+    var assetGroupId: String? = nil
 }
 
 /// 上传过程事件流。

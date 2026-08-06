@@ -125,6 +125,46 @@ struct PhotoIntakeTests {
         #expect(try store.data(forMetadataKey: "token") == nil)
     }
 
+    @Test("后台上传批次与逐资源状态跨进程持久化")
+    func uploadJobsPersistAndConverge() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let job = PhotoUploadJob(
+            assetKey: UUID().uuidString,
+            batchID: UUID().uuidString,
+            assetLocalIdentifier: "photo-library-id/L0/001",
+            resourceType: 1,
+            resourceFilename: "IMG_0001.HEIC",
+            destinationURL: "https://bubu-ai.example/intake/upload/batch/asset",
+            uploadToken: "short-lived-token",
+            mimeType: "image/heic",
+            state: .queued,
+            retryCount: 0)
+
+        try store.saveUploadBatch(
+            batchID: job.batchID,
+            entryLocalID: UUID().uuidString,
+            assetIdentifiers: [job.assetLocalIdentifier],
+            jobs: [job])
+        let reopened = PhotoIntakeStore(databaseURL: store.databaseURL)
+        #expect(try reopened.uploadJobs(states: [.queued]) == [job])
+        #expect(try reopened.uploadQueueSummary().pendingBatches == 1)
+
+        try reopened.updateUploadJob(
+            batchID: job.batchID, assetKey: job.assetKey,
+            state: .retrying, retryCount: 1)
+        let retry = try #require(store.uploadJobs(states: [.retrying]).first)
+        #expect(retry.retryCount == 1)
+        #expect(try store.uploadJobs(states: [.queued]).isEmpty)
+
+        try reopened.updateUploadJob(
+            batchID: job.batchID, assetKey: job.assetKey, state: .succeeded)
+        #expect(try reopened.activeUploadBatchIDs() == [job.batchID])
+        try reopened.reconcileUploadBatch(job.batchID)
+        #expect(try reopened.uploadQueueSummary() == PhotoUploadQueueSummary(
+            pendingBatches: 0, failedBatches: 0))
+    }
+
     @Test("已忽略候选跨重启仍不会重新提示")
     func ignoredStateSurvivesRediscovery() throws {
         let (store, directory) = try makeStore()

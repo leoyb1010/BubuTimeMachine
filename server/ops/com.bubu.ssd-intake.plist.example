@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bubu.ssd-intake</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/server/ai/start_ssd_intake.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/ABSOLUTE/PATH/server/ai</string>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/REPLACE/Library/Logs/BubuTimeMachine/ssd-intake.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/REPLACE/Library/Logs/BubuTimeMachine/ssd-intake-error.log</string>
+</dict>
+</plist>

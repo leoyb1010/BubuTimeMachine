@@ -85,6 +85,31 @@ struct CapsuleCryptoTests {
 @MainActor
 struct MediaSniffTests {
 
+    @Test("老媒体空资源角色继续展示，后台保真资源不重复展示")
+    func displayResourceCompatibility() {
+        let media = Media(type: .photo, localFileName: "legacy.heic")
+        #expect(media.isDisplayResource)
+        media.resourceRoleRaw = ""
+        #expect(media.isDisplayResource)
+        media.resourceRoleRaw = "display"
+        #expect(media.isDisplayResource)
+        media.resourceRoleRaw = "original"
+        #expect(!media.isDisplayResource)
+        media.resourceRoleRaw = "live-paired"
+        #expect(!media.isDisplayResource)
+    }
+
+    @Test("大文件流式 SHA 与内存 SHA 一致")
+    func streamingSHA() throws {
+        let data = Data((0..<2_100_000).map { UInt8($0 % 251) })
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-sha-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try data.write(to: url)
+
+        #expect(try MediaStore.sha256Hex(at: url, chunkSize: 65_537) == MediaStore.sha256Hex(data))
+    }
+
     @Test("JPEG/PNG/HEIC 文件头识别")
     func sniff() {
         let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0] + Array(repeating: 0, count: 12))

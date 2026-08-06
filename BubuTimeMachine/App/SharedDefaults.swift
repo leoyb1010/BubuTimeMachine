@@ -122,7 +122,7 @@ extension SharedWidgetSnapshot {
             let entryDate = entry.happenedAt
             let entryMood = entry.mood?.emoji
             let caption = entryFirstPerson ?? entryNote
-            for media in entry.media where media.type == .photo {
+            for media in entry.sortedMedia where media.type == .photo {
                 guard taken < maxPerEntry else { break }
                 let thumbName = media.thumbnailFileName
                 let fileName = media.localFileName
@@ -174,7 +174,7 @@ extension SharedWidgetSnapshot {
             sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
         descriptor.fetchLimit = 400
         let entries = (try? context.fetch(descriptor)) ?? []
-        return entries.filter { entry in entry.media.contains { $0.type == .photo } }
+        return entries.filter { entry in entry.sortedMedia.contains { $0.type == .photo } }
     }
 
     @MainActor
@@ -233,7 +233,7 @@ extension SharedWidgetSnapshot {
         var names: [String] = []
         var seen = Set<String>()
         for entry in entries {
-            for media in entry.media where media.type == .photo {
+            for media in entry.sortedMedia where media.type == .photo {
                 guard let name = media.thumbnailFileName ?? media.localFileName,
                       !seen.contains(name) else { continue }
                 seen.insert(name)
@@ -254,7 +254,7 @@ extension SharedWidgetSnapshot {
             predicate: #Predicate { !$0.isArchived && $0.happenedAt >= start }
         )
         let entries = (try? context.fetch(descriptor)) ?? []
-        return entries.reduce(0) { $0 + $1.media.filter { $0.type == .photo }.count }
+        return entries.reduce(0) { $0 + $1.sortedMedia.filter { $0.type == .photo }.count }
     }
 
     private static func clean(_ value: String?, maxLength: Int) -> String? {

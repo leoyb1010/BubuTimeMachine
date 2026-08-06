@@ -202,7 +202,7 @@ struct BubuTimeMachineApp: App {
 
         func photo(_ e: Entry?) -> UIImage? {
             guard let e else { return nil }
-            for media in e.media where media.type == .photo {
+            for media in e.sortedMedia where media.type == .photo {
                 guard let name = media.localFileName ?? media.thumbnailFileName else { continue }
                 let url = store.mediaURL(for: name)
                 let alt = store.thumbnailURL(for: name)

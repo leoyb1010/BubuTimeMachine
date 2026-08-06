@@ -182,8 +182,8 @@ struct GrowthReportView: View {
     }
 
     private var achievedMilestones: [Milestone] { milestones.filter(\.isAchieved).sorted { ($0.happenedAt ?? .distantPast) > ($1.happenedAt ?? .distantPast) } }
-    private var photoCount: Int { entries.reduce(0) { $0 + $1.media.filter { $0.type == .photo }.count } }
-    private var visualMediaCount: Int { entries.reduce(0) { $0 + $1.media.filter { $0.type == .photo || $0.type == .video }.count } }
+    private var photoCount: Int { entries.reduce(0) { $0 + $1.sortedMedia.filter { $0.type == .photo }.count } }
+    private var visualMediaCount: Int { entries.reduce(0) { $0 + $1.sortedMedia.filter { $0.type == .photo || $0.type == .video }.count } }
     private var voiceCount: Int { entries.reduce(0) { $0 + $1.voiceNotes.count } }
     private var textCount: Int { entries.filter { $0.note?.isEmpty == false }.count }
     private var locations: [String] { Array(Set(entries.compactMap(\.locationName))).sorted() }

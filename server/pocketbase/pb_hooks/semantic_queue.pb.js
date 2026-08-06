@@ -6,6 +6,8 @@ onRecordAfterCreateSuccess((e) => {
     function enqueue(record, kind) {
         const mediaType = record.getString("mediaType");
         if (mediaType !== "photo" && mediaType !== "video") return;
+        const role = record.getString("resourceRole");
+        if (kind === "semantic_media_upsert" && role && role !== "display") return;
         const collection = $app.findCollectionByNameOrId("automation_jobs");
         const job = new Record(collection);
         job.set("jobKey", "semantic_media:" + record.id + ":" + Date.now() + ":" + $security.randomString(8));
@@ -40,6 +42,8 @@ onRecordAfterUpdateSuccess((e) => {
     function enqueue(record, kind) {
         const mediaType = record.getString("mediaType");
         if (mediaType !== "photo" && mediaType !== "video") return;
+        const role = record.getString("resourceRole");
+        if (kind === "semantic_media_upsert" && role && role !== "display") return;
         const collection = $app.findCollectionByNameOrId("automation_jobs");
         const job = new Record(collection);
         job.set("jobKey", "semantic_media:" + record.id + ":" + Date.now() + ":" + $security.randomString(8));

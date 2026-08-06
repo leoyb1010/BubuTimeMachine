@@ -26,7 +26,10 @@ import json
 import logging
 import os
 import secrets
+import shutil
+import tempfile
 import time
+import uuid
 import httpx
 from collections import Counter, defaultdict, deque
 from datetime import datetime
@@ -46,6 +49,10 @@ from semantic_model import MobileCLIPEncoder, SemanticModelUnavailable
 from memory_query import PocketBaseMemoryStore
 from weekly_report import WeeklyReportService, WeeklyReportUnavailable
 from sound_ring import SoundRingService, SoundRingUnavailable
+from intake_staging import (
+    IntakeConflict, IntakeError, IntakeItem, IntakeStagingStore,
+    issue_upload_token, verify_upload_token,
+)
 
 logging.basicConfig(
     level=os.environ.get("AI_LOG_LEVEL", "INFO").upper(),
@@ -65,6 +72,8 @@ _parse_stats: Counter = Counter()
 _semantic_lock = Lock()
 _semantic_index: Optional[SemanticIndex] = None
 _semantic_encoder: Optional[MobileCLIPEncoder] = None
+_intake_lock = Lock()
+_intake_store: Optional[IntakeStagingStore] = None
 
 
 def _record_parse_stats(resp: "NaturalParseResp") -> None:
@@ -76,6 +85,51 @@ def _record_parse_stats(resp: "NaturalParseResp") -> None:
     if resp.warnings:
         logger.info("parse-natural-capture warnings=%s items=%d",
                     ",".join(resp.warnings), len(resp.items))
+
+
+def _intake_components() -> IntakeStagingStore:
+    global _intake_store
+    with _intake_lock:
+        if _intake_store is None:
+            _intake_store = IntakeStagingStore()
+            _intake_store.recover_stale_commits()
+            _intake_store.cleanup_temporary_files()
+        return _intake_store
+
+
+def _intake_family_id() -> str:
+    family_id = (
+        os.environ.get("INTAKE_FAMILY_ID", "").strip()
+        or os.environ.get("SEMANTIC_FAMILY_ID", "").strip()
+        or os.environ.get("WEEKLY_REPORT_FAMILY_ID", "").strip()
+    )
+    if not family_id:
+        raise HTTPException(status_code=503, detail="服务器尚未绑定摄取家庭。")
+    return family_id
+
+
+def _commit_staged_batch(
+    store: IntakeStagingStore, batch_id: str, principal: str
+) -> dict[str, Any]:
+    manifest = store.begin_commit(batch_id, principal)
+    if manifest["state"] == "committed":
+        return manifest
+    commit_key = os.environ.get("INTAKE_COMMIT_KEY", "").strip()
+    if len(commit_key) < 32:
+        raise IntakeError("commit key is not configured")
+    base_url = os.environ.get("PB_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+    with httpx.Client(timeout=300, trust_env=False) as client:
+        response = client.post(
+            base_url + "/api/bubu/intake/commit",
+            json=manifest,
+            headers={"X-Bubu-Intake-Key": commit_key},
+        )
+    if response.status_code not in {200, 201}:
+        raise IntakeError("PocketBase atomic commit failed")
+    entry_id = str((response.json() or {}).get("entry_id") or "")
+    if not entry_id:
+        raise IntakeError("PocketBase commit returned no entry")
+    return store.finish_commit(batch_id, principal, entry_id)
 
 # ---------- 鉴权 + 限流（公网暴露时的最低防线）----------
 # 客户端是原生 App，无需 CORS；浏览器跨域一律不放行（不挂 CORSMiddleware 即默认拒绝）。
@@ -145,6 +199,15 @@ def _pocketbase_principal(
         return None
     if not user_id:
         return None
+    allowed_users = {
+        item.strip()
+        for item in os.environ.get("AI_ALLOWED_PB_USER_IDS", "").split(",")
+        if item.strip()
+    }
+    # 单家庭服务必须显式绑定允许用户；缺配置也拒绝，绝不退化为任意 PB 用户可读。
+    if not allowed_users or user_id not in allowed_users:
+        logger.warning("pocketbase user rejected by AI allowlist")
+        return None
     with _pb_auth_lock:
         _pb_auth_cache[digest] = (now + _PB_AUTH_CACHE_SECONDS, user_id)
     return "pb:" + user_id
@@ -162,7 +225,7 @@ def require_api_key(
     request: Request,
     x_api_key: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
-) -> None:
+) -> str:
     """业务路由接受服务账号 key 或 App 的 PocketBase 用户登录态；两者都没有时 fail-closed。"""
     client_host = request.client.host if request.client else "unknown"
     principal = _authorized_principal(
@@ -174,6 +237,26 @@ def require_api_key(
         raise HTTPException(status_code=401, detail="鉴权失败：请先登录家庭服务器。")
     # 鉴权后按服务主体/用户计数，反代后的共享源 IP 不会让全家互相挤占额度。
     _check_rate(principal)
+    return principal
+
+
+def require_intake_family_user(
+    request: Request,
+    x_api_key: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> str:
+    """事实摄取只接受显式授权的 PocketBase 家庭用户，长期服务 key 无权发布。"""
+    allowed = {
+        item.strip()
+        for item in os.environ.get("INTAKE_ALLOWED_PB_USER_IDS", "").split(",")
+        if item.strip()
+    }
+    if not allowed:
+        raise HTTPException(status_code=503, detail="家庭摄取授权尚未完成。")
+    principal = require_api_key(request, x_api_key, authorization)
+    if not principal.startswith("pb:") or principal[3:] not in allowed:
+        raise HTTPException(status_code=403, detail="当前家庭账号没有摄取权限。")
+    return principal
 
 
 # ---------- 请求/响应模型 ----------
@@ -260,6 +343,35 @@ class SemanticSearchResp(BaseModel):
     query: str
     model_version: str
     hits: list[SemanticSearchHit] = Field(default_factory=list)
+
+
+class IntakeBatchItemReq(BaseModel):
+    asset_key: str = Field(..., min_length=8, max_length=128)
+    file_name: str = Field(..., min_length=1, max_length=255)
+    media_type: Literal["photo", "video", "audio"]
+    captured_at: str = Field(..., min_length=10, max_length=64)
+    # PhotoKit Background Resource Upload doesn't expose byte size before the
+    # system starts the job; zero means "unknown, enforce server maximum".
+    expected_size: int = Field(..., ge=0, le=2_147_483_648)
+    expected_mime: str = Field("application/octet-stream", min_length=3, max_length=120)
+    # 公网 iPhone 摄取每个 PHAsset 只允许一个可见原片；附加隐藏资源会造成
+    # 跨来源判重后的空 Entry，Live Photo 仍由 App 现有前台管线成对保存。
+    resource_role: Literal["display"] = "display"
+    asset_group_id: str = Field("", max_length=128)
+
+
+class IntakeBatchCreateReq(BaseModel):
+    batch_id: str = Field(..., min_length=8, max_length=128)
+    entry: dict[str, Any]
+    items: list[IntakeBatchItemReq] = Field(..., min_length=1, max_length=500)
+
+
+class IntakeBatchCommitReq(BaseModel):
+    batch_id: str = Field(..., min_length=8, max_length=128)
+
+
+class IntakeCandidateUpdateReq(IntakeBatchCommitReq):
+    happened_at: str = Field(..., min_length=10, max_length=64)
 
 
 class WeeklyReportSource(BaseModel):
@@ -427,6 +539,233 @@ def health(
                 "auth": True, "parse_stats": stats,
                 "semantic_search": {"enabled": _semantic_enabled(), "indexed": semantic_count}}
     return {"ok": True, "auth": False}
+
+
+# ---------- 已确认素材 · 隔离暂存与原子提交 ----------
+
+@app.post("/intake/batches")
+def intake_create_batch(
+    req: IntakeBatchCreateReq,
+    principal: str = Depends(require_intake_family_user),
+):
+    """用户确认一段时光后建立持久批次；此时不写 PocketBase 事实。"""
+    family_id = _intake_family_id()
+    items = [
+        IntakeItem(
+            asset_key=item.asset_key,
+            file_name=item.file_name,
+            media_type=item.media_type,
+            captured_at=item.captured_at,
+            expected_size=item.expected_size,
+            expected_mime=item.expected_mime,
+            resource_role=item.resource_role,
+            asset_group_id=item.asset_group_id,
+        )
+        for item in req.items
+    ]
+    try:
+        batch = _intake_components().create_batch(
+            req.batch_id, principal, family_id, req.entry, items
+        )
+        public_base = os.environ.get("INTAKE_PUBLIC_BASE_URL", "").strip().rstrip("/")
+        if not public_base:
+            raise IntakeError("public intake URL is not configured")
+        destinations = []
+        for item in batch["items"]:
+            asset_key = item["asset_key"]
+            destinations.append({
+                "asset_key": asset_key,
+                "url": f"{public_base}/intake/upload/{req.batch_id}/{asset_key}",
+                # PhotoKit 可能在锁屏、断网或低电量后才开始；使用能力令牌允许的
+                # 最长期限，避免正常后台排队因 24 小时过期而不可恢复。
+                "upload_token": issue_upload_token(
+                    req.batch_id, asset_key, principal, ttl=7 * 86400
+                ),
+                "state": item["state"],
+            })
+        return {"batch": batch, "destinations": destinations}
+    except IntakeConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntakeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/intake/batches/{batch_id}")
+def intake_batch_status(batch_id: str, principal: str = Depends(require_intake_family_user)):
+    try:
+        return _intake_components().batch(batch_id, principal)
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail="批次不存在。") from exc
+
+
+@app.get("/intake/candidates")
+def intake_candidates(principal: str = Depends(require_intake_family_user)):
+    """返回 mini/SSD 只读扫描出的候选；仍未进入正式事实层。"""
+    return _intake_components().ready_family_candidates(_intake_family_id())
+
+
+@app.post("/intake/confirm")
+def intake_confirm(
+    req: IntakeBatchCommitReq,
+    principal: str = Depends(require_intake_family_user),
+):
+    store = _intake_components()
+    try:
+        batch = store.confirm(req.batch_id, _intake_family_id(), principal)
+    except IntakeConflict as exc:
+        raise HTTPException(status_code=409, detail="候选素材仍在扫描，请稍后再确认。") from exc
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail="候选批次不存在。") from exc
+    if batch["state"] != "staged":
+        return batch
+    try:
+        return _commit_staged_batch(store, req.batch_id, principal)
+    except (IntakeError, httpx.HTTPError, ValueError) as exc:
+        store.reset_candidate_confirmation(req.batch_id, _intake_family_id())
+        logger.warning(
+            "intake candidate commit failed batch=%s reason=%s",
+            req.batch_id, type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=503, detail="这段时光暂时没能入库，可以安全重试。"
+        ) from exc
+
+
+@app.post("/intake/candidates/update")
+def intake_candidate_update(
+    req: IntakeCandidateUpdateReq,
+    principal: str = Depends(require_intake_family_user),
+):
+    try:
+        return _intake_components().update_candidate_time(
+            req.batch_id, _intake_family_id(), req.happened_at
+        )
+    except IntakeConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail="候选批次不存在。") from exc
+
+
+@app.post("/intake/cancel")
+def intake_cancel(
+    req: IntakeBatchCommitReq,
+    principal: str = Depends(require_intake_family_user),
+):
+    try:
+        return _intake_components().cancel(req.batch_id, _intake_family_id())
+    except IntakeConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail="候选批次不存在。") from exc
+
+
+@app.put("/intake/upload/{batch_id}/{asset_key}")
+async def intake_upload(
+    request: Request,
+    batch_id: str,
+    asset_key: str,
+    x_bubu_upload_token: Optional[str] = Header(default=None),
+):
+    """PhotoKit 系统后台直传原始资源；只落隔离目录，按大小与 SHA-256 收口。"""
+    store = _intake_components()
+    try:
+        batch = store.batch(batch_id)
+        owner = str(batch["owner"])
+        if not verify_upload_token(x_bubu_upload_token or "", batch_id, asset_key, owner):
+            raise HTTPException(status_code=401, detail="上传凭证无效或已过期。")
+        item = store.item(batch_id, asset_key)
+        expected = int(item["expected_size"])
+        declared = request.headers.get("content-length")
+        if declared and expected > 0 and int(declared) != expected:
+            raise HTTPException(status_code=409, detail="素材大小与确认清单不一致。")
+        minimum_free = max(
+            int(os.environ.get("INTAKE_MIN_FREE_BYTES", str(10 * 1024**3))),
+            expected * 2,
+        )
+        if shutil.disk_usage(store.root).free < minimum_free:
+            raise HTTPException(status_code=507, detail="服务器空间不足，已暂停接收素材。")
+        _check_rate("intake-upload:" + owner, 1_000)
+        store.mark_uploading(batch_id, asset_key)
+        temp_dir = store.root / "tmp"
+        temp_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor, temp_name = tempfile.mkstemp(prefix="upload-", suffix=".part", dir=temp_dir)
+        os.close(descriptor)
+        temporary = Path(temp_name)
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with temporary.open("wb") as handle:
+                os.chmod(temporary, 0o600)
+                async for chunk in request.stream():
+                    if not chunk:
+                        continue
+                    size += len(chunk)
+                    max_upload = int(os.environ.get("INTAKE_MAX_UPLOAD_BYTES", str(2 * 1024**3)))
+                    if size > max_upload or (expected > 0 and size > expected):
+                        raise IntakeConflict("upload exceeds expected size")
+                    if shutil.disk_usage(store.root).free < minimum_free:
+                        raise HTTPException(
+                            status_code=507,
+                            detail="服务器空间不足，已安全暂停接收素材。",
+                        )
+                    digest.update(chunk)
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+            result = store.stage_file(
+                batch_id, asset_key, temporary, digest.hexdigest(), size
+            )
+            if result["state"] == "staged":
+                try:
+                    result = await asyncio.to_thread(
+                        _commit_staged_batch, store, batch_id, owner
+                    )
+                except (IntakeError, httpx.HTTPError, ValueError) as exc:
+                    store.reset_commit(batch_id, owner, type(exc).__name__)
+                    logger.warning(
+                        "intake auto-commit deferred batch=%s reason=%s",
+                        batch_id, type(exc).__name__)
+                    raise HTTPException(
+                        status_code=503,
+                        detail="整批提交暂时失败，可以安全重试。",
+                    ) from exc
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        return Response(
+            status_code=200,
+            headers={
+                "X-Bubu-Content-SHA256": digest.hexdigest(),
+                "X-Bubu-Batch-State": str(result["state"]),
+            },
+        )
+    except HTTPException:
+        raise
+    except IntakeConflict as exc:
+        try:
+            store.fail_item(batch_id, asset_key, type(exc).__name__)
+        except IntakeError:
+            pass
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (IntakeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="素材暂存失败。") from exc
+
+
+@app.post("/intake/commit")
+def intake_commit(
+    req: IntakeBatchCommitReq,
+    principal: str = Depends(require_intake_family_user),
+):
+    """整批校验通过后交给 PocketBase 事务钩子，一次创建 Entry 与全部 Media。"""
+    store = _intake_components()
+    try:
+        return _commit_staged_batch(store, req.batch_id, principal)
+    except IntakeConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (IntakeError, httpx.HTTPError, ValueError) as exc:
+        store.reset_commit(req.batch_id, principal, type(exc).__name__)
+        logger.warning("intake commit failed batch=%s reason=%s", req.batch_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="整批提交暂时失败，可以安全重试。") from exc
 
 
 @app.post("/rewrite-first-person", response_model=RewriteResp,

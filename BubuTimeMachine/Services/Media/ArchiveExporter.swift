@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - 全量档案导出
 /// 导出 index.html + data.json + media/，覆盖照片、视频、语音、家人合奏与成长之声。
@@ -12,8 +13,12 @@ nonisolated struct ArchiveExporter: Sendable {
         let milestones: [MilestoneSnapshot]
         let voiceMemos: [VoiceMemoSnapshot]
         let healthRecords: [HealthRecordSnapshot]
+        let growthMeasurements: [GrowthSnapshot]
+        let vaccines: [VaccineSnapshot]
         let firstTimes: [FirstTimeSnapshot]
         let timeCapsules: [TimeCapsuleSnapshot]
+        /// 数据库中存在、但当前设备尚无本地文件名的引用。必须写进档案报告，绝不静默漏掉。
+        let unavailableReferences: [String]
     }
 
     struct EntrySnapshot: Sendable {
@@ -33,6 +38,7 @@ nonisolated struct ArchiveExporter: Sendable {
     struct MediaSnapshot: Sendable {
         let fileName: String
         let type: String
+        let resourceRole: String?
     }
 
     struct VoiceSnapshot: Sendable {
@@ -81,12 +87,34 @@ nonisolated struct ArchiveExporter: Sendable {
         let confirmed: Bool
     }
 
+    struct GrowthSnapshot: Sendable {
+        let measuredAt: Date
+        let heightCm: Double?
+        let weightKg: Double?
+        let headCircumferenceCm: Double?
+        let note: String?
+        let source: String
+    }
+
+    struct VaccineSnapshot: Sendable {
+        let vaccineName: String
+        let doseLabel: String?
+        let injectedAt: Date
+        let hospital: String?
+        let injectionSite: String?
+        let reaction: String?
+        let note: String?
+    }
+
     struct TimeCapsuleSnapshot: Sendable {
+        /// v3 解密盐；档案脱离 SwiftData 后仍必须保留，否则恢复码无法解密。
+        let id: UUID
         let title: String
         let fromRole: String
         let unlockAt: Date
         let isLocked: Bool
         let coverEmoji: String?
+        let encryptedBlobFileName: String?
     }
 
     /// 导出结果：档案根目录 + 未能纳入的媒体清单（DB 引用但源文件缺失 / 拷贝失败）。
@@ -94,6 +122,8 @@ nonisolated struct ArchiveExporter: Sendable {
         let root: URL
         /// 未能纳入档案的媒体文件名（缺失或拷贝失败），供 UI 诚实告知用户。
         let missingMedia: [String]
+        /// 含“本机没有文件名”和“有文件名但拷贝失败”两类，档案不完整时 UI 不得报成功备份。
+        let incompleteReferences: [String]
     }
 
     enum ArchiveExportError: LocalizedError {
@@ -122,6 +152,7 @@ nonisolated struct ArchiveExporter: Sendable {
             entry.comments.compactMap(\.voiceFileName).forEach { names.insert($0) }
         }
         input.voiceMemos.compactMap(\.fileName).forEach { names.insert($0) }
+        input.timeCapsules.compactMap(\.encryptedBlobFileName).forEach { names.insert($0) }
 
         // 预检：统计要拷贝的源文件总字节；DB 引用但沙盒文件缺失的先记进 missing。
         var totalBytes: Int64 = 0
@@ -155,12 +186,20 @@ nonisolated struct ArchiveExporter: Sendable {
             }
         }
 
-        try Self.buildJSON(input).write(to: root.appendingPathComponent("data.json"))
-        try Self.buildHTML(input).write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-        return ExportResult(root: root, missingMedia: missing.sorted())
+        let incomplete = Array(Set(input.unavailableReferences + missing)).sorted()
+        try Self.buildJSON(input, incomplete: incomplete)
+            .write(to: root.appendingPathComponent("data.json"), options: .atomic)
+        try Self.buildHTML(input, incomplete: incomplete)
+            .write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        try Self.buildMarkdown(input, incomplete: incomplete)
+            .write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try Self.buildManifest(root: root)
+            .write(to: root.appendingPathComponent("manifest.sha256"), atomically: true, encoding: .utf8)
+        return ExportResult(
+            root: root, missingMedia: missing.sorted(), incompleteReferences: incomplete)
     }
 
-    private static func buildHTML(_ input: ExportInput) -> String {
+    private static func buildHTML(_ input: ExportInput, incomplete: [String]) -> String {
         let df = DateFormatter()
         df.locale = Locale(identifier: "zh_CN")
         df.dateFormat = "yyyy年M月d日"
@@ -192,6 +231,23 @@ nonisolated struct ArchiveExporter: Sendable {
             let state = item.isLocked ? "未到开启时间" : "已开启"
             let emoji = item.coverEmoji ?? "💌"
             return "<li>\(esc(emoji)) \(esc(item.title)) · \(esc(item.fromRole)) <em>\(df.string(from: item.unlockAt)) · \(state)</em></li>"
+        }.joined()
+
+        let growth = input.growthMeasurements.sorted { $0.measuredAt > $1.measuredAt }.map { item in
+            let values = [
+                item.heightCm.map { String(format: "身高 %.1f cm", $0) },
+                item.weightKg.map { String(format: "体重 %.2f kg", $0) },
+                item.headCircumferenceCm.map { String(format: "头围 %.1f cm", $0) },
+            ].compactMap { $0 }.joined(separator: " · ")
+            let note = item.note.map { "<p>\(esc($0))</p>" } ?? ""
+            return "<li><b>\(esc(values))</b><span>\(df.string(from: item.measuredAt)) · \(esc(item.source))</span>\(note)</li>"
+        }.joined()
+
+        let vaccines = input.vaccines.sorted { $0.injectedAt > $1.injectedAt }.map { item in
+            let dose = item.doseLabel.map { " · \(esc($0))" } ?? ""
+            let place = item.hospital.map { " · \(esc($0))" } ?? ""
+            let reaction = item.reaction.map { "<p>反应：\(esc($0))</p>" } ?? ""
+            return "<li><b>\(esc(item.vaccineName))\(dose)</b><span>\(df.string(from: item.injectedAt))\(place)</span>\(reaction)</li>"
         }.joined()
 
         let cards = input.entries.sorted { $0.happenedAt > $1.happenedAt }.map { entry in
@@ -238,12 +294,16 @@ nonisolated struct ArchiveExporter: Sendable {
         \(firstTimes.isEmpty ? "" : "<div class=\"milestones\"><h2>✨ 人生第一次</h2><ul>\(firstTimes)</ul></div>")
         \(health.isEmpty ? "" : "<div class=\"voice-memos\"><h2>🩺 健康照护</h2><ul>\(health)</ul></div>")
         \(capsules.isEmpty ? "" : "<div class=\"milestones\"><h2>💌 时间胶囊</h2><ul>\(capsules)</ul></div>")
+        \(growth.isEmpty ? "" : "<div class=\"voice-memos\"><h2>📏 成长测量</h2><ul>\(growth)</ul></div>")
+        \(vaccines.isEmpty ? "" : "<div class=\"voice-memos\"><h2>💉 疫苗记录</h2><ul>\(vaccines)</ul></div>")
+        \(incomplete.isEmpty ? "" : "<div class=\"voice-memos\"><h2>⚠️ 本次档案不完整</h2><p>有 \(incomplete.count) 个文件引用未能纳入；详见 README.md。不要把本包当作完整灾备。</p></div>")
         \(voiceMemos.isEmpty ? "" : "<div class=\"voice-memos\"><h2>🎙️ 成长之声</h2>\(voiceMemos)</div>")
         \(cards)</div><footer>这是布布的时光机 · 永久离线可读</footer></body></html>
         """
     }
 
     private static func mediaHTML(_ media: MediaSnapshot) -> String {
+        guard media.resourceRole == nil || media.resourceRole == "display" else { return "" }
         let path = "media/\(urlEsc(media.fileName))"
         switch media.type {
         case "video": return "<video controls src=\"\(path)\"></video>"
@@ -258,14 +318,25 @@ nonisolated struct ArchiveExporter: Sendable {
     // 不破坏「导出的离线 HTML 档案」既有解析。
 
     private struct JSONRoot: Encodable {
+        let archiveVersion: Int
+        let generatedAt: String
         let childName: String
         let birthday: String
         let entries: [JSONEntry]
+        let milestones: [JSONMilestone]
+        let voiceMemos: [JSONVoiceMemo]
+        let healthRecords: [JSONHealth]
+        let growthMeasurements: [JSONGrowth]
+        let vaccines: [JSONVaccine]
+        let firstTimes: [JSONFirstTime]
+        let timeCapsules: [JSONCapsule]
+        let incompleteReferences: [String]
     }
 
     private struct JSONMedia: Encodable {
         let type: String
         let file: String
+        let resourceRole: String?
     }
 
     private struct JSONVoice: Encodable {
@@ -317,7 +388,67 @@ nonisolated struct ArchiveExporter: Sendable {
         }
     }
 
-    private static func buildJSON(_ input: ExportInput) throws -> Data {
+    private struct JSONMilestone: Encodable {
+        let title: String
+        let emoji: String
+        let achieved: Bool
+        let ageDescription: String?
+    }
+
+    private struct JSONVoiceMemo: Encodable {
+        let kind: String
+        let file: String?
+        let transcript: String?
+        let ageYears: Int?
+        let recordedAt: String
+        let durationSeconds: Double?
+    }
+
+    private struct JSONHealth: Encodable {
+        let kind: String
+        let title: String
+        let detail: String?
+        let recordedAt: String
+        let amountText: String?
+        let reaction: String?
+    }
+
+    private struct JSONGrowth: Encodable {
+        let measuredAt: String
+        let heightCm: Double?
+        let weightKg: Double?
+        let headCircumferenceCm: Double?
+        let note: String?
+        let source: String
+    }
+
+    private struct JSONVaccine: Encodable {
+        let vaccineName: String
+        let doseLabel: String?
+        let injectedAt: String
+        let hospital: String?
+        let injectionSite: String?
+        let reaction: String?
+        let note: String?
+    }
+
+    private struct JSONFirstTime: Encodable {
+        let what: String
+        let happenedAt: String
+        let confirmed: Bool
+    }
+
+    private struct JSONCapsule: Encodable {
+        let id: String
+        let title: String
+        let fromRole: String
+        let unlockAt: String
+        let isLocked: Bool
+        let coverEmoji: String?
+        let encryptedBlob: String?
+    }
+
+    private static func buildJSON(_ input: ExportInput, incomplete: [String]) throws -> Data {
         let iso = ISO8601DateFormatter()
         let entries = input.entries.map { entry in
             JSONEntry(
@@ -327,7 +458,10 @@ nonisolated struct ArchiveExporter: Sendable {
                 note: entry.note,
                 firstPerson: entry.firstPersonNote,
                 location: entry.locationName,
-                media: entry.media.map { JSONMedia(type: $0.type, file: "media/\($0.fileName)") },
+                media: entry.media.map {
+                    JSONMedia(type: $0.type, file: "media/\($0.fileName)",
+                              resourceRole: $0.resourceRole)
+                },
                 voiceNotes: entry.voiceNotes.map { JSONVoice(author: $0.authorRole, file: "media/\($0.fileName)", duration: $0.duration) },
                 comments: entry.comments.map { c in
                     // JSON 同款人话化：机器可读档案里也不留哨兵控制字符。
@@ -336,8 +470,131 @@ nonisolated struct ArchiveExporter: Sendable {
                 },
                 tags: entry.tags)
         }
-        let root = JSONRoot(childName: input.childName, birthday: iso.string(from: input.birthday), entries: entries)
-        return try JSONEncoder().encode(root)
+        let root = JSONRoot(
+            archiveVersion: 3,
+            generatedAt: iso.string(from: .now),
+            childName: input.childName,
+            birthday: iso.string(from: input.birthday),
+            entries: entries,
+            milestones: input.milestones.map {
+                JSONMilestone(title: $0.title, emoji: $0.emoji, achieved: $0.achieved,
+                              ageDescription: $0.ageDescription)
+            },
+            voiceMemos: input.voiceMemos.map {
+                JSONVoiceMemo(
+                    kind: $0.kind,
+                    file: $0.fileName.map { "media/\($0)" },
+                    transcript: $0.transcript,
+                    ageYears: $0.ageYears,
+                    recordedAt: iso.string(from: $0.recordedAt),
+                    durationSeconds: $0.durationSeconds)
+            },
+            healthRecords: input.healthRecords.map {
+                JSONHealth(kind: $0.kind, title: $0.title, detail: $0.detail,
+                           recordedAt: iso.string(from: $0.recordedAt),
+                           amountText: $0.amountText, reaction: $0.reaction)
+            },
+            growthMeasurements: input.growthMeasurements.map {
+                JSONGrowth(
+                    measuredAt: iso.string(from: $0.measuredAt), heightCm: $0.heightCm,
+                    weightKg: $0.weightKg, headCircumferenceCm: $0.headCircumferenceCm,
+                    note: $0.note, source: $0.source)
+            },
+            vaccines: input.vaccines.map {
+                JSONVaccine(
+                    vaccineName: $0.vaccineName, doseLabel: $0.doseLabel,
+                    injectedAt: iso.string(from: $0.injectedAt), hospital: $0.hospital,
+                    injectionSite: $0.injectionSite, reaction: $0.reaction, note: $0.note)
+            },
+            firstTimes: input.firstTimes.map {
+                JSONFirstTime(what: $0.what, happenedAt: iso.string(from: $0.happenedAt),
+                              confirmed: $0.confirmed)
+            },
+            timeCapsules: input.timeCapsules.map {
+                JSONCapsule(
+                    id: $0.id.uuidString,
+                    title: $0.title, fromRole: $0.fromRole,
+                    unlockAt: iso.string(from: $0.unlockAt), isLocked: $0.isLocked,
+                    coverEmoji: $0.coverEmoji,
+                    encryptedBlob: $0.encryptedBlobFileName.map { "media/\($0)" })
+            },
+            incompleteReferences: incomplete)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(root)
+    }
+
+    private static func buildMarkdown(_ input: ExportInput, incomplete: [String]) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "zh_CN")
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        var lines = [
+            "# \(input.childName)的布布时光机档案",
+            "",
+            "这是不依赖 App 的开放格式档案。可直接打开 `index.html` 浏览，`data.json` 用于机器迁移，`media/` 保存原始媒体与加密胶囊，`manifest.sha256` 用于完整性校验。",
+            "",
+            "- 出生日期：\(df.string(from: input.birthday))",
+            "- 时光：\(input.entries.count) 条",
+            "- 成长测量：\(input.growthMeasurements.count) 条",
+            "- 疫苗：\(input.vaccines.count) 条",
+            "- 健康记录：\(input.healthRecords.count) 条",
+            "- 时间胶囊：\(input.timeCapsules.count) 封",
+            "",
+        ]
+        if incomplete.isEmpty {
+            lines += ["## 完整性", "", "本次导出没有发现缺失的本地文件引用。仍建议保留服务器 3-2-1 备份。", ""]
+        } else {
+            lines += [
+                "## ⚠️ 本次档案不完整",
+                "",
+                "以下 \(incomplete.count) 个文件引用未能纳入。请先让同步中心下载完整原片后重新导出，不要把本包当作完整灾备：",
+                "",
+            ]
+            lines += incomplete.map { "- `\($0.replacingOccurrences(of: "`", with: "'"))`" }
+            lines.append("")
+        }
+        lines += ["## 时光目录", ""]
+        for entry in input.entries.sorted(by: { $0.happenedAt < $1.happenedAt }) {
+            let summary = entry.note ?? entry.firstPersonNote ?? "（无文字）"
+            lines += [
+                "### \(df.string(from: entry.happenedAt)) · \(entry.authorRole)",
+                "",
+                summary.replacingOccurrences(of: "\n", with: " "),
+                "",
+            ]
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func buildManifest(root: URL) throws -> String {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: root, includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return "" }
+        var records: [(String, String)] = []
+        while let url = enumerator.nextObject() as? URL {
+            guard url.lastPathComponent != "manifest.sha256",
+                  (try url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true
+            else { continue }
+            let relative = String(url.path.dropFirst(root.path.count + 1))
+            records.append((relative, try sha256(url)))
+        }
+        return records.sorted { $0.0 < $1.0 }
+            .map { "\($0.1)  \($0.0)" }
+            .joined(separator: "\n") + "\n"
+    }
+
+    private static func sha256(_ url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let data = try handle.read(upToCount: 1024 * 1024) ?? Data()
+            if data.isEmpty { break }
+            hasher.update(data: data)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private static func esc(_ s: String) -> String {

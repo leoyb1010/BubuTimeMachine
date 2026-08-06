@@ -70,7 +70,7 @@ struct SimpleTimelineView: View {
 
     @ViewBuilder
     private func entryCard(_ entry: Entry) -> some View {
-        let photos = entry.media.filter { $0.type == .photo || $0.type == .video }
+        let photos = entry.sortedMedia.filter { $0.type == .photo || $0.type == .video }
         let voice = entry.voiceNotes.first { $0.localFileName != nil }
         // 有照片/视频 → 整卡可点看大图；纯语音/纯文字 → 不可点（用语音气泡自己的播放按钮）。
         if let first = photos.first {

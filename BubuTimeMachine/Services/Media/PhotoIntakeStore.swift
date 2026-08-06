@@ -6,6 +6,7 @@ import SQLite3
 
 nonisolated enum PhotoIntakeState: String, Sendable {
     case discovered
+    case queued
     case accepted
     case ignored
     case failed
@@ -34,6 +35,33 @@ nonisolated struct PhotoIntakeCandidate: Sendable, Equatable {
 nonisolated struct PhotoIdentitySample: Sendable, Equatable {
     let label: Int
     let featureData: Data
+}
+
+nonisolated enum PhotoUploadJobState: String, Sendable {
+    case queued
+    case registered
+    case retrying
+    case succeeded
+    case failed
+    case acknowledged
+}
+
+nonisolated struct PhotoUploadJob: Sendable, Equatable {
+    let assetKey: String
+    let batchID: String
+    let assetLocalIdentifier: String
+    let resourceType: Int
+    let resourceFilename: String
+    let destinationURL: String
+    let uploadToken: String
+    let mimeType: String
+    let state: PhotoUploadJobState
+    let retryCount: Int
+}
+
+nonisolated struct PhotoUploadQueueSummary: Sendable, Equatable {
+    let pendingBatches: Int
+    let failedBatches: Int
 }
 
 /// App 与未来 PhotoKit 后台扩展共享的独立摄取库。
@@ -225,6 +253,317 @@ nonisolated struct PhotoIntakeStore: Sendable {
         }
     }
 
+    // MARK: - 可靠后台上传批次（主 App 与 Photos extension 共用）
+
+    func saveUploadBatch(
+        batchID: String,
+        entryLocalID: String,
+        assetIdentifiers: [String],
+        jobs: [PhotoUploadJob]
+    ) throws {
+        guard !batchID.isEmpty, !jobs.isEmpty else { return }
+        let assetData = try JSONEncoder().encode(assetIdentifiers.sorted())
+        let assetJSON = String(data: assetData, encoding: .utf8) ?? "[]"
+        try withDatabase { db in
+            try execute("BEGIN IMMEDIATE", db: db)
+            do {
+                let now = Date().timeIntervalSince1970
+                let batch = try prepare(
+                    """
+                    INSERT INTO upload_batches(batch_id, entry_local_id, asset_identifiers_json,
+                                               state, created_at, updated_at)
+                    VALUES(?, ?, ?, 'queued', ?, ?)
+                    ON CONFLICT(batch_id) DO UPDATE SET updated_at=excluded.updated_at
+                    """, db: db)
+                defer { sqlite3_finalize(batch) }
+                bind(batchID, at: 1, to: batch)
+                bind(entryLocalID, at: 2, to: batch)
+                bind(assetJSON, at: 3, to: batch)
+                sqlite3_bind_double(batch, 4, now)
+                sqlite3_bind_double(batch, 5, now)
+                try stepDone(batch, db: db)
+
+                let statement = try prepare(
+                    """
+                    INSERT INTO upload_jobs(
+                        asset_key,batch_id,asset_local_identifier,resource_type,resource_filename,
+                        destination_url,upload_token,mime_type,state,retry_count,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(asset_key) DO UPDATE SET
+                        batch_id=excluded.batch_id,
+                        asset_local_identifier=excluded.asset_local_identifier,
+                        resource_type=excluded.resource_type,
+                        resource_filename=excluded.resource_filename,
+                        destination_url=excluded.destination_url,
+                        upload_token=excluded.upload_token,
+                        mime_type=excluded.mime_type,
+                        state=excluded.state,
+                        retry_count=excluded.retry_count,
+                        updated_at=excluded.updated_at
+                    """, db: db)
+                defer { sqlite3_finalize(statement) }
+                for job in jobs {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    bind(job.assetKey, at: 1, to: statement)
+                    bind(job.batchID, at: 2, to: statement)
+                    bind(job.assetLocalIdentifier, at: 3, to: statement)
+                    sqlite3_bind_int64(statement, 4, Int64(job.resourceType))
+                    bind(job.resourceFilename, at: 5, to: statement)
+                    bind(job.destinationURL, at: 6, to: statement)
+                    bind(job.uploadToken, at: 7, to: statement)
+                    bind(job.mimeType, at: 8, to: statement)
+                    bind(job.state.rawValue, at: 9, to: statement)
+                    sqlite3_bind_int64(statement, 10, Int64(job.retryCount))
+                    sqlite3_bind_double(statement, 11, now)
+                    try stepDone(statement, db: db)
+                }
+                let queuedAssets = try prepare(
+                    "UPDATE intake_assets SET state='queued',updated_at=? WHERE local_identifier=?",
+                    db: db)
+                defer { sqlite3_finalize(queuedAssets) }
+                for identifier in assetIdentifiers {
+                    sqlite3_reset(queuedAssets)
+                    sqlite3_clear_bindings(queuedAssets)
+                    sqlite3_bind_double(queuedAssets, 1, now)
+                    bind(identifier, at: 2, to: queuedAssets)
+                    try stepDone(queuedAssets, db: db)
+                }
+                try execute("COMMIT", db: db)
+            } catch {
+                try? execute("ROLLBACK", db: db)
+                throw error
+            }
+        }
+    }
+
+    func uploadJobs(states: Set<PhotoUploadJobState>, limit: Int = 500) throws -> [PhotoUploadJob] {
+        guard !states.isEmpty else { return [] }
+        return try withDatabase { db in
+            let statement = try prepare(
+                """
+                SELECT asset_key,batch_id,asset_local_identifier,resource_type,resource_filename,
+                       destination_url,upload_token,mime_type,state,retry_count
+                FROM upload_jobs ORDER BY updated_at ASC
+                """, db: db)
+            defer { sqlite3_finalize(statement) }
+            var result: [PhotoUploadJob] = []
+            while result.count < max(1, limit), sqlite3_step(statement) == SQLITE_ROW {
+                guard let stateText = sqlite3_column_text(statement, 8),
+                      let state = PhotoUploadJobState(rawValue: String(cString: stateText)),
+                      states.contains(state) else { continue }
+                func text(_ index: Int32) -> String {
+                    sqlite3_column_text(statement, index).map { String(cString: $0) } ?? ""
+                }
+                result.append(PhotoUploadJob(
+                    assetKey: text(0), batchID: text(1), assetLocalIdentifier: text(2),
+                    resourceType: Int(sqlite3_column_int64(statement, 3)),
+                    resourceFilename: text(4), destinationURL: text(5), uploadToken: text(6),
+                    mimeType: text(7), state: state,
+                    retryCount: Int(sqlite3_column_int64(statement, 9))))
+            }
+            return result
+        }
+    }
+
+    func updateUploadJob(
+        batchID: String,
+        assetKey: String,
+        state: PhotoUploadJobState,
+        retryCount: Int? = nil
+    ) throws {
+        try withDatabase { db in
+            let statement = try prepare(
+                """
+                UPDATE upload_jobs SET state=?, retry_count=COALESCE(?,retry_count), updated_at=?
+                WHERE batch_id=? AND asset_key=?
+                """, db: db)
+            defer { sqlite3_finalize(statement) }
+            bind(state.rawValue, at: 1, to: statement)
+            if let retryCount { sqlite3_bind_int64(statement, 2, Int64(retryCount)) }
+            else { sqlite3_bind_null(statement, 2) }
+            sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+            bind(batchID, at: 4, to: statement)
+            bind(assetKey, at: 5, to: statement)
+            try stepDone(statement, db: db)
+        }
+    }
+
+    func markUploadBatch(_ batchID: String, state: String) throws {
+        try withDatabase { db in
+            let statement = try prepare(
+                "UPDATE upload_batches SET state=?,updated_at=? WHERE batch_id=?", db: db)
+            defer { sqlite3_finalize(statement) }
+            bind(state, at: 1, to: statement)
+            sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
+            bind(batchID, at: 3, to: statement)
+            try stepDone(statement, db: db)
+        }
+    }
+
+    func discardUploadBatch(_ batchID: String, restoreCandidates: Bool) throws {
+        try withDatabase { db in
+            try execute("BEGIN IMMEDIATE", db: db)
+            do {
+                var identifiers: [String] = []
+                let read = try prepare(
+                    "SELECT asset_identifiers_json FROM upload_batches WHERE batch_id=?", db: db)
+                defer { sqlite3_finalize(read) }
+                bind(batchID, at: 1, to: read)
+                if sqlite3_step(read) == SQLITE_ROW,
+                   let text = sqlite3_column_text(read, 0),
+                   let data = String(cString: text).data(using: .utf8) {
+                    identifiers = (try? JSONDecoder().decode([String].self, from: data)) ?? []
+                }
+                let delete = try prepare("DELETE FROM upload_batches WHERE batch_id=?", db: db)
+                defer { sqlite3_finalize(delete) }
+                bind(batchID, at: 1, to: delete)
+                try stepDone(delete, db: db)
+                if restoreCandidates {
+                    let restore = try prepare(
+                        "UPDATE intake_assets SET state='discovered',updated_at=? WHERE local_identifier=? AND state='queued'",
+                        db: db)
+                    defer { sqlite3_finalize(restore) }
+                    for identifier in identifiers {
+                        sqlite3_reset(restore)
+                        sqlite3_clear_bindings(restore)
+                        sqlite3_bind_double(restore, 1, Date().timeIntervalSince1970)
+                        bind(identifier, at: 2, to: restore)
+                        try stepDone(restore, db: db)
+                    }
+                }
+                try execute("COMMIT", db: db)
+            } catch {
+                try? execute("ROLLBACK", db: db)
+                throw error
+            }
+        }
+    }
+
+    func uploadQueueSummary() throws -> PhotoUploadQueueSummary {
+        try withDatabase { db in
+            func count(_ states: [String]) throws -> Int {
+                let placeholders = states.map { _ in "?" }.joined(separator: ",")
+                let statement = try prepare(
+                    "SELECT COUNT(DISTINCT batch_id) FROM upload_jobs WHERE state IN (\(placeholders))",
+                    db: db)
+                defer { sqlite3_finalize(statement) }
+                for (index, state) in states.enumerated() {
+                    bind(state, at: Int32(index + 1), to: statement)
+                }
+                guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+                return Int(sqlite3_column_int64(statement, 0))
+            }
+            return PhotoUploadQueueSummary(
+                pendingBatches: try count(["queued", "registered", "retrying"]),
+                failedBatches: try count(["failed"]))
+        }
+    }
+
+    func resetFailedUploadBatches() throws {
+        let batchIDs: [String] = try withDatabase { db in
+            let statement = try prepare(
+                "SELECT DISTINCT batch_id FROM upload_jobs WHERE state='failed'", db: db)
+            defer { sqlite3_finalize(statement) }
+            var result: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let text = sqlite3_column_text(statement, 0) {
+                result.append(String(cString: text))
+            }
+            return result
+        }
+        for batchID in batchIDs {
+            try discardUploadBatch(batchID, restoreCandidates: true)
+        }
+    }
+
+    func activeUploadBatchIDs() throws -> [String] {
+        try withDatabase { db in
+            let statement = try prepare(
+                "SELECT batch_id FROM upload_batches WHERE state NOT IN ('committed','failed')",
+                db: db)
+            defer { sqlite3_finalize(statement) }
+            var result: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let text = sqlite3_column_text(statement, 0) {
+                result.append(String(cString: text))
+            }
+            return result
+        }
+    }
+
+    func finishUploadBatchFromServer(_ batchID: String) throws {
+        let jobs = try uploadJobs(states: [.queued, .registered, .retrying, .failed])
+            .filter { $0.batchID == batchID }
+        for job in jobs {
+            try updateUploadJob(batchID: batchID, assetKey: job.assetKey, state: .succeeded)
+        }
+        try reconcileUploadBatch(batchID)
+    }
+
+    /// 上传端点只有在 PocketBase 原子提交成功后才返回 2xx，所以 PhotoKit 的
+    /// succeeded 可以安全收口为 accepted；失败则让候选重新出现在首页。
+    func reconcileUploadBatch(_ batchID: String) throws {
+        try withDatabase { db in
+            try execute("BEGIN IMMEDIATE", db: db)
+            do {
+                let counts = try prepare(
+                    "SELECT state,COUNT(*) FROM upload_jobs WHERE batch_id=? GROUP BY state", db: db)
+                defer { sqlite3_finalize(counts) }
+                bind(batchID, at: 1, to: counts)
+                var total = 0
+                var succeeded = 0
+                var failed = 0
+                while sqlite3_step(counts) == SQLITE_ROW {
+                    let state = sqlite3_column_text(counts, 0).map { String(cString: $0) } ?? ""
+                    let count = Int(sqlite3_column_int64(counts, 1))
+                    total += count
+                    if state == "succeeded" || state == "acknowledged" { succeeded += count }
+                    if state == "failed" { failed += count }
+                }
+                guard total > 0, succeeded + failed == total else {
+                    try execute("COMMIT", db: db)
+                    return
+                }
+                let batch = try prepare(
+                    "SELECT asset_identifiers_json FROM upload_batches WHERE batch_id=?", db: db)
+                defer { sqlite3_finalize(batch) }
+                bind(batchID, at: 1, to: batch)
+                guard sqlite3_step(batch) == SQLITE_ROW,
+                      let text = sqlite3_column_text(batch, 0),
+                      let data = String(cString: text).data(using: .utf8),
+                      let identifiers = try? JSONDecoder().decode([String].self, from: data) else {
+                    throw StoreError.sqlite("上传批次缺少素材清单")
+                }
+                let finalBatchState = failed > 0 ? "failed" : "committed"
+                let finalAssetState = failed > 0 ? "failed" : "accepted"
+                let now = Date().timeIntervalSince1970
+                let updateBatch = try prepare(
+                    "UPDATE upload_batches SET state=?,updated_at=? WHERE batch_id=?", db: db)
+                defer { sqlite3_finalize(updateBatch) }
+                bind(finalBatchState, at: 1, to: updateBatch)
+                sqlite3_bind_double(updateBatch, 2, now)
+                bind(batchID, at: 3, to: updateBatch)
+                try stepDone(updateBatch, db: db)
+                let updateAsset = try prepare(
+                    "UPDATE intake_assets SET state=?,updated_at=? WHERE local_identifier=?", db: db)
+                defer { sqlite3_finalize(updateAsset) }
+                for identifier in identifiers {
+                    sqlite3_reset(updateAsset)
+                    sqlite3_clear_bindings(updateAsset)
+                    bind(finalAssetState, at: 1, to: updateAsset)
+                    sqlite3_bind_double(updateAsset, 2, now)
+                    bind(identifier, at: 3, to: updateAsset)
+                    try stepDone(updateAsset, db: db)
+                }
+                try execute("COMMIT", db: db)
+            } catch {
+                try? execute("ROLLBACK", db: db)
+                throw error
+            }
+        }
+    }
+
     // MARK: - 本机身份样本
 
     /// `label`: 1 = 这是布布，-1 = 不是布布。每类只保留最近 40 张脸，避免模型无限增长。
@@ -372,6 +711,30 @@ nonisolated struct PhotoIntakeStore: Sendable {
             );
             CREATE INDEX IF NOT EXISTS idx_intake_assets_state_created
                 ON intake_assets(state, created_at DESC);
+            CREATE TABLE IF NOT EXISTS upload_batches(
+                batch_id TEXT PRIMARY KEY NOT NULL,
+                entry_local_id TEXT NOT NULL,
+                asset_identifiers_json TEXT NOT NULL,
+                state TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS upload_jobs(
+                asset_key TEXT PRIMARY KEY NOT NULL,
+                batch_id TEXT NOT NULL REFERENCES upload_batches(batch_id) ON DELETE CASCADE,
+                asset_local_identifier TEXT NOT NULL,
+                resource_type INTEGER NOT NULL,
+                resource_filename TEXT NOT NULL,
+                destination_url TEXT NOT NULL,
+                upload_token TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                state TEXT NOT NULL,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                updated_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_upload_jobs_state_updated
+                ON upload_jobs(state, updated_at);
             CREATE TABLE IF NOT EXISTS identity_samples(
                 id TEXT PRIMARY KEY NOT NULL,
                 label INTEGER NOT NULL CHECK(label IN (-1, 1)),

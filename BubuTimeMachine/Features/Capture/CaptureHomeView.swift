@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import Photos
 import UIKit
 
 // MARK: - 首页 · 成长仪表盘
@@ -31,6 +32,10 @@ struct CaptureHomeView: View {
     @State private var photoScanner = PhotoLibraryScanner()
     @State private var showTodayPhotos = false
     @State private var showNaturalCapture = false
+    @State private var uploadQueueSummary = PhotoUploadQueueSummary(
+        pendingBatches: 0, failedBatches: 0)
+    @State private var ssdIntakeCandidates: [SSDIntakeCandidate] = []
+    @State private var showSSDIntakeCandidates = false
     /// 悬浮球位置存**比例**（0…1，相对可移动范围）而非绝对点偏移。
     /// 绝对值在 iPad 旋转/分屏/台前调度改尺寸后会落到屏幕外且再也点不回来
     /// （横屏吸左 offset≈-940，转竖屏可移动范围只剩 -680，球停在 -940 处）。
@@ -69,6 +74,8 @@ struct CaptureHomeView: View {
                     greetingRow
                     if isBirthdayToday { birthdayBanner }   // 🎂 生日当天全 App 仪式（R4 C4）
                     identityCardTop            // ① 布布身份卡（可翻面看性别/血型/出生地）
+                    ssdCandidateCard           // 移动硬盘只生成候选，必须回手机确认
+                    uploadQueueCard            // 后台原片必须可见、可重试，不能假装已经收好
                     todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
                     primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
                     dashboardGridTop           // ③ 紧凑四宫格：星座/成长/故事/健康
@@ -117,11 +124,17 @@ struct CaptureHomeView: View {
             // 已授权过相册就顺手扫一下今天的照片（不主动弹权限）
             photoScanner.refreshAuthorizationState()
             if photoScanner.authorized { _ = photoScanner.scan() }
+            refreshUploadQueueSummary()
+            Task { await refreshSSDCandidates() }
+            Task { await reconcileReliableUploads() }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // 拍完照切回 App 时立即消费 PhotoKit 增量，不等重启；仍只生成候选，不自动发布。
             photoScanner.refreshAuthorizationState()
             if photoScanner.authorized { _ = photoScanner.scan() }
+            refreshUploadQueueSummary()
+            Task { await refreshSSDCandidates() }
+            Task { await reconcileReliableUploads() }
         }
         .onChange(of: quickCaptureTrigger) { _, _ in
             startQuickCapture()
@@ -158,8 +171,113 @@ struct CaptureHomeView: View {
             TodayPhotosSheet(assets: photoScanner.pendingAssets, groups: photoScanner.eventGroups) { outcome in
                 photoScanner.markAccepted(outcome.accepted)
                 photoScanner.markIgnored(outcome.ignored)
+                photoScanner.markQueued(outcome.queued)
+                refreshUploadQueueSummary()
             }
         }
+        .sheet(isPresented: $showSSDIntakeCandidates) {
+            SSDIntakeCandidatesSheet(candidates: $ssdIntakeCandidates)
+        }
+    }
+
+    @ViewBuilder
+    private var ssdCandidateCard: some View {
+        if !ssdIntakeCandidates.isEmpty {
+            Button { showSSDIntakeCandidates = true } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(BubuTheme.Color.primary.opacity(0.16))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "externaldrive.badge.plus")
+                            .font(BubuTheme.Font.scaled(19, weight: .bold))
+                            .foregroundStyle(BubuTheme.Color.primary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("移动硬盘有 \(ssdIntakeCandidates.count) 段待确认")
+                            .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("先核对拍摄时间，再决定收进或忽略；源文件不会被移动或删除")
+                            .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(BubuTheme.Font.scaled(13, weight: .bold))
+                        .foregroundStyle(BubuTheme.Color.primary)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .bubuCardShadow()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func refreshSSDCandidates() async {
+        guard let service = makeIntakeService(env) else { return }
+        if let candidates = try? await service.intakeCandidates() {
+            ssdIntakeCandidates = candidates
+        }
+    }
+
+    @ViewBuilder
+    private var uploadQueueCard: some View {
+        if uploadQueueSummary.failedBatches > 0 {
+            photoIntakePermissionCard(
+                title: "有 \(uploadQueueSummary.failedBatches) 段原片暂时停住了",
+                subtitle: "原片仍在系统相册里；网络恢复后可以安全继续，不会重复发布",
+                actionTitle: "重新整理"
+            ) {
+                retryFailedUploads()
+            }
+        } else if uploadQueueSummary.pendingBatches > 0 {
+            HStack(spacing: 12) {
+                ProgressView().tint(BubuTheme.Color.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(uploadQueueSummary.pendingBatches) 段原片正在回家")
+                        .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("锁屏或切换 App 也会继续；服务器真正入库后才算收好")
+                        .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .bubuCardShadow()
+        }
+    }
+
+    private func refreshUploadQueueSummary() {
+        uploadQueueSummary = (try? PhotoIntakeStore().uploadQueueSummary())
+            ?? PhotoUploadQueueSummary(pendingBatches: 0, failedBatches: 0)
+    }
+
+    private func retryFailedUploads() {
+        do {
+            try PhotoIntakeStore().resetFailedUploadBatches()
+            _ = photoScanner.scan()
+            refreshUploadQueueSummary()
+            BubuHaptics.success()
+        } catch {
+            model?.partialSaveWarning = "后台上传暂时没有恢复：\(error.localizedDescription)"
+        }
+    }
+
+    private func reconcileReliableUploads() async {
+        guard #available(iOS 26.4, *),
+              env.config.isConfigured,
+              let baseURL = env.config.aiBaseURL else { return }
+        let service = ReliablePhotoIntakeService(baseURL: baseURL) {
+            try await env.apiClient.authenticate(role: "intake").token
+        }
+        await service.reconcilePendingBatches()
+        refreshUploadQueueSummary()
+        photoScanner.refreshAuthorizationState()
+        if photoScanner.authorized { _ = photoScanner.scan() }
     }
 
     // MARK: 今天拍的照片卡（零操作记录）
@@ -273,8 +391,8 @@ struct CaptureHomeView: View {
         guard env.config.isAIConfigured else { return }
         let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryID })
         guard let entry = try? modelContext.fetch(descriptor).first,
-              !entry.media.isEmpty else { return }
-        if let suggestion = try? await env.aiService.detectFirstTime(media: entry.media),
+              !entry.sortedMedia.isEmpty else { return }
+        if let suggestion = try? await env.aiService.detectFirstTime(media: entry.sortedMedia),
            suggestion.confidence > 0.4 {
             firstTimeEntryID = entryID
             firstTimeSuggestion = suggestion.what
@@ -727,7 +845,7 @@ struct CaptureHomeView: View {
     /// 只做 O(n) 整型累加，不读 Media 属性，不构建数组。
     private var statsFingerprint: String {
         var mediaCount = 0
-        for e in entries { mediaCount += e.media.count }
+        for e in entries { mediaCount += e.sortedMedia.count }
         let day = Int(Calendar.current.startOfDay(for: .now).timeIntervalSince1970)
         return "\(entries.count)-\(mediaCount)-\(day)"
     }
@@ -737,7 +855,7 @@ struct CaptureHomeView: View {
         let cal = Calendar.current
         // 照片总数（唯一读 Media.type 的 O(n·m) 处，收拢到这里只跑一次）
         totalPhotos = entries.reduce(0) { total, entry in
-            total + entry.media.filter { $0.type == .photo }.count
+            total + entry.sortedMedia.filter { $0.type == .photo }.count
         }
         // 今天已回答「今日一问」的家人称谓（全家合唱，R4 F-6）
         var roles: [String] = []
@@ -1221,6 +1339,121 @@ struct CaptureHomeView: View {
             }
         }
         .allowsHitTesting(true)
+    }
+}
+
+private struct SSDIntakeCandidatesSheet: View {
+    @Binding var candidates: [SSDIntakeCandidate]
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    @State private var editedDates: [String: Date] = [:]
+    @State private var workingID: String?
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(candidates) { candidate in
+                    Section {
+                        DatePicker(
+                            "发生时间",
+                            selection: dateBinding(for: candidate),
+                            displayedComponents: [.date, .hourAndMinute])
+                        Text(candidate.items.prefix(3).map(\.fileName).joined(separator: "、"))
+                            .font(BubuTheme.Font.caption)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                        if candidate.items.count > 3 {
+                            Text("另有 \(candidate.items.count - 3) 个素材")
+                                .font(BubuTheme.Font.caption)
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                        }
+                        if candidate.entry.captureTimeSources?.contains("file-modified-fallback") == true {
+                            Label("未读到内嵌拍摄时间，当前日期按文件时间推测，请核对后再确认。",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(BubuTheme.Font.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        HStack {
+                            Button("忽略", role: .destructive) {
+                                Task { await cancel(candidate) }
+                            }
+                            Spacer()
+                            Button(workingID == candidate.id ? "处理中…" : "确认收进") {
+                                Task { await confirm(candidate) }
+                            }
+                            .disabled(workingID != nil)
+                            .buttonStyle(.borderedProminent)
+                        }
+                    } header: {
+                        Text("\(candidate.items.count) 个照片或视频")
+                    }
+                }
+                if let errorText {
+                    Text(errorText).foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("移动硬盘候选")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .onAppear {
+                for candidate in candidates where editedDates[candidate.id] == nil {
+                    editedDates[candidate.id] = Self.parse(candidate.entry.happenedAt) ?? .now
+                }
+            }
+        }
+    }
+
+    private func dateBinding(for candidate: SSDIntakeCandidate) -> Binding<Date> {
+        Binding(
+            get: { editedDates[candidate.id] ?? Self.parse(candidate.entry.happenedAt) ?? .now },
+            set: { editedDates[candidate.id] = $0 })
+    }
+
+    private func confirm(_ candidate: SSDIntakeCandidate) async {
+        guard let service = makeIntakeService(env) else { return }
+        workingID = candidate.id
+        defer { workingID = nil }
+        do {
+            try await service.updateIntakeCandidate(
+                id: candidate.id,
+                happenedAt: editedDates[candidate.id] ?? Self.parse(candidate.entry.happenedAt) ?? .now)
+            try await service.confirmIntakeCandidate(id: candidate.id)
+            candidates.removeAll { $0.id == candidate.id }
+            BubuHaptics.success()
+        } catch {
+            errorText = "这段时光暂时没能收进：\(error.localizedDescription)"
+        }
+    }
+
+    private func cancel(_ candidate: SSDIntakeCandidate) async {
+        guard let service = makeIntakeService(env) else { return }
+        workingID = candidate.id
+        defer { workingID = nil }
+        do {
+            try await service.cancelIntakeCandidate(id: candidate.id)
+            candidates.removeAll { $0.id == candidate.id }
+        } catch {
+            errorText = "这段候选暂时没能忽略：\(error.localizedDescription)"
+        }
+    }
+
+    nonisolated private static func parse(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        return ISO8601DateFormatter().date(from: value)
+    }
+}
+
+@MainActor
+private func makeIntakeService(_ env: AppEnvironment) -> BubuAIService? {
+    guard env.config.isConfigured, let url = env.config.aiBaseURL else { return nil }
+    return BubuAIService(baseURL: url) {
+        try await env.apiClient.authenticate(role: "intake").token
     }
 }
 

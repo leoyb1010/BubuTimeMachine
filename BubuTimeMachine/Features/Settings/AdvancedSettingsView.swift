@@ -94,7 +94,9 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("AI 服务（布布的故事）")
             } footer: {
-                Text("照片搜索默认关闭；开启后只把搜索词发给家中自托管服务，照片本身仍留在家里的服务器。AI 复用家庭服务器登录态，不需要在 App 保存共享密钥；服务不可用时自动回到本地文字搜索。")
+                Text(config.aiEnabled && !config.aiBaseURLString.isEmpty && config.aiBaseURL == nil
+                     ? "为保护家庭服务器登录态，AI 地址必须是内置可信地址、与家庭服务器同源的 HTTPS 地址，或 Debug 本机回环地址。"
+                     : "照片搜索默认关闭；开启后只把搜索词发给家中自托管服务，照片本身仍留在家里的服务器。AI 复用家庭服务器登录态，不需要在 App 保存共享密钥；服务不可用时自动回到本地文字搜索。")
             }
         }
         .navigationTitle("高级 · 自托管")

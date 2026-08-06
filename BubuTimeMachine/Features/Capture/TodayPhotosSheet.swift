@@ -6,6 +6,13 @@ import UIKit
 struct PhotoImportOutcome {
     let accepted: [PHAsset]
     let ignored: [PHAsset]
+    let queued: [PHAsset]
+
+    init(accepted: [PHAsset], ignored: [PHAsset], queued: [PHAsset] = []) {
+        self.accepted = accepted
+        self.ignored = ignored
+        self.queued = queued
+    }
 }
 
 // MARK: - 智能照片收件箱 · 一组收进时光机
@@ -206,7 +213,11 @@ struct TodayPhotosSheet: View {
             Button(allSelected ? "取消" : "全选") {
                 if allSelected {
                     groupAssets.forEach { selected.remove($0.localIdentifier) }
+                    if selected.isEmpty { note = "" }
                 } else {
+                    // 一次只确认一个真实事件，避免两段活动被错误合成一个 Entry。
+                    clearNoteIfSwitching(to: group)
+                    selected.removeAll()
                     groupAssets.forEach { selected.insert($0.localIdentifier) }
                 }
                 BubuHaptics.selection()
@@ -239,7 +250,18 @@ struct TodayPhotosSheet: View {
         let timestamp = asset.creationDate?.formatted(
             .dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN"))) ?? ""
         return Button {
-            if isOn { selected.remove(asset.localIdentifier) } else { selected.insert(asset.localIdentifier) }
+            if isOn {
+                selected.remove(asset.localIdentifier)
+                if selected.isEmpty { note = "" }
+            } else {
+                // 点进另一段时光时先清掉上一段选择，和“全选”保持同一规则。
+                let groupIDs = groups.first(where: { $0.assetIdentifiers.contains(asset.localIdentifier) })?
+                    .assetIdentifiers ?? []
+                let allowed = Set(groupIDs)
+                if !selected.isEmpty && selected.isDisjoint(with: allowed) { note = "" }
+                selected = selected.intersection(allowed)
+                selected.insert(asset.localIdentifier)
+            }
             BubuHaptics.selection()
         } label: {
             ZStack(alignment: .topTrailing) {
@@ -314,6 +336,14 @@ struct TodayPhotosSheet: View {
         }
     }
 
+    private func clearNoteIfSwitching(to group: PhotoEventGroup) {
+        let target = Set(group.assetIdentifiers)
+        if !selected.isEmpty && selected.isDisjoint(with: target) {
+            note = ""
+            suggestionMessage = "已切换到另一段时光，上一段的备注没有带过来。"
+        }
+    }
+
     private func badge(_ text: String, icon: String) -> some View {
         Label(text, systemImage: icon)
             .font(BubuTheme.Font.scaled(8.5, weight: .heavy, design: .rounded))
@@ -341,9 +371,20 @@ struct TodayPhotosSheet: View {
         suggestionMessage = nil
         defer { analyzingSuggestions = false }
 
-        var nextSignals: [String: PhotoSelectionSignals] = [:]
+        let targetGroup = groups.first(where: { group in
+            !selected.isDisjoint(with: group.assetIdentifiers)
+        }) ?? groups.first
+        guard let targetGroup else {
+            suggestionMessage = "当前没有可以整理的素材。"
+            return
+        }
+        let targetAssets = assets(in: targetGroup)
+        let targetIDs = Set(targetGroup.assetIdentifiers)
+        var nextSignals: [String: PhotoSelectionSignals] = selectionSignals.filter {
+            !targetIDs.contains($0.key)
+        }
         var nextMatches: [String: ChildIdentityMatch] = [:]
-        for asset in assets {
+        for asset in targetAssets {
             let analysisFrames: [Data]
             if asset.mediaType == .video {
                 analysisFrames = await PhotoLibraryScanner.loadVideoKeyframes(asset)
@@ -373,25 +414,21 @@ struct TodayPhotosSheet: View {
 
         var suggestions = Set<String>()
         var hidden = Set<String>()
-        for group in groups {
-            let groupAssets = assets(in: group)
-            let items = groupAssets.compactMap { asset -> PhotoSelectionItem? in
-                guard asset.mediaType == .image else { return nil }
-                guard let signals = nextSignals[asset.localIdentifier] else { return nil }
-                return PhotoSelectionItem(identifier: asset.localIdentifier, signals: signals)
-            }
-            for similar in PhotoSelectionAnalyzer.groupSimilar(items) {
-                suggestions.insert(similar.representativeIdentifier)
-                hidden.formUnion(similar.memberIdentifiers.filter {
-                    $0 != similar.representativeIdentifier
-                })
-            }
-            // 视频不逐帧全扫；作为完整事实保留在精选结果中，后续只提取有限关键帧加标。
-            for video in groupAssets where video.mediaType == .video
-                && nextSignals[video.localIdentifier]?.shouldSuppress != true
-                && !Self.isScreenCapture(video) {
-                suggestions.insert(video.localIdentifier)
-            }
+        let items = targetAssets.compactMap { asset -> PhotoSelectionItem? in
+            guard asset.mediaType == .image else { return nil }
+            guard let signals = nextSignals[asset.localIdentifier] else { return nil }
+            return PhotoSelectionItem(identifier: asset.localIdentifier, signals: signals)
+        }
+        for similar in PhotoSelectionAnalyzer.groupSimilar(items) {
+            suggestions.insert(similar.representativeIdentifier)
+            hidden.formUnion(similar.memberIdentifiers.filter {
+                $0 != similar.representativeIdentifier
+            })
+        }
+        for video in targetAssets where video.mediaType == .video
+            && nextSignals[video.localIdentifier]?.shouldSuppress != true
+            && !Self.isScreenCapture(video) {
+            suggestions.insert(video.localIdentifier)
         }
 
         selectionSignals = nextSignals
@@ -401,7 +438,7 @@ struct TodayPhotosSheet: View {
         selected = suggestions
         let childCount = nextMatches.values.count { $0.isLikelyChild }
         let suppressedCount = nextSignals.values.count { $0.shouldSuppress }
-        suggestionMessage = "精选了 \(suggestions.count) 个代表素材，折叠 \(hidden.count) 张近似照"
+        suggestionMessage = "只整理当前这一段：精选 \(suggestions.count) 个代表素材，折叠 \(hidden.count) 张近似照"
             + (suppressedCount > 0 ? "，默认跳过 \(suppressedCount) 个截图、录屏、二维码或文档" : "")
             + (childCount > 0 ? "；其中 \(childCount) 张可能是布布" : "")
             + "。原片一张也没有删除。"
@@ -442,10 +479,20 @@ struct TodayPhotosSheet: View {
     }
 
     /// 库里是否已有同内容照片（contentHash 命中即重复；老数据 hash 为 nil 不参与判定）。
-    private static func hashExists(_ hash: String, context: ModelContext) -> Bool {
-        var descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.contentHash == hash })
-        descriptor.fetchLimit = 1
-        return ((try? context.fetchCount(descriptor)) ?? 0) > 0
+    private enum HashLookup {
+        case missing
+        case duplicate
+        case unavailable
+    }
+
+    private static func lookupHash(_ hash: String, context: ModelContext) -> HashLookup {
+        let descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.contentHash == hash })
+        let matches: [Media]
+        do { matches = try context.fetch(descriptor) }
+        catch { return .unavailable }
+        guard !matches.isEmpty else { return .missing }
+        // 只要已有任一可见事实就判重；只有全部命中都归档时，才允许新建一条可见 Entry。
+        return matches.contains { $0.entry?.isArchived != true } ? .duplicate : .missing
     }
 
     private var savingOverlay: some View {
@@ -467,6 +514,18 @@ struct TodayPhotosSheet: View {
         let noteText = note.trimmingCharacters(in: .whitespacesAndNewlines)
         let role = env.config.currentRole
 
+        // iOS 26.4+ 把用户已经确认的这一段交给 PhotoKit 系统后台上传：锁屏、切 App、
+        // 断网和重启后都由 intake.sqlite + mini staging 收敛。任何准备失败都安全回退
+        // 下面原有的本地保真导入，不会丢掉用户这次选择。
+        if await enqueueReliableBackgroundImport(
+            chosen, note: noteText.isEmpty ? nil : noteText, role: role
+        ) {
+            BubuHaptics.success()
+            onDone(PhotoImportOutcome(accepted: [], ignored: [], queued: chosen))
+            dismiss()
+            return
+        }
+
         let entry = Entry(happenedAt: .now, authorRole: role.rawValue,
                           note: noteText.isEmpty ? nil : noteText)
         context.insert(entry)
@@ -483,11 +542,28 @@ struct TodayPhotosSheet: View {
             if asset.mediaType == .video {
                 // 视频：导出原文件 → 压缩沙盒导入 + 视频缩略图（R4 E-6）
                 guard let tmpURL = await PhotoLibraryScanner.loadVideoFile(asset) else { continue }
+                guard let originalHash = try? MediaStore.sha256Hex(at: tmpURL) else {
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    continue
+                }
+                switch Self.lookupHash(originalHash, context: context) {
+                case .duplicate:
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    duplicateAssets.append(asset)
+                    continue
+                case .unavailable:
+                    try? FileManager.default.removeItem(at: tmpURL)
+                    continue
+                case .missing:
+                    break
+                }
                 // 无论后续导入成功与否都清理 PhotoKit 导出的临时原片，避免失败重试累积孤儿文件。
                 let importedResult = try? await env.mediaStore.importVideoForSync(from: tmpURL)
                 try? FileManager.default.removeItem(at: tmpURL)
                 guard let imported = importedResult else { continue }
                 media = Media(type: .video, localFileName: imported.fileName)
+                // 即使为公网传输生成了代理，也以 PhotoKit 原资源哈希做跨重试幂等。
+                media.contentHash = originalHash
                 media.durationSeconds = asset.duration
                 media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: imported.fileName)
             } else {
@@ -496,9 +572,14 @@ struct TodayPhotosSheet: View {
                 // 重复收录拦截（V2 contentHash）：同一张照片之前已收过就跳过，
                 // 但仍标记已处理（skippedDuplicates 也进 markHandled），避免明天再被提示。
                 let hash = MediaStore.sha256Hex(data)
-                if Self.hashExists(hash, context: context) {
+                switch Self.lookupHash(hash, context: context) {
+                case .duplicate:
                     duplicateAssets.append(asset)
                     continue
+                case .unavailable:
+                    continue
+                case .missing:
+                    break
                 }
                 guard let fileName = try? env.mediaStore.savePhoto(data) else { continue }
                 media = Media(type: .photo, localFileName: fileName)
@@ -607,5 +688,30 @@ struct TodayPhotosSheet: View {
         BubuHaptics.success()
         onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: []))
         dismiss()
+    }
+
+    private func enqueueReliableBackgroundImport(
+        _ chosen: [PHAsset],
+        note: String?,
+        role: FamilyRole
+    ) async -> Bool {
+        guard #available(iOS 26.4, *),
+              env.config.isConfigured,
+              let baseURL = env.config.aiBaseURL,
+              // 公网大文件会受代理限制；视频继续走已有前台保真路径。
+              chosen.allSatisfy({
+                  $0.mediaType == .image && !$0.mediaSubtypes.contains(.photoLive)
+              }) else { return false }
+        let service = ReliablePhotoIntakeService(baseURL: baseURL) {
+            try await env.apiClient.authenticate(role: "intake").token
+        }
+        do {
+            try await service.enqueue(
+                assets: chosen, note: note, authorRole: role.rawValue)
+            return true
+        } catch {
+            // 可靠管线未建立时不把候选标记成功；直接走成熟的前台导入路径。
+            return false
+        }
     }
 }

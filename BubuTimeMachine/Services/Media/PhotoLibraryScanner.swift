@@ -141,6 +141,10 @@ final class PhotoLibraryScanner {
         mark(assets, state: .accepted)
     }
 
+    func markQueued(_ assets: [PHAsset]) {
+        mark(assets, state: .queued)
+    }
+
     func markIgnored(_ assets: [PHAsset]) {
         mark(assets, state: .ignored)
     }

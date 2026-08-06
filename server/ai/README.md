@@ -25,6 +25,11 @@ cp .env.example .env   # 填 DEEPSEEK_API_KEY 与 AI_API_KEY（必填，fail-clo
 | POST | `/movie-narration` | 年度成长电影旁白稿 |
 | POST | `/parse-natural-capture` | 一句话 → 多条结构化记录（疫苗/成长/餐食/睡眠…）；LLM 输出服务端逐条清洗，敏感域强制 `needs_confirmation` |
 | POST | `/transcribe` | 语音转写（需 faster-whisper） |
+| POST | `/intake/batches` | 为用户已确认的一段时光建立持久上传批次 |
+| PUT | `/intake/upload/{batch}/{asset}` | PhotoKit 能力令牌直传隔离暂存区 |
+| GET | `/intake/candidates` | 读取 SSD 只读扫描产生的待确认事件 |
+| POST | `/intake/confirm` | 家庭确认 SSD 候选并触发原子提交 |
+| POST | `/intake/commit` | 重试一个已完整暂存的批次 |
 | GET | `/weekly-report/latest` | 读取最新布布周报 |
 | GET | `/weekly-report/history` | 读取最近一年的往期周报（含已归档） |
 | POST | `/weekly-report/generate` | 幂等生成上一个完整自然周；证据不足不生成 |
@@ -39,7 +44,26 @@ cp .env.example .env   # 填 DEEPSEEK_API_KEY 与 AI_API_KEY（必填，fail-clo
 | POST | `/sound-ring/archive` | 只归档派生音频，不修改原声与照片 |
 | GET | `/health` | 健康检查；带正确 `X-API-Key` 时附 `parse_stats`（解析 warnings 累计，监控 LLM 输出漂移） |
 
-业务路由一律要求 `X-API-Key` 请求头 + 每 IP 限流（`AI_RATE_LIMIT_PER_MINUTE`，默认 30/分钟）。
+App 业务路由使用现有 PocketBase `Authorization: Bearer …` 登录态，并受
+`AI_ALLOWED_PB_USER_IDS` 单家庭白名单与按用户限流保护；`X-API-Key` 只保留给 mini 本机维护任务。
+PhotoKit 上传 URL 使用绑定 batch、asset、owner 和有效期的独立能力令牌，不能调用其他接口。
+
+## 可靠照片与 SSD 摄取
+
+1. iPhone 只在用户点“收好”后建立批次；未确认的系统相册素材不会上传。
+2. iOS 26.4+ 由 PhotoKit background upload extension 在锁屏/切 App/断网后继续；旧系统安全回退前台导入。
+3. mini 写入 `INTAKE_STAGING_ROOT`，逐文件校验大小和 SHA-256；半成品绝不进入 PocketBase。
+4. 全批完成后，PocketBase loopback hook 在一个事务里创建 Entry 与全部 Media；重放同一 batch 只返回原记录。
+5. `scan_ssd_inbox.py` 只读扫描 `BUBU_INBOX_ROOT`，不移动、不改名、不删除源文件；候选必须回到 iPhone 确认。
+6. 每次 SSD 扫描会先读取 PocketBase `contentHash` 与 staging 历史 hash 做跨来源去重；事实库不可读时整次延期。
+7. 已提交的中转原片立即清理，失败/取消批次超过 7 天由扫描任务清理；manifest 与哈希审计信息保留到批次过期。
+
+PocketBase 部署前必须先用全新临时 `pb_data` 跑原子提交集成测试：
+
+```bash
+POCKETBASE_BIN=/absolute/path/to/pocketbase \
+python3 -m unittest server.pocketbase.tests.test_intake_commit -v
+```
 
 ## 周日晚自动生成
 
@@ -66,12 +90,12 @@ python3 tests/test_parse.py        # 无 pytest 的环境直跑（自动 stub �
 ## 验收样例（部署后跑一遍）
 
 ```bash
-KEY=你的AI_API_KEY
+TOKEN=你的PocketBase登录token
 for t in "6月20日布布打了麻腮风疫苗" "今天身高82cm体重10.6kg" \
          "中午吃了南瓜米糊半碗，下午喝水120ml" "昨晚9点睡早上7点醒" \
          "今天咳嗽，体温37.8" "第一次自己扶着沙发站起来了"; do
   curl -s -X POST localhost:8000/parse-natural-capture \
-    -H "Content-Type: application/json" -H "X-API-Key: $KEY" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
     -d "{\"text\":\"$t\",\"childName\":\"布布\",\"timezone\":\"Asia/Shanghai\",\"referenceDate\":\"$(date -Iseconds)\"}" | head -c 300; echo
 done
 ```

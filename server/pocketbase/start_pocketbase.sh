@@ -8,8 +8,20 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 DATA_DIR="${1:-./pb_data}"
-PB_BIN="./pocketbase"
+PB_BIN="${PB_BIN:-./pocketbase}"
 PB_HTTP_ADDR="${PB_HTTP_ADDR:-127.0.0.1:8090}"
+PB_MIGRATIONS_DIR="${PB_MIGRATIONS_DIR:-./migrations}"
+PB_HOOKS_DIR="${PB_HOOKS_DIR:-./pb_hooks}"
+BUBU_SERVER_ENV_FILE="${BUBU_SERVER_ENV_FILE:-../ai/.env}"
+
+# PocketBase intake hook 与 AI staging 必须读到同一套本机密钥；launchd 只保存
+# 这个 0600 文件的路径，不把 secret 明文复制进 plist。
+if [[ -f "$BUBU_SERVER_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$BUBU_SERVER_ENV_FILE"
+  set +a
+fi
 
 if [ ! -x "$PB_BIN" ]; then
   echo "❌ 未找到 pocketbase 可执行文件。"
@@ -28,4 +40,8 @@ echo "   首次启动请在后台创建管理员账号，并新建一个家庭�
 #   PB_HTTP_ADDR="0.0.0.0:8090" ./start_pocketbase.sh /path/to/pb_data
 # ——0.0.0.0 同时覆盖 Tailscale IP 与 192.168.x.x，App 侧会自动赛跑择快。
 # 直接使用受 Git 管理的迁移目录，避免运行时副本残留已改号或已删除的旧迁移。
-exec "$PB_BIN" serve --http="$PB_HTTP_ADDR" --dir="$DATA_DIR" --migrationsDir="./migrations"
+exec "$PB_BIN" serve \
+  --http="$PB_HTTP_ADDR" \
+  --dir="$DATA_DIR" \
+  --migrationsDir="$PB_MIGRATIONS_DIR" \
+  --hooksDir="$PB_HOOKS_DIR"

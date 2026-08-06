@@ -884,6 +884,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "entryLocalId": file.entryLocalId.uuidString,
             "mediaType": file.type.rawValue,
         ]
+        if let contentHash = file.contentHash { fields["contentHash"] = contentHash }
+        if let resourceRole = file.resourceRole { fields["resourceRole"] = resourceRole }
+        if let assetGroupId = file.assetGroupId { fields["assetGroupId"] = assetGroupId }
         Self.addSyncTimestamp(to: &fields)
         fields = await activeRecordFields(fields)
         // 缩略图随原文件一并上传（服务端 thumbnail 字段早已就绪）：
@@ -1057,6 +1060,12 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         let remoteThumbURL = id.flatMap { recordId in
             thumbName.isEmpty ? nil : baseURL.appendingPathComponent("api/files/media/\(recordId)/\(thumbName)").absoluteString
         }
+        func nonEmpty(_ key: String) -> String? {
+            guard let value = obj[key] as? String,
+                  !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return nil }
+            return value
+        }
         return MediaDTO(
             id: id,
             localId: obj["localId"] as? String ?? UUID().uuidString,
@@ -1064,6 +1073,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             mediaType: obj["mediaType"] as? String ?? "photo",
             remoteURL: remoteURL,
             remoteThumbURL: remoteThumbURL,
+            contentHash: nonEmpty("contentHash"),
+            resourceRole: nonEmpty("resourceRole"),
+            assetGroupId: nonEmpty("assetGroupId"),
             durationSeconds: obj["durationSeconds"] as? Double,
             width: obj["width"] as? Int,
             height: obj["height"] as? Int,

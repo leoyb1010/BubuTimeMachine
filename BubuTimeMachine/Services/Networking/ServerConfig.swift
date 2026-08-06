@@ -104,8 +104,45 @@ final class ServerConfig {
     }
 
     var aiBaseURL: URL? {
-        guard !aiBaseURLString.isEmpty else { return nil }
-        return URL(string: aiBaseURLString)
+        guard let candidate = URL(string: aiBaseURLString),
+              Self.isTrustedAIURL(
+                candidate,
+                serverURL: baseURL,
+                packagedAIURL: URL(string: Self.defaultAIBaseURL)
+              ) else { return nil }
+        return candidate
+    }
+
+    /// AI 请求携带可访问家庭 PocketBase 的短期 Bearer，目标地址因此必须受限。
+    /// 正式包只信任构建时注入的 AI 地址，或与 PocketBase 同源的反向代理；
+    /// Debug 额外允许本机回环，方便隔离开发，绝不把登录态发给任意输入的主机。
+    nonisolated static func isTrustedAIURL(
+        _ candidate: URL,
+        serverURL: URL?,
+        packagedAIURL: URL?,
+        allowLoopback: Bool = _isDebugAssertConfiguration()
+    ) -> Bool {
+        guard let scheme = candidate.scheme?.lowercased(),
+              let host = candidate.host?.lowercased(),
+              candidate.user == nil,
+              candidate.password == nil else { return false }
+        let isLoopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
+        guard scheme == "https" || (allowLoopback && isLoopback && scheme == "http") else {
+            return false
+        }
+        if let packagedAIURL,
+           packagedAIURL.scheme?.lowercased() == scheme,
+           packagedAIURL.host?.lowercased() == host,
+           packagedAIURL.port == candidate.port {
+            return true
+        }
+        if let serverURL,
+           serverURL.scheme?.lowercased() == scheme,
+           serverURL.host?.lowercased() == host,
+           serverURL.port == candidate.port {
+            return true
+        }
+        return allowLoopback && isLoopback
     }
 
     var hasServerCredentials: Bool {

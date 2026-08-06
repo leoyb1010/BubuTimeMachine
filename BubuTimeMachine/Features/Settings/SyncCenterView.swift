@@ -301,12 +301,12 @@ struct SyncCenterView: View {
                 Spacer()
             }
             Text(exportStale
-                 ? "服务器是单点，建议每季度导出一份完整档案存到电脑或移动硬盘。"
-                 : "上次全量导出：\(exportText)。保持这个习惯，布布的档案就有双保险。")
+                 ? "建议定期导出一份开放阅读档案；灾后无损恢复仍由服务器加密备份负责。"
+                 : "上次开放档案导出：\(exportText)。它方便长期阅读，不替代服务器恢复备份。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             NavigationLink { ExportView() } label: {
-                Text("去导出完整档案")
+                Text("去导出开放档案")
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(theme)
             }
