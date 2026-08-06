@@ -150,8 +150,14 @@ struct ReliablePhotoIntakeService {
     /// 修复 Photos 与共享 SQLite 在进程终止边界上的短暂不一致：事实层是最终真相。
     /// committed 收口本地；服务端已清理/取消的批次重新回到候选箱；staged 主动续提交。
     func reconcilePendingBatches() async {
-        guard let token = try? await tokenProvider(), !token.isEmpty,
-              let batchIDs = try? store.activeUploadBatchIDs() else { return }
+        guard let batchIDs = try? store.activeUploadBatchIDs(), !batchIDs.isEmpty else { return }
+        // saveUploadBatch 与首次启用扩展不可能跨两个持久系统做成同一事务。
+        // 因此每次启动只要还有未收口批次，就幂等补一次启用动作；即使 App
+        // 恰好在保存 queued 之后被杀，下一次启动也不会让它永久滞留。
+        if #available(iOS 26.4, *) {
+            try? PHPhotoLibrary.shared().setUploadJobExtensionEnabled(true)
+        }
+        guard let token = try? await tokenProvider(), !token.isEmpty else { return }
         for batchID in batchIDs {
             var statusRequest = URLRequest(
                 url: baseURL.appendingPathComponent("intake/batches/\(batchID)"))

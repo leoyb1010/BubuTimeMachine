@@ -125,7 +125,7 @@ struct PhotoIntakeTests {
         #expect(try store.data(forMetadataKey: "token") == nil)
     }
 
-    @Test("后台上传批次与逐资源状态跨进程持久化")
+    @Test("终态先持久化后即使扩展重启，批次仍能被启动对账收口")
     func uploadJobsPersistAndConverge() throws {
         let (store, directory) = try makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -159,8 +159,12 @@ struct PhotoIntakeTests {
 
         try reopened.updateUploadJob(
             batchID: job.batchID, assetKey: job.assetKey, state: .succeeded)
+        // 模拟 SQLite 已写成功、Photos acknowledge 后扩展立刻被系统终止：
+        // 新进程仍从 upload_batches 非终态找到它，不依赖已释放的 Photos job。
+        let afterTermination = PhotoIntakeStore(databaseURL: store.databaseURL)
+        #expect(try afterTermination.uploadJobs(states: [.succeeded]).count == 1)
         #expect(try reopened.activeUploadBatchIDs() == [job.batchID])
-        try reopened.reconcileUploadBatch(job.batchID)
+        try afterTermination.reconcileUploadBatch(job.batchID)
         #expect(try reopened.uploadQueueSummary() == PhotoUploadQueueSummary(
             pendingBatches: 0, failedBatches: 0))
     }

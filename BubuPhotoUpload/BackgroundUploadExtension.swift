@@ -53,17 +53,34 @@ final class BackgroundUploadExtension: PHBackgroundResourceUploadExtension {
         let jobs = PHAssetResourceUploadJob.fetchJobs(action: .acknowledge, options: nil)
         guard jobs.count > 0 else { return }
         var outcomes: [(String, String, PhotoUploadJobState)] = []
+        jobs.enumerateObjects { job, _, _ in
+            guard let ids = Self.identifiers(from: job.destination.url) else { return }
+            let state: PhotoUploadJobState = job.state == .succeeded ? .succeeded : .failed
+            outcomes.append((ids.batchID, ids.assetKey, state))
+        }
+
+        // Durable state must lead Photos acknowledgement. acknowledge() releases
+        // the system job slot; if the extension is killed immediately afterwards,
+        // there is no Photos job left from which SQLite could recover the outcome.
+        // Replaying these idempotent writes before acknowledgement is safe.
+        for (batchID, assetKey, state) in outcomes {
+            try store.updateUploadJob(batchID: batchID, assetKey: assetKey, state: state)
+        }
+
+        var acknowledged: [(String, String)] = []
         try library.performChangesAndWait {
             jobs.enumerateObjects { job, _, _ in
                 guard let ids = Self.identifiers(from: job.destination.url),
                       let request = PHAssetResourceUploadJobChangeRequest(for: job) else { return }
-                let state: PhotoUploadJobState = job.state == .succeeded ? .succeeded : .failed
                 request.acknowledge()
-                outcomes.append((ids.batchID, ids.assetKey, state))
+                acknowledged.append((ids.batchID, ids.assetKey))
             }
         }
-        for (batchID, assetKey, state) in outcomes {
-            try store.updateUploadJob(batchID: batchID, assetKey: assetKey, state: state)
+
+        let expectedByBatch = Dictionary(grouping: outcomes, by: { $0.0 }).mapValues(\.count)
+        let acknowledgedByBatch = Dictionary(grouping: acknowledged, by: { $0.0 }).mapValues(\.count)
+        for batchID in expectedByBatch.keys where
+            acknowledgedByBatch[batchID] == expectedByBatch[batchID] {
             try store.reconcileUploadBatch(batchID)
         }
     }
