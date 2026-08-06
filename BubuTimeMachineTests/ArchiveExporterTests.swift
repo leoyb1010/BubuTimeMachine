@@ -74,5 +74,16 @@ struct ArchiveExporterTests {
             let actual = SHA256.hash(data: file).map { String(format: "%02x", $0) }.joined()
             #expect(actual == expected)
         }
+
+        let validReport = try OpenArchiveVerifier.verify(folder: result.root)
+        #expect(validReport.isValid)
+        #expect(validReport.childName == "布布")
+        #expect(validReport.entryCount == 0)
+
+        try Data("被改动".utf8).write(
+            to: result.root.appendingPathComponent("README.md"), options: .atomic)
+        let damagedReport = try OpenArchiveVerifier.verify(folder: result.root)
+        #expect(!damagedReport.isValid)
+        #expect(damagedReport.mismatchedFiles == ["README.md"])
     }
 }

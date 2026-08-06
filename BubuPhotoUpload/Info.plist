@@ -18,6 +18,9 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Photos 用这个固定前缀校验后台上传目的地；缺失时系统会拒绝启用扩展。 -->
+	<key>BackgroundUploadURLBase</key>
+	<string>https://bubu-ai.leoyuan.top</string>
 	<key>EXAppExtensionAttributes</key>
 	<dict>
 		<key>EXExtensionPointIdentifier</key>

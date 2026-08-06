@@ -3,6 +3,26 @@ import Foundation
 import Photos
 import UniformTypeIdentifiers
 
+#if !targetEnvironment(macCatalyst)
+@MainActor
+@available(iOS 26.1, *)
+protocol PhotoUploadExtensionControlling: AnyObject {
+    var uploadJobExtensionEnabled: Bool { get }
+    func setUploadJobExtensionEnabled(_ enabled: Bool) throws
+}
+
+@available(iOS 26.1, *)
+extension PHPhotoLibrary: PhotoUploadExtensionControlling {}
+
+/// iOS 26 对重复 set(true) 会抛 PHPhotosError 3202；只在实际关闭时调用系统 setter。
+@MainActor
+@available(iOS 26.1, *)
+func ensurePhotoUploadExtensionEnabled(_ controller: PhotoUploadExtensionControlling) throws {
+    guard !controller.uploadJobExtensionEnabled else { return }
+    try controller.setUploadJobExtensionEnabled(true)
+}
+#endif
+
 /// iOS 26.1+ reliable path: confirmed PhotoKit resources are registered with the
 /// system background uploader and tracked in the App Group intake database.
 @MainActor
@@ -143,7 +163,10 @@ struct ReliablePhotoIntakeService {
             jobs: jobs)
 
         do {
-            try PHPhotoLibrary.shared().setUploadJobExtensionEnabled(true)
+            let library = PHPhotoLibrary.shared()
+            // iOS 26 会把“已经启用”也作为 PHPhotosError 3202 抛出；这不是失败。
+            // 重复调用并在 catch 中回滚，会把第二批及之后的正常批次全部丢回候选箱。
+            try ensurePhotoUploadExtensionEnabled(library)
         } catch {
             // 扩展未启用时绝不能保留 queued job 再回退前台导入；否则未来扩展
             // 恢复会把同一批又上传一次，形成两个 Entry。
@@ -162,7 +185,8 @@ struct ReliablePhotoIntakeService {
         // 恰好在保存 queued 之后被杀，下一次启动也不会让它永久滞留。
         #if !targetEnvironment(macCatalyst)
         if #available(iOS 26.4, *) {
-            try? PHPhotoLibrary.shared().setUploadJobExtensionEnabled(true)
+            let library = PHPhotoLibrary.shared()
+            try? ensurePhotoUploadExtensionEnabled(library)
         }
         #endif
         guard let token = try? await tokenProvider(), !token.isEmpty else { return }

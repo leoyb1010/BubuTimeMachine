@@ -53,8 +53,8 @@ struct BubuGlassTabBar: View {
         .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("主导航")
-        .sensoryFeedback(.selection, trigger: selection)
-        .sensoryFeedback(.impact(weight: .medium), trigger: centerTrigger)
+        .bubuSensoryFeedback(.selection, trigger: selection)
+        .bubuSensoryFeedback(.impact(weight: .medium), trigger: centerTrigger)
     }
 
     private func tabButton(_ item: BubuTabItem) -> some View {

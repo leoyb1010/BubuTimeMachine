@@ -14,6 +14,14 @@ struct RootTabView: View {
     /// 判断依据必须是 sizeClass 而非设备类型——分屏变窄要能自动退回手机布局。
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
+    private var maximumSelectableTab: Int {
+        #if targetEnvironment(macCatalyst)
+        4
+        #else
+        3
+        #endif
+    }
+
     var body: some View {
         Group {
             if isWide { splitLayout } else { tabLayout }
@@ -29,6 +37,9 @@ struct RootTabView: View {
                 Button("") { selection = 1 }.keyboardShortcut("2", modifiers: .command)
                 Button("") { selection = 2 }.keyboardShortcut("3", modifiers: .command)
                 Button("") { selection = 3 }.keyboardShortcut("4", modifiers: .command)
+                #if targetEnvironment(macCatalyst)
+                Button("") { selection = 4 }.keyboardShortcut("5", modifiers: .command)
+                #endif
                 Button("") { selection = 0; quickCaptureTrigger += 1 }
                     .keyboardShortcut("n", modifiers: .command)
             }
@@ -42,7 +53,7 @@ struct RootTabView: View {
             if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),
                i + 1 < ProcessInfo.processInfo.arguments.count,
                let t = Int(ProcessInfo.processInfo.arguments[i + 1]) {
-                selection = min(max(t, 0), 3)
+                selection = min(max(t, 0), maximumSelectableTab)
             }
             // 联调：-uitest-openurl bubu://moment 直接走深链路由，绕过系统 openurl 确认框。
             if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-openurl"),
@@ -74,6 +85,9 @@ struct RootTabView: View {
                     sidebarRow(1, "时光", "clock.fill")
                     sidebarRow(2, "成长", "chart.xyaxis.line")
                     sidebarRow(3, "魔法屋", "wand.and.stars.inverse")
+                    #if targetEnvironment(macCatalyst)
+                    sidebarRow(4, "档案馆", "archivebox.fill")
+                    #endif
                 }
                 Section {
                     Button {
@@ -96,6 +110,9 @@ struct RootTabView: View {
                 case 1: TimelineView()
                 case 2: GrowthHomeView()
                 case 3: AIStudioHomeView()
+                #if targetEnvironment(macCatalyst)
+                case 4: MacArchiveWorkspaceView()
+                #endif
                 default:
                     CaptureHomeView(openTimeline: { selection = 1 },
                                     quickCaptureTrigger: quickCaptureTrigger)

@@ -3,6 +3,22 @@ import Testing
 @testable import BubuTimeMachine
 
 struct PhotoIntakeTests {
+    @MainActor
+    @available(iOS 26.1, *)
+    private final class UploadExtensionControllerSpy: PhotoUploadExtensionControlling {
+        var uploadJobExtensionEnabled: Bool
+        private(set) var setCalls: [Bool] = []
+
+        init(enabled: Bool) {
+            uploadJobExtensionEnabled = enabled
+        }
+
+        func setUploadJobExtensionEnabled(_ enabled: Bool) throws {
+            setCalls.append(enabled)
+            uploadJobExtensionEnabled = enabled
+        }
+    }
+
     @Test("身份特征与照片候选物理分库")
     func identityDatabaseIsIsolated() {
         #expect(BubuStorage.identityDatabaseURL != BubuStorage.intakeDatabaseURL)
@@ -167,6 +183,20 @@ struct PhotoIntakeTests {
         try afterTermination.reconcileUploadBatch(job.batchID)
         #expect(try reopened.uploadQueueSummary() == PhotoUploadQueueSummary(
             pendingBatches: 0, failedBatches: 0))
+    }
+
+    @MainActor
+    @available(iOS 26.1, *)
+    @Test("后台上传扩展已启用时不得重复调用系统 setter")
+    func uploadExtensionEnableIsIdempotent() throws {
+        let alreadyEnabled = UploadExtensionControllerSpy(enabled: true)
+        try ensurePhotoUploadExtensionEnabled(alreadyEnabled)
+        #expect(alreadyEnabled.setCalls.isEmpty)
+
+        let disabled = UploadExtensionControllerSpy(enabled: false)
+        try ensurePhotoUploadExtensionEnabled(disabled)
+        #expect(disabled.setCalls == [true])
+        #expect(disabled.uploadJobExtensionEnabled)
     }
 
     @Test("已忽略候选跨重启仍不会重新提示")

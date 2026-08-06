@@ -114,7 +114,7 @@ struct CaptureHomeView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         // 保存成功时的成功触觉，与「已经收好啦」贴纸同步，强化「完成感」。
-        .sensoryFeedback(.success, trigger: model?.savedFlash)
+        .bubuSensoryFeedback(.success, trigger: model?.savedFlash)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             if model == nil {
@@ -123,7 +123,7 @@ struct CaptureHomeView: View {
             }
             // 已授权过相册就顺手扫一下今天的照片（不主动弹权限）
             photoScanner.refreshAuthorizationState()
-            if photoScanner.authorized { _ = photoScanner.scan() }
+            if photoScanner.authorized { Task { _ = await photoScanner.scan() } }
             refreshUploadQueueSummary()
             Task { await refreshSSDCandidates() }
             Task { await reconcileReliableUploads() }
@@ -131,7 +131,7 @@ struct CaptureHomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // 拍完照切回 App 时立即消费 PhotoKit 增量，不等重启；仍只生成候选，不自动发布。
             photoScanner.refreshAuthorizationState()
-            if photoScanner.authorized { _ = photoScanner.scan() }
+            if photoScanner.authorized { Task { _ = await photoScanner.scan() } }
             refreshUploadQueueSummary()
             Task { await refreshSSDCandidates() }
             Task { await reconcileReliableUploads() }
@@ -257,13 +257,15 @@ struct CaptureHomeView: View {
     }
 
     private func retryFailedUploads() {
-        do {
-            try PhotoIntakeStore().resetFailedUploadBatches()
-            _ = photoScanner.scan()
-            refreshUploadQueueSummary()
-            BubuHaptics.success()
-        } catch {
-            model?.partialSaveWarning = "后台上传暂时没有恢复：\(error.localizedDescription)"
+        Task {
+            do {
+                try PhotoIntakeStore().resetFailedUploadBatches()
+                _ = await photoScanner.scan()
+                refreshUploadQueueSummary()
+                BubuHaptics.success()
+            } catch {
+                model?.partialSaveWarning = "后台上传暂时没有恢复：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -277,7 +279,7 @@ struct CaptureHomeView: View {
         await service.reconcilePendingBatches()
         refreshUploadQueueSummary()
         photoScanner.refreshAuthorizationState()
-        if photoScanner.authorized { _ = photoScanner.scan() }
+        if photoScanner.authorized { _ = await photoScanner.scan() }
     }
 
     // MARK: 今天拍的照片卡（零操作记录）
@@ -289,7 +291,7 @@ struct CaptureHomeView: View {
                 subtitle: "没有处理或发布任何照片，原片仍在系统相册里；可以稍后重试",
                 actionTitle: "重试"
             ) {
-                _ = photoScanner.scan()
+                Task { _ = await photoScanner.scan() }
             }
         } else if photoScanner.authorized, !photoScanner.pendingAssets.isEmpty {
             Button {

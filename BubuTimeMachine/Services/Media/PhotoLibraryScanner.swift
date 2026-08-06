@@ -24,6 +24,12 @@ final class PhotoLibraryScanner {
     private let changeTokenKey = "photo-library-change-token"
     private let handledKey = "bubu.photoscan.handledIDs"
     private let handledDayKey = "bubu.photoscan.handledDay"
+    private var isScanning = false
+    private var rescanRequested = false
+
+    private nonisolated struct ScanPayload: Sendable {
+        let pendingCandidates: [PhotoIntakeCandidate]
+    }
 
     init(store: PhotoIntakeStore = PhotoIntakeStore()) {
         self.store = store
@@ -50,22 +56,65 @@ final class PhotoLibraryScanner {
             eventGroups = []
             return 0
         }
-        return scan()
+        return await scan()
     }
 
     /// 首次回看最近 7 天；此后用 PhotoKit persistent change token 增量补入，
     /// 同时重载 intake.sqlite 中仍 pending 的旧候选，因此跨天/重启不会丢提示。
     @discardableResult
-    func scan() -> Int {
+    func scan() async -> Int {
         guard authorized else { return 0 }
-        lastError = nil
-        migrateLegacyHandledIDsIfNeeded()
+        if isScanning {
+            // 首页出现、回前台、服务器核对可能在同一秒触发；合并成当前轮后的至多一次补扫。
+            rescanRequested = true
+            return pendingAssets.count
+        }
+        isScanning = true
+        defer { isScanning = false }
 
+        repeat {
+            rescanRequested = false
+            lastError = nil
+            migrateLegacyHandledIDsIfNeeded()
+            let scanStore = store
+            let tokenKey = changeTokenKey
+            do {
+                // PhotoKit 枚举、持久变化解析、SQLite upsert/grouping 都不再占用 MainActor。
+                let payload = try await Task.detached(priority: .utility) {
+                    try Self.buildScanPayload(store: scanStore, changeTokenKey: tokenKey)
+                }.value
+                let identifiers = payload.pendingCandidates.map(\.localIdentifier)
+                let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+                var byIdentifier: [String: PHAsset] = [:]
+                result.enumerateObjects { asset, _, _ in
+                    byIdentifier[asset.localIdentifier] = asset
+                }
+                pendingAssets = identifiers.compactMap { byIdentifier[$0] }
+                eventGroups = PhotoEventClusterer.cluster(payload.pendingCandidates)
+            } catch {
+                // 状态库不可用时禁止展示：否则无法判断已收录/已忽略，可能重复发布。
+                // PhotoKit 原片仍在，下次扫描可完整重建候选，不存在事实数据丢失。
+                pendingAssets = []
+                eventGroups = []
+                lastError = error.localizedDescription
+            }
+        } while rescanRequested
+
+        Self.log.info("照片收件箱扫描完成：待处理 \(self.pendingAssets.count, privacy: .public) 个，分为 \(self.eventGroups.count, privacy: .public) 组")
+        return pendingAssets.count
+    }
+
+    private nonisolated static func buildScanPayload(
+        store: PhotoIntakeStore,
+        changeTokenKey: String
+    ) throws -> ScanPayload {
         let library = PHPhotoLibrary.shared()
-        var identifiers = Set((try? store.pendingIdentifiers()) ?? [])
+        var identifiers = Set(try store.pendingIdentifiers())
         var needsRecentBootstrap = false
 
-        if let token = loadChangeToken() {
+        if let data = try store.data(forMetadataKey: changeTokenKey),
+           let token = try? NSKeyedUnarchiver.unarchivedObject(
+               ofClass: PHPersistentChangeToken.self, from: data) {
             do {
                 let changes = try library.fetchPersistentChanges(since: token)
                 var deleted: [String] = []
@@ -78,7 +127,7 @@ final class PhotoLibraryScanner {
                 try store.mark(deleted, state: .deleted)
                 identifiers.subtract(deleted)
             } catch {
-                // change token 过期/不可用时只重扫近期窗口，正式状态仍由 intake.sqlite 去重。
+                // token 过期/不可用时仅补扫近期窗口；正式状态仍由 intake.sqlite 去重。
                 try? store.setData(nil, forMetadataKey: changeTokenKey)
                 needsRecentBootstrap = true
             }
@@ -89,8 +138,9 @@ final class PhotoLibraryScanner {
         var fetched: [PHAsset] = []
         if needsRecentBootstrap {
             let options = PHFetchOptions()
-            let start = Calendar.current.date(byAdding: .day, value: -7,
-                                              to: Calendar.current.startOfDay(for: .now)) ?? .distantPast
+            let calendar = Calendar.current
+            let start = calendar.date(
+                byAdding: .day, value: -7, to: calendar.startOfDay(for: .now)) ?? .distantPast
             options.predicate = NSPredicate(
                 format: "creationDate >= %@ AND (mediaType == %d OR mediaType == %d)",
                 start as NSDate, PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
@@ -100,36 +150,25 @@ final class PhotoLibraryScanner {
             identifiers.formUnion(fetched.map(\.localIdentifier))
         }
 
-        if !identifiers.isEmpty {
-            let alreadyFetched = Set(fetched.map(\.localIdentifier))
-            let missing = identifiers.subtracting(alreadyFetched)
-            if !missing.isEmpty {
-                let result = PHAsset.fetchAssets(withLocalIdentifiers: Array(missing), options: nil)
-                result.enumerateObjects { asset, _, _ in fetched.append(asset) }
-            }
+        let alreadyFetched = Set(fetched.map(\.localIdentifier))
+        let missing = identifiers.subtracting(alreadyFetched)
+        if !missing.isEmpty {
+            let result = PHAsset.fetchAssets(withLocalIdentifiers: Array(missing), options: nil)
+            result.enumerateObjects { asset, _, _ in fetched.append(asset) }
         }
 
         let candidates = fetched.compactMap(Self.candidate)
-        do {
-            try store.upsertDiscovered(candidates)
-            let candidateIDs = Set(candidates.map(\.localIdentifier))
-            let states = try store.states(for: Array(candidateIDs))
-            pendingAssets = fetched.filter { asset in
-                guard candidateIDs.contains(asset.localIdentifier) else { return false }
-                let state = states[asset.localIdentifier] ?? .discovered
-                return state == .discovered || state == .failed
-            }.sorted { ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast) }
-            try saveChangeToken(library.currentChangeToken)
-        } catch {
-            // 状态库不可用时禁止展示：否则无法判断已收录/已忽略，可能重复发布。
-            // PhotoKit 原片仍在，下次扫描可完整重建候选，不存在事实数据丢失。
-            pendingAssets = []
-            lastError = error.localizedDescription
-        }
-
-        rebuildGroups()
-        Self.log.info("照片收件箱扫描完成：待处理 \(self.pendingAssets.count, privacy: .public) 个，分为 \(self.eventGroups.count, privacy: .public) 组")
-        return pendingAssets.count
+        try store.upsertDiscovered(candidates)
+        let candidateIDs = candidates.map(\.localIdentifier)
+        let states = try store.states(for: candidateIDs)
+        let pending = candidates.filter {
+            let state = states[$0.localIdentifier] ?? .discovered
+            return state == .discovered || state == .failed
+        }.sorted { $0.creationDate > $1.creationDate }
+        let tokenData = try NSKeyedArchiver.archivedData(
+            withRootObject: library.currentChangeToken, requiringSecureCoding: true)
+        try store.setData(tokenData, forMetadataKey: changeTokenKey)
+        return ScanPayload(pendingCandidates: pending)
     }
 
     func assets(in group: PhotoEventGroup) -> [PHAsset] {
@@ -169,7 +208,7 @@ final class PhotoLibraryScanner {
         eventGroups = PhotoEventClusterer.cluster(pendingAssets.compactMap(Self.candidate))
     }
 
-    private static func candidate(_ asset: PHAsset) -> PhotoIntakeCandidate? {
+    private nonisolated static func candidate(_ asset: PHAsset) -> PhotoIntakeCandidate? {
         guard let creationDate = asset.creationDate else { return nil }
         let kind: PhotoIntakeMediaKind
         switch asset.mediaType {
@@ -189,18 +228,6 @@ final class PhotoLibraryScanner {
             burstIdentifier: asset.burstIdentifier,
             isLivePhoto: asset.mediaSubtypes.contains(.photoLive)
         )
-    }
-
-    private func loadChangeToken() -> PHPersistentChangeToken? {
-        guard let data = try? store.data(forMetadataKey: changeTokenKey) else { return nil }
-        return try? NSKeyedUnarchiver.unarchivedObject(
-            ofClass: PHPersistentChangeToken.self, from: data)
-    }
-
-    private func saveChangeToken(_ token: PHPersistentChangeToken) throws {
-        let data = try NSKeyedArchiver.archivedData(
-            withRootObject: token, requiringSecureCoding: true)
-        try store.setData(data, forMetadataKey: changeTokenKey)
     }
 
     private func migrateLegacyHandledIDsIfNeeded() {

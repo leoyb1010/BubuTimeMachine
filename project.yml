@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.9.0"
-    CURRENT_PROJECT_VERSION: "2026080605"
+    MARKETING_VERSION: "2.9.1"
+    CURRENT_PROJECT_VERSION: "2026080606"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -43,6 +43,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine
+        # 家庭自托管固定入口。PocketBase 必须走 bubu-api；FastAPI/语义与可靠照片
+        # staging 走 bubu-ai。Info.plist 只接受这两个构建时注入值，避免把家庭登录态
+        # 发往设置里误填的任意主机。
+        BUBU_DEFAULT_BASE_URL: "https://bubu-api.leoyuan.top"
+        BUBU_DEFAULT_AI_BASE_URL: "https://bubu-ai.leoyuan.top"
         # G6 Mac 档案馆复用同一 SwiftUI / SwiftData / 同步引擎，避免另造数据孤岛。
         # iPhone 专属扩展通过依赖平台过滤，不嵌进 Catalyst 包。
         SUPPORTS_MACCATALYST: YES
