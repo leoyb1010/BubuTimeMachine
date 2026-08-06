@@ -492,6 +492,21 @@ nonisolated struct PhotoIntakeStore: Sendable {
         }
     }
 
+    /// 该批次是否有任何一个 job 曾上传成功（succeeded/acknowledged）。
+    /// 404 对账用：有成功记录的批次大概率服务端已 commit 后被清理周期删行，
+    /// 此时还原候选箱会造成二次发布。
+    func uploadBatchHasSucceededJobs(_ batchID: String) throws -> Bool {
+        try withDatabase { db in
+            let stmt = try prepare(
+                "SELECT COUNT(*) FROM upload_jobs WHERE batch_id=? AND state IN ('succeeded','acknowledged')",
+                db: db)
+            defer { sqlite3_finalize(stmt) }
+            bind(batchID, at: 1, to: stmt)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return false }
+            return sqlite3_column_int64(stmt, 0) > 0
+        }
+    }
+
     func finishUploadBatchFromServer(_ batchID: String) throws {
         let jobs = try uploadJobs(states: [.queued, .registered, .retrying, .failed])
             .filter { $0.batchID == batchID }
@@ -507,6 +522,20 @@ nonisolated struct PhotoIntakeStore: Sendable {
         try withDatabase { db in
             try execute("BEGIN IMMEDIATE", db: db)
             do {
+                // 【防重复 Entry】已 committed 的批次绝不允许被迟到的 job 结果降级：
+                // 扩展在"Photos job 已提交、registered 未落库"间被杀会产生重复 job，
+                // 第一个 job 成功让服务端 commit 后，迟到副本撞 409 判 failed——
+                // 若在这里把批次拉回 failed，资产会回候选箱、用户再确认就是第二个 Entry。
+                let stateStmt = try prepare(
+                    "SELECT state FROM upload_batches WHERE batch_id=?", db: db)
+                defer { sqlite3_finalize(stateStmt) }
+                bind(batchID, at: 1, to: stateStmt)
+                if sqlite3_step(stateStmt) == SQLITE_ROW,
+                   let cState = sqlite3_column_text(stateStmt, 0),
+                   String(cString: cState) == "committed" {
+                    try execute("COMMIT", db: db)
+                    return
+                }
                 let counts = try prepare(
                     "SELECT state,COUNT(*) FROM upload_jobs WHERE batch_id=? GROUP BY state", db: db)
                 defer { sqlite3_finalize(counts) }

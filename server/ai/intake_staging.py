@@ -566,9 +566,18 @@ class IntakeStagingStore:
             ).fetchall()
             for row in cancelled:
                 shutil.rmtree(self.files / row["id"], ignore_errors=True)
+            # committed 与 cancelled 同理是永久小墓碑：删掉这行元数据后，
+            # 收口迟到的客户端查询会得到 404 → 把已发布的资产还原回候选箱 →
+            # 用户再确认 = 服务器上第二个 Entry（幂等键随新 batchID 失效）。
+            # 行保留，只清中转文件（占空间的是文件不是行）。
+            committed = db.execute(
+                "SELECT id FROM batches WHERE updated_at<? AND state='committed'", (cutoff,)
+            ).fetchall()
+            for row in committed:
+                shutil.rmtree(self.files / row["id"], ignore_errors=True)
             rows = db.execute(
                 "SELECT id FROM batches WHERE updated_at<? AND state IN "
-                "('awaiting_confirmation','accepted','uploading','staged','failed','committed')",
+                "('awaiting_confirmation','accepted','uploading','staged','failed')",
                 (cutoff,),
             ).fetchall()
             for row in rows:

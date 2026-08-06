@@ -167,6 +167,11 @@ struct ReliablePhotoIntakeService {
             // iOS 26 会把“已经启用”也作为 PHPhotosError 3202 抛出；这不是失败。
             // 重复调用并在 catch 中回滚，会把第二批及之后的正常批次全部丢回候选箱。
             try ensurePhotoUploadExtensionEnabled(library)
+        } catch let error as NSError
+            where error.domain == "PHPhotosErrorDomain" && error.code == 3202 {
+            // 兜底：guard 依赖 uploadJobExtensionEnabled 属性如实反映系统状态，
+            // 属性滞后返回 false 时 setter 仍会抛 3202——语义就是"已经启用"，
+            // 当成功继续，绝不把健康批次 discard 回候选箱。
         } catch {
             // 扩展未启用时绝不能保留 queued job 再回退前台导入；否则未来扩展
             // 恢复会把同一批又上传一次，形成两个 Entry。
@@ -198,7 +203,15 @@ struct ReliablePhotoIntakeService {
             guard let (data, response) = try? await URLSession.shared.data(for: statusRequest),
                   let http = response as? HTTPURLResponse else { continue }
             if http.statusCode == 404 {
-                try? store.discardUploadBatch(batchID, restoreCandidates: true)
+                // 404 有两种含义：批次真不存在（还原候选，让用户重来）；
+                // 或服务端清理周期删掉了记录。若本地已有成功上传的 job，
+                // 大概率服务端早已 commit——还原会导致同一批照片被二次确认成第二个 Entry。
+                // 按"疑似已发布"收口；一张都没传成过才安全还原。
+                if (try? store.uploadBatchHasSucceededJobs(batchID)) == true {
+                    try? store.finishUploadBatchFromServer(batchID)
+                } else {
+                    try? store.discardUploadBatch(batchID, restoreCandidates: true)
+                }
                 continue
             }
             guard (200..<300).contains(http.statusCode),

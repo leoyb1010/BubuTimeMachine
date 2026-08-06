@@ -305,6 +305,17 @@ struct HealthHomeView: View {
     private func deletePendingRecord() {
         guard let record = deletingRecord else { return }
         PendingDeletion.enqueue(collection: "healthrecords", remoteId: record.remoteId, in: context)
+        // 体检里的身高体重会派生一条 GrowthMeasurement：不连带删的话，
+        // 孤儿测量仍参与"最新值"与成长曲线——删掉的体检数据阴魂不散。
+        if let measurementId = record.growthMeasurementId {
+            let d = FetchDescriptor<GrowthMeasurement>(
+                predicate: #Predicate { $0.id == measurementId })
+            if let measurement = try? context.fetch(d).first {
+                PendingDeletion.enqueue(collection: "growthmeasurements",
+                                        remoteId: measurement.remoteId, in: context)
+                context.delete(measurement)
+            }
+        }
         context.delete(record)
         try? context.save()
         env.refreshWidgetSnapshot(context: context)

@@ -633,6 +633,17 @@ final class SyncEngine {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertVaccineRecord(Self.makeDTO(item))
+                // 同 Entry/HealthRecord 的复活守卫：await 期间用户可能已删除（疫苗页有删除入口），
+                // 彼时 remoteId 为 nil、删除队列空转——写回会让记录在全家复活。重查补墓碑。
+                let vaccineId = item.id
+                let vaccineExists = ((try? context.fetchCount(FetchDescriptor<VaccineRecord>(
+                    predicate: #Predicate { $0.id == vaccineId }))) ?? 0) > 0
+                guard vaccineExists else {
+                    PendingDeletion.enqueue(collection: "vaccinerecords", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
                 // LWW：远端这条更新导致本次推送被通用 upsert 跳过（带回的编辑时间比本地新）→ 采用远端版本，
                 // 否则本地会停在旧内容却被标成 synced，且游标已越过该记录不会再拉回（与 S-P2 游标解耦并存的收尾）。
                 if let remoteEdited = saved.editedAt, remoteEdited > item.updatedAt {

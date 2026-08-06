@@ -48,12 +48,18 @@ struct TimelineView: View {
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
     var body: some View {
+        #if DEBUG
+        let bodyT0 = CFAbsoluteTimeGetCurrent()
+        #endif
         let semanticTaskKey = SemanticSearchTaskKey(
             query: searchText,
             enabled: (env.config.semanticSearchEnabled && env.config.isAIConfigured) || Self.semanticVisualProbe,
             serviceRevision: env.aiServiceRevision,
-            entriesRevision: semanticEntriesRevision
+            entriesRevision: entriesRevision
         )
+        #if DEBUG
+        let _ = Self.logSlowKey(CFAbsoluteTimeGetCurrent() - bodyT0, entries: entries.count)
+        #endif
         ZStack {
             BubuTheme.Color.background.ignoresSafeArea()
 
@@ -72,7 +78,11 @@ struct TimelineView: View {
         // 本地文字结果立即出现；停顿 300ms 后再请求家中语义索引。请求失败不影响离线结果。
         .task(id: semanticTaskKey) { await updateSearch(semanticTaskKey) }
         .onAppear { rebuildSectionsIfNeeded(); refreshUnseenBadge() }
-        .onChange(of: entries) { _, _ in rebuildSections(); refreshUnseenBadge() }
+        .onChange(of: entries) { _, _ in
+            entriesRevision += 1
+            rebuildSections()
+            refreshUnseenBadge()
+        }
         .onChange(of: sortModeRaw) { _, _ in rebuildSections() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -405,17 +415,14 @@ struct TimelineView: View {
     }
 
     /// 仅作当前进程 task 失效键：Entry 或媒体/remoteId 后补时，活跃查询自动重跑。
-    private var semanticEntriesRevision: Int {
-        var revision = 0
-        for entry in entries {
-            revision ^= entry.id.hashValue
-            for media in entry.media {
-                revision ^= media.id.hashValue
-                if let remoteID = media.remoteId { revision ^= remoteID.hashValue }
-            }
-        }
-        return revision
-    }
+    /// 【性能事故现场，别改回计算属性】原实现是 body 里的计算属性：
+    /// 遍历全库 entries × 每条的 media 关系——首次访问触发 SwiftData faulting（主线程磁盘读）。
+    /// 实测 400 条 × 2 媒体：每次 body 65-77ms，一次进页 body 求值 5 次 ≈ 350ms 纯阻塞，
+    /// 真机真实照片库上这就是「点时光 Tab 卡 1 秒」的主因。
+    /// 改为计数器：entries 变化时在已有的 onChange 里 +1，body 里零遍历。
+    /// 语义损失（media.remoteId 同步完成不再触发重搜）可接受：
+    /// 命中解析在渲染时兜底（cardMedia 找不到 remoteId 会落到封面图）。
+    @State private var entriesRevision = 0
 
     @ViewBuilder
     private var semanticStatusBanner: some View {
@@ -533,7 +540,28 @@ struct TimelineView: View {
 
     /// 重新分组：仅在 entries / 搜索词 / 排序方式变化时调用，避免每次 body 求值 O(n) 重分组。
     /// @Query 固定按 happenedAt 倒序取数；按记录时间浏览时在这里内存重排（个人家庭库量级无压力）。
+    #if DEBUG
+    /// 性能取证：semanticTaskKey（含全库 revision 遍历）在 body 里的耗时。
+    /// `-uitest-perf` 时打印每次；平时只在超 8ms 时告警。
+    nonisolated static func logSlowKey(_ seconds: Double, entries: Int) {
+        let ms = seconds * 1000
+        if ProcessInfo.processInfo.arguments.contains("-uitest-perf") {
+            print("BUBUPERF key=\(String(format: "%.1f", ms))ms entries=\(entries)")
+        } else if ms > 8 {
+            print("BUBUPERF SLOW key=\(String(format: "%.1f", ms))ms entries=\(entries)")
+        }
+    }
+    #endif
+
     private func rebuildSections() {
+        #if DEBUG
+        let t0 = CFAbsoluteTimeGetCurrent()
+        defer {
+            if ProcessInfo.processInfo.arguments.contains("-uitest-perf") {
+                print("BUBUPERF sections=\(String(format: "%.1f", (CFAbsoluteTimeGetCurrent() - t0) * 1000))ms")
+            }
+        }
+        #endif
         let calendar = Calendar.current
         let filtered = matchingEntries.sorted { sortDate($0) > sortDate($1) }
         let groups = Dictionary(grouping: filtered) { entry -> DateComponents in

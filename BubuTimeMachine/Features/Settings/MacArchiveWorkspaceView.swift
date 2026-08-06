@@ -56,10 +56,14 @@ nonisolated enum OpenArchiveVerifier {
 
         for rawLine in manifest.split(whereSeparator: \Character.isNewline) {
             let line = String(rawLine)
-            guard line.utf8.count >= 67 else { throw VerificationError.malformedManifest }
-            let hashEnd = line.index(line.startIndex, offsetBy: 64)
+            // 【崩溃修复】护栏按 utf8 字节数、偏移却按 Character 数——一行 30 个汉字
+            // （90 字节 ≥ 67，但只有 30 个 Character）会让 index(offsetBy:) 越过 endIndex
+            // 直接 fatal trap。校验来路不明的档案本该抛 malformedManifest，不是崩掉整个 App。
+            // 一律用 limitedBy 安全推进，越界即格式错误。
+            guard let hashEnd = line.index(line.startIndex, offsetBy: 64, limitedBy: line.endIndex),
+                  let separatorEnd = line.index(hashEnd, offsetBy: 2, limitedBy: line.endIndex)
+            else { throw VerificationError.malformedManifest }
             let expected = String(line[..<hashEnd]).lowercased()
-            let separatorEnd = line.index(hashEnd, offsetBy: 2)
             guard line[hashEnd..<separatorEnd] == "  ",
                   expected.count == 64,
                   expected.allSatisfy({ $0.isHexDigit })
@@ -74,6 +78,13 @@ nonisolated enum OpenArchiveVerifier {
             }
             guard FileManager.default.fileExists(atPath: fileURL.path) else {
                 missing.append(relative)
+                continue
+            }
+            // 只认常规文件：符号链接可指向档案外（哈希 oracle），FIFO/设备文件会让
+            // sha256 循环永不返回（校验卡死在"正在逐个核对"）。异类一律按不匹配计。
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true else {
+                mismatched.append(relative)
                 continue
             }
             checked += 1
@@ -207,6 +218,9 @@ struct MacArchiveWorkspaceView: View {
             }
         }
         .onChange(of: filter) { _, _ in selectedIDs.removeAll() }
+        // 搜索词变化同样清空选择：否则选中的条目被过滤隐藏后仍会被批量操作到——
+        // 用户以为在操作眼前 2 条，实际连同看不见的 3 条一起动了。
+        .onChange(of: searchText) { _, _ in selectedIDs.removeAll() }
     }
 
     private var archiveList: some View {
@@ -474,11 +488,18 @@ struct MacArchiveWorkspaceView: View {
 
     private func applyArchive(_ archived: Bool) {
         guard !selectedEntries.isEmpty else { return }
+        let count = selectedEntries.count
         selectedEntries.forEach {
             $0.isArchived = archived
             $0.editedAt = .now
             $0.syncState = .local
         }
+        // 与时光轴/详情页的归档语义对齐：写一条家庭动态，家人知道谁动了档案。
+        // 批量合成一条，不逐条刷屏。
+        context.insert(FeedEvent(kind: .entryArchived,
+                                 actorRole: env.config.currentRole.rawValue,
+                                 summary: archived ? "在 Mac 档案馆归档了 \(count) 条记录"
+                                                   : "在 Mac 档案馆恢复了 \(count) 条记录"))
         saveAndSync()
         selectedIDs.removeAll()
     }

@@ -68,6 +68,7 @@ struct BubuTimeMachineApp: App {
                 .task {
                     #if DEBUG
                     seedForUITestingIfNeeded()
+                    seedBigForPerfIfNeeded()
                     dumpShareCardsIfNeeded()
                     dumpGrowthAuditIfNeeded()
                     #endif
@@ -299,6 +300,32 @@ struct BubuTimeMachineApp: App {
         env.currentMemberId = mama.id
         env.hasCompletedOnboarding = true
     }
+    /// 压测种子：`-uitest-seed-big` 再铺 400 条记录 × 2 媒体行。
+    /// 专给时光页性能测量用——faulting/分组/遍历的成本要在真实量级下测，
+    /// 4 条种子测不出任何东西。媒体行只有假文件名（测的是关系 fault，不是解码）。
+    @MainActor
+    private func seedBigForPerfIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("-uitest-seed-big") else { return }
+        let context = modelContainer.mainContext
+        let existing = (try? context.fetchCount(FetchDescriptor<Entry>())) ?? 0
+        guard existing < 300 else { return }   // 幂等：已铺过不重复
+        let base = Date.now
+        for i in 0..<400 {
+            let entry = Entry(happenedAt: base.addingTimeInterval(Double(-i) * 86_400 * 0.7),
+                              authorRole: i % 3 == 0 ? "爸爸" : "妈妈",
+                              note: "压测记录 #\(i)：今天也很可爱")
+            context.insert(entry)
+            for j in 0..<2 {
+                let media = Media(type: j == 0 ? .photo : .video,
+                                  localFileName: "perf-\(i)-\(j).jpg")
+                media.remoteId = "perf-remote-\(i)-\(j)"
+                media.entry = entry
+                context.insert(media)
+            }
+        }
+        try? context.save()
+    }
+
 
     @MainActor
     private func seedCapsule(into context: ModelContext, title: String, letter: String, unlockAt: Date, emoji: String) {

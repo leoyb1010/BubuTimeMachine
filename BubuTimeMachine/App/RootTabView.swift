@@ -26,6 +26,11 @@ struct RootTabView: View {
         Group {
             if isWide { splitLayout } else { tabLayout }
         }
+        // 档案馆（tag 4）只存在于宽屏侧栏：Catalyst 窗口拖窄切回 tabLayout 时，
+        // selection 还停在 4 会落到没有任何匹配页的空白。收窄即回时光页。
+        .onChange(of: isWide) { _, wide in
+            if !wide && selection > 3 { selection = 1 }
+        }
         // 完整版 App 的 Dynamic Type 上限：4 Tab + 卡片 + 玻璃底栏属密集布局，
         // 收紧到 accessibility1（无障碍档中最小的一档，body 已约 1.6×）——在「字尽量大」与
         // 「不破版」之间取的保守安全档；younger 家人才走完整版，极端无障碍档少见。

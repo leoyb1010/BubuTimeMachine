@@ -121,20 +121,11 @@ struct CaptureHomeView: View {
                 model = CaptureModel(mediaStore: env.mediaStore, analyzer: env.photoAnalyzer,
                                      role: env.config.currentRole)
             }
-            // 已授权过相册就顺手扫一下今天的照片（不主动弹权限）
-            photoScanner.refreshAuthorizationState()
-            if photoScanner.authorized { Task { _ = await photoScanner.scan() } }
-            refreshUploadQueueSummary()
-            Task { await refreshSSDCandidates() }
-            Task { await reconcileReliableUploads() }
+            kickOffHomeRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // 拍完照切回 App 时立即消费 PhotoKit 增量，不等重启；仍只生成候选，不自动发布。
-            photoScanner.refreshAuthorizationState()
-            if photoScanner.authorized { Task { _ = await photoScanner.scan() } }
-            refreshUploadQueueSummary()
-            Task { await refreshSSDCandidates() }
-            Task { await reconcileReliableUploads() }
+            kickOffHomeRefresh()
         }
         .onChange(of: quickCaptureTrigger) { _, _ in
             startQuickCapture()
@@ -249,6 +240,21 @@ struct CaptureHomeView: View {
             .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .bubuCardShadow()
         }
+    }
+
+    /// 首页刷新統一入口。冷启动时 onAppear 与 didBecomeActive 会背靠背各来一次，
+    /// 原来是两份一模一样的工作清单——scan 有合并闸，但 SSD 候选/上传对账没有：
+    /// 双份认证、双份批次状态查询、双份 commit 尝试，纯浪费。2 秒节流合并成一份。
+    @State private var lastHomeRefreshAt = Date.distantPast
+
+    private func kickOffHomeRefresh() {
+        photoScanner.refreshAuthorizationState()
+        guard Date.now.timeIntervalSince(lastHomeRefreshAt) > 2 else { return }
+        lastHomeRefreshAt = .now
+        if photoScanner.authorized { Task { _ = await photoScanner.scan() } }
+        refreshUploadQueueSummary()
+        Task { await refreshSSDCandidates() }
+        Task { await reconcileReliableUploads() }
     }
 
     private func refreshUploadQueueSummary() {

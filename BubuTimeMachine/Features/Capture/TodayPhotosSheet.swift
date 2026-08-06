@@ -394,21 +394,35 @@ struct TodayPhotosSheet: View {
             } else {
                 analysisFrames = []
             }
-            let frameSignals = analysisFrames.compactMap {
-                PhotoSelectionAnalyzer.analyze(
-                    imageData: $0, isScreenshot: Self.isScreenCapture(asset))
-            }
-            if let bestSignals = frameSignals.max(by: { $0.qualityScore < $1.qualityScore }) {
+            // 【卡顿修复】Vision（条码/文字/人脸/特征打印）每帧几十到几百毫秒。
+            // 工程默认 MainActor 隔离 + 继承调用方 actor，直接调用会让整组照片的
+            // 分析全部串行压在主线程——一组 20 张就是数秒可感冻结。
+            // 入参 Data 与识别器都是 Sendable，整块下移 detached；PHAsset 不跨隔离域。
+            let isShot = Self.isScreenCapture(asset)
+            let recognizer = identityRecognizer
+            let recognizerEnabled = recognizer.isEnabled
+            let frames = analysisFrames
+            let (bestSignals, bestMatch) = await Task.detached(priority: .userInitiated) {
+                () -> (PhotoSelectionSignals?, ChildIdentityMatch?) in
+                let frameSignals = frames.compactMap {
+                    PhotoSelectionAnalyzer.analyze(imageData: $0, isScreenshot: isShot)
+                }
+                let signals = frameSignals.max(by: { $0.qualityScore < $1.qualityScore })
+                var match: ChildIdentityMatch?
+                if recognizerEnabled {
+                    var matches: [ChildIdentityMatch] = []
+                    for frame in frames {
+                        matches.append(await recognizer.match(imageData: frame))
+                    }
+                    match = matches.max(by: { $0.confidence < $1.confidence })
+                }
+                return (signals, match)
+            }.value
+            if let bestSignals {
                 nextSignals[asset.localIdentifier] = bestSignals
             }
-            if identityRecognizer.isEnabled {
-                var matches: [ChildIdentityMatch] = []
-                for frame in analysisFrames {
-                    matches.append(await identityRecognizer.match(imageData: frame))
-                }
-                if let bestMatch = matches.max(by: { $0.confidence < $1.confidence }) {
-                    nextMatches[asset.localIdentifier] = bestMatch
-                }
+            if let bestMatch {
+                nextMatches[asset.localIdentifier] = bestMatch
             }
         }
 
