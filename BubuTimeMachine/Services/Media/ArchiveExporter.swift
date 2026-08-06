@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 // MARK: - 全量档案导出
-/// 导出 index.html + data.json + media/，覆盖照片、视频、语音、家人合奏与成长之声。
+/// 导出 HTML / PDF / JSON / Markdown + media/，覆盖照片、视频、语音、家人合奏与成长之声。
 nonisolated struct ArchiveExporter: Sendable {
     let mediaStore: MediaStore
 
@@ -191,8 +191,15 @@ nonisolated struct ArchiveExporter: Sendable {
             .write(to: root.appendingPathComponent("data.json"), options: .atomic)
         try Self.buildHTML(input, incomplete: incomplete)
             .write(to: root.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        try ArchivePDFRenderer.write(input, to: root.appendingPathComponent("成长档案.pdf"))
         try Self.buildMarkdown(input, incomplete: incomplete)
             .write(to: root.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        let verifyURL = root.appendingPathComponent("验证档案.command")
+        try Self.verifyScript.write(to: verifyURL, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: verifyURL.path)
+        let restoreURL = root.appendingPathComponent("恢复开放档案.command")
+        try Self.restoreScript.write(to: restoreURL, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: restoreURL.path)
         try Self.buildManifest(root: root)
             .write(to: root.appendingPathComponent("manifest.sha256"), atomically: true, encoding: .utf8)
         return ExportResult(
@@ -471,7 +478,7 @@ nonisolated struct ArchiveExporter: Sendable {
                 tags: entry.tags)
         }
         let root = JSONRoot(
-            archiveVersion: 3,
+            archiveVersion: 4,
             generatedAt: iso.string(from: .now),
             childName: input.childName,
             birthday: iso.string(from: input.birthday),
@@ -531,7 +538,7 @@ nonisolated struct ArchiveExporter: Sendable {
         var lines = [
             "# \(input.childName)的布布时光机档案",
             "",
-            "这是不依赖 App 的开放格式档案。可直接打开 `index.html` 浏览，`data.json` 用于机器迁移，`media/` 保存原始媒体与加密胶囊，`manifest.sha256` 用于完整性校验。",
+            "这是不依赖 App 的开放格式档案。可直接打开 `index.html` 或 `成长档案.pdf` 阅读，`data.json` 用于机器迁移，`media/` 保存原始媒体与加密胶囊。双击 `验证档案.command` 可核对所有文件，`恢复开放档案.command` 可在校验后复制出一份完整档案。",
             "",
             "- 出生日期：\(df.string(from: input.birthday))",
             "- 时光：\(input.entries.count) 条",
@@ -565,6 +572,52 @@ nonisolated struct ArchiveExporter: Sendable {
         }
         return lines.joined(separator: "\n")
     }
+
+    /// macOS/Linux 都能直接运行；脚本只读档案并逐项比对 manifest。
+    private static let verifyScript = """
+    #!/bin/sh
+    set -eu
+    ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+    cd "$ROOT"
+    if command -v shasum >/dev/null 2>&1; then
+      shasum -a 256 -c manifest.sha256
+    elif command -v sha256sum >/dev/null 2>&1; then
+      sha256sum -c manifest.sha256
+    else
+      echo "找不到 SHA-256 校验工具（需要 shasum 或 sha256sum）。" >&2
+      exit 2
+    fi
+    echo "档案完整：可以离线打开 index.html 或 成长档案.pdf。"
+    """
+
+    /// 先做完整性校验，再复制到一个全新的目标目录；绝不覆盖现有文件。
+    private static let restoreScript = """
+    #!/bin/sh
+    set -eu
+    ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+    DEST=${1:-}
+    if [ -z "$DEST" ]; then
+      echo "用法：将目标文件夹拖到本脚本后面，或运行：$0 /目标/文件夹" >&2
+      exit 2
+    fi
+    if [ -e "$DEST" ]; then
+      echo "目标已存在，为避免覆盖任何文件，恢复已停止：$DEST" >&2
+      exit 3
+    fi
+    PARENT=$(dirname -- "$DEST")
+    mkdir -p "$PARENT"
+    PARENT=$(CDPATH= cd -- "$PARENT" && pwd -P)
+    DEST="$PARENT/$(basename -- "$DEST")"
+    case "$DEST/" in "$ROOT"/*)
+      echo "目标不能位于当前档案内部。" >&2
+      exit 4
+      ;;
+    esac
+    "$ROOT/验证档案.command"
+    mkdir "$DEST"
+    (cd "$ROOT" && tar -cf - .) | (cd "$DEST" && tar -xf -)
+    echo "开放档案已恢复到：$DEST"
+    """
 
     private static func buildManifest(root: URL) throws -> String {
         let fm = FileManager.default

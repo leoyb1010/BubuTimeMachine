@@ -1,4 +1,5 @@
 import Foundation
+#if !targetEnvironment(macCatalyst)
 import ActivityKit
 import OSLog
 
@@ -108,3 +109,14 @@ enum BubuActivityController {
         }
     }
 }
+#else
+/// Catalyst 没有锁屏 Live Activity；Mac 档案馆保留同一调用面并安静降级。
+@MainActor
+enum BubuActivityController {
+    static func startVoiceRecording(childName: String) {}
+    static func endVoiceRecording(elapsedText: String) {}
+    static func startSleepTimer(childName: String, startedAt: Date) {}
+    static func endSleepTimer(elapsedText: String) {}
+    static func startCapsuleCountdown(title: String, unlockAt: Date, childName: String) {}
+}
+#endif

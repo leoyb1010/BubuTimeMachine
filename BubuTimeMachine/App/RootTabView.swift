@@ -72,7 +72,7 @@ struct RootTabView: View {
                 Section {
                     sidebarRow(0, "首页", "house.fill")
                     sidebarRow(1, "时光", "clock.fill")
-                    sidebarRow(2, "里程碑", "star.fill")
+                    sidebarRow(2, "成长", "chart.xyaxis.line")
                     sidebarRow(3, "魔法屋", "wand.and.stars.inverse")
                 }
                 Section {
@@ -94,7 +94,7 @@ struct RootTabView: View {
             NavigationStack {
                 switch selection {
                 case 1: TimelineView()
-                case 2: MilestonesHomeView()
+                case 2: GrowthHomeView()
                 case 3: AIStudioHomeView()
                 default:
                     CaptureHomeView(openTimeline: { selection = 1 },
@@ -135,10 +135,10 @@ struct RootTabView: View {
                 .toolbar(.hidden, for: .tabBar)
 
                 NavigationStack {
-                    MilestonesHomeView()
+                    GrowthHomeView()
                 }
                 .safeAreaInset(edge: .bottom) { tabBarSpacer }
-                .tabItem { Label("里程碑", systemImage: "star.fill") }
+                .tabItem { Label("成长", systemImage: "chart.xyaxis.line") }
                 .tag(2)
                 .toolbar(.hidden, for: .tabBar)
 

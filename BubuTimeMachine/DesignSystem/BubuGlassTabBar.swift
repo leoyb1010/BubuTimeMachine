@@ -23,7 +23,7 @@ struct BubuGlassTabBar: View {
         .init(id: 1, title: "时光", systemImage: "clock.fill"),
     ]
     private let right: [BubuTabItem] = [
-        .init(id: 2, title: "里程碑", systemImage: "star.fill"),
+        .init(id: 2, title: "成长", systemImage: "chart.xyaxis.line"),
         .init(id: 3, title: "魔法屋", systemImage: "wand.and.stars.inverse"),
     ]
 

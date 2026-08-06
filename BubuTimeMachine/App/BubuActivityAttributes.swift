@@ -1,4 +1,5 @@
 import Foundation
+#if !targetEnvironment(macCatalyst)
 import ActivityKit
 
 // MARK: - Live Activity 属性（主 App 与 Widget extension 共享）
@@ -27,3 +28,4 @@ struct BubuActivityAttributes: ActivityAttributes {
     /// 布布名字（展示用）。
     var childName: String
 }
+#endif

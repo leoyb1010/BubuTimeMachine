@@ -23,7 +23,7 @@ final class BubuRouter {
 enum BubuRoute: String {
     case identity   // 身份卡 → 首页
     case moment     // 今日时光 → 时光轴
-    case growth     // 成长一览 → 里程碑
+    case growth     // 成长一览 → 成长域
     case record     // 记一笔 → 首页并拉起快速记录
 
     static let scheme = "bubu"

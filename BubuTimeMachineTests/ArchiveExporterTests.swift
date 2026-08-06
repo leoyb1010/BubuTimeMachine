@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import BubuTimeMachine
@@ -36,7 +37,7 @@ struct ArchiveExporterTests {
         #expect(result.incompleteReferences == ["time-capsule:test-id"])
         let data = try Data(contentsOf: result.root.appendingPathComponent("data.json"))
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(json["archiveVersion"] as? Int == 3)
+        #expect(json["archiveVersion"] as? Int == 4)
         #expect((json["growthMeasurements"] as? [[String: Any]])?.count == 1)
         #expect((json["vaccines"] as? [[String: Any]])?.count == 1)
         #expect((json["timeCapsules"] as? [[String: Any]])?.count == 1)
@@ -47,11 +48,31 @@ struct ArchiveExporterTests {
             contentsOf: result.root.appendingPathComponent("README.md"), encoding: .utf8)
         #expect(readme.contains("本次档案不完整"))
         #expect(readme.contains("time-capsule:test-id"))
+        #expect(readme.contains("成长档案.pdf"))
+
+        let pdf = try Data(contentsOf: result.root.appendingPathComponent("成长档案.pdf"))
+        #expect(String(decoding: pdf.prefix(4), as: UTF8.self) == "%PDF")
+        #expect(FileManager.default.isExecutableFile(
+            atPath: result.root.appendingPathComponent("验证档案.command").path))
+        #expect(FileManager.default.isExecutableFile(
+            atPath: result.root.appendingPathComponent("恢复开放档案.command").path))
 
         let manifest = try String(
             contentsOf: result.root.appendingPathComponent("manifest.sha256"), encoding: .utf8)
         #expect(manifest.contains("  data.json"))
         #expect(manifest.contains("  index.html"))
         #expect(manifest.contains("  README.md"))
+        #expect(manifest.contains("  成长档案.pdf"))
+        #expect(manifest.contains("  验证档案.command"))
+        #expect(manifest.contains("  恢复开放档案.command"))
+        for line in manifest.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            let expected = try #require(parts.first.map(String.init))
+            let relative = try #require(parts.last.map(String.init))
+                .trimmingCharacters(in: .whitespaces)
+            let file = try Data(contentsOf: result.root.appendingPathComponent(relative))
+            let actual = SHA256.hash(data: file).map { String(format: "%02x", $0) }.joined()
+            #expect(actual == expected)
+        }
     }
 }

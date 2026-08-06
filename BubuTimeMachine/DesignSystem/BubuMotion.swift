@@ -19,12 +19,22 @@ nonisolated enum BubuMotion {
 // MARK: - 统一按压缩放
 /// 卡片/统计卡等可点元素的标准按压反馈：轻微缩小，不拦截滚动。
 struct BubuPressableStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var scale: CGFloat = 0.97
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .animation(BubuMotion.quick, value: configuration.isPressed)
+            .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? scale : 1))
+            // 取自 leotexiao Squish Button 的“快压、弹回”，原生端收敛振幅到 3%，
+            // 高频按钮不会夸张；减少动态效果开启时完全静止。
+            .animation(
+                reduceMotion
+                    ? nil
+                    : (configuration.isPressed
+                        ? .easeOut(duration: 0.08)
+                        : .spring(response: 0.42, dampingFraction: 0.72)),
+                value: configuration.isPressed
+            )
     }
 }
 

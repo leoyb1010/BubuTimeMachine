@@ -65,6 +65,11 @@ struct ReliablePhotoIntakeService {
         note: String?,
         authorRole: String
     ) async throws {
+#if targetEnvironment(macCatalyst)
+        // Photos 的 ExtensionKit 后台上传只存在于 iPhone/iPad；Mac 档案馆继续使用
+        // 成熟的前台保真导入和 SSD 候选确认，不制造一条永远跑不起来的后台 job。
+        throw IntakeError.unavailable
+#else
         guard #available(iOS 26.4, *),
               PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
             throw IntakeError.unavailable
@@ -145,6 +150,7 @@ struct ReliablePhotoIntakeService {
             try? store.discardUploadBatch(batchID, restoreCandidates: true)
             throw IntakeError.unavailable
         }
+#endif
     }
 
     /// 修复 Photos 与共享 SQLite 在进程终止边界上的短暂不一致：事实层是最终真相。
@@ -154,9 +160,11 @@ struct ReliablePhotoIntakeService {
         // saveUploadBatch 与首次启用扩展不可能跨两个持久系统做成同一事务。
         // 因此每次启动只要还有未收口批次，就幂等补一次启用动作；即使 App
         // 恰好在保存 queued 之后被杀，下一次启动也不会让它永久滞留。
+        #if !targetEnvironment(macCatalyst)
         if #available(iOS 26.4, *) {
             try? PHPhotoLibrary.shared().setUploadJobExtensionEnabled(true)
         }
+        #endif
         guard let token = try? await tokenProvider(), !token.isEmpty else { return }
         for batchID in batchIDs {
             var statusRequest = URLRequest(

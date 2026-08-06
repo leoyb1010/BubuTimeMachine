@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.8.0"
-    CURRENT_PROJECT_VERSION: "2026080604"
+    MARKETING_VERSION: "2.9.0"
+    CURRENT_PROJECT_VERSION: "2026080605"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -43,6 +43,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine
+        # G6 Mac 档案馆复用同一 SwiftUI / SwiftData / 同步引擎，避免另造数据孤岛。
+        # iPhone 专属扩展通过依赖平台过滤，不嵌进 Catalyst 包。
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: BubuTimeMachine/Info.plist
@@ -51,10 +55,13 @@ targets:
     dependencies:
       - target: BubuWidgetsExtension
         embed: true
+        platformFilter: iOS
       - target: BubuPhotoUpload
         embed: true
+        platformFilter: iOS
       - target: BubuWatch
         embed: true
+        platformFilter: iOS
 
   BubuPhotoUpload:
     type: extensionkit-extension

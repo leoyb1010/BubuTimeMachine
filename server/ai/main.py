@@ -24,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import secrets
 import shutil
@@ -59,7 +60,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="1.4.0")
+app = FastAPI(title="布布时光机 AI 服务", version="1.4.1")
 
 llm = LLMClient()
 
@@ -456,6 +457,20 @@ def _semantic_enabled() -> bool:
     return os.environ.get("SEMANTIC_SEARCH_ENABLED", "false").lower() in {
         "1", "true", "yes", "on"
     }
+
+
+def _semantic_min_score() -> float:
+    """Return a safe similarity threshold even when an operator mistypes env config."""
+    raw = os.environ.get("SEMANTIC_MIN_SCORE", "0.50").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("invalid SEMANTIC_MIN_SCORE; using calibrated default")
+        return 0.50
+    if not math.isfinite(value) or not 0 <= value <= 1:
+        logger.warning("out-of-range SEMANTIC_MIN_SCORE; using calibrated default")
+        return 0.50
+    return value
 
 
 def _semantic_components() -> tuple[SemanticIndex, MobileCLIPEncoder]:
@@ -896,7 +911,9 @@ def semantic_search(req: SemanticSearchReq):
     family_id = os.environ.get("SEMANTIC_FAMILY_ID", "").strip()
     if not family_id:
         raise HTTPException(status_code=503, detail="服务器尚未绑定语义搜索家庭。")
-    min_score = float(os.environ.get("SEMANTIC_MIN_SCORE", "0.52"))
+    # 生产图库校准：0.52 会把海边、笑脸这类肉眼明确命中的纯画面结果一起挡掉；
+    # 0.50 仍会拒绝睡眠/水果等本轮明显误匹配，同时保留文字与标签的高置信命中。
+    min_score = _semantic_min_score()
     hits = index.search(query, embedding, limit=req.limit, family_id=family_id,
                         min_score=min_score)
     return SemanticSearchResp(

@@ -457,8 +457,10 @@ struct RootView: View {
             NavigationStack { CapsuleHomeView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth-entry") {
             HealthRecordSheet(kind: .checkup, growthOnly: true)
-        } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth") {
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth-curve") {
             NavigationStack { GrowthCurveView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth") {
+            NavigationStack { GrowthHomeView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-diary") {
             NavigationStack { FirstPersonDiaryView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-voice") {

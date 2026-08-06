@@ -55,7 +55,9 @@ def main() -> int:
         return 0
     except WeeklyReportUnavailable as exc:
         # 材料不足是正常状态，不制造空周报，也不触发告警重试风暴。
-        print("WEEKLY_REPORT_SKIPPED reason=%s" % type(exc).__name__)
+        # 这里只会出现生成器内定义的固定原因，不包含家庭正文；保留具体原因方便判断
+        # 是缺记录、缺成长事实还是缺原声，避免把正确的“无证据不生成”误判为故障。
+        print("WEEKLY_REPORT_SKIPPED reason=%s" % str(exc))
         return 0
     except Exception as exc:  # noqa: BLE001
         print("WEEKLY_REPORT_FAILED type=%s" % type(exc).__name__, file=sys.stderr)
