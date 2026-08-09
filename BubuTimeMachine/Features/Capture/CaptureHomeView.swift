@@ -266,12 +266,15 @@ struct CaptureHomeView: View {
     /// 原来是两份一模一样的工作清单——scan 有合并闸，但 SSD 候选/上传对账没有：
     /// 双份认证、双份批次状态查询、双份 commit 尝试，纯浪费。2 秒节流合并成一份。
     @State private var lastHomeRefreshAt = Date.distantPast
+    /// 照片智能收件箱总开关（默认关）：实际使用验证下来，手动发记录 + SSD 批量
+    /// 导入才是主路；自动收件箱交互不顺手，收进设置里做可选能力。
+    @AppStorage("bubu.photoInbox.enabled") private var photoInboxEnabled = false
 
     private func kickOffHomeRefresh() {
         photoScanner.refreshAuthorizationState()
         guard Date.now.timeIntervalSince(lastHomeRefreshAt) > 2 else { return }
         lastHomeRefreshAt = .now
-        if photoScanner.authorized { Task { _ = await photoScanner.scan() } }
+        if photoInboxEnabled, photoScanner.authorized { Task { _ = await photoScanner.scan() } }
         refreshUploadQueueSummary()
         Task { await refreshSSDCandidates() }
         Task { await reconcileReliableUploads() }
@@ -377,7 +380,7 @@ struct CaptureHomeView: View {
     // MARK: 今天拍的照片卡（零操作记录）
     @ViewBuilder
     private var todayPhotosCard: some View {
-        if photoScanner.authorized, photoScanner.lastError != nil {
+        if photoInboxEnabled, photoScanner.authorized, photoScanner.lastError != nil {
             photoIntakePermissionCard(
                 title: "照片自动整理暂时停住了",
                 subtitle: "没有处理或发布任何照片，原片仍在系统相册里；可以稍后重试",
@@ -385,7 +388,7 @@ struct CaptureHomeView: View {
             ) {
                 Task { _ = await photoScanner.scan() }
             }
-        } else if photoScanner.authorized, !photoScanner.pendingAssets.isEmpty {
+        } else if photoInboxEnabled, photoScanner.authorized, !photoScanner.pendingAssets.isEmpty {
             Button {
                 showTodayPhotos = true
             } label: {
@@ -420,7 +423,7 @@ struct CaptureHomeView: View {
             }
             .buttonStyle(.plain)
             .popoverTip(TodayPhotosTip())
-        } else if photoScanner.authorizationStatus == .limited {
+        } else if photoInboxEnabled, photoScanner.authorizationStatus == .limited {
             photoIntakePermissionCard(
                 title: "目前只看得到部分照片",
                 subtitle: "改为完整访问后，才能自动发现之后拍摄的全部照片和视频",
@@ -428,7 +431,7 @@ struct CaptureHomeView: View {
             ) {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }
-        } else if photoScanner.authorizationStatus == .notDetermined {
+        } else if photoInboxEnabled, photoScanner.authorizationStatus == .notDetermined {
             photoIntakePermissionCard(
                 title: "让照片自己排好队",
                 subtitle: "一次授权，自动发现新照片和视频；确认后才会收进时光",

@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var showFrame = false
     /// 相框每张停留秒数（与 PhotoFrameView 共用同一个 AppStorage 键）
     @AppStorage("bubu.photoFrame.dwell") private var frameDwell: Double = 8
+    @AppStorage("bubu.photoInbox.enabled") private var photoInboxEnabled = false
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
@@ -41,6 +42,12 @@ struct SettingsView: View {
                         tint: env.theme.theme.primary) { YearbookView() }
                     row("导出开放阅读档案", icon: "square.and.arrow.up.on.square.fill",
                         tint: env.theme.theme.secondary) { ExportView() }
+                    Toggle(isOn: $photoInboxEnabled) {
+                        settingRowLabel("照片智能收件箱", icon: "photo.badge.plus.fill",
+                                        tint: BubuTheme.Color.pink,
+                                        subtitle: "首页自动发现新照片、提示「待收好」。关着也不影响手动记录和移动硬盘批量导入")
+                    }
+                    .tint(env.theme.theme.primary)
                 }
                 group("外观") {
                     row("主题与外观", icon: "paintpalette.fill", tint: env.theme.theme.primary) { ThemeSettingsView() }
