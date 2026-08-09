@@ -88,6 +88,22 @@ struct PhotoUploadBatchGuardTests {
         let remaining = try store.activeUploadBatchIDs()
         #expect(remaining == [partial], "有成功记录的批次被取回——可能造成重复 Entry")
     }
+
+    @Test("取回后队列摘要归零：job 行随批次删除，孤儿 job 不再计数")
+    func recallClearsQueueSummary() throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let batch = "batch-recall-ui"
+        try store.saveUploadBatch(batchID: batch, entryLocalID: UUID().uuidString,
+                                  assetIdentifiers: ["asset-r"], jobs: [job("r", batch: batch)])
+        #expect(try store.uploadQueueSummary().pendingBatches == 1)
+
+        _ = try store.recallStalledUploadBatches()
+        let summary = try store.uploadQueueSummary()
+        #expect(summary.pendingBatches == 0,
+                "取回后「正在回家」卡片仍在——job 孤儿行还在计数（线上 v2.9.4 现象）")
+        #expect(summary.failedBatches == 0)
+    }
 }
 
 // MARK: - 服务器信任边界补测

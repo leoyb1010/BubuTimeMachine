@@ -419,6 +419,12 @@ nonisolated struct PhotoIntakeStore: Sendable {
                 defer { sqlite3_finalize(delete) }
                 bind(batchID, at: 1, to: delete)
                 try stepDone(delete, db: db)
+                // job 行必须跟着批次一起删：uploadQueueSummary 按 upload_jobs 计数，
+                // 孤儿 job 会让「正在回家/停住了」卡片在批次已取回后永远挂着。
+                let deleteJobs = try prepare("DELETE FROM upload_jobs WHERE batch_id=?", db: db)
+                defer { sqlite3_finalize(deleteJobs) }
+                bind(batchID, at: 1, to: deleteJobs)
+                try stepDone(deleteJobs, db: db)
                 if restoreCandidates {
                     let restore = try prepare(
                         "UPDATE intake_assets SET state='discovered',updated_at=? WHERE local_identifier=? AND state='queued'",
@@ -444,8 +450,14 @@ nonisolated struct PhotoIntakeStore: Sendable {
         try withDatabase { db in
             func count(_ states: [String]) throws -> Int {
                 let placeholders = states.map { _ in "?" }.joined(separator: ",")
+                // JOIN 批次表：批次行已删（取回/重新整理）的孤儿 job 不参与计数——
+                // 修复取回后卡片不消失，也让旧版本遗留的孤儿立即失效。
                 let statement = try prepare(
-                    "SELECT COUNT(DISTINCT batch_id) FROM upload_jobs WHERE state IN (\(placeholders))",
+                    """
+                    SELECT COUNT(DISTINCT j.batch_id) FROM upload_jobs j
+                    JOIN upload_batches b ON b.batch_id = j.batch_id
+                    WHERE j.state IN (\(placeholders))
+                    """,
                     db: db)
                 defer { sqlite3_finalize(statement) }
                 for (index, state) in states.enumerated() {
