@@ -86,6 +86,56 @@ routerAdd('POST', '/api/bubu/intake/commit', (e) => {
         // 返回已有事实，由 staging 正常收口并清理本批中转文件。
         if (freshItems.length === 0) return
 
+        // 幂等升级：客户端可能已把同 localId 的记录（占位被编辑后）推了上来。
+        // localId 有唯一索引，盲建会撞索引让 commit 永久失败——先查后建/复用。
+        const priorEntries = txApp.findRecordsByFilter(
+            'entries', 'familyId={:family} && localId={:local} && isDeleted=false', '', 1, 0,
+            { family: familyId, local: entryLocalId }
+        )
+        if (priorEntries.length > 0) {
+            const prior = priorEntries[0]
+            if (!prior.getString('intakeBatchId')) {
+                prior.set('intakeBatchId', batchId)
+                txApp.save(prior)
+            }
+            entryId = prior.id
+            for (const item of freshItems) {
+                const assetKey = String(field(item, 'asset_key') || '')
+                const storedPath = String(field(item, 'stored_path') || '')
+                const digest = String(field(item, 'content_hash') || '')
+                if (!/^[A-Za-z0-9_-]{8,128}$/.test(assetKey)
+                    || !/^[0-9a-f]{64}$/.test(digest)
+                    || storedPath.indexOf(allowedPrefix) !== 0
+                    || storedPath.indexOf('/../') >= 0) {
+                    throw new BadRequestError('invalid staged item')
+                }
+                // media.localId 同样有唯一去重语义：已存在（客户端推过）就跳过
+                const priorMedia = txApp.findRecordsByFilter(
+                    'media', 'familyId={:family} && localId={:local}', '', 1, 0,
+                    { family: familyId, local: assetKey }
+                )
+                if (priorMedia.length > 0) continue
+                const file = $filesystem.fileFromPath(storedPath)
+                const media = new Record(txApp.findCollectionByNameOrId('media'))
+                media.set('localId', assetKey)
+                media.set('entryLocalId', entryLocalId)
+                media.set('familyId', familyId)
+                media.set('authorUserId', String(body.owner || '').replace(/^pb:/, ''))
+                media.set('mediaType', String(field(item, 'media_type') || 'photo'))
+                media.set('file', file)
+                media.set('contentHash', digest)
+                media.set('intakeBatchId', batchId)
+                media.set('sourceAssetKey', assetKey)
+                media.set('sourceRaw', String(field(entryData, 'source') || 'iphone-photo-library'))
+                media.set('resourceRole', String(field(item, 'resource_role') || 'original'))
+                media.set('assetGroupId', String(field(item, 'asset_group_id') || assetKey))
+                media.set('isDeleted', false)
+                media.set('clientUpdatedAt', new Date().toISOString())
+                txApp.save(media)
+            }
+            return
+        }
+
         const entry = new Record(txApp.findCollectionByNameOrId('entries'))
         entry.set('localId', entryLocalId)
         entry.set('familyId', familyId)

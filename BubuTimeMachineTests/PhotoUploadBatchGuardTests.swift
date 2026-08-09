@@ -84,7 +84,7 @@ struct PhotoUploadBatchGuardTests {
         try store.updateUploadJob(batchID: partial, assetKey: "p", state: .succeeded)
 
         let recalled = try store.recallStalledUploadBatches()
-        #expect(recalled == 1)
+        #expect(recalled.count == 1)
         let remaining = try store.activeUploadBatchIDs()
         #expect(remaining == [partial], "有成功记录的批次被取回——可能造成重复 Entry")
     }
@@ -103,6 +103,32 @@ struct PhotoUploadBatchGuardTests {
         #expect(summary.pendingBatches == 0,
                 "取回后「正在回家」卡片仍在——job 孤儿行还在计数（线上 v2.9.4 现象）")
         #expect(summary.failedBatches == 0)
+    }
+
+    @Test("取回返回批次的 entry_local_id：调用方据此删除本地占位记录")
+    func recallReturnsEntryLocalIDs() throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let batch = "batch-placeholder"
+        let entryLocalID = UUID().uuidString
+        try store.saveUploadBatch(batchID: batch, entryLocalID: entryLocalID,
+                                  assetIdentifiers: ["asset-x"], jobs: [job("x", batch: batch)])
+        let recalled = try store.recallStalledUploadBatches()
+        #expect(recalled == [entryLocalID])
+    }
+
+    @Test("队列摘要包含真实进度：已传 x/总 y")
+    func summaryReportsUploadProgress() throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let batch = "batch-progress"
+        try store.saveUploadBatch(batchID: batch, entryLocalID: UUID().uuidString,
+                                  assetIdentifiers: ["asset-1", "asset-2"],
+                                  jobs: [job("p1", batch: batch), job("p2", batch: batch)])
+        try store.updateUploadJob(batchID: batch, assetKey: "p1", state: .succeeded)
+        let summary = try store.uploadQueueSummary()
+        #expect(summary.totalJobs == 2)
+        #expect(summary.uploadedJobs == 1)
     }
 }
 

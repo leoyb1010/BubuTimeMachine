@@ -41,6 +41,21 @@ struct ReliablePhotoIntakeService {
         }
     }
 
+    /// enqueue 成功后的回执：调用方据此立即建本地占位 Entry/Media（收好即完成）。
+    /// assetKey 与服务端 hook 写入的 media.localId 相同——同步下来按 id 确定性合并，零重复。
+    struct EnqueuedDisplayItem {
+        let asset: PHAsset
+        let assetKey: String
+        let assetGroupID: String
+        let mediaType: String
+    }
+    struct EnqueueReceipt {
+        let batchID: String
+        let entryLocalID: String
+        let happenedAt: Date
+        let displayItems: [EnqueuedDisplayItem]
+    }
+
     private struct ResourceSpec {
         let assetKey: String
         let assetGroupID: String
@@ -80,11 +95,12 @@ struct ReliablePhotoIntakeService {
         self.tokenProvider = tokenProvider
     }
 
+    @discardableResult
     func enqueue(
         assets: [PHAsset],
         note: String?,
         authorRole: String
-    ) async throws {
+    ) async throws -> EnqueueReceipt {
 #if targetEnvironment(macCatalyst)
         // Photos 的 ExtensionKit 后台上传只存在于 iPhone/iPad；Mac 档案馆继续使用
         // 成熟的前台保真导入和 SSD 候选确认，不制造一条永远跑不起来的后台 job。
@@ -169,6 +185,14 @@ struct ReliablePhotoIntakeService {
             entryLocalID: entryLocalID,
             assetIdentifiers: assets.map(\.localIdentifier),
             jobs: jobs)
+        let receipt = EnqueueReceipt(
+            batchID: batchID,
+            entryLocalID: entryLocalID,
+            happenedAt: happenedAt,
+            displayItems: resources.filter { $0.role == "display" }.map {
+                EnqueuedDisplayItem(asset: $0.asset, assetKey: $0.assetKey,
+                                    assetGroupID: $0.assetGroupID, mediaType: $0.mediaType)
+            })
 
         do {
             let library = PHPhotoLibrary.shared()
@@ -186,6 +210,7 @@ struct ReliablePhotoIntakeService {
             try? store.discardUploadBatch(batchID, restoreCandidates: true)
             throw IntakeError.unavailable
         }
+        return receipt
 #endif
     }
 
@@ -250,7 +275,8 @@ struct ReliablePhotoIntakeService {
         let selected: [(PHAssetResource, String, String)]
         switch asset.mediaType {
         case .image:
-            selected = selectImageResources(all)
+            selected = selectImageResources(
+                all, includeLivePairedVideo: asset.mediaSubtypes.contains(.photoLive))
         case .video:
             selected = selectVideoResources(all)
         case .audio:
@@ -270,15 +296,21 @@ struct ReliablePhotoIntakeService {
     }
 
     private static func selectImageResources(
-        _ resources: [PHAssetResource]
+        _ resources: [PHAssetResource],
+        includeLivePairedVideo: Bool
     ) -> [(PHAssetResource, String, String)] {
-        // 可靠后台路径每个 PHAsset 只提交一个可见原片，避免同一资产的
-        // display/original/paired 被各消费面重复统计。Live Photo 由成熟前台路径
-        // 同时保存静态图与配对视频，不进入本路径。
+        // 每个 PHAsset 提交一个可见原片（role=display）；实况照片额外提交配对视频
+        // （role=paired，isDisplayResource 会把它挡在时光流外，只做保真归档）。
         guard let original = resources.first(where: { $0.type == .fullSizePhoto })
             ?? resources.first(where: { $0.type == .photo })
             ?? resources.first(where: { $0.type == .alternatePhoto }) else { return [] }
-        return [(original, "photo", "display")]
+        var selected: [(PHAssetResource, String, String)] = [(original, "photo", "display")]
+        if includeLivePairedVideo,
+           let paired = resources.first(where: { $0.type == .fullSizePairedVideo })
+               ?? resources.first(where: { $0.type == .pairedVideo }) {
+            selected.append((paired, "video", "paired"))
+        }
+        return selected
     }
 
     private static func selectVideoResources(

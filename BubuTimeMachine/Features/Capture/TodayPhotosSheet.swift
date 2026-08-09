@@ -32,6 +32,8 @@ struct TodayPhotosSheet: View {
     @State private var note = ""
     @State private var saving = false
     @State private var importError: String?
+    @State private var importProgress: (done: Int, total: Int)?
+    @State private var importCancelled = false
     @State private var groupToIgnore: PhotoEventGroup?
     @State private var selectionSignals: [String: PhotoSelectionSignals] = [:]
     @State private var identityMatches: [String: ChildIdentityMatch] = [:]
@@ -518,8 +520,20 @@ struct TodayPhotosSheet: View {
     private var savingOverlay: some View {
         ZStack {
             Color.black.opacity(0.25).ignoresSafeArea()
-            ProgressView("正在收好…").tint(.white).foregroundStyle(.white)
-                .padding(28).background(BubuTheme.Color.warmBrown.opacity(0.92), in: RoundedRectangle(cornerRadius: 22))
+            VStack(spacing: 14) {
+                ProgressView().tint(.white)
+                Text(importProgress.map { "正在收好 第 \($0.done)/\($0.total) 个…" } ?? "正在收好…")
+                    .font(BubuTheme.Font.scaled(15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                if importProgress != nil, !importCancelled {
+                    Button("先收这些，剩下的下次继续") { importCancelled = true }
+                        .font(BubuTheme.Font.scaled(13, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .padding(28)
+            .background(BubuTheme.Color.warmBrown.opacity(0.92), in: RoundedRectangle(cornerRadius: 22))
         }
     }
 
@@ -528,20 +542,31 @@ struct TodayPhotosSheet: View {
     /// 失败诚实上报：只把成功的照片标记"已处理"，失败的下次还会提示。
     private func importSelected() async {
         saving = true
-        defer { saving = false }
+        importCancelled = false
+        defer { saving = false; importProgress = nil }
 
         let chosen = assets.filter { selected.contains($0.localIdentifier) }
         let noteText = note.trimmingCharacters(in: .whitespacesAndNewlines)
         let role = env.config.currentRole
 
-        // iOS 26.4+ 把用户已经确认的这一段交给 PhotoKit 系统后台上传：锁屏、切 App、
-        // 断网和重启后都由 intake.sqlite + mini staging 收敛。任何准备失败都安全回退
-        // 下面原有的本地保真导入，不会丢掉用户这次选择。
-        if await enqueueReliableBackgroundImport(
-            chosen, note: noteText.isEmpty ? nil : noteText, role: role
-        ) {
+        // 【收好即完成】选择拆成两路：照片（含实况）交给 PhotoKit 系统后台上传，
+        // 同时立即创建本地占位 Entry——记录马上出现在时光轴，原片在后台慢慢回家；
+        // 只有视频留在前台保真导入（公网大文件受代理限制）。后台路准备失败时
+        // 整批安全回退前台导入，不丢掉这次选择。
+        let videos = chosen.filter { $0.mediaType == .video }
+        let images = chosen.filter { $0.mediaType == .image }
+        var queuedImages: [PHAsset] = []
+        if !images.isEmpty,
+           let receipt = await enqueueReliableBackgroundImport(
+               images, note: noteText.isEmpty ? nil : noteText, role: role) {
+            makePlaceholderEntry(receipt: receipt, note: noteText, role: role)
+            queuedImages = images
+        }
+
+        let foregroundAssets = queuedImages.isEmpty ? chosen : videos
+        if foregroundAssets.isEmpty {
             BubuHaptics.success()
-            onDone(PhotoImportOutcome(accepted: [], ignored: [], queued: chosen))
+            onDone(PhotoImportOutcome(accepted: [], ignored: [], queued: queuedImages))
             dismiss()
             return
         }
@@ -556,7 +581,9 @@ struct TodayPhotosSheet: View {
         var aggregatedTags: [String] = []
         var createdMedia: [Media] = []
 
-        for asset in chosen {
+        for (index, asset) in foregroundAssets.enumerated() {
+            if importCancelled { break }
+            importProgress = (index + 1, foregroundAssets.count)
             let media: Media
             var pairedLivePhotoMedia: Media?
             if asset.mediaType == .video {
@@ -652,22 +679,28 @@ struct TodayPhotosSheet: View {
             }
         }
 
-        let failedCount = chosen.count - okAssets.count - duplicateAssets.count
+        let failedCount = foregroundAssets.count - okAssets.count - duplicateAssets.count
 
         // 全是重复：不落空 Entry，标记已处理后温和告知（不算失败）
         if okAssets.isEmpty, !duplicateAssets.isEmpty, failedCount == 0 {
             context.delete(entry)
             BubuHaptics.tapLight()
             importError = "这 \(duplicateAssets.count) 张之前都收录过啦，没有重复保存。"
-            onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: []))
+            onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: [], queued: queuedImages))
             return
         }
 
         guard !okAssets.isEmpty else {
             // 一张都没成：即使填过附言也不落空 Entry；重复项可安全从候选移除，失败项保留重试。
             context.delete(entry)
-            if !duplicateAssets.isEmpty {
-                onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: []))
+            if importCancelled {
+                // 用户主动取消且什么都没导入：候选原样保留，不弹错误
+                onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: [], queued: queuedImages))
+                dismiss()
+                return
+            }
+            if !duplicateAssets.isEmpty || !queuedImages.isEmpty {
+                onDone(PhotoImportOutcome(accepted: duplicateAssets, ignored: [], queued: queuedImages))
             }
             importError = "选中的素材没有成功读取（照片可能还在 iCloud 上没下载，连上网络后再试）。"
             return
@@ -698,15 +731,22 @@ struct TodayPhotosSheet: View {
         let acceptedAssets = okAssets + duplicateAssets
         let dupNote = duplicateAssets.isEmpty ? "" : "（\(duplicateAssets.count) 张之前收录过，自动跳过）"
 
+        if importCancelled {
+            // 主动取消：已导入的算收好，剩下的留在待收好，下次继续；不算错误
+            BubuHaptics.success()
+            onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: [], queued: queuedImages))
+            dismiss()
+            return
+        }
         if failedCount > 0 {
             importError = "收好了 \(okAssets.count) 张\(dupNote)，另外 \(failedCount) 张没能读取（可能还在 iCloud 上），之后会再提醒你。"
             BubuHaptics.warning()
-            onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: []))
+            onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: [], queued: queuedImages))
             // 不立即 dismiss：让用户看到提示，点"知道了"后自己关
             return
         }
         BubuHaptics.success()
-        onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: []))
+        onDone(PhotoImportOutcome(accepted: acceptedAssets, ignored: [], queued: queuedImages))
         dismiss()
     }
 
@@ -714,24 +754,69 @@ struct TodayPhotosSheet: View {
         _ chosen: [PHAsset],
         note: String?,
         role: FamilyRole
-    ) async -> Bool {
+    ) async -> ReliablePhotoIntakeService.EnqueueReceipt? {
         guard #available(iOS 26.4, *),
               env.config.isConfigured,
               let baseURL = env.config.aiBaseURL,
-              // 公网大文件会受代理限制；视频继续走已有前台保真路径。
-              chosen.allSatisfy({
-                  $0.mediaType == .image && !$0.mediaSubtypes.contains(.photoLive)
-              }) else { return false }
+              // 实况照片也走后台（静态原片 + role=paired 配对视频一起归档）；
+              // 视频（公网大文件受代理限制）继续走前台保真路径。
+              chosen.allSatisfy({ $0.mediaType == .image }) else { return nil }
         let service = ReliablePhotoIntakeService(baseURL: baseURL) {
             try await env.apiClient.authenticate(role: "intake").token
         }
         do {
-            try await service.enqueue(
+            return try await service.enqueue(
                 assets: chosen, note: note, authorRole: role.rawValue)
-            return true
         } catch {
             // 可靠管线未建立时不把候选标记成功；直接走成熟的前台导入路径。
-            return false
+            return nil
+        }
+    }
+
+    /// 【收好即完成】后台批次登记成功后，立即用回执建本地占位记录：
+    /// Entry.id = 批次 entry_local_id、Media.id = assetKey——与服务端 hook 写入的
+    /// localId 逐字相同，同步下来按 id 确定性合并（apply 只增不清），零重复。
+    /// syncState 设 .synced：本地不推（服务端 hook 建权威副本），只等 pull 合并。
+    private func makePlaceholderEntry(
+        receipt: ReliablePhotoIntakeService.EnqueueReceipt,
+        note: String, role: FamilyRole
+    ) {
+        let entry = Entry(happenedAt: receipt.happenedAt, authorRole: role.rawValue,
+                          note: note.isEmpty ? nil : note)
+        if let uuid = UUID(uuidString: receipt.entryLocalID) { entry.id = uuid }
+        entry.syncState = .synced
+        context.insert(entry)
+        var pendingThumbs: [(Media, PHAsset)] = []
+        for item in receipt.displayItems {
+            let media = Media(type: item.mediaType == "video" ? .video : .photo,
+                              localFileName: nil)
+            if let uuid = UUID(uuidString: item.assetKey) { media.id = uuid }
+            media.assetGroupID = item.assetGroupID
+            media.resourceRoleRaw = "display"
+            media.width = item.asset.pixelWidth
+            media.height = item.asset.pixelHeight
+            media.syncState = .synced
+            media.entry = entry
+            context.insert(media)
+            pendingThumbs.append((media, item.asset))
+        }
+        let event = FeedEvent(kind: .entryCreated, actorRole: role.rawValue,
+                              summary: "收好了 \(receipt.displayItems.count) 张照片，原片正在回家",
+                              targetLocalId: entry.id.uuidString,
+                              happenedAt: entry.happenedAt)
+        context.insert(event)
+        try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        // 缩略图异步补齐：本地优先（不等 iCloud），补上前时光轴先显示占位底色
+        let store = env.mediaStore
+        let modelContext = context
+        Task {
+            for (media, asset) in pendingThumbs {
+                if let image = await PhotoLibraryScanner.loadThumb(asset, targetPixel: 1200) {
+                    media.thumbnailFileName = store.makePhotoThumbnail(fromImage: image)
+                }
+            }
+            try? modelContext.save()
         }
     }
 }

@@ -235,7 +235,9 @@ struct CaptureHomeView: View {
                         Text("\(uploadQueueSummary.pendingBatches) 段原片正在回家")
                             .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text("锁屏或切换 App 也会继续；长时间没进展可点这里处理")
+                        Text(uploadQueueSummary.totalJobs > 0
+                             ? "已传 \(uploadQueueSummary.uploadedJobs)/\(uploadQueueSummary.totalJobs) 张；锁屏也会继续，长时间没进展可点这里"
+                             : "锁屏或切换 App 也会继续；长时间没进展可点这里处理")
                             .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
@@ -291,19 +293,55 @@ struct CaptureHomeView: View {
     private func recallPendingUploads() {
         Task {
             do {
-                let recalled = try await Task.detached(priority: .userInitiated) {
+                let recalledEntryIDs = try await Task.detached(priority: .userInitiated) {
                     try PhotoIntakeStore().recallStalledUploadBatches()
                 }.value
+                // 取回批次对应的本地占位记录一并删除（照片回到候选箱，占位留着
+                // 会在用户再次确认时变成重复记录）。只删服务器从未确认过的。
+                deletePlaceholderEntries(localIDs: recalledEntryIDs)
                 _ = await photoScanner.scan()
                 refreshUploadQueueSummary()
                 BubuHaptics.success()
-                if recalled == 0 {
+                if recalledEntryIDs.isEmpty {
                     model?.partialSaveWarning = "这些批次已有照片上传成功，为避免重复发布会继续等待服务器收口"
                 }
             } catch {
                 model?.partialSaveWarning = "取回暂时没成功：\(error.localizedDescription)"
             }
         }
+    }
+
+    /// 删除后台上传的本地占位记录。判据必须同时满足：
+    /// syncState == .synced 且 remoteId == nil——只有占位记录长这样
+    /// （正常记录推送后有 remoteId，拉下来的也有），绝不会误删真实记录。
+    private func deletePlaceholderEntries(localIDs: [String]) {
+        guard !localIDs.isEmpty else { return }
+        for idString in localIDs {
+            guard let uuid = UUID(uuidString: idString) else { continue }
+            let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == uuid })
+            guard let entry = try? modelContext.fetch(descriptor).first,
+                  entry.remoteId == nil, entry.syncState == .synced else { continue }
+            for media in entry.media {
+                env.mediaStore.deleteLocalFiles(media: media.localFileName,
+                                                thumbnail: media.thumbnailFileName)
+                modelContext.delete(media)
+            }
+            modelContext.delete(entry)
+        }
+        try? modelContext.save()
+    }
+
+    /// 孤儿占位清理：批次已 committed 但服务端因整批照片重复没建 Entry
+    /// （hook 去重路径），本地占位在一轮成功同步后仍无 remoteId——删除，
+    /// 否则同一批照片在时光轴出现两条记录。给同步留 5 分钟余量。
+    private func cleanupOrphanPlaceholders() async {
+        guard let lastSynced = env.syncEngine.lastSyncedAt else { return }
+        let rows = await Task.detached(priority: .utility) {
+            (try? PhotoIntakeStore().committedBatchEntryInfo()) ?? []
+        }.value
+        let stale = rows.filter { lastSynced > $0.committedAt.addingTimeInterval(300) }
+        guard !stale.isEmpty else { return }
+        deletePlaceholderEntries(localIDs: stale.map(\.entryLocalID))
     }
 
     private func retryFailedUploads() {
@@ -330,6 +368,7 @@ struct CaptureHomeView: View {
             try await env.apiClient.authenticate(role: "intake").token
         }
         await service.reconcilePendingBatches()
+        await cleanupOrphanPlaceholders()
         refreshUploadQueueSummary()
         photoScanner.refreshAuthorizationState()
         if photoScanner.authorized { _ = await photoScanner.scan() }

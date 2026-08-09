@@ -62,6 +62,9 @@ nonisolated struct PhotoUploadJob: Sendable, Equatable {
 nonisolated struct PhotoUploadQueueSummary: Sendable, Equatable {
     let pendingBatches: Int
     let failedBatches: Int
+    /// 活跃批次内已上传/总任务数——首页「正在回家」卡显示真实进度用。
+    var uploadedJobs: Int = 0
+    var totalJobs: Int = 0
 }
 
 /// App 与未来 PhotoKit 后台扩展共享的独立摄取库。
@@ -466,9 +469,26 @@ nonisolated struct PhotoIntakeStore: Sendable {
                 guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
                 return Int(sqlite3_column_int64(statement, 0))
             }
+            // 活跃批次（未 committed）内的任务进度：已传 x / 共 y
+            var uploaded = 0
+            var total = 0
+            let progress = try prepare(
+                """
+                SELECT COUNT(*),
+                       COALESCE(SUM(CASE WHEN j.state IN ('succeeded','acknowledged') THEN 1 ELSE 0 END), 0)
+                FROM upload_jobs j
+                JOIN upload_batches b ON b.batch_id = j.batch_id
+                WHERE b.state != 'committed'
+                """, db: db)
+            defer { sqlite3_finalize(progress) }
+            if sqlite3_step(progress) == SQLITE_ROW {
+                total = Int(sqlite3_column_int64(progress, 0))
+                uploaded = Int(sqlite3_column_int64(progress, 1))
+            }
             return PhotoUploadQueueSummary(
                 pendingBatches: try count(["queued", "registered", "retrying"]),
-                failedBatches: try count(["failed"]))
+                failedBatches: try count(["failed"]),
+                uploadedJobs: uploaded, totalJobs: total)
         }
     }
 
@@ -522,14 +542,46 @@ nonisolated struct PhotoIntakeStore: Sendable {
     /// 用户主动取回卡住的上传批次：只取回一张都没传成功的批次
     /// （有 succeeded job 的批次可能服务端已 commit，取回会造成重复 Entry——
     /// 那些留给 reconcile 按服务器状态收口）。返回取回的批次数。
-    func recallStalledUploadBatches() throws -> Int {
-        var recalled = 0
+    /// 返回被取回批次的 entry_local_id：调用方据此删除对应的本地占位记录。
+    func recallStalledUploadBatches() throws -> [String] {
+        var entryLocalIDs: [String] = []
         for batchID in try activeUploadBatchIDs() {
             guard try !uploadBatchHasSucceededJobs(batchID) else { continue }
+            if let entryLocalID = try uploadBatchEntryLocalID(batchID) {
+                entryLocalIDs.append(entryLocalID)
+            }
             try discardUploadBatch(batchID, restoreCandidates: true)
-            recalled += 1
         }
-        return recalled
+        return entryLocalIDs
+    }
+
+    func uploadBatchEntryLocalID(_ batchID: String) throws -> String? {
+        try withDatabase { db in
+            let statement = try prepare(
+                "SELECT entry_local_id FROM upload_batches WHERE batch_id=?", db: db)
+            defer { sqlite3_finalize(statement) }
+            bind(batchID, at: 1, to: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let text = sqlite3_column_text(statement, 0) else { return nil }
+            return String(cString: text)
+        }
+    }
+
+    /// committed 批次的 (entry_local_id, 落定时间)：孤儿占位清理用——
+    /// 服务端因全量去重没建 Entry 时，本地占位在一轮成功同步后仍无 remoteId，应删除。
+    func committedBatchEntryInfo() throws -> [(entryLocalID: String, committedAt: Date)] {
+        try withDatabase { db in
+            let statement = try prepare(
+                "SELECT entry_local_id, updated_at FROM upload_batches WHERE state='committed'", db: db)
+            defer { sqlite3_finalize(statement) }
+            var result: [(String, Date)] = []
+            while sqlite3_step(statement) == SQLITE_ROW,
+                  let text = sqlite3_column_text(statement, 0) {
+                let at = Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
+                result.append((String(cString: text), at))
+            }
+            return result
+        }
     }
 
     func finishUploadBatchFromServer(_ batchID: String) throws {
