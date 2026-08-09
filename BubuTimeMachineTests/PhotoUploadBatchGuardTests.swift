@@ -67,6 +67,27 @@ struct PhotoUploadBatchGuardTests {
         #expect(!(try store.uploadBatchHasSucceededJobs(loser)))
         #expect(!(try store.uploadBatchHasSucceededJobs("no-such-batch")))
     }
+
+    @Test("recallStalledUploadBatches：零成功批次取回，有成功记录的批次保留")
+    func recallOnlyTouchesFullyStalledBatches() throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // 批次一：一张都没传成 → 应被取回
+        let stalled = "batch-stalled"
+        try store.saveUploadBatch(batchID: stalled, entryLocalID: UUID().uuidString,
+                                  assetIdentifiers: ["asset-s"], jobs: [job("s", batch: stalled)])
+        // 批次二：已有成功 job → 服务端可能已 commit，必须保留等 reconcile
+        let partial = "batch-partial"
+        try store.saveUploadBatch(batchID: partial, entryLocalID: UUID().uuidString,
+                                  assetIdentifiers: ["asset-p"], jobs: [job("p", batch: partial)])
+        try store.updateUploadJob(batchID: partial, assetKey: "p", state: .succeeded)
+
+        let recalled = try store.recallStalledUploadBatches()
+        #expect(recalled == 1)
+        let remaining = try store.activeUploadBatchIDs()
+        #expect(remaining == [partial], "有成功记录的批次被取回——可能造成重复 Entry")
+    }
 }
 
 // MARK: - 服务器信任边界补测

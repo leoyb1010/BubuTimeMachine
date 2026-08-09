@@ -507,6 +507,19 @@ nonisolated struct PhotoIntakeStore: Sendable {
         }
     }
 
+    /// 用户主动取回卡住的上传批次：只取回一张都没传成功的批次
+    /// （有 succeeded job 的批次可能服务端已 commit，取回会造成重复 Entry——
+    /// 那些留给 reconcile 按服务器状态收口）。返回取回的批次数。
+    func recallStalledUploadBatches() throws -> Int {
+        var recalled = 0
+        for batchID in try activeUploadBatchIDs() {
+            guard try !uploadBatchHasSucceededJobs(batchID) else { continue }
+            try discardUploadBatch(batchID, restoreCandidates: true)
+            recalled += 1
+        }
+        return recalled
+    }
+
     func finishUploadBatchFromServer(_ batchID: String) throws {
         let jobs = try uploadJobs(states: [.queued, .registered, .retrying, .failed])
             .filter { $0.batchID == batchID }

@@ -47,7 +47,9 @@ struct TodayPhotosSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
+                // 【卡死修复】必须 LazyVStack：普通 VStack 会在 sheet 打开瞬间把
+                // 全部组×全部格子同步实例化——积压几百张候选时点一下就是数秒冻结。
+                LazyVStack(spacing: 14) {
                     header
                     ForEach(groups) { group in
                         VStack(alignment: .leading, spacing: 8) {
@@ -331,7 +333,9 @@ struct TodayPhotosSheet: View {
         }
         .task {
             if thumbs[asset.localIdentifier] == nil {
-                thumbs[asset.localIdentifier] = await PhotoLibraryScanner.loadImage(asset, targetPixel: 200)
+                // 网格缩略图用本地优先 loader：不等 iCloud 下载、降级图也先显示——
+                // 旧的 loadImage 在 iCloud 离线照片上永远等不到高清回调，格子永远灰着。
+                thumbs[asset.localIdentifier] = await PhotoLibraryScanner.loadThumb(asset, targetPixel: 200)
             }
         }
     }
@@ -482,7 +486,9 @@ struct TodayPhotosSheet: View {
     /// whole-module 下捕获 PHAsset 时触发 Swift 6 sending 风险。
     private func analysisImage(for asset: PHAsset, targetPixel: CGFloat) async -> UIImage? {
         let identifier = asset.localIdentifier
-        let analyzed = await PhotoLibraryScanner.loadImage(asset, targetPixel: targetPixel)
+        // 本地优先：端侧分析没必要为一张 iCloud 离线照片等网络下载，
+        // 本地拿不到就退回网格缩略图，再不行跳过这张。
+        let analyzed = await PhotoLibraryScanner.loadThumb(asset, targetPixel: targetPixel)
         if let analyzed { return analyzed }
         return thumbs[identifier]
     }

@@ -15,6 +15,14 @@ final class PhotoLibraryScanner {
     /// 最近发现且尚未确认/忽略的照片与视频。
     private(set) var pendingAssets: [PHAsset] = []
     private(set) var eventGroups: [PhotoEventGroup] = []
+    /// 被封顶截掉的更早候选数（收好当前批后自动补位）。
+    private(set) var truncatedPendingCount = 0
+
+    /// 收件箱封顶：积压再多也只上屏最近若干组/若干个——
+    /// 无界的 pendingAssets 会让首页 sheet 一次构建几百个格子（点击即冻结数秒），
+    /// 也让每次启动的 fetchAssets 主线程开销随积压无限涨。
+    nonisolated static let maxInboxGroups = 12
+    nonisolated static let maxInboxAssets = 150
     var authorized: Bool = false
     private(set) var hasFullAccess: Bool = false
     private(set) var authorizationStatus: PHAuthorizationStatus = .notDetermined
@@ -75,27 +83,44 @@ final class PhotoLibraryScanner {
         repeat {
             rescanRequested = false
             lastError = nil
-            migrateLegacyHandledIDsIfNeeded()
             let scanStore = store
             let tokenKey = changeTokenKey
+            // 旧版遗留 ID 迁移是 SQLite 写循环：跟着 payload 一起下移，不占 MainActor。
+            let legacyIDs = Self.consumeLegacyHandledIDs()
             do {
                 // PhotoKit 枚举、持久变化解析、SQLite upsert/grouping 都不再占用 MainActor。
-                let payload = try await Task.detached(priority: .utility) {
-                    try Self.buildScanPayload(store: scanStore, changeTokenKey: tokenKey)
+                // 聚类和封顶也在 detached 里做完；MainActor 只 fetch 封顶后的有界集合。
+                let (keptGroups, truncated) = try await Task.detached(priority: .utility) {
+                    if !legacyIDs.isEmpty { try scanStore.mark(legacyIDs, state: .ignored) }
+                    let payload = try Self.buildScanPayload(store: scanStore, changeTokenKey: tokenKey)
+                    let groups = PhotoEventClusterer.cluster(payload.pendingCandidates)
+                    var kept: [PhotoEventGroup] = []
+                    var assetCount = 0
+                    for group in groups {
+                        if !kept.isEmpty,
+                           (kept.count >= Self.maxInboxGroups
+                            || assetCount + group.totalCount > Self.maxInboxAssets) { break }
+                        kept.append(group)
+                        assetCount += group.totalCount
+                    }
+                    let total = payload.pendingCandidates.count
+                    return (kept, total - assetCount)
                 }.value
-                let identifiers = payload.pendingCandidates.map(\.localIdentifier)
+                let identifiers = keptGroups.flatMap(\.assetIdentifiers)
                 let result = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
                 var byIdentifier: [String: PHAsset] = [:]
                 result.enumerateObjects { asset, _, _ in
                     byIdentifier[asset.localIdentifier] = asset
                 }
                 pendingAssets = identifiers.compactMap { byIdentifier[$0] }
-                eventGroups = PhotoEventClusterer.cluster(payload.pendingCandidates)
+                eventGroups = keptGroups
+                truncatedPendingCount = truncated
             } catch {
                 // 状态库不可用时禁止展示：否则无法判断已收录/已忽略，可能重复发布。
                 // PhotoKit 原片仍在，下次扫描可完整重建候选，不存在事实数据丢失。
                 pendingAssets = []
                 eventGroups = []
+                truncatedPendingCount = 0
                 lastError = error.localizedDescription
             }
         } while rescanRequested
@@ -230,17 +255,16 @@ final class PhotoLibraryScanner {
         )
     }
 
-    private func migrateLegacyHandledIDsIfNeeded() {
+    /// 取出待迁移的旧版 ID 并清除标记（写库在 detached 里做）。
+    /// 失败重试代价：ID 已清、这批旧记录可能重新出现在收件箱——用户再忽略一次即可，
+    /// 好过每次启动都在主线程跑一遍大写循环。
+    private nonisolated static func consumeLegacyHandledIDs() -> [String] {
         let defaults = UserDefaults.standard
-        let identifiers = defaults.stringArray(forKey: handledKey) ?? []
-        guard !identifiers.isEmpty else { return }
-        do {
-            try store.mark(identifiers, state: .ignored)
-            defaults.removeObject(forKey: handledKey)
-            defaults.removeObject(forKey: handledDayKey)
-        } catch {
-            lastError = error.localizedDescription
-        }
+        let identifiers = defaults.stringArray(forKey: "bubu.photoScanner.handledIDs") ?? []
+        guard !identifiers.isEmpty else { return [] }
+        defaults.removeObject(forKey: "bubu.photoScanner.handledIDs")
+        defaults.removeObject(forKey: "bubu.photoScanner.handledDay")
+        return identifiers
     }
 
     /// 取资产的【原始字节】（保真导入用）：EXIF/GPS/拍摄时间原样保留，30 年档案不存压缩图。
@@ -343,11 +367,39 @@ final class PhotoLibraryScanner {
             options.isNetworkAccessAllowed = true
             options.resizeMode = .exact
             let target = CGSize(width: targetPixel, height: targetPixel)
+            // 【必回调修复】旧逻辑只在非降级图时 resume——iCloud 离线资产可能只给
+            // 降级图或直接报错，continuation 永远挂着，等它的 task 全部冻死。
+            // resume-once 门闩 + 错误/取消也回调 nil。
+            nonisolated(unsafe) var resumed = false
             PHImageManager.default().requestImage(for: asset, targetSize: target,
                                                   contentMode: .aspectFit, options: options) { image, info in
-                // 可能回调两次（低清占位 + 高清）；只在拿到非降级图时 resume。
                 let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if !degraded { cont.resume(returning: image) }
+                let failed = info?[PHImageErrorKey] != nil
+                    || (info?[PHImageCancelledKey] as? Bool) == true
+                guard !resumed else { return }
+                if !degraded || failed || image == nil {
+                    resumed = true
+                    cont.resume(returning: degraded && !failed ? image : image)
+                }
+            }
+        }
+    }
+
+    /// 本地优先缩略图：不联网、降级图也收、第一帧就回调。
+    /// 收件箱网格/端侧分析专用——那两处不值得为 iCloud 离线照片等网络。
+    nonisolated static func loadThumb(_ asset: PHAsset, targetPixel: CGFloat = 200) async -> UIImage? {
+        await withCheckedContinuation { cont in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .opportunistic
+            options.isNetworkAccessAllowed = false
+            options.resizeMode = .fast
+            let target = CGSize(width: targetPixel, height: targetPixel)
+            nonisolated(unsafe) var resumed = false
+            PHImageManager.default().requestImage(for: asset, targetSize: target,
+                                                  contentMode: .aspectFit, options: options) { image, _ in
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: image)
             }
         }
     }

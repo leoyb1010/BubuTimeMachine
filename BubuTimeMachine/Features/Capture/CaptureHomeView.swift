@@ -36,6 +36,7 @@ struct CaptureHomeView: View {
         pendingBatches: 0, failedBatches: 0)
     @State private var ssdIntakeCandidates: [SSDIntakeCandidate] = []
     @State private var showSSDIntakeCandidates = false
+    @State private var showPendingRecallDialog = false
     /// 悬浮球位置存**比例**（0…1，相对可移动范围）而非绝对点偏移。
     /// 绝对值在 iPad 旋转/分屏/台前调度改尺寸后会落到屏幕外且再也点不回来
     /// （横屏吸左 offset≈-940，转竖屏可移动范围只剩 -680，球停在 -940 处）。
@@ -223,22 +224,39 @@ struct CaptureHomeView: View {
                 retryFailedUploads()
             }
         } else if uploadQueueSummary.pendingBatches > 0 {
-            HStack(spacing: 12) {
-                ProgressView().tint(BubuTheme.Color.primary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(uploadQueueSummary.pendingBatches) 段原片正在回家")
-                        .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("锁屏或切换 App 也会继续；服务器真正入库后才算收好")
-                        .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
+            // 【出路修复】原来是不可点的死卡：批次在服务端卡在 accepted/uploading 时
+            // 会永远显示"正在回家"，用户没有任何操作出口。改成可点 + 取回对话框。
+            Button {
+                showPendingRecallDialog = true
+            } label: {
+                HStack(spacing: 12) {
+                    ProgressView().tint(BubuTheme.Color.primary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(uploadQueueSummary.pendingBatches) 段原片正在回家")
+                            .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("锁屏或切换 App 也会继续；长时间没进展可点这里处理")
+                            .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(BubuTheme.Font.scaled(13, weight: .semibold))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
-                Spacer(minLength: 0)
+                .padding(14)
+                .frame(maxWidth: .infinity)
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .bubuCardShadow()
             }
-            .padding(14)
-            .frame(maxWidth: .infinity)
-            .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .bubuCardShadow()
+            .buttonStyle(.plain)
+            .confirmationDialog("原片正在后台上传", isPresented: $showPendingRecallDialog,
+                                titleVisibility: .visible) {
+                Button("取回照片，重新整理") { recallPendingUploads() }
+                Button("继续等待", role: .cancel) {}
+            } message: {
+                Text("通常无需操作，锁屏也会继续上传。如果长时间没进展，可以把照片取回候选箱重新整理；已部分上传成功的批次会保留继续等待，不会重复发布。")
+            }
         }
     }
 
@@ -267,6 +285,24 @@ struct CaptureHomeView: View {
                     ?? PhotoUploadQueueSummary(pendingBatches: 0, failedBatches: 0)
             }.value
             uploadQueueSummary = summary
+        }
+    }
+
+    private func recallPendingUploads() {
+        Task {
+            do {
+                let recalled = try await Task.detached(priority: .userInitiated) {
+                    try PhotoIntakeStore().recallStalledUploadBatches()
+                }.value
+                _ = await photoScanner.scan()
+                refreshUploadQueueSummary()
+                BubuHaptics.success()
+                if recalled == 0 {
+                    model?.partialSaveWarning = "这些批次已有照片上传成功，为避免重复发布会继续等待服务器收口"
+                }
+            } catch {
+                model?.partialSaveWarning = "取回暂时没成功：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -325,9 +361,11 @@ struct CaptureHomeView: View {
                         Text("有 \(photoScanner.eventGroups.count) 段时光待收好")
                             .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text(photoScanner.hasFullAccess
-                             ? "共 \(photoScanner.pendingAssets.count) 个照片和视频，已自动整理"
-                             : "已整理授权范围内的 \(photoScanner.pendingAssets.count) 个素材；完整访问可自动发现全部")
+                        Text(photoScanner.truncatedPendingCount > 0
+                             ? "先收好最近 \(photoScanner.pendingAssets.count) 个，还有 \(photoScanner.truncatedPendingCount) 个更早的会自动接上"
+                             : (photoScanner.hasFullAccess
+                                ? "共 \(photoScanner.pendingAssets.count) 个照片和视频，已自动整理"
+                                : "已整理授权范围内的 \(photoScanner.pendingAssets.count) 个素材；完整访问可自动发现全部"))
                             .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
