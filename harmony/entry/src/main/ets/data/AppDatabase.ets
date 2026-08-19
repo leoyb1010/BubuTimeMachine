@@ -761,7 +761,7 @@ export class AppDatabase {
       recordedAt: m.recordedAt, durationSeconds: m.durationSeconds ?? null,
       syncState: m.syncState, createdAt: m.createdAt
     };
-    await this.store!.insert('voice_memo', v);
+    await this.store!.insert('voice_memo', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchVoiceMemos(): Promise<VoiceMemo[]> {
@@ -974,6 +974,24 @@ export class AppDatabase {
 
   async deleteFirstTime(id: string): Promise<void> {
     const pred = new relationalStore.RdbPredicates('first_time');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async deleteComment(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('comment');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async deleteVoiceNote(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('voice_note');
+    pred.equalTo('id', id);
+    await this.store!.delete(pred);
+  }
+
+  async deleteVoiceMemo(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('voice_memo');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
   }

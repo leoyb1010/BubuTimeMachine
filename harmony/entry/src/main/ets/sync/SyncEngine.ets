@@ -7,7 +7,8 @@ import { MediaStore } from '../services/MediaStore';
 import { AppDatabase } from '../data/AppDatabase';
 import { SyncState, MediaType } from '../models/Enums';
 import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote,
-  FamilyMember, GrowthMeasurement, VaccineRecord, Comment, FirstTime, PendingDeletion } from '../models/Models';
+  VoiceMemo, FamilyMember, GrowthMeasurement, VaccineRecord, Comment, FirstTime,
+  PendingDeletion } from '../models/Models';
 import { UploadedFileResult } from '../services/DTOs';
 import { MILESTONE_PRESETS } from '../models/MilestoneTemplates';
 import { syncBackoffIntervalMs } from './SyncBackoff';
@@ -257,6 +258,7 @@ export class SyncEngine {
     await this.pushGrowthMeasurements();
     await this.pushComments();
     await this.pushVoiceNotes();
+    await this.pushVoiceMemos();
     await this.pushTimeCapsules();
   }
 
@@ -618,6 +620,43 @@ export class SyncEngine {
     await AppDatabase.shared.insertVoiceNote(n);
   }
 
+  // —— VoiceMemo（成长之声，对照 iOS pushLocalFileObjects 的 VoiceMemo 分支）——
+  private async pushVoiceMemos(): Promise<void> {
+    const memos: VoiceMemo[] = await AppDatabase.shared.fetchVoiceMemos();
+    for (const memo of memos) {
+      if (!SyncEngine.isDirty(memo.syncState)) continue;
+      const body: Record<string, Object> = {
+        'kind': memo.kindRaw,
+        'recordedAt': new Date(memo.recordedAt).toISOString(),
+        'createdAt': new Date(memo.createdAt).toISOString()
+      };
+      if (memo.transcript !== undefined) body['transcript'] = memo.transcript;
+      if (memo.ageYears !== undefined) body['ageYears'] = memo.ageYears;
+      if (memo.durationSeconds !== undefined) body['durationSeconds'] = memo.durationSeconds;
+      try {
+        const saved = await APIClient.shared.upsert('voicememos', memo.id, body);
+        memo.remoteId = saved['id'] as string;
+        if (memo.localFileName !== undefined && MediaStore.shared.exists(memo.localFileName)) {
+          const filePath = MediaStore.shared.fullPath(memo.localFileName);
+          const fields: Record<string, string> = {
+            'kind': memo.kindRaw,
+            'recordedAt': new Date(memo.recordedAt).toISOString(),
+            'createdAt': new Date(memo.createdAt).toISOString()
+          };
+          const res = await APIClient.shared.uploadFile(
+            'voicememos', memo.id, fields, 'file', filePath, memo.localFileName);
+          memo.remoteId = res.recordId;
+          memo.remoteURL = APIClient.shared.fileURL('voicememos', res.recordId, res.storedFileName);
+        }
+        memo.syncState = SyncState.synced;
+      } catch (e) {
+        memo.syncState = SyncState.failed;
+        hilog.warn(DOMAIN, 'Bubu', `同步成长之声失败 ${memo.id}: ${SyncEngine.errorText(e)}`);
+      }
+      await AppDatabase.shared.insertVoiceMemo(memo);
+    }
+  }
+
   // —— Media（照片/视频文件上传，对照 iOS pushUnsyncedMedia / pushMediaItem）——
   private async pushUnsyncedMedia(): Promise<void> {
     const all: Media[] = await AppDatabase.shared.fetchAllMedia();
@@ -724,6 +763,7 @@ export class SyncEngine {
     await this.pullGrowthMeasurements();
     await this.pullComments();
     await this.pullVoiceNotes();
+    await this.pullVoiceMemos();
     await this.pullTimeCapsules();
   }
 
@@ -785,6 +825,9 @@ export class SyncEngine {
     await this.pruneVaccinesToMirror();
     await this.pruneFirstTimesToMirror();
     await this.pruneMembersToMirror();
+    await this.pruneCommentsToMirror();
+    await this.pruneVoiceNotesToMirror();
+    await this.pruneVoiceMemosToMirror();
     await this.pruneCapsulesToMirror();
   }
 
@@ -871,6 +914,36 @@ export class SyncEngine {
     const records = await AppDatabase.shared.fetchMembers();
     for (const item of records) {
       if (this.shouldPrune('members', item.id)) await AppDatabase.shared.deleteMember(item.id);
+    }
+  }
+
+  private async pruneCommentsToMirror(): Promise<void> {
+    if (this.seen('comments') === undefined) return;
+    const entries = await AppDatabase.shared.fetchEntries(true);
+    for (const entry of entries) {
+      const comments = await AppDatabase.shared.fetchCommentsForEntry(entry.id);
+      for (const item of comments) {
+        if (this.shouldPrune('comments', item.id)) await AppDatabase.shared.deleteComment(item.id);
+      }
+    }
+  }
+
+  private async pruneVoiceNotesToMirror(): Promise<void> {
+    if (this.seen('voicenotes') === undefined) return;
+    const entries = await AppDatabase.shared.fetchEntries(true);
+    for (const entry of entries) {
+      const notes = await AppDatabase.shared.fetchVoiceForEntry(entry.id);
+      for (const item of notes) {
+        if (this.shouldPrune('voicenotes', item.id)) await AppDatabase.shared.deleteVoiceNote(item.id);
+      }
+    }
+  }
+
+  private async pruneVoiceMemosToMirror(): Promise<void> {
+    if (this.seen('voicememos') === undefined) return;
+    const memos = await AppDatabase.shared.fetchVoiceMemos();
+    for (const item of memos) {
+      if (this.shouldPrune('voicememos', item.id)) await AppDatabase.shared.deleteVoiceMemo(item.id);
     }
   }
 
@@ -1634,6 +1707,43 @@ export class SyncEngine {
     n.waveformSamples = SyncEngine.rNumArray(r, 'waveform');
   }
 
+  // —— VoiceMemo 合并（成长之声）——
+  private async pullVoiceMemos(): Promise<void> {
+    await this.pullCollection('voicememos', async (r: Record<string, Object>): Promise<boolean | void> => {
+      const localId = SyncEngine.recordLocalId(r);
+      if (localId === undefined) return;
+      if (await this.isPendingDeletion('voicememos', SyncEngine.rStr(r, 'id'))) return true;
+      const memos = await AppDatabase.shared.fetchVoiceMemos();
+      const existing = memos.find((item: VoiceMemo): boolean => item.id === localId);
+      if (existing) {
+        if (existing.syncState !== SyncState.synced && !this.serverMirrorMode) return false;
+        SyncEngine.applyVoiceMemo(r, existing);
+        existing.remoteId = SyncEngine.rStr(r, 'id');
+        await AppDatabase.shared.insertVoiceMemo(existing);
+      } else {
+        const memo: VoiceMemo = {
+          id: localId,
+          kindRaw: SyncEngine.rStr(r, 'kind') ?? 'childVoice',
+          recordedAt: SyncEngine.rDate(r, 'recordedAt', Date.now()),
+          syncState: SyncState.synced,
+          createdAt: SyncEngine.rDate(r, 'createdAt', Date.now())
+        };
+        SyncEngine.applyVoiceMemo(r, memo);
+        memo.remoteId = SyncEngine.rStr(r, 'id');
+        await AppDatabase.shared.insertVoiceMemo(memo);
+      }
+    });
+  }
+
+  private static applyVoiceMemo(r: Record<string, Object>, memo: VoiceMemo): void {
+    memo.kindRaw = SyncEngine.rStr(r, 'kind') ?? memo.kindRaw;
+    memo.remoteURL = SyncEngine.remoteFileURL(r, 'voicememos', 'file');
+    memo.transcript = SyncEngine.rStr(r, 'transcript');
+    memo.ageYears = SyncEngine.rNum(r, 'ageYears');
+    memo.recordedAt = SyncEngine.rDate(r, 'recordedAt', memo.recordedAt);
+    memo.durationSeconds = SyncEngine.rNum(r, 'durationSeconds');
+  }
+
   // —— TimeCapsule 合并（拉回后确保本地有加密 blob，对照 iOS ensureLocalCapsuleBlob）——
   private async pullTimeCapsules(): Promise<void> {
     await this.pullCollection('timecapsules', async (r: Record<string, Object>): Promise<boolean | void> => {
@@ -1747,6 +1857,31 @@ export class SyncEngine {
       }
     }
 
+    // VoiceMemo：成长之声独立于 Entry，单独补齐远端音频。
+    const memos = await AppDatabase.shared.fetchVoiceMemos();
+    let memoCount = 0;
+    let memoDone = 0;
+    let memoFailed = 0;
+    const memoLimit = downloadAll ? 1000000 : 10;
+    for (const memo of memos) {
+      if (memoCount >= memoLimit) break;
+      const existingName = memo.localFileName;
+      if (existingName !== undefined && existingName.length > 0 && MediaStore.shared.exists(existingName)) continue;
+      if (memo.remoteURL === undefined) continue;
+      memoCount += 1;
+      try {
+        const fileName = (existingName !== undefined && existingName.length > 0)
+          ? existingName : `memo_${memo.id}.m4a`;
+        await APIClient.shared.downloadFile(memo.remoteURL, MediaStore.shared.fullPath(fileName));
+        memo.localFileName = fileName;
+        await AppDatabase.shared.insertVoiceMemo(memo);
+        memoDone += 1;
+      } catch (e) {
+        memoFailed += 1;
+        hilog.warn(DOMAIN, 'Bubu', `下载成长之声失败 ${memo.id}: ${SyncEngine.errorText(e)}`);
+      }
+    }
+
     // Comment 语音补充：缺本地文件但有 remoteURL。
     let commentVoiceCount = 0;
     let commentVoiceDone = 0;
@@ -1795,7 +1930,7 @@ export class SyncEngine {
       }
     }
     hilog.info(DOMAIN, 'Bubu',
-      `补下载统计 media=${mediaDone}/${mediaCount} failed=${mediaFailed}, voice=${voiceDone}/${voiceCount} failed=${voiceFailed}, commentVoice=${commentVoiceDone}/${commentVoiceCount} failed=${commentVoiceFailed}`);
+      `补下载统计 media=${mediaDone}/${mediaCount} failed=${mediaFailed}, voice=${voiceDone}/${voiceCount} failed=${voiceFailed}, memo=${memoDone}/${memoCount} failed=${memoFailed}, commentVoice=${commentVoiceDone}/${commentVoiceCount} failed=${commentVoiceFailed}`);
   }
 
   private static extFromURL(url: string): string | undefined {
@@ -1828,7 +1963,7 @@ export class SyncEngine {
     const collections: string[] = [
       'entries', 'media', 'milestones', 'firsttimes', 'members', 'childprofile',
       'healthrecords', 'vaccinerecords', 'growthmeasurements', 'comments',
-      'voicenotes', 'timecapsules'
+      'voicenotes', 'voicememos', 'timecapsules'
     ];
     for (const c of collections) {
       await this.cursorStore.put(`cursor_${c}`, '');
