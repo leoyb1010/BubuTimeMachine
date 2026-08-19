@@ -2,13 +2,14 @@
 /build
 /*/build
 /.hvigor
+/.idea
 /.cxx
 /oh_modules
 /*/oh_modules
 .clangd
 .clang-format
 local.properties
-# 复制进来的 hvigor wrapper（每台机器从 DevEco 生成，不入库）
+# DevEco 可能生成的 wrapper；仓库统一使用 scripts/build-local.sh
 /hvigorw
 /hvigorw.js
 /hvigor/hvigor-wrapper.js

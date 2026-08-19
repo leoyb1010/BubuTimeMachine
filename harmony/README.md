@@ -5,24 +5,23 @@ iOS 端的鸿蒙原生重写。与 iOS **共用同一套自托管后端**（Pock
 
 ---
 
-## ✅ 编译验证（已通过）
+## 编译基线
 
-用本机 DevEco 工具链实测通过：
+仓库提供不依赖 DevEco 自动生成 wrapper 的统一构建入口：
 
 ```
-hvigor 6.26.1 + HarmonyOS SDK + JBR 21
-$ ./hvigorw assembleHap --mode module -p product=default
+hvigor 6.26.1 + HarmonyOS 26.0.0 SDK + JBR 21
+$ ./scripts/build-local.sh
 > BUILD SUCCESSFUL
-产物：entry/build/default/outputs/default/entry-default-unsigned.hap (~319KB)
-ArkTS 编译 0 error。
+产物：entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
-当前工程目标已对齐本机 DevEco 模拟器 `Pura X Max 6.1.1(24)`：
+当前工程已迁移到 HarmonyOS API 26：
 
-- `build-profile.json5`: `compatibleSdkVersion/targetSdkVersion = 6.1.1(24)`
-- `AppScope/app.json5`: `minAPIVersion/targetAPIVersion = 24`
+- `build-profile.json5`: `compatibleSdkVersion/targetSdkVersion = 26.0.0`
+- `AppScope/app.json5`: `minAPIVersion/targetAPIVersion = 26`
 
-> DevEco 绿色 Run 若报 `00401019`，通常是 DevEco 当前编译 SDK 的 releaseType 与模拟器 releaseType 预检不一致。底层 `hdc install` 可正常安装启动；也可以在 DevEco SDK Manager 安装与模拟器匹配的 HarmonyOS 6.1.1(API 24) Release 编译 SDK。
+构建默认不带签名，避免把证书路径或口令提交到仓库。安装真机前在 DevEco 的 Project Structure 中配置本机自动签名。
 
 ---
 
@@ -86,23 +85,16 @@ ArkTS 编译 0 error。
 
 1. DevEco Studio → Open → 选 `harmony/` 目录。
 2. 首次会提示同步依赖（File → Sync）。
-   - ⚠️ `hvigor/hvigor-config.json5` 里依赖指向了**本机 DevEco 路径**（命令行编译需要）。
-     在 DevEco 里打开时若报路径问题，删掉该文件的 `dependencies` 两行让 DevEco 用内置版本即可。
 3. 配置签名：File → Project Structure → Signing Configs → 勾选自动签名（需登录华为账号）。
 4. 连真机/模拟器 → Run。
 5. 首次进 App：首页点「建立布布的档案」填生日 → 即可记录、看时光轴。
-6. 配服务器同步：（待加设置页 UI）目前 `ServerConfig` 默认空，可在 `ServerConfig.ets` 临时填
-   `baseURLString`/`accountEmail`/`accountPassword` 测试，或后续补设置页。
+6. 在设置 → 服务器中配置家庭服务地址与账号；不要把账号写入源码。
 
 ## 命令行编译（复现验证）
 
 ```bash
 cd harmony
-export NODE_HOME=/Applications/DevEco-Studio.app/Contents/tools/node
-export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
-export JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home
-export PATH="$NODE_HOME/bin:$JAVA_HOME/bin:$PATH"
-./hvigorw assembleHap --mode module -p product=default --no-daemon
+./scripts/build-local.sh
 ```
 
 ## 一键安装到当前鸿蒙模拟器
@@ -120,8 +112,17 @@ cd harmony
 ./scripts/run-on-harmony-device.sh 127.0.0.1:5555
 ```
 
-> `hvigorw` / `hvigorw.js` / `hvigor/hvigor-wrapper.js` / `local.properties` 已 gitignore，
-> 每台机器从 DevEco 生成（或 DevEco 打开工程时自动补）。
+> 本机 DevEco 不在默认 `/Applications/DevEco-Studio.app` 时，通过
+> `DEVECO_STUDIO_CONTENTS=/path/to/DevEco-Studio.app/Contents ./scripts/build-local.sh` 指定。
+
+## 安全规则
+
+- `build-profile.json5` 只保留无签名构建配置。
+- 证书、私钥、口令和本机绝对路径不得提交到 Git。
+- 运行 `./scripts/check-repository-hygiene.sh` 可在提交前执行同一套 CI 检查。
+- 历史版本曾包含调试签名字段；旧签名必须在开发者后台作废并重新生成。
+
+完整追平状态见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
 
 ---
 

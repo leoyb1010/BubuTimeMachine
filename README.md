@@ -3,7 +3,10 @@
 > 真正的用户，是未来 18 岁的布布。
 > 一切技术决策都要回答：30 年后，这些数据还能被她完整地读到、看到、听到吗？
 
-原生 iOS App（SwiftUI + SwiftData），为家庭记录孩子成长、传承一生。离线优先、隐私至上、自托管。
+原生 iOS（SwiftUI + SwiftData）与 HarmonyOS（ArkTS + ArkUI）双端工程，为家庭记录孩子成长、传承一生。离线优先、隐私至上、自托管。
+
+> HarmonyOS 正在以 iOS 2.11.0 为基准做全能力追平；真实进度和验收边界见
+> [`harmony/PARITY_MATRIX.md`](harmony/PARITY_MATRIX.md)，不再以“页面存在”代替完成。
 
 ## 当前进度
 
@@ -79,6 +82,8 @@
 
 ## 构建运行
 
+### iOS
+
 ```bash
 # 安装项目生成器（一次）
 brew install xcodegen
@@ -99,6 +104,16 @@ xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
 ```
 
 要求：Xcode 26+、iOS 18+ 部署目标。`project.pbxproj` 由 `project.yml` 生成，**修改工程配置请改 `project.yml` 后重跑 `xcodegen generate`**。
+
+### HarmonyOS
+
+```bash
+cd harmony
+./scripts/check-repository-hygiene.sh
+./scripts/build-local.sh
+```
+
+要求：DevEco Studio 26.0.0+ 与 HarmonyOS API 26 SDK。构建默认生成 unsigned HAP；真机安装签名只保存在本机 DevEco 配置中，不得提交到 Git。
 
 ## 目录结构
 

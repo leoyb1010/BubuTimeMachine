@@ -1,25 +1,10 @@
 {
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "/Users/leoyuan/.ohos/config/default_harmony_X5fIcnTNr7zl39yKf2apUQIapKNioK9Ky7A_giCMyA4=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B680579915129720DC48CAA3BD894C47251FFD49ADDED42027C705FEDA0A7DB76C7C07A3BDDDC47",
-          "profile": "/Users/leoyuan/.ohos/config/default_harmony_X5fIcnTNr7zl39yKf2apUQIapKNioK9Ky7A_giCMyA4=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/leoyuan/.ohos/config/default_harmony_X5fIcnTNr7zl39yKf2apUQIapKNioK9Ky7A_giCMyA4=.p12",
-          "storePassword": "0000001B5BDA5B66F370AA123B8228F7CBA2C35C530BED623F01285E1A0DA4F7B3F6221A790B2C73D60C6A"
-        }
-      }
-    ],
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
-        "compatibleSdkVersion": "6.1.1(24)",
+        "compatibleSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
@@ -27,7 +12,7 @@
             "useNormalizedOHMUrl": true
           }
         },
-        "targetSdkVersion": "6.1.1(24)"
+        "targetSdkVersion": "26.0.0"
       }
     ],
     "buildModeSet": [

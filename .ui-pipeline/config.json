@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "project_id": "Leo-布布时光机",
+  "platform": "harmonyos-native",
+  "profile": "universal-zero-auth-max",
+  "zero_auth": true,
+  "design_intelligence": {
+    "engine": "bundled-ui-ux-pro-max",
+    "remote_required": false
+  },
+  "finish_gate": {
+    "engine": "bundled-impeccable-local",
+    "result": "pending"
+  },
+  "component_source": "project",
+  "storybook": {
+    "enabled": false,
+    "mcp_name": null,
+    "url": "http://localhost:6006/mcp"
+  },
+  "visual_feedback": "browser",
+  "visual_regression": {
+    "enabled": false,
+    "baseline_dir": "tests/visual"
+  }
+}

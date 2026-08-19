@@ -9,6 +9,15 @@ on:
   pull_request:
 
 jobs:
+  harmony-policy:
+    name: HarmonyOS repository gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject signing material and stale parity metadata
+        run: bash harmony/scripts/check-repository-hygiene.sh
+
   ios:
     name: iOS build & test (Xcode 26)
     runs-on: macos-26
