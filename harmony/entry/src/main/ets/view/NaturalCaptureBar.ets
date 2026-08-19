@@ -9,12 +9,14 @@ import {
   NaturalCaptureRequest, NaturalCaptureParseResult, decodeParseResult
 } from '../services/NaturalCaptureDTO';
 import { NaturalCaptureReviewSheet } from './NaturalCaptureReviewSheet';
+import { AudioRecorder, RecorderState } from '../services/AudioRecorder';
+import { MediaStore } from '../services/MediaStore';
+import { common } from '@kit.AbilityKit';
 
 // MARK: - 全局一句话记录入口（对照 iOS Features/NaturalCapture/NaturalCaptureBar.swift）
 // 轻盈的「AI 记录卡」：写一句 → 解析 → 确认页 → 各模块落库。
 // 不做聊天界面；失败温和降级，不暴露异常原文。
-// NOTE: iOS 还支持「说一句」（AudioRecorder + transcribe）。鸿蒙端未接入录音器前不展示语音按钮，
-// 避免出现不可用的假入口。
+// 支持写一句或说一句；语音只走真实自托管 /transcribe，失败保留原音频供重试。
 @Component
 export struct NaturalCaptureBar {
   @State private text: string = '';
@@ -26,13 +28,23 @@ export struct NaturalCaptureBar {
   @State private reviewResult: NaturalCaptureParseResult | null = null;
   @State private reviewOriginalText: string = '';
   @State private pageIn: boolean = false;
+  @State private isRecording: boolean = false;
+  @State private isTranscribing: boolean = false;
+  @State private recordingElapsed: number = 0;
+  @State private pendingAudioFileName: string | undefined = undefined;
+  private recordingTimer: number = -1;
 
   aboutToAppear(): void {
     this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
   }
 
+  aboutToDisappear(): void {
+    this.stopRecordingTimer();
+    if (AudioRecorder.shared.state === RecorderState.recording) AudioRecorder.shared.cancel();
+  }
+
   private isBusy(): boolean {
-    return this.isParsing;
+    return this.isParsing || this.isTranscribing;
   }
 
   private trimmed(): string {
@@ -48,7 +60,22 @@ export struct NaturalCaptureBar {
             .backgroundColor('#1AF28C9E')
             .borderRadius(17)
 
-          if (this.isParsing) {
+          if (this.isRecording) {
+            Row({ space: 8 }) {
+              Text('●').fontSize(12).fontColor(BubuColor.danger)
+              Text(`布布在听… ${Math.floor(this.recordingElapsed)} 秒`)
+                .fontSize(BubuFont.caption).fontColor(BubuColor.warmBrown)
+              Blank()
+              Text('取消').fontSize(BubuFont.caption).fontColor(BubuColor.secondaryText)
+                .onClick(() => { this.cancelRecording(); })
+            }.layoutWeight(1)
+          } else if (this.isTranscribing) {
+            Row({ space: 8 }) {
+              LoadingProgress().width(22).height(22).color(BubuColor.primary)
+              Text('正在听清布布说了什么…').fontSize(BubuFont.caption).fontColor(BubuColor.secondaryText)
+              Blank()
+            }.layoutWeight(1)
+          } else if (this.isParsing) {
             Row({ space: 8 }) {
               LoadingProgress().width(22).height(22).color(BubuColor.primary)
               Text('正在识别这句话…')
@@ -81,6 +108,16 @@ export struct NaturalCaptureBar {
               })
           }
 
+          Text(this.isRecording ? '⏹' : '🎙')
+            .fontSize(this.isRecording ? 28 : 22)
+            .fontColor(this.isRecording ? BubuColor.danger : BubuColor.primary)
+            .opacity(this.isBusy() && !this.isRecording ? 0.45 : 1)
+            .accessibilityText(this.isRecording ? '停止录音并识别' : '按一下开始说话')
+            .onClick(() => {
+              if (this.isParsing || this.isTranscribing) return;
+              this.toggleRecording();
+            })
+
         }
         .width('100%')
         .padding(12)
@@ -99,11 +136,13 @@ export struct NaturalCaptureBar {
         }
 
         if (this.errorText !== null) {
-          Text(this.errorText)
-            .fontSize(11)
-            .fontColor(BubuColor.secondaryText)
-            .width('100%')
-            .padding({ left: 4, right: 4 })
+          Row({ space: 10 }) {
+            Text(this.errorText).fontSize(11).fontColor(BubuColor.secondaryText).layoutWeight(1)
+            if (this.pendingAudioFileName !== undefined && !this.isTranscribing) {
+              Text('重试转写').fontSize(11).fontWeight(FontWeight.Bold).fontColor(BubuColor.primary)
+                .onClick(() => { this.transcribeAndParse(this.pendingAudioFileName!); })
+            }
+          }.width('100%').padding({ left: 4, right: 4 })
         }
       }
       .width('100%')
@@ -124,6 +163,62 @@ export struct NaturalCaptureBar {
     }
     .width('100%')
     .height('100%')
+  }
+
+  private async toggleRecording(): Promise<void> {
+    const recorder = AudioRecorder.shared;
+    if (recorder.state === RecorderState.recording) {
+      const result = await recorder.stop();
+      this.stopRecordingTimer();
+      this.isRecording = false;
+      if (result) await this.transcribeAndParse(result.fileName);
+      return;
+    }
+    this.errorText = null;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    if (!(await recorder.requestPermission(context))) {
+      this.errorText = '需要麦克风权限，去系统设置里给布布开启吧。';
+      return;
+    }
+    if (!(await recorder.start())) {
+      this.errorText = '录音启动失败，稍后再试试。';
+      return;
+    }
+    this.isRecording = true;
+    this.recordingElapsed = 0;
+    this.recordingTimer = setInterval(() => { this.recordingElapsed = recorder.elapsed; }, 100);
+  }
+
+  private async cancelRecording(): Promise<void> {
+    await AudioRecorder.shared.cancel();
+    this.isRecording = false;
+    this.stopRecordingTimer();
+  }
+
+  private stopRecordingTimer(): void {
+    if (this.recordingTimer >= 0) clearInterval(this.recordingTimer);
+    this.recordingTimer = -1;
+  }
+
+  private async transcribeAndParse(fileName: string): Promise<void> {
+    this.pendingAudioFileName = fileName;
+    this.isTranscribing = true;
+    this.errorText = null;
+    try {
+      const transcript = (await AIService.shared.transcribe(MediaStore.shared.fullPath(fileName))).trim();
+      if (transcript.length === 0) {
+        this.errorText = '没听清，可以再说一次或直接打字。';
+        return;
+      }
+      this.text = transcript;
+      MediaStore.shared.deleteMedia(fileName);
+      this.pendingAudioFileName = undefined;
+      await this.parseText();
+    } catch (e) {
+      this.errorText = '转写失败了，可以重试或直接打字。';
+    } finally {
+      this.isTranscribing = false;
+    }
   }
 
   // MARK: 文字解析（对照 parseText）
