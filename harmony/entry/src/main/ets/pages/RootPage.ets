@@ -42,6 +42,9 @@ struct RootPage {
     const profile = await AppDatabase.shared.fetchChildProfile();
     this.hasCompletedOnboarding = profile !== null;
     ThemeManager.shared.initialize(ctx);
+    if (profile) {
+      ThemeManager.shared.setBirthdayMonth(new Date(profile.birthday).getMonth() === new Date().getMonth());
+    }
     this.booted = true;
     // 回前台立刻补一轮同步 + 刷新服务卡片快照（对照 iOS scenePhase .active）。
     SyncEngine.shared.start();

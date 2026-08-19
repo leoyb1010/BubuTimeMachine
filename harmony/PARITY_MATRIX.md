@@ -39,6 +39,7 @@
 |---|---|---|---|
 | WidgetKit | Form Kit 服务卡片 | 🟡 已补 2×2/2×4、持久刷新、最近照片封面、成长快照和点击拉起 App | 桌面添加、照片解码、刷新与点击路径真机通过 |
 | App Intents | InsightIntent | 🟡 已声明打开入口和 JSON Schema 带参数记录；原话预填后仍由用户确认保存 | 小艺平台注册、系统推荐与落地页真机通过 |
+| Alternate App Icons | Bundle Manager alternateIcons | 🟡 已复用 7 套主题/生日素材并接 API 26 系统切换和生日月优先 | 桌面实际刷新待真机验收 |
 | Live Activity | Live View | ⏳ 已实现 TIMER 原生实况窗并接录音、持久哄睡、临近胶囊倒计时；无权益自动降级通知 | TIMER 场景权益、锁屏样式与真机启停待验收 |
 | Photos Extension | Media Library + Background Tasks | 🟡 已接持久候选和 WorkScheduler | 后台恢复、权限拒绝、大图库验证 |
 | Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🟡 开放档案已接系统分享 | 图片、视频、文本和目标页直达 |

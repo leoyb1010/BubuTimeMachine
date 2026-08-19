@@ -6,6 +6,7 @@
 import { preferences } from '@kit.ArkData';
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { mixHex, BubuColor } from './BubuTheme';
+import { AppIconManager } from './AppIconManager';
 
 // MARK: 背景样式（对照 iOS BackgroundStyle）
 export enum BackgroundStyleKind { solid = 'solid', gradient = 'gradient' }
@@ -143,6 +144,7 @@ export class ThemeManager {
   private context: common.UIAbilityContext | null = null;
   private systemDark: boolean = false;
   private renderTick: number = 0;
+  private birthdayMonth: boolean = false;
   currentThemeId: string = BubuThemeDefinition.defaultTheme.id;
   heroModeRaw: string = HeroBackgroundMode.theme;
 
@@ -185,7 +187,12 @@ export class ThemeManager {
     this.currentThemeId = theme.id;
     this.applyColorMode();
     this.persist(ThemeManager.themeKey, theme.id);
-    // NOTE: HarmonyOS 桌面图标随主题切换机制不同，见 AppIconManager.ets。
+    AppIconManager.apply(theme.id, this.birthdayMonth);
+  }
+
+  setBirthdayMonth(enabled: boolean): void {
+    this.birthdayMonth = enabled;
+    AppIconManager.apply(this.currentThemeId, enabled);
   }
 
   updateSystemColorMode(mode: ConfigurationConstant.ColorMode | undefined): void {
