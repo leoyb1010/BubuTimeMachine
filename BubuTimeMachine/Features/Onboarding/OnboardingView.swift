@@ -167,7 +167,7 @@ struct OnboardingView: View {
                 .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
 
             if joinExisting {
-                Text("进入后到「设置 → 家人登录」输入家庭账号，\n布布的照片和记录就都回来了。")
+                Text("下一步直接打开登录页，输入家庭账号，\n布布的照片和记录就都回来了。")
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .multilineTextAlignment(.center)
@@ -192,6 +192,9 @@ struct OnboardingView: View {
         .buttonStyle(.plain)
     }
 
+    /// 「加入已有家庭」完成引导后，由根视图消费一次，直接把登录页推到面前。
+    static let pendingFamilyLoginKey = "bubu.onboarding.pendingFamilyLogin"
+
     private func advance() {
         if step < 2 {
             withAnimation(.smooth) { step += 1 }
@@ -205,6 +208,9 @@ struct OnboardingView: View {
             // 加入已有家庭：不建档、不建成员——登录后由同步拉回全家的布布与成员，
             // 不会再产生第二个「布布」污染全家（R4 P2-29）
             env.config.currentRoleRaw = selectedRelation.rawValue
+            // 直接把登录页排上：旧版只留一句「到设置 → 家人登录」，
+            // 找不到的人会当场再建一个「布布」，全家从此两个空库。
+            UserDefaults.standard.set(true, forKey: Self.pendingFamilyLoginKey)
             withAnimation(.smooth) {
                 env.hasCompletedOnboarding = true
             }

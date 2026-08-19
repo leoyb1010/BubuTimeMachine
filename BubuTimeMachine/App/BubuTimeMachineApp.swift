@@ -407,14 +407,36 @@ struct BubuTimeMachineApp: App {
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var showWhatsNew = false
+    /// 引导里选了「加入已有家庭」：进主界面后立刻把登录页推到面前，
+    /// 不让第二台设备停在一个空库上、再自己建出第二个布布。
+    @State private var showFamilyLogin = false
 
     var body: some View {
         rootContent
+            .onAppear { consumePendingFamilyLogin() }
+            .onChange(of: env.hasCompletedOnboarding) { _, done in
+                if done { consumePendingFamilyLogin() }
+            }
+            .sheet(isPresented: $showFamilyLogin) {
+                NavigationStack { AccountView() }
+            }
             // 全 App Dynamic Type 兜底基线：老人把系统字体开到最大无障碍档时，先统一夹到
             // accessibility3，避免布局爆裂。这是较宽的上限，专给以大按钮/单列布局为主、
             // 抗放大能力强的 SimpleMode（老人模式）与引导页用；密集的 RootTabView 会在其内部
             // 再收紧到 accessibility1（见 RootTabView）。外松内紧：内层更严的夹取会生效。
             .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+    }
+
+    @MainActor
+    private func consumePendingFamilyLogin() {
+        guard env.hasCompletedOnboarding,
+              UserDefaults.standard.bool(forKey: OnboardingView.pendingFamilyLoginKey) else { return }
+        UserDefaults.standard.set(false, forKey: OnboardingView.pendingFamilyLoginKey)
+        // 略等根界面完成过渡再弹，避免和 onboarding 的淡出抢呈现。
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            showFamilyLogin = true
+        }
     }
 
     @ViewBuilder

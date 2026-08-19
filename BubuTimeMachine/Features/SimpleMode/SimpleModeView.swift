@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 // MARK: - 简单模式（老人模式）
 /// 跟随身份的极简界面：切到长辈（爷爷/奶奶/姥姥/姥爷）自动进入，名字用当前称谓。
@@ -19,6 +20,9 @@ struct SimpleModeView: View {
     @State private var showTimeline = false
     @State private var confirmation: String?
     @State private var saving = false
+    /// 布布本人的头像。头部显示的是「布布」的名字，配的头像就必须是布布，
+    /// 不能是当前登录家人的 emoji——那会让人以为这台手机上的身份是布布。
+    @State private var childAvatar: UIImage?
 
     private var role: FamilyRole { env.config.currentRole }
     private var childName: String { profiles.first?.name ?? env.config.childName }
@@ -78,20 +82,23 @@ struct SimpleModeView: View {
     }
 
     // MARK: 顶部问候
+    /// 两行分工明确：上行是「现在是谁在用这台手机」（家人 emoji + 称谓），
+    /// 下行是「你要记录的是谁」（布布本人的头像 + 名字 + 年龄）。
+    /// 旧版把家人的 emoji 配在布布名字旁边，两个身份混成一个，长辈最容易看错。
     private var header: some View {
         VStack(spacing: 8) {
-            HStack {
+            HStack(spacing: 7) {
+                Text(currentMember?.avatarEmoji ?? Relation(rawValue: role.rawValue)?.defaultEmoji ?? "🙂")
+                    .font(.system(size: 19))
                 Text(role.simpleModeName)
                     .font(BubuTheme.Font.scaled(17, weight: .bold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 Spacer()
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("当前身份：\(role.rawValue)")
             HStack(spacing: 14) {
-                Text(currentMember?.avatarEmoji ?? Relation(rawValue: role.rawValue)?.defaultEmoji ?? "🙂")
-                    // 固定圆形头像内的单 emoji，老人模式放大档下会溢出 66pt 圆，保持固定
-                    .font(.system(size: 40))
-                    .frame(width: 66, height: 66)
-                    .background(BubuTheme.Color.card, in: Circle())
+                childAvatarCircle
                 VStack(alignment: .leading, spacing: 2) {
                     Text("你好呀")
                         .font(BubuTheme.Font.scaled(18, weight: .bold))
@@ -108,6 +115,37 @@ struct SimpleModeView: View {
                 Spacer()
             }
         }
+        .task(id: profiles.first?.avatarMediaFileName) { await loadChildAvatar() }
+    }
+
+    /// 布布的头像圆：有档案头像就用真照片，没有就用固定的宝宝 emoji，绝不借用家人头像。
+    private var childAvatarCircle: some View {
+        ZStack {
+            Circle().fill(BubuTheme.Color.card)
+            if let childAvatar {
+                Image(uiImage: childAvatar)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(Circle())
+            } else {
+                Text("👶").font(.system(size: 40))
+            }
+        }
+        .frame(width: 66, height: 66)
+        .overlay { Circle().stroke(BubuTheme.Color.peach.opacity(0.55), lineWidth: 2) }
+        .accessibilityHidden(true)
+    }
+
+    private func loadChildAvatar() async {
+        guard let name = profiles.first?.avatarMediaFileName else {
+            childAvatar = nil
+            return
+        }
+        let store = env.mediaStore
+        let image = await Task.detached(priority: .userInitiated) {
+            ThumbnailProvider.downsample(url: store.mediaURL(for: name), maxPixel: 200)
+        }.value
+        childAvatar = image
     }
 
     // MARK: 大按钮

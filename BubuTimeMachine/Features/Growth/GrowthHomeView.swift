@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 // MARK: - 成长总览
-/// 一个成长引擎，多处消费：里程碑、实测数据、健康照护、疫苗和“第一次”共享入口，
+/// 一个成长引擎，多处消费：里程碑、实测数据、健康、疫苗和“第一次”共享入口，
 /// 不复制数据、不新建模型，只把已经存在的事实组织成家人一眼能懂的成长域。
 struct GrowthHomeView: View {
     @Environment(AppEnvironment.self) private var env
@@ -116,7 +116,7 @@ struct GrowthHomeView: View {
                 growthLink(icon: "star.fill", title: "里程碑", subtitle: "已点亮 \(achievedMilestones.count) 个")
             }
             NavigationLink { HealthHomeView() } label: {
-                growthLink(icon: "heart.text.square.fill", title: "健康照护", subtitle: "共 \(healthRecordCount) 条记录")
+                growthLink(icon: "heart.text.square.fill", title: "健康", subtitle: "共 \(healthRecordCount) 条记录")
             }
             NavigationLink { VaccineView() } label: {
                 growthLink(icon: "syringe.fill", title: "疫苗接种", subtitle: "已记录 \(vaccines.count) 剂")

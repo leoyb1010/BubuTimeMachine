@@ -196,6 +196,18 @@ struct BubuAppShortcuts: AppShortcutsProvider {
             shortTitle: "布布多大了",
             systemImageName: "birthday.cake.fill"
         )
+        // 半夜喂奶最高频，却一直没进预置短语——Intent 早就实现了，只是没挂上来，
+        // 于是锁屏/Siri 这条最省事的路径白白空着。
+        AppShortcut(
+            intent: HealthCheckInIntent(),
+            phrases: [
+                "用\(.applicationName)打卡\(\.$kind)",
+                "\(.applicationName)给布布打卡\(\.$kind)",
+                "在\(.applicationName)记一次\(\.$kind)"
+            ],
+            shortTitle: "健康打卡",
+            systemImageName: "cross.case.fill"
+        )
         AppShortcut(
             intent: OpenRecordIntent(),
             phrases: [

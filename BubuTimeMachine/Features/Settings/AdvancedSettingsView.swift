@@ -15,14 +15,6 @@ struct AdvancedSettingsView: View {
         @Bindable var config = env.config
         Form {
             Section {
-                NavigationLink { SyncCenterView() } label: {
-                    Label("同步与备份中心", systemImage: "arrow.triangle.2.circlepath")
-                }
-            } footer: {
-                Text("同步状态、进度与「重新拉取 / 重传」都在那里。")
-            }
-
-            Section {
                 // 地址/账号一律走缓冲输入：这些字段的 setter 有副作用——写 UserDefaults、
                 // 写钥匙串，主地址变化还会清空同步游标。逐键触发等于「打字过程中反复清同步状态」。
                 // 缓冲后副作用只在用户输完（失焦/回车）发生一次。
