@@ -45,13 +45,13 @@ export class EntryWriter {
   // 带照片/视频/语音的记录：文件名为已落沙盒的相对名。voiceFileName/voiceDuration 可选。
   static async entryWithPhoto(note: string, photoFileName: string | string[] | null, role: FamilyRole,
                               mood?: Mood, voiceFileName?: string | null, voiceDuration?: number,
-                              videoFileNames: string[] = []): Promise<string> {
+                              videoFileNames: string[] = [], happenedAt: number = Date.now()): Promise<string> {
     const now = Date.now();
     const id = util.generateRandomUUID(true);
     const trimmed = note.trim();
     const entry: Entry = {
       id: id,
-      happenedAt: now,
+      happenedAt,
       authorRole: role,
       note: trimmed.length === 0 ? undefined : trimmed,
       moodRaw: mood,

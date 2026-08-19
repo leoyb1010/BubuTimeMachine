@@ -69,6 +69,7 @@ $ ./scripts/build-local.sh
 | 自然语言一句话记录 | ✅ | AIService + HomeView 一句话条（AI 解析，离线降级原文） |
 | 成长曲线图（Canvas 自绘） | ✅ | GrowthCurveView（健康页进入） |
 | 服务卡片（≈iOS 小组件） | ✅ | BubuFormAbility + widget/pages/BubuCard + form_config.json |
+| 智能照片收件箱 | 🟡 | Media Library 扫描 + 持久候选 + 事件分组 + 确认入库；后台扩展与人物识别待补 |
 
 ### 🟡 / ⬜ 仍待续（长尾）
 

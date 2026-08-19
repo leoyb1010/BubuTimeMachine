@@ -14,6 +14,7 @@ import { YearbookView } from './YearbookView';
 import { ExportView } from './ExportView';
 import { AdvancedSettingsView } from './AdvancedSettingsView';
 import { SyncCenterView } from './SyncCenterView';
+import { PhotoInboxView } from './PhotoInboxView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { promptAction } from '@kit.ArkUI';
 
@@ -46,6 +47,7 @@ export struct SettingsView {
   @State showYearbook: boolean = false;
   @State showExport: boolean = false;
   @State showSyncCenter: boolean = false;
+  @State showPhotoInbox: boolean = false;
   @State statusText: string = '';
 
   aboutToAppear(): void {
@@ -83,6 +85,8 @@ export struct SettingsView {
       this.exportPage()
     } else if (this.showSyncCenter) {
       this.syncCenterPage()
+    } else if (this.showPhotoInbox) {
+      this.photoInboxPage()
     } else {
       this.mainPage()
     }
@@ -326,6 +330,11 @@ export struct SettingsView {
   }
 
   @Builder
+  photoInboxPage() {
+    PhotoInboxView({ onClose: () => { this.showPhotoInbox = false; } })
+  }
+
+  @Builder
   bubuGroup() {
     Column({ space: 10 }) {
       Text('布布')
@@ -399,6 +408,7 @@ export struct SettingsView {
         .padding({ left: 6 })
       Column({ space: 0 }) {
         this.navRow('同步与备份', BubuIconName.checkCloud, '查看状态、立即同步或重新核对全部内容', () => { this.showSyncCenter = true; })
+        this.navRow('照片收件箱', BubuIconName.photo, '扫描最近照片，按事件分组后确认收好', () => { this.showPhotoInbox = true; })
         this.navRow('做一本 PDF 年册', BubuIconName.photo, '把布布的一年做成可打印的书', () => { this.showYearbook = true; })
         this.navRow('导出布布的全量档案', BubuIconName.send, '网页 + 全部媒体，永久离线可读', () => { this.showExport = true; })
       }

@@ -4,6 +4,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord, Comment, VoiceMemo, FirstTime, GrowthMovie, PendingDeletion, FeedEvent } from '../models/Models';
 import { SyncState } from '../models/Enums';
+import { PhotoIntakeCandidate, PhotoIntakeState } from '../models/PhotoIntake';
 
 const DOMAIN = 0x0000;
 
@@ -111,6 +112,12 @@ export class AppDatabase {
     // PendingDeletion（待同步删除队列）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS pending_deletion (
       id TEXT PRIMARY KEY, collection TEXT NOT NULL, remoteId TEXT NOT NULL, createdAt INTEGER NOT NULL)`);
+    // 智能照片收件箱只保存系统相册元数据和处理状态，不复制原片。
+    await s.executeSql(`CREATE TABLE IF NOT EXISTS photo_intake_asset (
+      assetUri TEXT PRIMARY KEY, state TEXT NOT NULL, displayName TEXT NOT NULL,
+      createdAt INTEGER NOT NULL, mediaType INTEGER NOT NULL, width INTEGER NOT NULL,
+      height INTEGER NOT NULL, duration REAL NOT NULL, subtype INTEGER NOT NULL,
+      burstKey TEXT, lastSeenAt INTEGER NOT NULL)`);
     await this.runSchemaMigrations();
   }
 
@@ -1000,6 +1007,64 @@ export class AppDatabase {
     const pred = new relationalStore.RdbPredicates('feed_event');
     pred.equalTo('targetLocalId', localId);
     await this.store!.delete(pred);
+  }
+
+  // —— 智能照片收件箱（可重建派生状态，不进入家庭同步）——
+  async upsertPhotoIntakeCandidates(candidates: PhotoIntakeCandidate[]): Promise<void> {
+    if (candidates.length === 0) return;
+    const sql = `INSERT INTO photo_intake_asset(
+      assetUri,state,displayName,createdAt,mediaType,width,height,duration,subtype,burstKey,lastSeenAt
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(assetUri) DO UPDATE SET
+      displayName=excluded.displayName,createdAt=excluded.createdAt,mediaType=excluded.mediaType,
+      width=excluded.width,height=excluded.height,duration=excluded.duration,
+      subtype=excluded.subtype,burstKey=excluded.burstKey,lastSeenAt=excluded.lastSeenAt`;
+    const now = Date.now();
+    await this.store!.executeSql('BEGIN IMMEDIATE');
+    try {
+      for (const item of candidates) {
+        await this.store!.executeSql(sql, [
+          item.assetUri, item.state, item.displayName, item.createdAt, item.mediaType,
+          item.width, item.height, item.duration, item.subtype, item.burstKey ?? null, now
+        ]);
+      }
+      await this.store!.executeSql('COMMIT');
+    } catch (e) {
+      await this.store!.executeSql('ROLLBACK');
+      throw e instanceof Error ? e : new Error(JSON.stringify(e));
+    }
+  }
+
+  async fetchPhotoIntakePending(limit: number = 150): Promise<PhotoIntakeCandidate[]> {
+    const pred = new relationalStore.RdbPredicates('photo_intake_asset');
+    pred.in('state', [PhotoIntakeState.discovered, PhotoIntakeState.failed]);
+    pred.orderByDesc('createdAt');
+    pred.limitAs(limit);
+    const rs = await this.store!.query(pred);
+    const items: PhotoIntakeCandidate[] = [];
+    while (rs.goToNextRow()) {
+      items.push({
+        assetUri: rs.getString(rs.getColumnIndex('assetUri')),
+        state: rs.getString(rs.getColumnIndex('state')),
+        displayName: rs.getString(rs.getColumnIndex('displayName')),
+        createdAt: rs.getLong(rs.getColumnIndex('createdAt')),
+        mediaType: rs.getLong(rs.getColumnIndex('mediaType')),
+        width: rs.getLong(rs.getColumnIndex('width')),
+        height: rs.getLong(rs.getColumnIndex('height')),
+        duration: rs.getDouble(rs.getColumnIndex('duration')),
+        subtype: rs.getLong(rs.getColumnIndex('subtype')),
+        burstKey: AppDatabase.optStr(rs, 'burstKey')
+      });
+    }
+    rs.close();
+    return items;
+  }
+
+  async markPhotoIntake(assetUris: string[], state: string): Promise<void> {
+    if (assetUris.length === 0) return;
+    const pred = new relationalStore.RdbPredicates('photo_intake_asset');
+    pred.in('assetUri', assetUris);
+    await this.store!.update({ state }, pred);
   }
 
   async clearServerBackedData(): Promise<void> {
