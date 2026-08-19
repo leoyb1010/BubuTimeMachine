@@ -10,6 +10,7 @@ import { APIClient } from '../services/APIClient';
 import { IosBaselineImporter } from '../bootstrap/IosBaselineImporter';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
 import '../intent/OpenBubuIntent';
+import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -34,6 +35,7 @@ export default class EntryAbility extends UIAbility {
       await ServerConfig.shared.load(this.context);
       await IosBaselineImporter.runIfNeeded(this.context);
       await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences
+      BackgroundSyncScheduler.ensureScheduled();
       await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `初始化失败: ${JSON.stringify(e)}`);
@@ -56,5 +58,6 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     // 进后台停轮询省电（对应 iOS .background → stopPolling）。
     SyncEngine.shared.stopPolling();
+    BackgroundSyncScheduler.ensureScheduled();
   }
 }

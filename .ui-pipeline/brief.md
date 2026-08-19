@@ -2,19 +2,19 @@
 
 ## Outcome
 
-- User-visible outcome: HarmonyOS 端追平 iOS 2.11.0 的业务能力，并用鸿蒙原生交互承载卡片、意图、穿戴与跨设备能力。
-- Success signal: 同一家庭数据下，核心任务结果与 iOS 一致；手机、平板、折叠屏和穿戴端均有真实运行证据。
+- User-visible outcome: HarmonyOS 手机端追平 iOS 2.11.0 的业务能力，并用鸿蒙原生交互承载卡片、意图与后台能力。
+- Success signal: 同一家庭数据下，鸿蒙手机核心任务结果与 iPhone 一致，并有真机运行证据。
 
 ## Users and situation
 
 - Primary users: 家庭成员，包含需要大字、低认知负担操作的长辈。
 - Job to be done: 可靠记录、回看、搜索、分享孩子成长资料，且不因断网、杀进程或换设备丢失。
-- Environment and devices: HarmonyOS 手机、平板、折叠屏、鸿蒙电脑与华为穿戴设备。
+- Environment and devices: HarmonyOS 手机。
 
 ## Scope
 
-- In scope: iOS 全部用户能力、鸿蒙原生替代能力、响应式布局、无障碍、深色模式和关键状态。
-- Out of scope: 与家庭成长记录无关的通用社交或营销功能。
+- In scope: iOS 手机端全部用户能力、鸿蒙手机原生替代能力、无障碍、深色模式和关键状态。
+- Out of scope: 平板、折叠屏、鸿蒙电脑、穿戴设备，以及与家庭成长记录无关的通用社交或营销功能。
 
 ## Facts and constraints
 
@@ -30,4 +30,4 @@
 ## Assumptions and open decisions
 
 - Assumptions: 业务能力等价优先于控件逐像素复制，系统能力采用鸿蒙推荐交互。
-- Open decisions: Live View、Wear Engine 等受限权益以开发者后台实际开通结果为准。
+- Open decisions: Live View 等受限权益以开发者后台实际开通结果为准。

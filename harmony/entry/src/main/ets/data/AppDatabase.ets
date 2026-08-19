@@ -17,7 +17,7 @@ export class AppDatabase {
 
   private constructor() {}
 
-  async initialize(context: common.UIAbilityContext): Promise<void> {
+  async initialize(context: common.Context): Promise<void> {
     if (this.store) return;
     const config: relationalStore.StoreConfig = {
       name: 'BubuTimeMachine.db',

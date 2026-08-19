@@ -27,11 +27,11 @@ export class APIClient {
   private currentFamilyId: string = '';
   private fileToken: string = '';
   private fileTokenExpiresAt: number = 0;
-  private appContext: common.UIAbilityContext | null = null;
+  private appContext: common.BaseContext | null = null;
 
   private constructor() {}
 
-  initialize(context: common.UIAbilityContext): void {
+  initialize(context: common.BaseContext): void {
     this.appContext = context;
   }
 
@@ -275,7 +275,7 @@ export class APIClient {
       isPatch ? 'PATCH' : 'POST', url, formData, fileField, filePath, fileName, header, onProgress);
   }
 
-  // 自实现 multipart：读整文件构造 body 一次发出（对照 iOS multipartBodyFile）。
+  // 系统 multipart 直接从 filePath 流式读取，避免把大视频整段装进内存。
   private async multipartViaHttp(
     method: string,
     url: string,
@@ -286,44 +286,31 @@ export class APIClient {
     header: Record<string, string>,
     onProgress?: (fraction: number) => void
   ): Promise<UploadedFileResult> {
-    const boundary = `Boundary-${APIClient.uuid()}`;
     const path = filePath.replace(/^file:\/\//, '');
-    const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
-    const stat = fileIo.statSync(path);
-    const fileBuf = new ArrayBuffer(stat.size);
-    fileIo.readSync(file.fd, fileBuf);
-    fileIo.closeSync(file);
-
-    // 文本部分（前缀字段 + 文件头）
-    let pre = '';
+    const parts: http.MultiFormData[] = [];
     for (const d of formData) {
-      pre += `--${boundary}\r\n`;
-      pre += `Content-Disposition: form-data; name="${d.name}"\r\n\r\n`;
-      pre += `${d.value}\r\n`;
+      parts.push({ name: d.name, contentType: 'text/plain', data: d.value });
     }
-    pre += `--${boundary}\r\n`;
-    pre += `Content-Disposition: form-data; name="${fileField}"; filename="${fileName}"\r\n`;
-    pre += `Content-Type: application/octet-stream\r\n\r\n`;
-    const post = `\r\n--${boundary}--\r\n`;
-
-    const enc = new util.TextEncoder();
-    const preBytes = enc.encodeInto(pre);
-    const postBytes = enc.encodeInto(post);
-    const fileBytes = new Uint8Array(fileBuf);
-    const total = new Uint8Array(preBytes.length + fileBytes.length + postBytes.length);
-    total.set(preBytes, 0);
-    total.set(fileBytes, preBytes.length);
-    total.set(postBytes, preBytes.length + fileBytes.length);
+    parts.push({
+      name: fileField,
+      contentType: 'application/octet-stream',
+      remoteFileName: fileName,
+      filePath: path
+    });
 
     const req = http.createHttp();
     try {
-      header['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
+      if (onProgress) {
+        req.on('dataSendProgress', (info: http.DataSendProgressInfo): void => {
+          if (info.totalSize > 0) onProgress(Math.min(1, info.sendSize / info.totalSize));
+        });
+      }
       const resp = await req.request(url, {
         method: method === 'PATCH' ? http.RequestMethod.PATCH : http.RequestMethod.POST,
         header: header,
-        extraData: total.buffer,
+        multiFormDataList: parts,
         connectTimeout: 30000,
-        readTimeout: 120000
+        readTimeout: 300000
       });
       const code = resp.responseCode;
       if (code < 200 || code >= 300) throw new Error(`HTTP ${code}: ${resp.result}`);
@@ -340,38 +327,14 @@ export class APIClient {
   // MARK: 文件下载（对照 iOS downloadFile(from:)）-----------------------------
 
   // 下载远端文件到本地 destPath，返回最终落盘路径。带 Bearer token。
-  // NOTE: 用 http.request 取二进制（resultType ARRAY_BUFFER），再 fileIo 落盘；
-  //       等价 iOS URLSession.data + 写盘，避免 request.downloadFile 的额外鉴权 header 限制。
+  // 只走系统下载任务直接落盘；失败由 SyncEngine 保留本地状态并在下一轮重试。
   async downloadFile(remoteURL: string, destPath: string): Promise<string> {
     if (remoteURL.length === 0) throw new Error('文件地址不正确');
     const tokenStr = await this.ensureToken();
     const accessURL = await this.fileAccessURL(remoteURL);
     const header: Record<string, string> = {};
     if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
-    try {
-      return await this.downloadFileViaTask(accessURL, destPath, header);
-    } catch (taskError) {
-      hilog.warn(DOMAIN, 'Bubu', `系统下载失败，回退 HTTP 下载: ${APIClient.errorText(taskError)}`);
-    }
-    const req = http.createHttp();
-    try {
-      const resp = await req.request(accessURL, {
-        method: http.RequestMethod.GET,
-        header: header,
-        expectDataType: http.HttpDataType.ARRAY_BUFFER,
-        connectTimeout: 30000,
-        readTimeout: 120000
-      });
-      const code = resp.responseCode;
-      if (code < 200 || code >= 300) throw new Error(`HTTP ${code}`);
-      const buf = resp.result as ArrayBuffer;
-      const file = fileIo.openSync(destPath, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, buf);
-      fileIo.closeSync(file);
-      return destPath;
-    } finally {
-      req.destroy();
-    }
+    return await this.downloadFileViaTask(accessURL, destPath, header);
   }
 
   private async downloadFileViaTask(accessURL: string, destPath: string,

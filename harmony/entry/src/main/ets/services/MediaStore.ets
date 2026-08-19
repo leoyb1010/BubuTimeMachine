@@ -17,7 +17,7 @@ export class MediaStore {
 
   private constructor() {}
 
-  initialize(context: common.UIAbilityContext): void {
+  initialize(context: common.Context): void {
     this.baseDir = context.filesDir + '/Media';
     this.thumbDir = context.filesDir + '/Thumbnails';
     this.cacheBase = context.cacheDir;

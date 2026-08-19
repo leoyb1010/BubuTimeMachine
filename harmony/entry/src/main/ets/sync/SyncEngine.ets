@@ -59,7 +59,7 @@ export class SyncEngine {
   private serverMirrorMode: boolean = false;
   private serverSeen: Map<string, Set<string>> = new Map<string, Set<string>>();
   private cursorStore: preferences.Preferences | null = null;
-  private appContext: common.UIAbilityContext | null = null;
+  private appContext: common.Context | null = null;
 
   private constructor() {}
 
@@ -74,7 +74,7 @@ export class SyncEngine {
   }
 
   // 由 EntryAbility 注入上下文，打开游标用的 Preferences 实例（对照 iOS UserDefaults）。
-  async initialize(context: common.UIAbilityContext): Promise<void> {
+  async initialize(context: common.Context): Promise<void> {
     this.appContext = context;
     if (!this.cursorStore) {
       this.cursorStore = await preferences.getPreferences(context, 'bubu_sync_cursor');

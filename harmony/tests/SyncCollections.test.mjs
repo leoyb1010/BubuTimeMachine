@@ -28,3 +28,11 @@ test('增量同步使用服务器 updated 并传播软删除墓碑', () => {
   assert.ok(apiSource.includes('activeRecordBody(body, existing === null)'));
   assert.ok(apiSource.includes('activeRecordFields(fields, !isPatch)'));
 });
+
+test('媒体上传下载不再整文件读入内存', () => {
+  assert.ok(apiSource.includes('multiFormDataList: parts'));
+  assert.ok(apiSource.includes("filePath: path"));
+  assert.ok(apiSource.includes("req.on('dataSendProgress'"));
+  assert.ok(!apiSource.includes('const fileBuf = new ArrayBuffer(stat.size)'));
+  assert.ok(!apiSource.includes('HTTP 下载'));
+});

@@ -25,7 +25,7 @@ export class ServerConfig {
 
   private constructor() {}
 
-  async load(context: common.UIAbilityContext): Promise<void> {
+  async load(context: common.Context): Promise<void> {
     this.store = await preferences.getPreferences(context, 'bubu_server_config');
     this.baseURLString = await this.getStr('baseURL', ServerConfig.defaultBaseURL);
     this.accountEmail = await this.getStr('email', '');

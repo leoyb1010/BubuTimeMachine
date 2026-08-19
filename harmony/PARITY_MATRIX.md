@@ -11,7 +11,7 @@
 | 档案、文字、照片、视频、语音、地点记录 | 完整 | 🟡 已实现并接真实一次定位，批量媒体失败恢复待追平 | 真机创建后跨端可见，杀进程后不丢 |
 | 本地数据库与迁移 | SwiftData Schema + migrator | 🟡 RDB 已有，迁移测试缺失 | 旧 HAP 覆盖安装后数据完整 |
 | PocketBase 全集合双向同步 | 生产使用 | 🟡 已补成长之声全链路，其余集合继续核验 | 离线增删改、冲突、重试矩阵全绿 |
-| 媒体上传、下载、缩略图 | 后台可靠摄取 | 🟡 基础链路已有 | 弱网/断网/进程终止恢复全绿 |
+| 媒体上传、下载、缩略图 | 后台可靠摄取 | 🟡 已改为文件流式上传/系统落盘下载，并接 WorkScheduler 恢复 | 弱网/断网/进程终止恢复全绿 |
 | 删除队列与冲突合并 | 完整 | 🟡 已改用服务器 updated，并补 tombstone 删除传播 | 两端交叉删除不复活、不误删 |
 | 胶囊加密与恢复 | 完整 | 🟡 已移植，设备能力与异常路径待验证 | 密文兼容、错误口令、恢复演练 |
 
@@ -39,10 +39,10 @@
 | WidgetKit | Form Kit 服务卡片 | 🟡 单卡片 | 多规格、照片、刷新、点击路径真机通过 |
 | App Intents | InsightIntent | 🟡 已声明系统前台打开意图；带参数快捷记录继续补 | 意图声明、系统推荐与落地页真机通过 |
 | Live Activity | Live View | ⏳ | 仅在权益和场景准入允许时接入 |
-| Photos Extension | Media Library + Background Tasks | 🔴 | 后台恢复、权限拒绝、大图库验证 |
-| WatchConnectivity/watchOS | Wear Engine + 穿戴侧 HAP | 🔴 | 消息、语音、照片包、离线队列实表通过 |
+| Photos Extension | Media Library + Background Tasks | 🟡 已接持久候选和 WorkScheduler | 后台恢复、权限拒绝、大图库验证 |
 | Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🟡 开放档案已接系统分享 | 图片、视频、文本和目标页直达 |
-| iPad/Mac Catalyst | 平板、折叠屏、鸿蒙电脑 | 🟡 phone/tablet 声明 | 横竖屏、分栏、多窗口、长文本截图 |
+
+> 用户已明确：平板、折叠屏、鸿蒙电脑和穿戴端不在本次范围；工程仅声明 `phone`。
 
 ## 发布门槛
 

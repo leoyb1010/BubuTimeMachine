@@ -4,7 +4,7 @@
     "type": "entry",
     "description": "布布时光机 · 鸿蒙主模块",
     "mainElement": "EntryAbility",
-    "deviceTypes": ["phone", "tablet"],
+    "deviceTypes": ["phone"],
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
@@ -27,6 +27,13 @@
       }
     ],
     "extensionAbilities": [
+      {
+        "name": "BackgroundSyncAbility",
+        "srcEntry": "./ets/background/BackgroundSyncAbility.ets",
+        "description": "联网后恢复上传与同步",
+        "type": "workScheduler",
+        "exported": false
+      },
       {
         "name": "BubuFormAbility",
         "srcEntry": "./ets/widget/BubuFormAbility.ets",
