@@ -10,12 +10,13 @@ import { CapsuleRecovery } from '../services/security/CapsuleRecovery';
 import { BubuActivityController } from '../services/BubuActivityController';
 import { BubuColor, BubuFont, BubuRadius, BubuSpacing, BubuShadow } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
+import { VoicePlayerBubble, VoiceRecorderBar } from '../components/VoiceComponents';
+import { MediaStore } from '../services/MediaStore';
 
 // MARK: - 时间胶囊 · 写信（对照 iOS Features/Capsule/CapsuleComposeView.swift）
 // 写文字 + 选解锁时间（提供「明年今天」「N岁生日」等快捷项）。
 // 保存时用家庭恢复码 v3 真 E2E 加密落盘，UI 立刻锁定。
-// NOTE: iOS 还支持录语音（VoiceRecorderBar/VoicePlayerBubble），本切片未携带录音组件，
-//       故省略语音段，仅保留文字信；payload 的语音字段保持空（与同步格式兼容）。
+// 文字与可选语音一起进入同一个 E2E 加密载荷；封存成功后删除语音明文副本。
 
 // 解锁时间快捷项（对照 iOS quickOptions）。
 interface QuickOption {
@@ -39,6 +40,11 @@ export struct CapsuleComposeView {
   @State private saving: boolean = false;
   @State private profile: ChildProfile | null = null;
   @State private loaded: boolean = false;
+  @State private loadedPayload: CapsulePayload | null = null;
+  @State private voiceFileName: string | undefined = undefined;
+  @State private voiceDuration: number = 0;
+  @State private voiceWaveform: number[] = [];
+  private loadedVoiceFileName: string | undefined = undefined;
 
   private readonly emojiChoices: string[] = ['💌', '🎁', '🌟', '🎂', '🧸', '🌷', '📮', '🕰️', '💝', '🍼'];
 
@@ -72,7 +78,12 @@ export struct CapsuleComposeView {
         const recovery = CapsuleRecovery.current();
         const payload = await CapsuleVault.shared.unseal(
           blob, e.unlockAt, e.id, recovery ?? undefined);
+        this.loadedPayload = payload;
         this.letter = payload.letter;
+        this.voiceFileName = payload.voiceFileName;
+        this.loadedVoiceFileName = payload.voiceFileName;
+        this.voiceDuration = payload.voiceDuration;
+        this.voiceWaveform = payload.voiceWaveform;
       } catch (err) {
         // 解不开就保留空正文（与 iOS try? 一致）。
       }
@@ -86,7 +97,7 @@ export struct CapsuleComposeView {
         Button('取消')
           .backgroundColor('#F3F3F3')
           .fontColor(BubuColor.warmBrown)
-          .onClick(() => { this.onBack(); })
+          .onClick(() => { this.cancel(); })
         Text(this.editing === null ? '写给未来的布布' : '修改时间胶囊')
           .fontSize(BubuFont.headline)
           .fontWeight(FontWeight.Bold)
@@ -107,6 +118,7 @@ export struct CapsuleComposeView {
           this.emojiPicker()
           this.titleField()
           this.letterField()
+          this.voiceSection()
           this.unlockSection()
           Blank().height(20)
         }
@@ -120,6 +132,36 @@ export struct CapsuleComposeView {
     .width('100%')
     .height('100%')
     .backgroundColor(BubuColor.cream)
+  }
+
+  @Builder
+  voiceSection() {
+    if (this.canRewritePayload()) {
+      Column({ space: 8 }) {
+        Text('也可以录一段话（可不录）').fontSize(BubuFont.body).fontColor(BubuColor.secondaryText)
+        if (this.voiceFileName !== undefined) {
+          Row({ space: 10 }) {
+            VoicePlayerBubble({
+              fileName: this.voiceFileName!, duration: this.voiceDuration,
+              waveform: this.voiceWaveform, tint: BubuColor.primary
+            }).layoutWeight(1)
+            Button('删除语音').backgroundColor(BubuColor.softFill).fontColor(BubuColor.secondaryText)
+              .onClick(() => { this.removeVoice(); })
+          }.width('100%')
+        } else {
+          VoiceRecorderBar({
+            tint: BubuColor.primary,
+            onFinished: (fileName: string, duration: number, waveform: number[]) => {
+              this.voiceFileName = fileName;
+              this.voiceDuration = duration;
+              this.voiceWaveform = waveform;
+            }
+          })
+        }
+      }
+      .alignItems(HorizontalAlign.Start)
+      .width('100%')
+    }
   }
 
   // 封面 emoji 横向选择器（对照 iOS emojiPicker）。
@@ -264,7 +306,7 @@ export struct CapsuleComposeView {
   // 可保存：标题非空 + （编辑态 或 正文非空）。对照 iOS canSave。
   private canSave(): boolean {
     const hasTitle = this.title.trim().length > 0;
-    const hasBody = this.letter.trim().length > 0;
+    const hasBody = this.letter.trim().length > 0 || this.voiceFileName !== undefined;
     return hasTitle && (this.editing !== null || hasBody);
   }
 
@@ -297,7 +339,11 @@ export struct CapsuleComposeView {
       }
 
       const id = e !== null ? e.id : util.generateRandomUUID(true);
-      const payload: CapsulePayload = makeCapsulePayload(this.letter);
+      const payload: CapsulePayload = this.loadedPayload ?? makeCapsulePayload(this.letter);
+      payload.letter = this.letter;
+      payload.voiceFileName = this.voiceFileName;
+      payload.voiceDuration = this.voiceDuration;
+      payload.voiceWaveform = this.voiceWaveform;
 
       // v3 真 E2E：用家庭恢复码派生密钥加密，salt 用胶囊 id。
       const recoveryCode = CapsuleRecovery.currentOrCreate();
@@ -317,6 +363,7 @@ export struct CapsuleComposeView {
         createdAt: e !== null ? e.createdAt : now
       };
       await AppDatabase.shared.insertCapsule(capsule);
+      if (payload.voiceFileName) MediaStore.shared.deleteMedia(payload.voiceFileName);
       BubuActivityController.shared.startCapsuleCountdown(
         capsule.title, capsule.unlockAt, ServerConfig.shared.childName);
       this.getUIContext().getPromptAction().showToast({ message: '已经封存啦 💌' });
@@ -332,5 +379,19 @@ export struct CapsuleComposeView {
     } finally {
       this.saving = false;
     }
+  }
+
+  private removeVoice(): void {
+    if (this.voiceFileName) MediaStore.shared.deleteMedia(this.voiceFileName);
+    this.voiceFileName = undefined;
+    this.voiceDuration = 0;
+    this.voiceWaveform = [];
+  }
+
+  private cancel(): void {
+    if (this.voiceFileName && this.voiceFileName !== this.loadedVoiceFileName) {
+      MediaStore.shared.deleteMedia(this.voiceFileName);
+    }
+    this.onBack();
   }
 }

@@ -7,12 +7,12 @@ import { CapsuleRecovery } from '../services/security/CapsuleRecovery';
 import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
+import { VoicePlayerBubble } from '../components/VoiceComponents';
 
 // MARK: - 时间胶囊 · 庄重开启（三幕制）（对照 iOS Features/Capsule/CapsuleUnlockView.swift）
 // 第一幕「破封」：封蜡碎裂粒子；第二幕「时光回溯」：字幕告诉等了多久；
 // 第三幕「信纸展开」：解密内容浮现。全程可点击跳过。
-// NOTE: iOS 用触觉/音效/symbolEffect；本切片以无触觉的纯动画 + emoji 等价呈现。
-//       语音段省略（无录音组件），只展示文字信。
+// NOTE: iOS 用触觉/音效/symbolEffect；本切片以纯动画 + emoji 承载典礼，并播放解密后语音。
 
 type UnlockPhase = 'sealed' | 'cracking' | 'retrospect' | 'revealed';
 
@@ -241,6 +241,17 @@ export struct CapsuleUnlockView {
               .fontColor(BubuColor.warmBrown)
               .lineHeight(30)
               .width('100%')
+          }
+
+          if (this.payload !== null && this.payload.voiceFileName !== undefined) {
+            Column({ space: 8 }) {
+              Text('〰 还有一段话想对你说')
+                .fontSize(BubuFont.caption).fontColor(BubuColor.secondaryText).width('100%')
+              VoicePlayerBubble({
+                fileName: this.payload.voiceFileName!, duration: this.payload.voiceDuration,
+                waveform: this.payload.voiceWaveform, tint: this.theme()
+              }).width('100%')
+            }.alignItems(HorizontalAlign.Start).width('100%')
           }
 
           Text(`—— 来自${this.capsule.fromRole}，写于 ${BubuDateFormat.longDate(new Date(this.capsule.createdAt))}`)
