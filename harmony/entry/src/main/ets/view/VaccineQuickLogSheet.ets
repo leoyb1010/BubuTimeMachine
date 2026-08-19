@@ -129,7 +129,7 @@ export struct VaccineQuickLogSheet {
   }
 
   private pickDate(): void {
-    DatePickerDialog.show({
+    this.getUIContext().showDatePickerDialog({
       start: new Date(2015, 0, 1),
       end: new Date(),
       selected: new Date(this.injectedAt),
@@ -138,7 +138,7 @@ export struct VaccineQuickLogSheet {
   }
 
   private confirmDelete(): void {
-    AlertDialog.show({
+    this.getUIContext().showAlertDialog({
       title: '取消这针的打卡？',
       message: '删除后家人设备也会同步移除这条记录。',
       primaryButton: { value: '取消打卡', fontColor: BubuColor.danger, action: () => { this.deleteRecord(); } },
@@ -179,7 +179,7 @@ export struct VaccineQuickLogSheet {
       };
       await AppDatabase.shared.insertVaccine(newRecord);
     }
-    promptAction.showToast({ message: '已记录 💉' });
+    this.getUIContext().getPromptAction().showToast({ message: '已记录 💉' });
     this.onDone();
   }
 

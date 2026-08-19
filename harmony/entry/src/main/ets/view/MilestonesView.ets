@@ -41,7 +41,7 @@ export struct MilestonesView {
   aboutToAppear(): void {
     this.reload();
     this.pageIn = false;
-    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
   }
 
   private async reload(): Promise<void> {
@@ -230,7 +230,7 @@ export struct MilestonesView {
       })
 	        .onClick(() => {
 	          BubuHaptics.selection();
-	          animateTo(BubuMotion.quick, () => { this.isConstellation = !this.isConstellation; });
+	          this.getUIContext().animateTo(BubuMotion.quick, () => { this.isConstellation = !this.isConstellation; });
 	        })
       Blank()
       Text('里程碑').fontSize(BubuFont.headline).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
@@ -247,7 +247,7 @@ export struct MilestonesView {
       })
 	        .onClick(() => {
 	          BubuHaptics.tapLight();
-	          animateTo(BubuMotion.quick, () => { this.showAddMenu = !this.showAddMenu; });
+	          this.getUIContext().animateTo(BubuMotion.quick, () => { this.showAddMenu = !this.showAddMenu; });
 	        })
     }
     .width('100%').padding({ left: 8, right: 8, top: 6 })
@@ -330,7 +330,7 @@ export struct MilestonesView {
 	              .animation(BubuMotion.quick)
 	              .onClick(() => {
 	                BubuHaptics.selection();
-	                animateTo(BubuMotion.quick, () => { this.selectedCategory = category; });
+	                this.getUIContext().animateTo(BubuMotion.quick, () => { this.selectedCategory = category; });
 	              })
           }, (category: string) => category)
         }

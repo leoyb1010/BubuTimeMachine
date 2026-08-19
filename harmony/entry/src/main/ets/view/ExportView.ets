@@ -228,12 +228,12 @@ export struct ExportView {
       this.resultPath = archive;
       // 记录导出时间戳（对照 iOS UserDefaults bubu.lastExportAt）。
       try {
-        const store = preferences.getPreferencesSync(getContext(this), { name: 'bubu_widget' });
+        const store = preferences.getPreferencesSync(this.getUIContext().getHostContext(), { name: 'bubu_widget' });
         store.putSync('bubu.lastExportAt', Math.floor(Date.now() / 1000));
         store.flush();
       } catch (e) {}
       try {
-        await ShareService.shareFile(getContext(this) as common.UIAbilityContext, archive, `${profile.name}的一生`);
+        await ShareService.shareFile(this.getUIContext().getHostContext() as common.UIAbilityContext, archive, `${profile.name}的一生`);
       } catch (shareError) {
         this.errorText = '档案已经导出；分享面板被取消或暂时不可用，可以稍后再次导出分享。';
       }

@@ -58,8 +58,8 @@ export function expressionForMood(mood: Mood | undefined): BubuExpression {
 @Component
 export struct BubuMascotBadge {
   @Prop badgeSize: number = 54;
-  @Prop expression?: BubuExpression;
-  @Prop mood?: Mood;
+  @Prop expression: BubuExpression | undefined = undefined;
+  @Prop mood: Mood | undefined = undefined;
 
   // iOS: resolved = expression ?? .forMood(mood)
   private resolved(): BubuExpression {

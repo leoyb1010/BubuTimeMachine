@@ -274,7 +274,7 @@ export struct MilestoneEditSheet {
                 Text(BubuDateFormat.yearMonthDay(new Date(this.happenedAt)))
                   .fontSize(BubuFont.caption).fontColor(BubuColor.warmBrown)
                   .onClick(() => {
-                    DatePickerDialog.show({
+                    this.getUIContext().showDatePickerDialog({
                       selected: new Date(this.happenedAt),
                       end: new Date(),
                       onDateAccept: (d: Date) => { this.happenedAt = d.getTime(); }

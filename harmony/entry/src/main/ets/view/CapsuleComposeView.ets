@@ -212,7 +212,7 @@ export struct CapsuleComposeView {
           .fontColor(BubuColor.primary)
           .enabled(this.canRewritePayload())
           .onClick(() => {
-            DatePickerDialog.show({
+            this.getUIContext().showDatePickerDialog({
               selected: new Date(this.unlockMs),
               start: new Date(),
               onDateAccept: (d: Date) => { this.unlockMs = d.getTime(); }
@@ -316,12 +316,12 @@ export struct CapsuleComposeView {
         createdAt: e !== null ? e.createdAt : now
       };
       await AppDatabase.shared.insertCapsule(capsule);
-      promptAction.showToast({ message: '已经封存啦 💌' });
+      this.getUIContext().getPromptAction().showToast({ message: '已经封存啦 💌' });
       this.onSaved();
       this.onBack();
     } catch (err) {
       const e = err as Error;
-      promptAction.showDialog({
+      this.getUIContext().getPromptAction().showDialog({
         title: '封存失败',
         message: `这封信还没有封存成功：${e.message ?? '未知错误'}。可以稍后再试。`,
         buttons: [{ text: '好', color: BubuColor.primary }]

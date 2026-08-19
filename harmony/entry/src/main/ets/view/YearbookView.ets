@@ -238,7 +238,7 @@ export struct YearbookView {
       const dir = await YearbookExporter.shared.makePDF(input);
       if (dir) {
         this.resultPath = dir;
-        promptAction.showToast({ message: '年册已生成 💛' });
+        this.getUIContext().getPromptAction().showToast({ message: '年册已生成 💛' });
       } else {
         this.errorText = '年册生成失败了，稍后再试试。';
       }

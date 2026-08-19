@@ -114,7 +114,7 @@ export struct ThemeSettingsView {
     .onClick(() => {
       this.manager.select(theme);
       this.tick += 1;
-      promptAction.showToast({ message: `已切换到「${theme.name}」` });
+      this.getUIContext().getPromptAction().showToast({ message: `已切换到「${theme.name}」` });
     })
   }
 

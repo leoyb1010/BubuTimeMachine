@@ -125,7 +125,7 @@ export struct ReactionRow {
 // MARK: - 弹出的反应选择条（对照 iOS ReactionPicker）
 @Component
 export struct ReactionPicker {
-  @Prop current?: Reaction;
+  @Prop current: Reaction | undefined = undefined;
   onPick?: (r: Reaction) => void;
 
   build() {

@@ -230,7 +230,7 @@ export struct VaccineView {
   }
 
   private confirmDeleteExtra(record: VaccineRecord): void {
-    AlertDialog.show({
+    this.getUIContext().showAlertDialog({
       title: '删除这条记录？',
       message: '删除后家人设备也会同步移除这条记录。',
       primaryButton: { value: '删除', fontColor: BubuColor.danger, action: () => { this.deleteRecord(record); } },
@@ -257,7 +257,7 @@ export struct VaccineView {
     };
     await AppDatabase.shared.insertVaccine(record);
     await this.reload();
-    promptAction.showToast({ message: '打卡完成 ✅' });
+    this.getUIContext().getPromptAction().showToast({ message: '打卡完成 ✅' });
   }
 
   private async deleteRecord(record: VaccineRecord): Promise<void> {

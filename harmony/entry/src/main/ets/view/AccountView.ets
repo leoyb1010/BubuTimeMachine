@@ -97,7 +97,7 @@ export struct AccountView {
     const role = ALL_FAMILY_ROLES[Math.max(0, Math.min(this.roleIndex, ALL_FAMILY_ROLES.length - 1))] as FamilyRole;
     try {
       await this.service.login(this.username, this.password, role);
-      promptAction.showToast({ message: '已登录，开始同步' });
+      this.getUIContext().getPromptAction().showToast({ message: '已登录，开始同步' });
       if (this.onDone) this.onDone();
     } catch (e) {
       this.errorText = e instanceof Error ? e.message : '登录失败，请稍后再试';
@@ -109,7 +109,7 @@ export struct AccountView {
     await this.service.logout();
     this.username = '';
     this.password = '';
-    promptAction.showToast({ message: '已退出当前账号' });
+    this.getUIContext().getPromptAction().showToast({ message: '已退出当前账号' });
     if (this.onDone) this.onDone();
   }
 }

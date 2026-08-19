@@ -247,6 +247,6 @@ export struct VoiceArchiveView {
     await AppDatabase.shared.insertVoiceMemo(memo);
     this.closeRecorder();
     await this.reload();
-    promptAction.showToast({ message: '已收好 💛' });
+    this.getUIContext().getPromptAction().showToast({ message: '已收好 💛' });
   }
 }

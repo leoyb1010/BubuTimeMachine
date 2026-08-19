@@ -167,7 +167,7 @@ export struct CapsuleUnlockView {
     }
     .alignContent(Alignment.Center)
     .onAppear(() => {
-      animateTo({ duration: 650, curve: Curve.EaseOut }, () => { this.burst = true; });
+      this.getUIContext().animateTo({ duration: 650, curve: Curve.EaseOut }, () => { this.burst = true; });
     })
   }
 
@@ -266,10 +266,10 @@ export struct CapsuleUnlockView {
     await this.decrypt();
 
     // 破封 → 回溯 → 信纸；任一阶段被点击跳过则直达信纸。
-    animateTo({ duration: 250, curve: Curve.EaseOut }, () => { this.phase = 'cracking'; });
+    this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseOut }, () => { this.phase = 'cracking'; });
     setTimeout(() => {
       if (this.skipped) return;
-      animateTo({ duration: 400, curve: Curve.Smooth }, () => { this.phase = 'retrospect'; });
+      this.getUIContext().animateTo({ duration: 400, curve: Curve.Smooth }, () => { this.phase = 'retrospect'; });
       setTimeout(() => {
         if (this.skipped) return;
         this.finishReveal();
@@ -278,7 +278,7 @@ export struct CapsuleUnlockView {
   }
 
   private finishReveal(): void {
-    animateTo({ duration: 500, curve: Curve.Smooth }, () => { this.phase = 'revealed'; });
+    this.getUIContext().animateTo({ duration: 500, curve: Curve.Smooth }, () => { this.phase = 'revealed'; });
   }
 
   // 解密内容并解除锁定（对照 iOS decrypt）。

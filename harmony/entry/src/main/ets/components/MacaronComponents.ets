@@ -68,7 +68,7 @@ export struct BubuSparkle {
     if (!this.animated || this.reduceMotion) return;
     // 循环呼吸：easeInOut 1.3s 往返。delay 用 setTimeout 错峰。
     setTimeout(() => {
-      animateTo({
+      this.getUIContext().animateTo({
         duration: 1300,
         curve: Curve.EaseInOut,
         iterations: -1,

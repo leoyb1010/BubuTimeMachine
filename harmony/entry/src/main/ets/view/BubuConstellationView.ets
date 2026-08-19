@@ -30,7 +30,7 @@ export struct BubuConstellationView {
   private ready: boolean = false;
 
   aboutToAppear(): void {
-    animateTo(BubuMotion.breathe, () => { this.boardBreath = true; });
+    this.getUIContext().animateTo(BubuMotion.breathe, () => { this.boardBreath = true; });
   }
 
   private onMilestonesChanged(): void {

@@ -139,7 +139,7 @@ export struct VoiceRecorderBar {
       }
     } else {
       // NOTE: requestPermission 需 UIAbilityContext，运行期由宿主 getContext 提供。
-      const ctx = getContext(this) as common.UIAbilityContext;
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const granted = await rec.requestPermission(ctx);
       if (granted) {
         const ok = await rec.start();
@@ -148,7 +148,7 @@ export struct VoiceRecorderBar {
           this.startUITimer();
         }
       } else {
-        promptAction.showToast({ message: '请到系统设置里允许布布时光机使用麦克风。' });
+        this.getUIContext().getPromptAction().showToast({ message: '请到系统设置里允许布布时光机使用麦克风。' });
       }
     }
   }

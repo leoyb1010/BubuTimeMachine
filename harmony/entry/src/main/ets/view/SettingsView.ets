@@ -527,6 +527,6 @@ export struct SettingsView {
     await c.persistServer();
     SyncEngine.shared.start();
     this.statusText = '已保存，正在同步';
-    promptAction.showToast({ message: '已保存，正在同步…' });
+    this.getUIContext().getPromptAction().showToast({ message: '已保存，正在同步…' });
   }
 }

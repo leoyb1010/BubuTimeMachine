@@ -36,7 +36,7 @@ struct RootPage {
   private whatsNewStore: preferences.Preferences | null = null;
 
   async aboutToAppear(): Promise<void> {
-    const ctx = getContext(this) as common.UIAbilityContext;
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
     // 引导门槛：以是否已有布布档案为准（对照 iOS existing.isEmpty）。
     const profile = await AppDatabase.shared.fetchChildProfile();
     this.hasCompletedOnboarding = profile !== null;
@@ -67,7 +67,7 @@ struct RootPage {
   }
 
   private async refreshWidget(): Promise<void> {
-    const ctx = getContext(this) as common.UIAbilityContext;
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
     await WidgetRefresher.publishCurrentSnapshot(ctx);
     WidgetRefresher.reload(ctx);
   }
@@ -87,7 +87,7 @@ struct RootPage {
       return true;
     }
     if (this.selection !== 0) {
-      animateTo(BubuMotion.quick, () => { this.selection = 0; });
+      this.getUIContext().animateTo(BubuMotion.quick, () => { this.selection = 0; });
       return true;
     }
     return true;
@@ -130,7 +130,7 @@ struct RootPage {
           HomeView({
             captureSignal: this.captureSignal,
             onOpenMilestones: () => {
-              animateTo(BubuMotion.gentle, () => { this.selection = 2; });
+              this.getUIContext().animateTo(BubuMotion.gentle, () => { this.selection = 2; });
             }
           })
             .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))

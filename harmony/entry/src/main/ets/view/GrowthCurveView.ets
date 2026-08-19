@@ -365,7 +365,7 @@ export struct GrowthCurveView {
     const wv = parseFloat(this.weightStr);
     const hc = parseFloat(this.headStr);
     if (isNaN(hv) && isNaN(wv) && isNaN(hc)) {
-      promptAction.showToast({ message: '先填身高、体重或头围' });
+      this.getUIContext().getPromptAction().showToast({ message: '先填身高、体重或头围' });
       return;
     }
     const now = Date.now();
@@ -383,7 +383,7 @@ export struct GrowthCurveView {
     await AppDatabase.shared.insertGrowth(g);
     this.showAdd = false;
     await this.reload();
-    promptAction.showToast({ message: '已记录 📈' });
+    this.getUIContext().getPromptAction().showToast({ message: '已记录 📈' });
   }
 
   private dateText(ms: number): string {

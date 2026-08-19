@@ -63,7 +63,7 @@ export struct ChildProfileView {
           Button(this.dateText(this.birthdayMs))
             .backgroundColor(Color.Transparent).fontColor(BubuColor.primary)
             .onClick(() => {
-              DatePickerDialog.show({
+              this.getUIContext().showDatePickerDialog({
                 selected: new Date(this.birthdayMs),
                 onDateAccept: (d: Date) => { this.birthdayMs = d.getTime(); }
               });
@@ -131,12 +131,12 @@ export struct ChildProfileView {
     // 镜像给服务卡片：写生日/名字到 Preferences，卡片据此显示年龄。
     try {
       const opt: preferences.Options = { name: 'bubu_widget' };
-      const store = preferences.getPreferencesSync(getContext(this), opt);
+      const store = preferences.getPreferencesSync(this.getUIContext().getHostContext(), opt);
       store.putSync('birthday', p.birthday);
       store.putSync('childName', p.name);
       store.flush();
     } catch (e) {}
-    promptAction.showToast({ message: '已保存档案 💛' });
+    this.getUIContext().getPromptAction().showToast({ message: '已保存档案 💛' });
   }
 
   private dateText(ms: number): string {

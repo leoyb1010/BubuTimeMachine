@@ -21,10 +21,10 @@ export struct CeremonyAnimation {
     BubuHaptics.success();
     if (this.reduceMotion) { this.appear = true; return; }
     // 卡片弹入（对照 spring(0.48,0.72)）。
-    animateTo({ duration: 480, curve: Curve.Friction }, () => { this.appear = true; });
+    this.getUIContext().animateTo({ duration: 480, curve: Curve.Friction }, () => { this.appear = true; });
     // 星点放射淡出（对照 easeOut 1.1s，delay 0.18）。
     setTimeout(() => {
-      animateTo({ duration: 1100, curve: Curve.EaseOut }, () => { this.sparkle = true; });
+      this.getUIContext().animateTo({ duration: 1100, curve: Curve.EaseOut }, () => { this.sparkle = true; });
     }, 180);
   }
 

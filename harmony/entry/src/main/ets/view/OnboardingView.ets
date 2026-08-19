@@ -212,7 +212,7 @@ export struct OnboardingView {
   }
 
   private pickBirthday(): void {
-    DatePickerDialog.show({
+    this.getUIContext().showDatePickerDialog({
       start: new Date(2015, 0, 1),
       end: new Date(),
       selected: new Date(this.birthdayMs),

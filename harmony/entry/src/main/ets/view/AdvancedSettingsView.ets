@@ -71,7 +71,7 @@ export struct AdvancedSettingsView {
           Button('立即同步')
             .width('100%').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
             .enabled(ServerConfig.shared.isConfigured)
-            .onClick(() => { SyncEngine.shared.start(); promptAction.showToast({ message: '正在同步…' }); })
+            .onClick(() => { SyncEngine.shared.start(); this.getUIContext().getPromptAction().showToast({ message: '正在同步…' }); })
 
           // —— 家里的服务器 ——
           Text('家里的服务器（多设备同步）').fontSize(13).fontColor(BubuColor.secondaryText).width('100%').margin({ top: 8 })
@@ -165,7 +165,7 @@ export struct AdvancedSettingsView {
     await c.persistServer();
     SyncEngine.shared.start();
     this.statusText = '已保存，正在同步';
-    promptAction.showToast({ message: '已保存，正在同步…' });
+    this.getUIContext().getPromptAction().showToast({ message: '已保存，正在同步…' });
   }
 }
 

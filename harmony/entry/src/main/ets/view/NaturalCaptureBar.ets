@@ -28,7 +28,7 @@ export struct NaturalCaptureBar {
   @State private pageIn: boolean = false;
 
   aboutToAppear(): void {
-    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
   }
 
   private isBusy(): boolean {

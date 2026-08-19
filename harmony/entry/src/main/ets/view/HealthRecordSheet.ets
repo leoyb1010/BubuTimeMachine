@@ -540,7 +540,7 @@ export struct HealthRecordSheet {
   }
 
   private showDatePicker(onPick: (ms: number) => void, current: number): void {
-    DatePickerDialog.show({
+    this.getUIContext().showDatePickerDialog({
       start: new Date(2015, 0, 1),
       end: new Date(),
       selected: new Date(current),
@@ -657,7 +657,7 @@ export struct HealthRecordSheet {
       };
       await AppDatabase.shared.insertGrowth(measurement);
     }
-    promptAction.showToast({ message: '已经收好啦 🌟' });
+    this.getUIContext().getPromptAction().showToast({ message: '已经收好啦 🌟' });
     this.onDone();
   }
 }

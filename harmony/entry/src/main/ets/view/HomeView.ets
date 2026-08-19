@@ -99,9 +99,9 @@ export struct HomeView {
     this.pageIn = false;
     this.floatLoop = false;
     this.heroBreath = false;
-    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
-    animateTo(BubuMotion.floating, () => { this.floatLoop = true; });
-    animateTo(BubuMotion.breathe, () => { this.heroBreath = true; });
+    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+    this.getUIContext().animateTo(BubuMotion.floating, () => { this.floatLoop = true; });
+    this.getUIContext().animateTo(BubuMotion.breathe, () => { this.heroBreath = true; });
   }
 
   private async reload(): Promise<void> {
@@ -147,7 +147,7 @@ export struct HomeView {
     this.model.startQuickCapture(prefillNote);
     this.tabBarVisible = false;
     setTimeout(() => {
-      animateTo(BubuMotion.gentle, () => { this.route = HomeRoute.record; });
+      this.getUIContext().animateTo(BubuMotion.gentle, () => { this.route = HomeRoute.record; });
     }, 40);
   }
 
@@ -155,7 +155,7 @@ export struct HomeView {
     BubuHaptics.selection();
     this.tabBarVisible = false;
     setTimeout(() => {
-      animateTo(BubuMotion.gentle, () => { this.route = route; });
+      this.getUIContext().animateTo(BubuMotion.gentle, () => { this.route = route; });
     }, 40);
   }
 
@@ -826,7 +826,7 @@ export struct HomeView {
     .onClick(() => {
       BubuHaptics.selection();
       this.tabBarVisible = false;
-      animateTo(BubuMotion.gentle, () => { this.selectedEntry = entry; });
+      this.getUIContext().animateTo(BubuMotion.gentle, () => { this.selectedEntry = entry; });
     })
   }
 
@@ -899,7 +899,7 @@ export struct HomeView {
     .onClick(() => {
       BubuHaptics.selection();
       this.tabBarVisible = false;
-      animateTo(BubuMotion.gentle, () => { this.selectedEntry = e; });
+      this.getUIContext().animateTo(BubuMotion.gentle, () => { this.selectedEntry = e; });
     })
   }
 

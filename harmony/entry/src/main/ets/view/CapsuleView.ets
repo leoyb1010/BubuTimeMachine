@@ -212,7 +212,7 @@ export struct CapsuleView {
         this.unlocking = c;
         this.route = 'unlock';
       } else {
-        promptAction.showDialog({
+        this.getUIContext().getPromptAction().showDialog({
           title: '还没到解锁日',
           message: this.countdownText(c.unlockAt),
           buttons: [{ text: '知道了', color: BubuColor.primary }]
@@ -281,7 +281,7 @@ export struct CapsuleView {
   }
 
   private confirmDelete(c: TimeCapsule): void {
-    promptAction.showDialog({
+    this.getUIContext().getPromptAction().showDialog({
       title: '删除时间胶囊',
       message: `确定删除「${c.title}」吗？这封信将无法恢复。`,
       buttons: [
@@ -297,6 +297,6 @@ export struct CapsuleView {
     await AppDatabase.shared.enqueueRemoteDeletion('timecapsules', c.remoteId);
     await AppDatabase.shared.deleteCapsule(c.id);
     await this.reload();
-    promptAction.showToast({ message: '已删除' });
+    this.getUIContext().getPromptAction().showToast({ message: '已删除' });
   }
 }

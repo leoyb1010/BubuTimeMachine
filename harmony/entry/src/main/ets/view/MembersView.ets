@@ -128,7 +128,7 @@ export struct MembersView {
     await AppDatabase.shared.upsertMember(m);
     this.showAdd = false;
     await this.reload();
-    promptAction.showToast({ message: '已添加 💛' });
+    this.getUIContext().getPromptAction().showToast({ message: '已添加 💛' });
   }
 
   private async remove(m: FamilyMember): Promise<void> {

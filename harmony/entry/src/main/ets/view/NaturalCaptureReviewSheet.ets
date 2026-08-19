@@ -164,7 +164,7 @@ export struct NaturalCaptureReviewSheet {
   private onTapSave(): void {
     if (this.savableItems().length === 0) return;
     if (this.unconfirmedCount() > 0) {
-      promptAction.showDialog({
+      this.getUIContext().getPromptAction().showDialog({
         title: `还有 ${this.unconfirmedCount()} 条需要确认`,
         message: '疫苗、症状等敏感记录需要逐条点「确认无误」才会保存；未确认的这次不会入库。',
         buttons: [
@@ -445,7 +445,7 @@ export struct NaturalCaptureReviewSheet {
   // 选日期（对照 DatePicker；保留时分）。
   private pickDate(item: NaturalCaptureItem): void {
     const current = item.date !== undefined ? item.date : new Date();
-    DatePickerDialog.show({
+    this.getUIContext().showDatePickerDialog({
       start: new Date(2015, 0, 1),
       end: new Date(),
       selected: current,
@@ -517,7 +517,7 @@ export struct NaturalCaptureReviewSheet {
     for (const item of this.savableItems()) {
       await router.save(item);
     }
-    promptAction.showToast({ message: '已经收好啦 🌟' });
+    this.getUIContext().getPromptAction().showToast({ message: '已经收好啦 🌟' });
     if (this.onSaved) this.onSaved();
     if (this.onDismiss) this.onDismiss();
   }

@@ -3,6 +3,7 @@
 // 数据为按月龄的简化版近似值（来源：WHO 2006/2007 标准表关键月龄抽样 + 线性插值）。
 // 用于在 Canvas 画"五条带 + 布布实测点"，落点处给"比同龄 X% 的小朋友高"的友好解读。
 // 说明：这是家庭参考，不替代医生评估。
+import { interpolatePercentileBand } from '../models/WHOInterpolation';
 
 // 指标：身高 / 体重 / 头围（对照 iOS enum Metric）。
 export enum WHOMetric {
@@ -164,10 +165,10 @@ export class WHOGrowthStandard {
     return best;
   }
 
-  // 给定月龄与实测值，估算落在第几百分位（粗略：在 P3…P97 五点间线性插值）。
+  // 给定月龄与实测值，先按月龄插值百分位带，再在 P3…P97 间插值落点。
   static percentile(metric: WHOMetric, gender: string | undefined, month: number, value: number): number | null {
     const table = WHOGrowthStandard.bands(metric, gender);
-    const band = WHOGrowthStandard.nearest(table, month);
+    const band = interpolatePercentileBand(table, month);
     if (!band) return null;
     const points: [number, number][] = [
       [band.p3, 3], [band.p15, 15], [band.p50, 50], [band.p85, 85], [band.p97, 97]

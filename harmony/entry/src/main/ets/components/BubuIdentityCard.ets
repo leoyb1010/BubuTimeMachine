@@ -62,7 +62,7 @@ export struct BubuIdentityCard {
 
   private flip(): void {
     // iOS withAnimation(BubuMotion.ceremony) —— 可打断 spring 翻面节奏。
-    animateTo({ duration: 420, curve: Curve.EaseInOut }, () => {
+    this.getUIContext().animateTo({ duration: 420, curve: Curve.EaseInOut }, () => {
       this.flipped = !this.flipped;
     });
   }

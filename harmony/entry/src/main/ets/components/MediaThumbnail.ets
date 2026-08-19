@@ -56,7 +56,7 @@ export struct MediaThumbnail {
 
   private startPulse(): void {
     // iOS: .easeInOut(0.9).repeatForever(autoreverses: true)
-    animateTo({
+    this.getUIContext().animateTo({
       duration: 900,
       curve: Curve.EaseInOut,
       iterations: -1,

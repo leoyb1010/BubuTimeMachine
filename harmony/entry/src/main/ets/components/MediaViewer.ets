@@ -229,7 +229,7 @@ struct ZoomableImage {
       .onClick((event: ClickEvent) => {
         // 双击切换（ArkUI onClick 无 doubleClick 计数，这里以单击在缩放态间切换近似 iOS 双击）。
         // NOTE: 完整双击手势可改用 TapGesture(count:2)；此处用 onClick 简化以保证编译与基础体验。
-        animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
+        this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
           this.scaleValue = this.scaleValue > 1.01 ? this.minScale : this.doubleTapScale;
         });
       })

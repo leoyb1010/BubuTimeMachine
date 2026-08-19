@@ -24,7 +24,7 @@
 
 ## Remaining risk
 
-- Known issues: ArkTS 当前仍有弃用 API、异常处理与可选 `@Prop` 等编译警告；服务卡片刷新/内容已补齐但仍待手机桌面真机验证
+- Known issues: API 26 弃用 UI API 和可选 `@Prop` 警告已清理；剩余 492 条中 455 条为 RDB/系统 API 的“可能抛异常”提示，继续按数据风险收敛
 - Deferred work: 无；按能力矩阵持续推进
 - Visual verification outstanding: 是
 

@@ -6,7 +6,7 @@ import { BubuColor } from '../theme/BubuTheme';
 // iOS 用 @Binding selection: Mood?；ArkUI 用 @Prop 当前值 + onChange 回调回传（父持有真相源）。
 @Component
 export struct MoodPicker {
-  @Prop selection?: Mood;
+  @Prop selection: Mood | undefined = undefined;
   @Prop tint: string = BubuColor.primary;
   // iOS @Binding 的写回：选中 mood 或 undefined（取消）。
   onChange?: (mood: Mood | undefined) => void;
@@ -55,7 +55,7 @@ export struct MoodPicker {
     .onClick(() => {
       const next: Mood | undefined = this.selection === mood ? undefined : mood;
       // iOS withAnimation(BubuMotion.quick) { selection = ... }
-      animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
+      this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseOut }, () => {
         this.selection = next;
       });
       if (this.onChange) {

@@ -473,7 +473,7 @@ export struct EntryDetailView {
       this.entry.editedAt = now;
       this.entry.syncState = SyncState.local;
     }
-    animateTo({ duration: 200, curve: Curve.EaseInOut }, () => { this.editing = !this.editing; });
+    this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseInOut }, () => { this.editing = !this.editing; });
   }
 
   // 切换反应（对照 iOS toggleReaction）：同一人只保留一条；点已选的反应=取消。
@@ -603,9 +603,9 @@ export struct EntryDetailView {
       }
       await AppDatabase.shared.updateEntryFields(this.entry.id, { editedAt: now, syncState: SyncState.local });
       await this.load();
-      promptAction.showToast({ message: count > 0 ? `已追加 ${count} 个媒体` : '媒体读取失败' });
+      this.getUIContext().getPromptAction().showToast({ message: count > 0 ? `已追加 ${count} 个媒体` : '媒体读取失败' });
     } catch (e) {
-      promptAction.showToast({ message: '已取消' });
+      this.getUIContext().getPromptAction().showToast({ message: '已取消' });
     }
   }
 
@@ -626,7 +626,7 @@ export struct EntryDetailView {
 
   // 删除记录（对照 iOS deleteEntry：软删除 + entryArchived FeedEvent + dismiss）。
   private confirmDelete(): void {
-    promptAction.showDialog({
+    this.getUIContext().getPromptAction().showDialog({
       title: '删除这条记录？',
       message: '删除后会从时光轴隐藏，本地记录会标记为待同步删除。',
       buttons: [
@@ -648,7 +648,7 @@ export struct EntryDetailView {
           createdAt: now
         };
         await AppDatabase.shared.insertFeedEvent(event);
-        promptAction.showToast({ message: '已删除' });
+        this.getUIContext().getPromptAction().showToast({ message: '已删除' });
         if (this.onDismiss) this.onDismiss();
       }
     });

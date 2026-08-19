@@ -341,6 +341,6 @@ export struct FirstPersonDiaryView {
       editedAt: Date.now(),
       syncState: SyncState.local
     });
-    promptAction.showToast({ message: '已保存到这条记录' });
+    this.getUIContext().getPromptAction().showToast({ message: '已保存到这条记录' });
   }
 }

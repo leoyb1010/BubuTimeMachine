@@ -49,7 +49,7 @@ export struct TimelineView {
 	    this.tabBarVisible = true;
 	    this.reload();
 	    this.pageIn = false;
-	    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+	    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
 	  }
 
   private onBackSignal(): void {
@@ -304,7 +304,7 @@ export struct TimelineView {
 	  private openDetail(entry: Entry): void {
 	    BubuHaptics.selection();
 	    this.tabBarVisible = false;
-	    animateTo(BubuMotion.gentle, () => { this.detailEntry = entry; });
+	    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.detailEntry = entry; });
 	  }
 
   // MARK: 大图卡片（对照 iOS bigPhotoCard）：顶部图/占位 + 日期标 + 标题 + 备注 + tag 行
@@ -443,7 +443,7 @@ export struct TimelineView {
 
   // 删除确认（对照 iOS alert「删除这条记录？」+ deletePendingEntry）。
   private confirmDelete(entry: Entry): void {
-    promptAction.showDialog({
+    this.getUIContext().getPromptAction().showDialog({
       title: '删除这条记录？',
       message: '删除后会从时光轴隐藏，本地记录会标记为待同步删除。',
       buttons: [
@@ -472,7 +472,7 @@ export struct TimelineView {
       createdAt: now
     };
     await AppDatabase.shared.insertFeedEvent(event);
-    promptAction.showToast({ message: '已删除' });
+    this.getUIContext().getPromptAction().showToast({ message: '已删除' });
     this.reload();
   }
 }

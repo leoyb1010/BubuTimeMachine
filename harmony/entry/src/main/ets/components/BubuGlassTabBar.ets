@@ -32,7 +32,7 @@ export struct BubuGlassTabBar {
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
 
   aboutToAppear(): void {
-    animateTo(BubuMotion.breathe, () => { this.centerBreath = true; });
+    this.getUIContext().animateTo(BubuMotion.breathe, () => { this.centerBreath = true; });
   }
 
   // 四个页面入口（胶囊收进魔法屋，底栏不再拥挤）。
@@ -86,7 +86,7 @@ export struct BubuGlassTabBar {
     .onClick(() => {
       BubuHaptics.selection();
       this.tabBarVisible = true;
-      animateTo(BubuMotion.quick, () => { this.selection = item.id; });
+      this.getUIContext().animateTo(BubuMotion.quick, () => { this.selection = item.id; });
     })
   }
 
@@ -116,7 +116,7 @@ export struct BubuGlassTabBar {
     .margin({ left: this.compact ? 2 : 3, right: this.compact ? 2 : 3 })
     .onClick(() => {
       BubuHaptics.tapLight();
-      animateTo(BubuMotion.quick, () => { this.onCenterTap(); });
+      this.getUIContext().animateTo(BubuMotion.quick, () => { this.onCenterTap(); });
     })
   }
 }

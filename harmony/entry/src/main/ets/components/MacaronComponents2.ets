@@ -74,7 +74,7 @@ export struct BubuBurst {
 
   aboutToAppear(): void {
     if (this.reduceMotion) return;
-    animateTo({ duration: 1000, curve: Curve.EaseOut }, () => { this.fired = true; });
+    this.getUIContext().animateTo({ duration: 1000, curve: Curve.EaseOut }, () => { this.fired = true; });
   }
 
   @Builder

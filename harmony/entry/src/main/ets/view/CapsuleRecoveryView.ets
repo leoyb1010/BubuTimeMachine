@@ -101,7 +101,7 @@ export struct CapsuleRecoveryView {
           .borderRadius(24)
           .onClick(() => {
             this.code = CapsuleRecovery.currentOrCreate();
-            promptAction.showToast({ message: '已生成，请务必抄下来 🔑' });
+            this.getUIContext().getPromptAction().showToast({ message: '已生成，请务必抄下来 🔑' });
           })
       }
       .width('100%')
@@ -167,7 +167,7 @@ export struct CapsuleRecoveryView {
         .fontWeight(FontWeight.Medium)
         .fontColor(BubuColor.secondaryText)
         .onClick(() => {
-          animateTo({ duration: 250, curve: Curve.EaseInOut }, () => { this.restoring = !this.restoring; });
+          this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, () => { this.restoring = !this.restoring; });
         })
       if (this.restoring) {
         TextArea({ text: $$this.restoreInput, placeholder: '把 24 个词按顺序输进来，用空格隔开' })
@@ -189,7 +189,7 @@ export struct CapsuleRecoveryView {
             this.code = CapsuleRecovery.current() ?? '';
             this.restoreInput = '';
             this.restoring = false;
-            promptAction.showToast({ message: '恢复码已更新 🔑' });
+            this.getUIContext().getPromptAction().showToast({ message: '恢复码已更新 🔑' });
           })
       }
     }
@@ -231,7 +231,7 @@ export struct CapsuleRecoveryView {
     const sysPasteboard = pasteboard.getSystemPasteboard();
     sysPasteboard.setData(data).then(() => {
       this.copied = true;
-      promptAction.showToast({ message: '已复制到剪贴板' });
+      this.getUIContext().getPromptAction().showToast({ message: '已复制到剪贴板' });
     });
   }
 }

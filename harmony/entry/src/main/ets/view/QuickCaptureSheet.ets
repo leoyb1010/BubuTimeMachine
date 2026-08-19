@@ -12,7 +12,6 @@ import { VoiceRecorderBar, VoicePlayerBubble } from '../components/VoiceComponen
 import { MediaStore } from '../services/MediaStore';
 import { AudioRecorder } from '../services/AudioRecorder';
 import { abilityAccessCtrl, common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { LocationService } from '../services/LocationService';
 
@@ -34,7 +33,7 @@ export struct QuickCaptureSheet {
   @State private pageIn: boolean = false;
 
   aboutToAppear(): void {
-    animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
+    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
   }
 
   build() {
@@ -138,10 +137,10 @@ export struct QuickCaptureSheet {
     const ok = await this.model.save();
     if (ok) {
       BubuHaptics.success();
-      promptAction.showToast({ message: '已经收好啦 🌟' });
+      this.getUIContext().getPromptAction().showToast({ message: '已经收好啦 🌟' });
       this.onSaved?.();
     } else if (this.model.saveError !== null) {
-      promptAction.showToast({ message: this.model.saveError });
+      this.getUIContext().getPromptAction().showToast({ message: this.model.saveError });
       this.model.saveError = null;
     }
   }
@@ -221,10 +220,10 @@ export struct QuickCaptureSheet {
       this.actionCard('照片', BubuIconName.photo, '#61FFC2D6', () => { this.pickPhotos(); })
       this.actionCard('视频', BubuIconName.video, '#66DCC9FF', () => { this.pickVideos(); })
       this.actionCard('文字', BubuIconName.textBubble, '#66BFEBD2', () => {
-        promptAction.showToast({ message: '在下方「写一句」里写下此刻' });
+        this.getUIContext().getPromptAction().showToast({ message: '在下方「写一句」里写下此刻' });
       })
       this.actionCard('语音', BubuIconName.waveform, '#66C4E4FF', () => {
-        promptAction.showToast({ message: '在下方「说给布布」卡片里录音' });
+        this.getUIContext().getPromptAction().showToast({ message: '在下方「说给布布」卡片里录音' });
       })
     }
     .width('100%')
@@ -552,7 +551,7 @@ export struct QuickCaptureSheet {
     this.model.locationError = null;
     if (!enabled) return;
     this.model.locationError = '正在获取一次位置…';
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const captured = await LocationService.shared.currentPlacemark(context);
     if (!captured) {
       this.model.locationError = '没有取得位置，仍可正常保存记录';
@@ -574,10 +573,10 @@ export struct QuickCaptureSheet {
       const res = await picker.select(opt);
       if (res.photoUris && res.photoUris.length > 0) {
         this.model.addPhotoUris(res.photoUris);
-        promptAction.showToast({ message: `已选择 ${res.photoUris.length} 张照片` });
+        this.getUIContext().getPromptAction().showToast({ message: `已选择 ${res.photoUris.length} 张照片` });
       }
     } catch (e) {
-      promptAction.showToast({ message: '已取消' });
+      this.getUIContext().getPromptAction().showToast({ message: '已取消' });
     }
   }
 
@@ -590,16 +589,16 @@ export struct QuickCaptureSheet {
       const res = await picker.select(opt);
       if (res.photoUris && res.photoUris.length > 0) {
         this.model.addVideoUris(res.photoUris);
-        promptAction.showToast({ message: `已选择 ${res.photoUris.length} 段视频` });
+        this.getUIContext().getPromptAction().showToast({ message: `已选择 ${res.photoUris.length} 段视频` });
       }
     } catch (e) {
-      promptAction.showToast({ message: '已取消' });
+      this.getUIContext().getPromptAction().showToast({ message: '已取消' });
     }
   }
 
   // 拍照 / 录像（对照 iOS requestCamera）。
   private async requestCamera(video: boolean): Promise<void> {
-    const ctx = getContext(this) as common.UIAbilityContext;
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
       const atManager = abilityAccessCtrl.createAtManager();
       await atManager.requestPermissionsFromUser(ctx, ['ohos.permission.CAMERA']);
@@ -609,14 +608,14 @@ export struct QuickCaptureSheet {
       if (uri) {
         this.model.addVideoUri(uri);
       } else {
-        promptAction.showToast({ message: '已取消或设备无相机，可从相册选择' });
+        this.getUIContext().getPromptAction().showToast({ message: '已取消或设备无相机，可从相册选择' });
       }
     } else {
       const uri = await CameraCaptureView.capturePhoto(ctx);
       if (uri) {
         this.model.addPhotoUri(uri);
       } else {
-        promptAction.showToast({ message: '已取消或设备无相机，可从相册选择' });
+        this.getUIContext().getPromptAction().showToast({ message: '已取消或设备无相机，可从相册选择' });
       }
     }
   }
