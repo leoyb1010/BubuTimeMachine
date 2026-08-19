@@ -36,6 +36,7 @@ export default class EntryAbility extends UIAbility {
       AIService.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
       await IosBaselineImporter.runIfNeeded(this.context);
+      await AppDatabase.shared.normalizeChildBirthday();
       await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences
       BackgroundSyncScheduler.ensureScheduled();
       await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移

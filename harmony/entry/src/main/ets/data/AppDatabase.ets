@@ -5,6 +5,7 @@ import { util } from '@kit.ArkTS';
 import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord, Comment, VoiceMemo, FirstTime, GrowthMovie, PendingDeletion, FeedEvent } from '../models/Models';
 import { SyncState } from '../models/Enums';
 import { PhotoIntakeCandidate, PhotoIntakeState } from '../models/PhotoIntake';
+import { startOfLocalDay } from '../models/CalendarDay';
 
 const DOMAIN = 0x0000;
 
@@ -565,6 +566,17 @@ export class AppDatabase {
     }
     rs.close();
     return p;
+  }
+
+  async normalizeChildBirthday(): Promise<boolean> {
+    const profile = await this.fetchChildProfile();
+    if (!profile) return false;
+    const normalized = startOfLocalDay(profile.birthday);
+    if (profile.birthday === normalized) return false;
+    profile.birthday = normalized;
+    if (profile.syncState === SyncState.synced) profile.syncState = SyncState.local;
+    await this.upsertChildProfile(profile);
+    return true;
   }
 
   // —— HealthRecord ——

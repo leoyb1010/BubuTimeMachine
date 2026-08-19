@@ -1,14 +1,17 @@
 // MARK: - 年龄计算（逐行对照 iOS Models/AgeCalculator.swift）
 // 布布生日驱动全 App 的年龄展示。纯函数、无副作用，可被 UI / 卡片 / 意图复用。
+import { startOfLocalDay } from './CalendarDay';
 
 export class AgeCalculator {
   // 精确年龄描述："1岁11个月" / "出生第3天" / "还有N天出生"
   static ageDescription(birthdayMs: number, atMs: number): string {
-    if (atMs < birthdayMs) {
-      const days = AgeCalculator.dayDiff(atMs, birthdayMs);
+    const birthdayDay = startOfLocalDay(birthdayMs);
+    const atDay = startOfLocalDay(atMs);
+    if (atDay < birthdayDay) {
+      const days = AgeCalculator.dayDiff(atDay, birthdayDay);
       return days <= 0 ? '即将出生' : `还有${days}天出生`;
     }
-    const c = AgeCalculator.ymd(birthdayMs, atMs);
+    const c = AgeCalculator.ymd(birthdayDay, atDay);
     if (c.y === 0 && c.m === 0) {
       return c.d === 0 ? '出生当天' : `出生第${c.d}天`;
     }
@@ -34,8 +37,10 @@ export class AgeCalculator {
 
   // 紧凑年龄："1岁11月" / "23天"
   static compactAge(birthdayMs: number, atMs: number): string {
-    if (atMs < birthdayMs) return '孕期';
-    const c = AgeCalculator.ymd(birthdayMs, atMs);
+    const birthdayDay = startOfLocalDay(birthdayMs);
+    const atDay = startOfLocalDay(atMs);
+    if (atDay < birthdayDay) return '孕期';
+    const c = AgeCalculator.ymd(birthdayDay, atDay);
     if (c.y === 0 && c.m === 0) return `${c.d}天`;
     if (c.y === 0) return `${c.m}月`;
     return c.m === 0 ? `${c.y}岁` : `${c.y}岁${c.m}月`;
@@ -54,10 +59,7 @@ export class AgeCalculator {
   }
 
   // —— 工具 ——
-  private static startOfDay(ms: number): number {
-    const d = new Date(ms);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  }
+  private static startOfDay(ms: number): number { return startOfLocalDay(ms); }
 
   private static dayDiff(fromMs: number, toMs: number): number {
     return Math.round((toMs - fromMs) / 86400000);

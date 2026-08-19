@@ -80,6 +80,7 @@ export class SyncEngine {
       this.cursorStore = await preferences.getPreferences(context, 'bubu_sync_cursor');
     }
     await this.migrateCursorsIfNeeded();
+    await this.migrateLegacyHealthIfNeeded();
   }
 
   // 回前台：立刻补一轮；之后按结果在 30s–8min 之间退避轮询。
@@ -1593,7 +1594,7 @@ export class SyncEngine {
       headCircumferenceCm: values.headCircumferenceCm,
       note: noteParts.length > 0 ? noteParts.join(' · ') : undefined,
       source: 'health-fallback',
-      syncState: SyncState.synced,
+      syncState: h.syncState === SyncState.synced ? SyncState.synced : SyncState.local,
       createdAt: h.createdAt,
       updatedAt: Date.now()
     };
@@ -1613,7 +1614,7 @@ export class SyncEngine {
       reaction: h.reaction,
       note: h.detail,
       source: 'health-fallback',
-      syncState: SyncState.synced,
+      syncState: h.syncState === SyncState.synced ? SyncState.synced : SyncState.local,
       createdAt: h.createdAt,
       updatedAt: Date.now()
     };
@@ -2134,6 +2135,21 @@ export class SyncEngine {
     await this.cursorStore.put(key, true);
     await this.cursorStore.flush();
     hilog.info(DOMAIN, 'Bubu', '同步游标已迁移到服务器 updated 权威时钟');
+  }
+
+  private async migrateLegacyHealthIfNeeded(): Promise<void> {
+    if (!this.cursorStore) return;
+    const key = 'legacy_health_structured_migration_v1';
+    const migrated = await this.cursorStore.get(key, false) as boolean;
+    if (migrated) return;
+    const records = await AppDatabase.shared.fetchHealth();
+    for (const record of records) {
+      await this.backfillGrowthFromHealth(record);
+      await this.backfillVaccineFromHealth(record);
+    }
+    await this.cursorStore.put(key, true);
+    await this.cursorStore.flush();
+    hilog.info(DOMAIN, 'Bubu', `旧健康记录结构化迁移完成 count=${records.length}`);
   }
 
   private async isServerBaselineReady(): Promise<boolean> {
