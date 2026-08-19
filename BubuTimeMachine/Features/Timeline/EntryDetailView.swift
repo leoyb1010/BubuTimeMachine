@@ -193,7 +193,7 @@ struct EntryDetailView: View {
                             } label: {
                                 Image(systemName: "minus.circle.fill")
                                     .font(BubuTheme.Font.scaled(24))
-                                    .foregroundStyle(.white, .red)
+                                    .foregroundStyle(.white, BubuTheme.Color.danger)
                                     .padding(6)
                             }
                         }

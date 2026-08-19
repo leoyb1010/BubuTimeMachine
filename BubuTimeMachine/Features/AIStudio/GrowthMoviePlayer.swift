@@ -155,7 +155,7 @@ struct GrowthMoviePlayer: View {
                 .foregroundStyle(.white.opacity(0.86))
         }
         .padding(28)
-        .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .padding()
         .transition(.opacity)
         .zIndex(2)
@@ -172,7 +172,7 @@ struct GrowthMoviePlayer: View {
                 .shadow(color: .black.opacity(0.55), radius: 4)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
-                .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 12)
                 .transition(.opacity)
@@ -216,7 +216,7 @@ struct GrowthMoviePlayer: View {
             }
         }
         .padding(28)
-        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
     }
 
     private var overallProgress: Double {

@@ -129,15 +129,15 @@ struct WidgetWallpaperView: View {
                     Image(uiImage: image)
                         .resizable().scaledToFill()
                         .frame(width: w, height: h)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
 
                     // 候选格子：全画出来，点哪个选哪个。
                     ForEach(Array(candidates.enumerated()), id: \.offset) { _, c in
                         if !isSelected(c) {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                                 .fill(.black.opacity(0.20))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                                         .strokeBorder(.white.opacity(0.9),
                                                       style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                                 )
@@ -149,10 +149,10 @@ struct WidgetWallpaperView: View {
 
                     // 选中的框：拖动微调。
                     if rect != .zero {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                             .fill(env.theme.theme.primary.opacity(0.22))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                                     .strokeBorder(env.theme.theme.primary, lineWidth: 2.5)
                             )
                             .overlay(

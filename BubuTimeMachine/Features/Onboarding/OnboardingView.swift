@@ -70,7 +70,7 @@ struct OnboardingView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 112, height: 112)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 .shadow(color: theme.primary.opacity(0.3), radius: 16, y: 8)
             VStack(spacing: 12) {
                 Text("欢迎来到布布时光机")
@@ -149,9 +149,9 @@ struct OnboardingView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .background(selectedRelation == rel ? theme.primary.opacity(0.18) : BubuTheme.Color.softFill,
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                                 .stroke(selectedRelation == rel ? theme.primary : .clear, lineWidth: 2)
                         }
                         .foregroundStyle(BubuTheme.Color.warmBrown)

@@ -85,7 +85,7 @@ struct TodayPhotosSheet: View {
                                 .font(BubuTheme.Font.body)
                                 .padding(12)
                                 .background(BubuTheme.Color.softFill,
-                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                         }
                     }
                 }
@@ -277,9 +277,9 @@ struct TodayPhotosSheet: View {
                     }
                 }
                 .frame(width: 88, height: 88)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                         .stroke(isOn ? BubuTheme.Color.primary : .clear, lineWidth: 3)
                 }
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
@@ -533,7 +533,7 @@ struct TodayPhotosSheet: View {
                 }
             }
             .padding(28)
-            .background(BubuTheme.Color.warmBrown.opacity(0.92), in: RoundedRectangle(cornerRadius: 22))
+            .background(BubuTheme.Color.warmBrown.opacity(0.92), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md))
         }
     }
 

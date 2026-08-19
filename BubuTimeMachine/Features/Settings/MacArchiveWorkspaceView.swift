@@ -290,10 +290,10 @@ struct MacArchiveWorkspaceView: View {
     private func archiveRow(_ entry: Entry) -> some View {
         HStack(spacing: 12) {
             if let media = entry.coverMedia {
-                MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: 10, size: .grid)
+                MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: BubuTheme.Radius.xs, size: .grid)
                     .frame(width: 58, height: 58)
             } else {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                     .fill(BubuTheme.Color.cream2)
                     .frame(width: 58, height: 58)
                     .overlay(Image(systemName: "text.page").foregroundStyle(BubuTheme.Color.secondaryText))
@@ -406,7 +406,7 @@ struct MacArchiveWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if let media = entry.coverMedia {
-                    MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: 22, size: .detail)
+                    MediaThumbnail(media: media, mediaStore: env.mediaStore, cornerRadius: BubuTheme.Radius.md, size: .detail)
                         .aspectRatio(16 / 10, contentMode: .fit)
                         .frame(maxWidth: 760)
                 }

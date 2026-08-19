@@ -87,7 +87,7 @@ struct SimpleTimelineView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let cover {
                 MediaThumbnail(media: cover, mediaStore: env.mediaStore,
-                               cornerRadius: 22, size: .card)
+                               cornerRadius: BubuTheme.Radius.md, size: .card)
                     .frame(height: 240)
                     .frame(maxWidth: .infinity)
                     .clipped()
@@ -116,7 +116,7 @@ struct SimpleTimelineView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
     }
 

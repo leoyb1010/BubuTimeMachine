@@ -166,7 +166,7 @@ struct FirstPersonDiaryView: View {
                 .font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .padding()
-                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         }
     }
 
@@ -196,7 +196,7 @@ struct FirstPersonDiaryView: View {
                 }
             }
             .padding(16)
-            .background(theme.opacity(0.10), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(theme.opacity(0.10), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             .overlay(alignment: .leading) {
                 DiaryBubbleTail()
                     .fill(theme.opacity(0.10))

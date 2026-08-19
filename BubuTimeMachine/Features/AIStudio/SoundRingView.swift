@@ -169,9 +169,9 @@ struct SoundRingView: View {
 
     private var loadingState: some View {
         VStack(alignment: .leading, spacing: 12) {
-            RoundedRectangle(cornerRadius: 10).fill(BubuTheme.Color.softFill).frame(height: 22)
-            RoundedRectangle(cornerRadius: 10).fill(BubuTheme.Color.softFill).frame(height: 96)
-            RoundedRectangle(cornerRadius: 10).fill(BubuTheme.Color.softFill).frame(height: 96)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.xs).fill(BubuTheme.Color.softFill).frame(height: 22)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.xs).fill(BubuTheme.Color.softFill).frame(height: 96)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.xs).fill(BubuTheme.Color.softFill).frame(height: 96)
         }
         .redacted(reason: .placeholder)
         .padding()

@@ -137,8 +137,8 @@ private struct CoverPage: View {
                     Image(uiImage: cover)
                         .resizable().scaledToFill()
                         .frame(width: 260, height: 260)
-                        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(.white, lineWidth: 5))
+                        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous).stroke(.white, lineWidth: 5))
                         .shadow(color: .black.opacity(0.2), radius: 16, y: 8)
                 }
                 VStack(spacing: 10) {
@@ -184,7 +184,7 @@ private struct EntryPage: View {
                             .resizable().scaledToFill()
                             .frame(height: images.count == 1 ? 360 : 220)
                             .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                     }
                 }
             }

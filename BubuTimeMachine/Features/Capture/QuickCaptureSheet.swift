@@ -197,9 +197,9 @@ struct QuickCaptureSheet: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding(12)
-            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .bubuGlassSurface(cornerRadius: 20, tint: theme, interactive: true)
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.60), lineWidth: 1))
+            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+            .bubuGlassSurface(cornerRadius: BubuTheme.Radius.md, tint: theme, interactive: true)
+            .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous).stroke(.white.opacity(0.60), lineWidth: 1))
         }
         .buttonStyle(BubuPressableStyle(scale: 0.98))
         .accessibilityLabel("打开一句话智能记录")
@@ -255,13 +255,13 @@ struct QuickCaptureSheet: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 72)
-        .background(Color.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .bubuGlassSurface(cornerRadius: 20, tint: tint, interactive: true)
+        .background(Color.white.opacity(0.11), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.md, tint: tint, interactive: true)
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                 .stroke(.white.opacity(0.58), lineWidth: 1)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
     }
 
     private var photoPicker: some View {
@@ -276,7 +276,7 @@ struct QuickCaptureSheet: View {
                     .font(BubuTheme.Font.scaled(30, weight: .medium))
                     .foregroundStyle(tint)
                     .frame(width: 48, height: 48)
-                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text("从相册补充照片或视频")
                         .font(BubuTheme.Font.headline)
@@ -652,10 +652,10 @@ private struct CaptureMediaSourceRow: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .bubuGlassSurface(cornerRadius: 22, tint: tint, interactive: true)
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.58), lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.md, tint: tint, interactive: true)
+        .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous).stroke(.white.opacity(0.58), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
     }
 }
 

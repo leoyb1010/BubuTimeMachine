@@ -101,35 +101,51 @@ struct AIStudioHomeView: View {
             BubuStoryView()
         } label: {
             HStack(spacing: 14) {
-                BubuDreamPhoto(hue: 18, height: 72, cornerRadius: 16, motif: "✦")
-                    .frame(width: 60)
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white, lineWidth: 3))
-                    .rotationEffect(.degrees(-4))
-                    .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
+                // 原来用 BubuDreamPhoto（照片占位渐变 + 巨大的 ✦ 字符）当图标：
+                // 缩到 60pt 后 motif 字号 32pt、白色 0.6 透明压在浅粉彩上，糊成一块黄绿色斑，
+                // 和旁边一排清晰的 SF Symbol 完全不是一个语言。改成同语言的图标底。
+                ZStack {
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
+                        .fill(LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.peach],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "book.pages.fill")
+                        .font(BubuTheme.Font.scaled(26, weight: .bold))
+                        .foregroundStyle(BubuTheme.Color.paperInk)
+                }
+                .frame(width: 60, height: 60)
+                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
+                    .stroke(.white.opacity(0.85), lineWidth: 3))
+                .rotationEffect(.degrees(-4))
+                .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
                 VStack(alignment: .leading, spacing: 4) {
+                    // 白字压在 butter/peach 这种高明度底上，浅色模式本来就勉强；
+                    // 改成动态 warmBrown：浅色是深棕（对比度足），深色随底一起翻。
                     Text("成长绘本")
                         .font(BubuTheme.Font.scaled(19, weight: .heavy))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
                     Text("由你记录的点滴，自动编织成可翻页的故事")
                         .font(BubuTheme.Font.scaled(12.5, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
                         .lineLimit(2)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(BubuTheme.Font.scaled(14, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
             }
             .padding(18)
             .frame(maxWidth: .infinity)
             .background(
-                LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.peach, BubuTheme.Color.pink],
+                // 大面积暖彩卡走 warmSurface（深色下压暗）。原来直接用静态 butter/peach/pink，
+                // 深色模式下整张卡是一块发亮的粉黄，从页面上「飘」出来。
+                LinearGradient(colors: [BubuTheme.Color.warmSurfaceTop,
+                                        BubuTheme.Color.warmSurfaceMid,
+                                        BubuTheme.Color.warmSurfaceEnd],
                                startPoint: .topLeading, endPoint: .bottomTrailing),
                 in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
             )
             .overlay(alignment: .topTrailing) {
-                BubuSparkle(size: 13, color: .white.opacity(0.95)).padding(14)
+                BubuSparkle(size: 13, color: BubuTheme.Color.warmBrown.opacity(0.55)).padding(14)
             }
             .bubuCardShadow()
         }
@@ -142,7 +158,7 @@ struct AIStudioHomeView: View {
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                         .fill(LinearGradient(colors: [BubuTheme.Color.lav, BubuTheme.Color.sky],
                                              startPoint: .topLeading,
                                              endPoint: .bottomTrailing))
@@ -151,7 +167,7 @@ struct AIStudioHomeView: View {
                         .foregroundStyle(.white)
                 }
                 .frame(width: 60, height: 60)
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.7), lineWidth: 2))
+                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous).stroke(.white.opacity(0.7), lineWidth: 2))
                 .shadow(color: BubuTheme.Color.lav.opacity(0.35), radius: 10, y: 5)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -171,9 +187,9 @@ struct AIStudioHomeView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.60), lineWidth: 1)
             }
             .shadow(color: BubuTheme.Color.lav.opacity(0.22), radius: 12, y: 6)
@@ -186,7 +202,7 @@ struct AIStudioHomeView: View {
         NavigationLink { BubuQAView() } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                         .fill(LinearGradient(colors: [BubuTheme.Color.primary, BubuTheme.Color.deepRose],
                                              startPoint: .topLeading, endPoint: .bottomTrailing))
                     Image(systemName: "bubble.left.and.text.bubble.right.fill")
@@ -194,7 +210,7 @@ struct AIStudioHomeView: View {
                         .foregroundStyle(.white)
                 }
                 .frame(width: 60, height: 60)
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                     .stroke(.white.opacity(0.7), lineWidth: 2))
                 .shadow(color: BubuTheme.Color.deepRose.opacity(0.30), radius: 10, y: 5)
 
@@ -214,9 +230,9 @@ struct AIStudioHomeView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.60), lineWidth: 1)
             }
             .shadow(color: BubuTheme.Color.primary.opacity(0.20), radius: 12, y: 6)
@@ -262,7 +278,7 @@ struct AIStudioHomeView: View {
                         .font(BubuTheme.Font.scaled(17, weight: .bold))
                         .foregroundStyle(BubuTheme.Color.deepRose)
                         .frame(width: 36, height: 36)
-                        .background(tint.opacity(0.72), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        .background(tint.opacity(0.72), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(BubuTheme.Font.scaled(11, weight: .black))
@@ -287,10 +303,10 @@ struct AIStudioHomeView: View {
                 LinearGradient(colors: [BubuTheme.Color.card.opacity(0.98), tint.opacity(0.22)],
                                startPoint: .topLeading,
                                endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.62), lineWidth: 1)
             }
             .shadow(color: tint.opacity(0.22), radius: 12, y: 7)

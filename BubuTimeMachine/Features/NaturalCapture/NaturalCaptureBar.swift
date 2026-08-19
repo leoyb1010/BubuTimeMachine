@@ -72,14 +72,14 @@ struct NaturalCaptureBar: View {
                 } label: {
                     Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
                         .font(BubuTheme.Font.scaled(isRecording ? 28 : 17, weight: .bold))
-                        .foregroundStyle(isRecording ? .red : theme)
+                        .foregroundStyle(isRecording ? BubuTheme.Color.danger : theme)
                 }
                 .disabled(isParsing || isTranscribing)
                 .accessibilityLabel(isRecording ? "停止录音并识别" : "按一下开始说话")
             }
             .padding(12)
-            .background(BubuTheme.Color.card.opacity(0.72), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .bubuGlassSurface(cornerRadius: 22, tint: theme, interactive: true)
+            .background(BubuTheme.Color.card.opacity(0.72), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+            .bubuGlassSurface(cornerRadius: BubuTheme.Radius.md, tint: theme, interactive: true)
 
             if let slowHint, isParsing {
                 Text(slowHint)
@@ -130,7 +130,7 @@ struct NaturalCaptureBar: View {
     private var recordingStrip: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(.red)
+                .fill(BubuTheme.Color.danger)
                 .frame(width: 8, height: 8)
             Text("布布在听… \(Int(recorder.elapsed)) 秒")
                 .font(BubuTheme.Font.caption.weight(.medium))

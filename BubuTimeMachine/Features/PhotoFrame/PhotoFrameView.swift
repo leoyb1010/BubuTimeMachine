@@ -97,7 +97,7 @@ struct PhotoFrameView: View {
                             .font(BubuTheme.Font.scaled(13, weight: .heavy))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(.orange.opacity(0.85), in: Capsule())
+                            .background(BubuTheme.Color.warning.opacity(0.85), in: Capsule())
                     }
                     if let current {
                         Text(current.caption)

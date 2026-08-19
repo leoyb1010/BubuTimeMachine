@@ -303,7 +303,7 @@ private struct MediaPageView: View {
                                   mediaStore: mediaStore,
                                   tint: BubuTheme.Color.primary)
                     .padding()
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             } else {
                 Text("本地音频文件找不到了")
                     .foregroundStyle(.white.opacity(0.8))

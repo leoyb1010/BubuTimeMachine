@@ -50,27 +50,28 @@ struct BubuStoryView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("一本正在生长的书")
                 .font(BubuTheme.Font.scaled(12.5, weight: .bold))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
             Text("布布的成长绘本")
                 .font(BubuTheme.Font.scaled(26, weight: .black))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                .foregroundStyle(BubuTheme.Color.warmBrown)
             Text("由你记录的点滴，自动编织成故事 · 共 \(chapters.count) 章")
                 .font(BubuTheme.Font.scaled(12.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(22)
         .background(
-            LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.peach, BubuTheme.Color.pink],
+            LinearGradient(colors: [BubuTheme.Color.warmSurfaceTop,
+                                    BubuTheme.Color.warmSurfaceMid,
+                                    BubuTheme.Color.warmSurfaceEnd],
                            startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
         )
         .overlay(alignment: .topTrailing) {
-            BubuSparkle(size: 14, color: .white.opacity(0.95)).padding(18)
+            BubuSparkle(size: 14, color: BubuTheme.Color.warmBrown.opacity(0.55)).padding(18)
         }
         .overlay(alignment: .trailing) {
-            BubuSparkle(size: 10, color: .white.opacity(0.8), delay: 0.7).padding(.trailing, 34)
+            BubuSparkle(size: 10, color: BubuTheme.Color.warmBrown.opacity(0.42), delay: 0.7).padding(.trailing, 34)
         }
         .bubuCardShadow()
     }
@@ -80,7 +81,7 @@ struct BubuStoryView: View {
         HStack(spacing: 14) {
             chapterCover(ch, entry: entry)
                 .frame(width: 64, height: 80)
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.white, lineWidth: 3))
+                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous).stroke(.white, lineWidth: 3))
                 .rotationEffect(.degrees(index % 2 == 0 ? -3 : 3))
                 .shadow(color: .black.opacity(0.16), radius: 7, y: 4)
             VStack(alignment: .leading, spacing: 3) {
@@ -102,7 +103,7 @@ struct BubuStoryView: View {
                 .foregroundStyle(BubuTheme.Color.peach)
         }
         .padding(14)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
     }
 
@@ -110,9 +111,9 @@ struct BubuStoryView: View {
     @ViewBuilder
     private func chapterCover(_ ch: StoryChapter, entry: Entry?) -> some View {
         if let photo = entry?.sortedMedia.first(where: { $0.type == .photo }) {
-            MediaThumbnail(media: photo, mediaStore: env.mediaStore, cornerRadius: 12, size: .card)
+            MediaThumbnail(media: photo, mediaStore: env.mediaStore, cornerRadius: BubuTheme.Radius.xs, size: .card)
         } else {
-            BubuDreamPhoto(hue: ch.hue, height: 80, cornerRadius: 12, motif: ch.emoji)
+            BubuDreamPhoto(hue: ch.hue, height: 80, cornerRadius: BubuTheme.Radius.xs, motif: ch.emoji)
         }
     }
 

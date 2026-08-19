@@ -133,26 +133,28 @@ struct MilestoneEditSheet: View {
                 HStack(spacing: 10) {
                     if let photo = linked.sortedMedia.first(where: { $0.type == .photo }) {
                         MediaThumbnail(media: photo, mediaStore: env.mediaStore,
-                                       cornerRadius: 12, size: .grid)
+                                       cornerRadius: BubuTheme.Radius.xs, size: .grid)
                             .frame(width: 52, height: 52)
                     } else {
                         Text("💛").font(BubuTheme.Font.scaled(28))
                             .frame(width: 52, height: 52)
-                            .background(.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(.white.opacity(0.65), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
                     }
                     VStack(alignment: .leading, spacing: 2) {
+                        // 固定白底必须配固定深字：动态 warmBrown/secondaryText 在深色模式下
+                        // 会翻成米白，压在这块 .white.opacity(0.80) 上等于白底白字（同 P3-42）。
                         Text("那一刻")
                             .font(BubuTheme.Font.scaled(10.5, weight: .black, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                            .foregroundStyle(BubuTheme.Color.paperInkSecondary)
                         Text(linked.note ?? linked.title ?? "那天的布布")
                             .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                            .foregroundStyle(BubuTheme.Color.paperInk)
                             .lineLimit(2)
                     }
                     Spacer(minLength: 0)
                 }
                 .padding(10)
-                .background(.white.opacity(0.80), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(.white.opacity(0.80), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                 .padding(.horizontal, 18)
                 .padding(.top, 10)
             }
@@ -160,11 +162,13 @@ struct MilestoneEditSheet: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
         .background(
-            LinearGradient(colors: [BubuTheme.Color.hue(hue, lightness: 0.84),
-                                    BubuTheme.Color.hue((hue + 45).truncatingRemainder(dividingBy: 360), lightness: 0.80)],
+            // 大面积卡底走 hueSurface（深色下压暗），不用恒浅的 hue()——
+            // 否则深色模式下这块庆祝面板是整片发亮的粉彩，和页面完全脱开。
+            LinearGradient(colors: [BubuTheme.Color.hueSurface(hue),
+                                    BubuTheme.Color.hueSurface((hue + 45).truncatingRemainder(dividingBy: 360))],
                            startPoint: .top, endPoint: .bottom)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .padding(.bottom, 4)
     }
 

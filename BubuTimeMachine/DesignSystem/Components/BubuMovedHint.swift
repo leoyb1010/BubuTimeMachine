@@ -46,7 +46,7 @@ struct BubuMovedHint: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BubuTheme.Color.peach.opacity(0.30),
+            .background(BubuTheme.Color.peachSurface.opacity(0.55),
                         in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
         }

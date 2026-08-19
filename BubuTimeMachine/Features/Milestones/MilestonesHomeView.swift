@@ -119,25 +119,26 @@ struct MilestonesHomeView: View {
                     .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 3) {
+                // 白字压在 lav/pink 这类高明度底上对比度不足（浅色下也勉强）；改动态 warmBrown。
                 Text("已点亮 \(done) / \(max(total, 1)) 颗星")
                     .font(BubuTheme.Font.scaled(17, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
                 Text("还有 \(max(0, total - done)) 颗等你点亮 ♡")
                     .font(BubuTheme.Font.scaled(12.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.95))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             Spacer(minLength: 0)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
         .background(
-            LinearGradient(colors: [BubuTheme.Color.lav, BubuTheme.Color.pink],
+            // 大面积底走 *Surface 动态版：静态 lav/pink 在深色模式下整块发亮、从页面上飘出来。
+            LinearGradient(colors: [BubuTheme.Color.lavSurface, BubuTheme.Color.pinkSurface],
                            startPoint: .leading, endPoint: .trailing),
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
         )
         .overlay(alignment: .topTrailing) {
-            BubuSparkle(size: 13, color: .white.opacity(0.95)).padding(14)
+            BubuSparkle(size: 13, color: BubuTheme.Color.warmBrown.opacity(0.55)).padding(14)
         }
         .bubuCardShadow()
     }

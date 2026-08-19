@@ -61,7 +61,7 @@ struct NaturalCaptureReviewSheet: View {
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
-                            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
 
                         ForEach($editableItems) { $item in
                             itemCard($item)
@@ -238,9 +238,9 @@ struct NaturalCaptureReviewSheet: View {
             }
         }
         .padding(14)
-        .background(BubuTheme.Color.card.opacity(0.8), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(BubuTheme.Color.card.opacity(0.8), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                 .stroke(needsConfirm && !confirmed ? theme.opacity(0.35) : .clear, lineWidth: 1)
         }
         .bubuCardShadow()
@@ -276,7 +276,7 @@ struct NaturalCaptureReviewSheet: View {
                 .font(BubuTheme.Font.body.weight(.semibold))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .padding(8)
-                .background(BubuTheme.Color.cream.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(BubuTheme.Color.cream.opacity(0.6), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
 
             DatePicker("时间", selection: dateBinding(item), in: ...Date.now,
                        displayedComponents: [.date, .hourAndMinute])
@@ -312,7 +312,7 @@ struct NaturalCaptureReviewSheet: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(BubuTheme.Color.cream.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(BubuTheme.Color.cream.opacity(0.45), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
     }
 
     private func dateBinding(_ item: Binding<NaturalCaptureItem>) -> Binding<Date> {

@@ -61,9 +61,9 @@ struct BubuIdentityCard: View {
                     .offset(x: 18, y: 30)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                 .stroke(.white.opacity(0.45), lineWidth: 1)
         }
         .bubuCardShadow()
@@ -184,7 +184,7 @@ struct BubuIdentityCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
 
             Text("轻点卡片翻回正面")
                 .font(BubuTheme.Font.scaled(10))
@@ -209,7 +209,7 @@ struct BubuIdentityCard: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
     }
 
     private var clipBar: some View {
@@ -255,10 +255,10 @@ struct BubuIdentityCard: View {
                 }
             }
             .frame(width: 90, height: 96)
-            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.65), lineWidth: 1)
             }
 
@@ -301,7 +301,7 @@ struct BubuIdentityCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
     }
 
     private var barcode: some View {
@@ -315,7 +315,7 @@ struct BubuIdentityCard: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
     }
 
     private var cardBackground: some ShapeStyle {

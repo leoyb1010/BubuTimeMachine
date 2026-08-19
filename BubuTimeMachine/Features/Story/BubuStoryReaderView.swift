@@ -23,9 +23,12 @@ struct BubuStoryReaderView: View {
 
     var body: some View {
         ZStack {
+            // 整页底走 hueSurface：
+            // ① 深色模式下不再是一整片发亮的粉彩；
+            // ② 浅色下也比原来的 0.92 略深，正文那层白字终于有对比度（原来白字压在近白粉彩上）。
             LinearGradient(
-                colors: [BubuTheme.Color.hue(chapter.hue, lightness: 0.92),
-                         BubuTheme.Color.hue((chapter.hue + 30).truncatingRemainder(dividingBy: 360), lightness: 0.88)],
+                colors: [BubuTheme.Color.hueSurface(chapter.hue),
+                         BubuTheme.Color.hueSurface((chapter.hue + 30).truncatingRemainder(dividingBy: 360))],
                 startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea()
@@ -49,7 +52,8 @@ struct BubuStoryReaderView: View {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
                     .font(BubuTheme.Font.scaled(16, weight: .bold))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    // 固定白底配固定墨色：动态 warmBrown 在深色下会翻成米白，白底白字。
+                    .foregroundStyle(BubuTheme.Color.paperInk)
                     .frame(width: 40, height: 40)
                     .background(.white.opacity(0.7), in: Circle())
             }
@@ -83,8 +87,8 @@ struct BubuStoryReaderView: View {
         VStack(spacing: 0) {
             StoryCover(chapter: chapter)
                 .frame(width: 150, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).stroke(.white.opacity(0.6), lineWidth: 6))
+                .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous).stroke(.white.opacity(0.6), lineWidth: 6))
                 .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
                 .padding(.top, 14)
                 .padding(.bottom, 22)
@@ -128,7 +132,7 @@ struct BubuStoryReaderView: View {
         Button(action: action) {
             Text(title)
                 .font(BubuTheme.Font.scaled(13.5, weight: .bold))
-                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .foregroundStyle(BubuTheme.Color.paperInk)
                 .padding(.horizontal, 18)
                 .frame(height: 44)
                 .background(.white.opacity(enabled ? 0.85 : 0.35), in: Capsule())
@@ -178,7 +182,7 @@ private struct StoryCover: View {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                BubuDreamPhoto(hue: chapter.hue, height: 150, cornerRadius: 30, motif: chapter.emoji)
+                BubuDreamPhoto(hue: chapter.hue, height: 150, cornerRadius: BubuTheme.Radius.card, motif: chapter.emoji)
             }
         }
         .task(id: chapter.id) { await load() }

@@ -117,18 +117,18 @@ struct AlbumHomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             // 叠放卡片效果（对照设计稿 MacAlbum：上方两条错位白边像叠着的相片）
             ZStack(alignment: .top) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                     .fill(.white.opacity(0.6))
                     .frame(width: 134, height: 16).offset(y: -5)
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                     .fill(.white.opacity(0.8))
                     .frame(width: 142, height: 16).offset(y: -2)
                 ZStack {
                     if let cover = album.cover {
                         MediaThumbnail(media: cover.media, mediaStore: env.mediaStore,
-                                       cornerRadius: 18, size: .card)
+                                       cornerRadius: BubuTheme.Radius.sm, size: .card)
                     } else {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                             .fill(theme.opacity(0.10))
                             .overlay {
                                 Image(systemName: album.icon)
@@ -138,7 +138,7 @@ struct AlbumHomeView: View {
                     }
                 }
                 .frame(width: 150, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                 .bubuCardShadow()
             }
             .frame(width: 150, height: 155)
@@ -182,9 +182,9 @@ struct AlbumHomeView: View {
             Group {
                 if let cover = album.cover {
                     MediaThumbnail(media: cover.media, mediaStore: env.mediaStore,
-                                   cornerRadius: 12, size: .grid)
+                                   cornerRadius: BubuTheme.Radius.xs, size: .grid)
                 } else {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
                         .fill(theme.opacity(0.10))
                 }
             }

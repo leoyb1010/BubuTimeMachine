@@ -37,7 +37,7 @@ struct AlbumDetailView: View {
                             viewerRoute = MediaViewerRoute(initialMediaID: item.media.id)
                         } label: {
                             MediaThumbnail(media: item.media, mediaStore: env.mediaStore,
-                                           cornerRadius: 8, size: .grid)
+                                           cornerRadius: BubuTheme.Radius.xs, size: .grid)
                                 .aspectRatio(1, contentMode: .fit)
                                 .clipped()
                         }
@@ -56,7 +56,16 @@ struct AlbumDetailView: View {
                 .padding(8)
 
                 if visibleCount < items.count {
-                    ProgressView().padding(.vertical, 16)
+                    // 再加载一屏时用骨架占位而不是转圈：格子形状是已知的，
+                    // 骨架能让网格保持连续、不在滚动中忽然塌一块。
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 4)], spacing: 4) {
+                        ForEach(0..<6, id: \.self) { _ in
+                            BubuSkeletonBlock(cornerRadius: BubuTheme.Radius.xs)
+                                .aspectRatio(1, contentMode: .fill)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, BubuTheme.Spacing.m)
                 }
             }
         }

@@ -203,7 +203,7 @@ struct CaptureHomeView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity)
-                .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
                 .bubuCardShadow()
             }
             .buttonStyle(.plain)
@@ -252,7 +252,7 @@ struct CaptureHomeView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity)
-                .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
                 .bubuCardShadow()
             }
             .buttonStyle(.plain)
@@ -422,7 +422,7 @@ struct CaptureHomeView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity)
-                .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
                 .bubuCardShadow()
             }
             .buttonStyle(.plain)
@@ -485,7 +485,7 @@ struct CaptureHomeView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .background(homeSurface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
     }
 
@@ -617,7 +617,7 @@ struct CaptureHomeView: View {
         .background(
             LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.pink],
                            startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
         .overlay { BubuBurst(count: 20, radius: 150) }
     }
@@ -678,9 +678,9 @@ struct CaptureHomeView: View {
         .foregroundStyle(BubuTheme.Color.secondaryText)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 17, style: .continuous)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                 .stroke(.white.opacity(0.52), lineWidth: 1)
         }
     }
@@ -745,7 +745,7 @@ struct CaptureHomeView: View {
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity)
-                .background(BubuTheme.Gradient.hero, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .background(BubuTheme.Gradient.hero, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 .bubuCardShadow()
             }
             .buttonStyle(.plain)
@@ -778,9 +778,9 @@ struct CaptureHomeView: View {
                 .padding(.trailing, 10)
                 .frame(height: 64)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                         .stroke(.white.opacity(0.58), lineWidth: 1)
                 }
             }
@@ -817,9 +817,9 @@ struct CaptureHomeView: View {
                 .lineLimit(1)
         }
         .frame(width: 66, height: 64)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                 .stroke(.white.opacity(0.54), lineWidth: 1)
         }
     }
@@ -888,9 +888,9 @@ struct CaptureHomeView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.55), lineWidth: 1)
             }
         }
@@ -934,9 +934,9 @@ struct CaptureHomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 34)
         .padding(.horizontal, 18)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                 .stroke(.white.opacity(0.55), lineWidth: 1)
         }
     }
@@ -974,11 +974,11 @@ struct CaptureHomeView: View {
                     MediaThumbnail(media: media, mediaStore: env.mediaStore)
                 } else {
                     BubuDreamPhoto(hue: entry.id.bubuStableHue, height: 64,
-                                   cornerRadius: 16, motif: entry.mood?.emoji ?? "◡")
+                                   cornerRadius: BubuTheme.Radius.sm, motif: entry.mood?.emoji ?? "◡")
                 }
             }
             .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(BubuDateFormat.monthDay(entry.happenedAt))
@@ -998,7 +998,7 @@ struct CaptureHomeView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
     }
 
@@ -1248,7 +1248,7 @@ private struct SSDIntakeCandidatesSheet: View {
                             Label("未读到内嵌拍摄时间，当前日期按文件时间推测，请核对后再确认。",
                                   systemImage: "exclamationmark.triangle")
                                 .font(BubuTheme.Font.caption)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(BubuTheme.Color.warning)
                         }
                         HStack {
                             Button("忽略", role: .destructive) {
@@ -1266,7 +1266,7 @@ private struct SSDIntakeCandidatesSheet: View {
                     }
                 }
                 if let errorText {
-                    Text(errorText).foregroundStyle(.red)
+                    Text(errorText).foregroundStyle(BubuTheme.Color.danger)
                 }
             }
             .navigationTitle("移动硬盘候选")

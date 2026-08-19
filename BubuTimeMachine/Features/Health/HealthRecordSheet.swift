@@ -499,7 +499,7 @@ private struct SnackComposer: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 66)
                         .background(draft.tags.contains(chip) ? tint : BubuTheme.Color.cream.opacity(0.7),
-                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -548,7 +548,7 @@ private struct WaterComposer: View {
         ComposerCard(title: "小水壶喝了多少", icon: "drop.fill", tint: tint) {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                         .fill(tint.opacity(0.12))
                         .frame(width: 82, height: 82)
                     Image(systemName: "drop.fill")
@@ -579,7 +579,7 @@ private struct WaterComposer: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)
                             .background((draft.amountValue == amount ? tint.opacity(0.18) : BubuTheme.Color.cream.opacity(0.7)),
-                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -840,7 +840,7 @@ private struct AmountStepper: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? range.lowerBound },
                 set: {
@@ -943,7 +943,7 @@ private struct TemperatureStepper: View {
                 .onSubmit { commit() }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
             Stepper("", value: Binding(
                 get: { value ?? 36.5 },
                 set: { value = min(max($0, 34.0), 42.0); syncText() }

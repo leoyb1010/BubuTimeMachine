@@ -102,6 +102,24 @@ nonisolated enum BubuTheme {
         static let butter = SwiftUI.Color(red: 1.000, green: 0.886, blue: 0.627) // #FFE2A0
         static let sky    = SwiftUI.Color(red: 0.769, green: 0.894, blue: 1.000) // #C4E4FF
 
+        /// UIColor 版 HSL→HSB，供动态色（明/暗两套）复用。
+        private static func uiHue(_ h: Double, lightness: Double, saturation: Double) -> UIColor {
+            let l = min(max(lightness, 0), 1)
+            let sat = min(max(saturation, 0), 1)
+            let brightness = l + sat * min(l, 1 - l)
+            let hsbSaturation = brightness == 0 ? 0 : 2 * (1 - l / brightness)
+            return UIColor(hue: CGFloat((h.truncatingRemainder(dividingBy: 360)) / 360.0),
+                           saturation: CGFloat(hsbSaturation),
+                           brightness: CGFloat(brightness), alpha: 1)
+        }
+
+        /// 「按色相上色的**大面积**背景」。`hue()` 恒返回浅粉彩，用作整块卡底时深色模式会整片发飘；
+        /// 这个版本在深色下压到同色相的暗调，让卡片融进页面、也压得住动态文字。
+        static func hueSurface(_ h: Double) -> SwiftUI.Color {
+            dynamic(light: uiHue(h, lightness: 0.84, saturation: 0.90),
+                    dark: uiHue(h, lightness: 0.24, saturation: 0.45))
+        }
+
         /// 由色相（0–360）生成一抹柔和马卡龙色，用于按记忆/里程碑上色（对照设计稿 HUE()）。
         /// 设计稿参数是 HSL；SwiftUI 的 Color(hue:saturation:brightness:) 是 HSB，
         /// 直接照搬会得到高饱和霓虹色（P3-41）。这里做 HSL→HSB 换算还原柔和粉彩。
@@ -113,6 +131,36 @@ nonisolated enum BubuTheme {
             return SwiftUI.Color(hue: (h.truncatingRemainder(dividingBy: 360)) / 360.0,
                                  saturation: hsbSaturation, brightness: brightness)
         }
+
+        // MARK: 马卡龙副色的「大面积」动态版
+        /// 上面那六个 peach/pink/lav/mint/butter/sky 是**静态**的，只该用于小面积点缀
+        /// （星点、圆点、图标底）——那里需要它们在深色下依然明亮才看得见。
+        /// 但大面积卡片背景用静态浅色，深色模式下整块会发飘、并且压不住动态文字。
+        /// 需要「一整块马卡龙底」时用下面这组：浅色保持原色，深色压到同色相的暗调。
+        static let peachSurface = dynamic(
+            light: UIColor(red: 1.000, green: 0.827, blue: 0.745, alpha: 1),
+            dark: UIColor(red: 0.30, green: 0.205, blue: 0.170, alpha: 1)
+        )
+        static let pinkSurface = dynamic(
+            light: UIColor(red: 1.000, green: 0.761, blue: 0.839, alpha: 1),
+            dark: UIColor(red: 0.31, green: 0.180, blue: 0.225, alpha: 1)
+        )
+        static let lavSurface = dynamic(
+            light: UIColor(red: 0.863, green: 0.788, blue: 1.000, alpha: 1),
+            dark: UIColor(red: 0.235, green: 0.205, blue: 0.320, alpha: 1)
+        )
+        static let mintSurface = dynamic(
+            light: UIColor(red: 0.749, green: 0.922, blue: 0.827, alpha: 1),
+            dark: UIColor(red: 0.165, green: 0.275, blue: 0.215, alpha: 1)
+        )
+        static let butterSurface = dynamic(
+            light: UIColor(red: 1.000, green: 0.886, blue: 0.627, alpha: 1),
+            dark: UIColor(red: 0.30, green: 0.235, blue: 0.135, alpha: 1)
+        )
+        static let skySurface = dynamic(
+            light: UIColor(red: 0.769, green: 0.894, blue: 1.000, alpha: 1),
+            dark: UIColor(red: 0.170, green: 0.240, blue: 0.320, alpha: 1)
+        )
 
         // MARK: 卡片大面积柔面（动态：浅色=近白奶油/马卡龙，深色=压暗同色相，承托动态文字并融入深色页）
         // 马卡龙副色板（peach/pink/… 静态）仅用于小面积点缀（星点/圆点/图标），大面积卡片背景改用下面这组。
@@ -190,10 +238,24 @@ nonisolated enum BubuTheme {
     }
 
     // MARK: 圆角（马卡龙更圆润）
+    /// 完整阶梯。以前只有 card/button/small 三档，够不到实际需要的档位，
+    /// 于是页面里散落了约 146 处硬编码 cornerRadius（同屏混用 10~32），
+    /// 「同一个产品手感不一」主要就是这么来的。新代码一律从这里取值。
+    /// 阶梯按全仓实测分布定档（原来散落 0~32 共 15 个不同值）：
+    /// 12 / 16 / 22 / 28，四档覆盖 96% 的实际用法，最大位移只有 4pt。
     enum Radius {
+        /// 标签 / chip / 小图标底
+        static let xs: CGFloat = 12
+        /// 内嵌块 / 输入框 / 缩略图
+        static let sm: CGFloat = 16
+        /// 次级卡片 / tile / 玻璃块
+        static let md: CGFloat = 22
+        /// 页面级大卡
         static let card: CGFloat = 28
+        /// 主按钮（与大卡同档，视觉上成对）
         static let button: CGFloat = 28
-        static let small: CGFloat = 16
+        /// 旧名，等同 `sm`。保留是为了不制造一次无意义的全仓改名。
+        static let small: CGFloat = sm
     }
 
     // MARK: 马卡龙渐变（主按钮 / Hero / 凸起键）
@@ -211,9 +273,21 @@ nonisolated enum BubuTheme {
     }
 
     // MARK: 间距
+    /// 同理于 Radius：只有 section/item 两档时，页面只能硬写数字（全仓约 502 处）。
+    /// 这里补成 4 的倍数阶梯，覆盖从「两行文字之间」到「大分区之间」的全部常用间隔。
     enum Spacing {
-        static let section: CGFloat = 28
+        /// 同一组内两行文字
+        static let xs: CGFloat = 4
+        /// 图标与文字、紧凑元素
+        static let s: CGFloat = 8
+        /// 卡内元素、网格间隔
+        static let m: CGFloat = 12
+        /// 卡片之间 / 标准内边距
         static let item: CGFloat = 16
+        /// 分组之间
+        static let l: CGFloat = 20
+        /// 页面大分区之间
+        static let section: CGFloat = 28
     }
 
     // MARK: 口语文案常量（错误永不报代码，永不吓人）

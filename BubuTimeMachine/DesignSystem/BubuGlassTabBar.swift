@@ -72,9 +72,9 @@ struct BubuGlassTabBar: View {
             .frame(width: 58, height: 50)
             .background {
                 if active {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                         .fill(BubuTheme.Color.cream2.opacity(0.34))
-                        .bubuGlassSurface(cornerRadius: 16, tint: tint, interactive: true)
+                        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.sm, tint: tint, interactive: true)
                 }
             }
             .scaleEffect(active ? 1.04 : 1)

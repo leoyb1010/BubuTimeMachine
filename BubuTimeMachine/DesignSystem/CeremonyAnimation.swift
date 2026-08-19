@@ -56,9 +56,9 @@ struct CeremonyAnimation: View {
             .padding(.horizontal, 26)
             .padding(.vertical, 30)
             .frame(maxWidth: 340)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                     .stroke(.white.opacity(0.46), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.14), radius: 24, y: 12)

@@ -151,9 +151,9 @@ struct SettingsView: View {
             }
             .padding(16)
             .background(
-                LinearGradient(colors: [BubuTheme.Color.peach.opacity(0.40),
-                                        BubuTheme.Color.pink.opacity(0.32),
-                                        BubuTheme.Color.lav.opacity(0.32)],
+                LinearGradient(colors: [BubuTheme.Color.peachSurface.opacity(0.55),
+                                        BubuTheme.Color.pinkSurface.opacity(0.48),
+                                        BubuTheme.Color.lavSurface.opacity(0.48)],
                                startPoint: .topLeading, endPoint: .bottomTrailing),
                 in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
             )

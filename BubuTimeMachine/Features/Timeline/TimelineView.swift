@@ -122,7 +122,7 @@ struct TimelineView: View {
                 // 未读红点（R4 F-3）：上次看过之后家人有新动态就亮
                 .overlay(alignment: .topTrailing) {
                     if hasUnseenFamilyActivity {
-                        Circle().fill(.red).frame(width: 8, height: 8).offset(x: 2, y: -1)
+                        Circle().fill(BubuTheme.Color.danger).frame(width: 8, height: 8).offset(x: 2, y: -1)
                     }
                 }
             }
@@ -236,7 +236,7 @@ struct TimelineView: View {
                     .scaleEffect(animates && !phase.isIdentity ? 0.97 : 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             // 删除不再是卡片上常驻的裸垃圾桶键（每天翻时光轴，误触代价是丢一条回忆）。
             // 统一收进长按菜单：多一步长按当摩擦，删完还有 3.5 秒撤销。
             .contextMenu {
@@ -314,8 +314,8 @@ struct TimelineView: View {
             }
             .padding(14)
         }
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
     }
 

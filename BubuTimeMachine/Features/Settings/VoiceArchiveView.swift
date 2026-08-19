@@ -159,7 +159,7 @@ struct VoiceMemoRecorderSheet: View {
                         }
                         if let t = transcript {
                             Text(t).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
-                                .padding().background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 12))
+                                .padding().background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs))
                         }
                     } else {
                         VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in

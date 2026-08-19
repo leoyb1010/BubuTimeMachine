@@ -176,7 +176,7 @@ struct SimpleModeView: View {
             .background(
                 LinearGradient(colors: [tint, tint.opacity(0.82)],
                                startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 30, style: .continuous)
+                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
             )
             .shadow(color: tint.opacity(0.3), radius: 12, y: 6)
         }
@@ -248,7 +248,7 @@ struct SimpleModeView: View {
                 .foregroundStyle(.white)
         }
         .padding(40)
-        .background(BubuTheme.Color.deepRose.opacity(0.95), in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .background(BubuTheme.Color.deepRose.opacity(0.95), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .shadow(radius: 20)
         .transition(.scale.combined(with: .opacity))
     }
@@ -264,7 +264,7 @@ struct SimpleModeView: View {
                     .foregroundStyle(.white)
             }
             .padding(36)
-            .background(BubuTheme.Color.warmBrown.opacity(0.92), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .background(BubuTheme.Color.warmBrown.opacity(0.92), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         }
         .transition(.opacity)
     }

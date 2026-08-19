@@ -28,9 +28,9 @@ struct MoodPicker: View {
                             }
                             .frame(width: 58, height: 62)
                             .background(selected ? tint.opacity(0.18) : BubuTheme.Color.card,
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
                             .overlay {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                                     .stroke(selected ? tint : .clear, lineWidth: 2)
                             }
                             .scaleEffect(selected ? 1.05 : 1)

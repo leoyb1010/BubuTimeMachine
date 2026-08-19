@@ -65,7 +65,7 @@ struct WatchFaceGuideView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
     }
 
@@ -76,6 +76,6 @@ struct WatchFaceGuideView: View {
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(BubuTheme.Color.softFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(BubuTheme.Color.softFill, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
     }
 }

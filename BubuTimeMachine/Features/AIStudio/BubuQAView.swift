@@ -95,18 +95,24 @@ struct BubuQAView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(msg.isUser ? BubuTheme.Color.primary : BubuTheme.Color.card,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
             if !msg.isUser { Spacer(minLength: 40) }
         }
     }
 
+    /// 等回答时给一个「答案气泡的形状」，而不是一个转圈：
+    /// 答案马上会长在同一个位置，骨架能让它平滑地填进来，不让整段对话跳一下。
     private var thinkingBubble: some View {
-        HStack {
-            ProgressView().tint(BubuTheme.Color.primary)
-            Text("正在翻\(childName)的时光…")
-                .font(BubuTheme.Font.caption)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-            Spacer()
+        VStack(alignment: .leading, spacing: BubuTheme.Spacing.s) {
+            HStack(spacing: BubuTheme.Spacing.s) {
+                ProgressView().tint(BubuTheme.Color.primary).controlSize(.small)
+                Text("正在翻\(childName)的时光…")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                Spacer()
+            }
+            BubuSkeletonLines(lines: 3)
+                .frame(maxWidth: 260, alignment: .leading)
         }
         .padding(.horizontal, 4)
     }
@@ -116,7 +122,7 @@ struct BubuQAView: View {
             TextField("问问关于\(childName)的…", text: $input, axis: .vertical)
                 .font(BubuTheme.Font.body)
                 .padding(10)
-                .background(BubuTheme.Color.softFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(BubuTheme.Color.softFill, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
             Button {
                 ask(input)
             } label: {
