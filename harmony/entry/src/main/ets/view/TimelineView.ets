@@ -14,6 +14,7 @@ import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
 import { promptAction } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
+import { AIService } from '../services/AIService';
 
 // MARK: - 时光轴（对照 iOS Features/Timeline/TimelineView.swift）
 // 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；离线优先，只读本地数据库。
@@ -35,6 +36,8 @@ export struct TimelineView {
   // entryId → 首张媒体 mood emoji 占位用（无图时）。
   @State sections: TimelineSection[] = [];
   @State searchText: string = '';
+  @State semanticEntryIds: Set<string> = new Set<string>();
+  @State semanticSearchState: string = 'idle';
 
 	  @State showFamilyFeed: boolean = false;
 	  @State detailEntry: Entry | null = null;
@@ -112,12 +115,38 @@ export struct TimelineView {
     if (q.length === 0) return this.entries;
     return this.entries.filter((e: Entry) => {
       return this.hit(e.note, q) || this.hit(e.firstPersonNote, q) || this.hit(e.title, q)
-        || this.hit(e.locationName, q) || this.hit(e.authorRole, q) || this.hit(e.moodRaw, q);
+        || this.hit(e.locationName, q) || this.hit(e.authorRole, q) || this.hit(e.moodRaw, q)
+        || this.semanticEntryIds.has(e.id);
     });
   }
 
   private hit(s: string | undefined, q: string): boolean {
     return s !== undefined && s.toLowerCase().includes(q);
+  }
+
+  private async runSemanticSearch(raw: string): Promise<void> {
+    const query = raw.trim();
+    if (query.length === 0 || !AIService.shared.isConfigured) return;
+    this.semanticSearchState = 'searching';
+    try {
+      const response = await AIService.shared.semanticSearch(query, 30);
+      if (this.searchText.trim() !== query || response.query !== query) return;
+      const ids = new Set<string>();
+      for (const hit of response.hits) {
+        if (this.entries.some((entry: Entry): boolean => entry.id === hit.entryLocalId)) ids.add(hit.entryLocalId);
+      }
+      this.semanticEntryIds = ids;
+      this.semanticSearchState = 'active';
+      this.rebuildSections();
+    } catch (e) {
+      if (this.searchText.trim() === query) this.semanticSearchState = 'fallback';
+    }
+  }
+
+  private semanticSearchLabel(): string {
+    if (this.semanticSearchState === 'searching') return '正在同时搜索照片画面与文字…';
+    if (this.semanticSearchState === 'active') return `已同时搜索照片画面与文字 · 命中 ${this.semanticEntryIds.size} 条`;
+    return '语义服务暂时不可用，已保留本地文字搜索结果';
   }
 
 	  build() {
@@ -180,10 +209,24 @@ export struct TimelineView {
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
 
       // 搜索框（对照 iOS .searchable）。
-      Search({ value: this.searchText, placeholder: '找找布布的记录' })
+      Search({ value: this.searchText, placeholder: '找文字；按搜索键也会找照片画面' })
         .width('100%')
         .margin({ left: 16, right: 16, bottom: 8 })
-        .onChange((v: string) => { this.searchText = v; this.rebuildSections(); })
+        .onChange((v: string) => {
+          this.searchText = v;
+          this.semanticEntryIds = new Set<string>();
+          this.semanticSearchState = 'idle';
+          this.rebuildSections();
+        })
+        .onSubmit((v: string) => { this.runSemanticSearch(v); })
+
+      if (this.semanticSearchState !== 'idle') {
+        Text(this.semanticSearchLabel())
+          .fontSize(11)
+          .fontColor(this.semanticSearchState === 'fallback' ? BubuColor.warning : BubuColor.secondaryText)
+          .width('100%')
+          .padding({ left: 20, right: 20, bottom: 6 })
+      }
 
       if (this.entries.length === 0) {
         this.emptyState()

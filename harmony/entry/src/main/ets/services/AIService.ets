@@ -7,6 +7,15 @@ import {
   NaturalCaptureParseResult,
   decodeParseResult
 } from './NaturalCaptureDTO';
+import {
+  QAAnswer,
+  QAContextRecord,
+  SemanticSearchResponse,
+  WeeklyReport,
+  decodeQAAnswer,
+  decodeSemanticSearch,
+  decodeWeeklyReport
+} from '../models/AIArtifacts';
 
 // MARK: - AI 服务（对照 iOS Services/AI/AIService.swift + BubuAIService.swift）
 // 隐私至上：AI 能力全部自托管 FastAPI（背后接 DeepSeek），UI 永不依赖具体后端。
@@ -198,6 +207,50 @@ export class AIService {
     return (obj['narration'] as string | undefined) ?? '';
   }
 
+  async ask(question: string, childName: string, records: QAContextRecord[]): Promise<QAAnswer> {
+    const wireRecords: Record<string, Object>[] = records.map((record: QAContextRecord): Record<string, Object> => ({
+      'id': record.id,
+      'date': record.dateText,
+      'age': record.ageText,
+      'text': record.text
+    }));
+    const raw = await this.post('ask', {
+      'question': question,
+      'child_name': childName,
+      'records': wireRecords
+    });
+    return decodeQAAnswer(raw);
+  }
+
+  async semanticSearch(query: string, limit: number = 20): Promise<SemanticSearchResponse> {
+    const raw = await this.post('semantic/search', {
+      'query': query.trim(),
+      'limit': Math.max(1, Math.min(limit, 50))
+    });
+    return decodeSemanticSearch(raw);
+  }
+
+  async latestWeeklyReport(): Promise<WeeklyReport | undefined> {
+    const raw = await this.getJSON('weekly-report/latest', true);
+    return raw === undefined ? undefined : decodeWeeklyReport(raw as Record<string, Object>);
+  }
+
+  async weeklyReportHistory(): Promise<WeeklyReport[]> {
+    const raw = await this.getJSON('weekly-report/history');
+    if (!Array.isArray(raw)) return [];
+    return (raw as Object[]).map((item: Object): WeeklyReport => {
+      return decodeWeeklyReport(item as Record<string, Object>);
+    });
+  }
+
+  async generateWeeklyReport(): Promise<WeeklyReport> {
+    return decodeWeeklyReport(await this.post('weekly-report/generate', {}));
+  }
+
+  async archiveWeeklyReport(id: string): Promise<WeeklyReport> {
+    return decodeWeeklyReport(await this.post('weekly-report/archive', { 'artifact_id': id }));
+  }
+
   // MARK: - 自然语言解析
 
   // 一句话解析（保留原公共接口）。失败抛错，UI 层降级为「直接存原文」。
@@ -264,6 +317,25 @@ export class AIService {
       }
       const parsed = JSON.parse(resp.result as string) as Record<string, Object>;
       return parsed;
+    } finally {
+      req.destroy();
+    }
+  }
+
+  private async getJSON(path: string, allowNotFound: boolean = false): Promise<Object | undefined> {
+    const req = http.createHttp();
+    try {
+      const resp = await req.request(this.baseURL + '/' + path, {
+        method: http.RequestMethod.GET,
+        header: this.authHeader(),
+        connectTimeout: 30000,
+        readTimeout: 90000
+      });
+      if (allowNotFound && resp.responseCode === 404) return undefined;
+      if (resp.responseCode < 200 || resp.responseCode >= 300) {
+        throw new Error(`HTTP ${resp.responseCode}`);
+      }
+      return JSON.parse(resp.result as string) as Object;
     } finally {
       req.destroy();
     }

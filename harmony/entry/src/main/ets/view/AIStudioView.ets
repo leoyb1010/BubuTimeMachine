@@ -7,26 +7,30 @@ import { FamilyEnsembleView } from './FamilyEnsembleView';
 import { GrowthReportView } from './GrowthReportView';
 import { BubuStoryView } from './BubuStoryView';
 import { CapsuleView } from './CapsuleView';
+import { BubuQAView } from './BubuQAView';
+import { WeeklyReportView } from './WeeklyReportView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 
 // MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
 // 自托管 AI 的创作中心：成长绘本 / 未来胶囊 / 第一人称日记 / 成长电影 / 家人合奏 / 成长报告。
 // RootPage 把本组件直接作为「故事」Tab 渲染（无 NavPathStack），故内部用 @State route 就地切换子页。
 
-// 魔法屋四块创作能力（对照 iOS creativeGrid 的 capabilityTile）。
+// 魔法屋创作能力（对照 iOS creativeGrid 的 capabilityTile）。
 interface CapabilityTile {
   iconName: string;
   title: string;
   subtitle: string;
   tint: string;       // 背景渐变副色
-  route: string;      // diary / movie / ensemble / report
+  route: string;
 }
 
 const CAPABILITY_TILES: CapabilityTile[] = [
   { iconName: BubuIconName.textBubble, title: '第一人称日记', subtitle: '改写成布布的话', tint: BubuColor.pink, route: 'diary' },
   { iconName: BubuIconName.video, title: '成长电影', subtitle: '精选照片成短片', tint: BubuColor.sky, route: 'movie' },
   { iconName: BubuIconName.home, title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' },
-  { iconName: BubuIconName.sparkles, title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' }
+  { iconName: BubuIconName.sparkles, title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' },
+  { iconName: BubuIconName.textBubble, title: '问问布布', subtitle: '有出处的家庭问答', tint: BubuColor.lav, route: 'qa' },
+  { iconName: BubuIconName.calendar, title: '布布周报', subtitle: '把一周轻轻收好', tint: BubuColor.peach, route: 'weekly' }
 ];
 
 @Component
@@ -68,6 +72,10 @@ export struct AIStudioView {
       FamilyEnsembleView({ onBack: (): void => { this.route = ''; } })
     } else if (this.route === 'report') {
       GrowthReportView({ onBack: (): void => { this.route = ''; } })
+    } else if (this.route === 'qa') {
+      BubuQAView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
+    } else if (this.route === 'weekly') {
+      WeeklyReportView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
     } else if (this.route === 'story') {
       // 成长绘本（对照 iOS BubuStoryView 翻页绘本）
       Column() {
@@ -262,6 +270,8 @@ export struct AIStudioView {
 	        this.capabilityTile(CAPABILITY_TILES[1])
 	        this.capabilityTile(CAPABILITY_TILES[2])
 	        this.capabilityTile(CAPABILITY_TILES[3])
+	        this.capabilityTile(CAPABILITY_TILES[4])
+	        this.capabilityTile(CAPABILITY_TILES[5])
 	      }
 	      .width('100%')
 	    } else {
@@ -273,6 +283,10 @@ export struct AIStudioView {
 	        Row({ space: 10 }) {
 	          this.capabilityTile(CAPABILITY_TILES[2])
 	          this.capabilityTile(CAPABILITY_TILES[3])
+	        }.width('100%')
+	        Row({ space: 10 }) {
+	          this.capabilityTile(CAPABILITY_TILES[4])
+	          this.capabilityTile(CAPABILITY_TILES[5])
 	        }.width('100%')
 	      }
 	      .width('100%')
