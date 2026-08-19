@@ -71,7 +71,7 @@ $ ./scripts/build-local.sh
 | 自然语言一句话记录 | ✅ | AIService + HomeView 一句话条（AI 解析，离线降级原文） |
 | 成长曲线图（Canvas 自绘） | ✅ | GrowthCurveView（健康页进入） |
 | 服务卡片（≈iOS 小组件） | ✅ | BubuFormAbility + widget/pages/BubuCard + form_config.json |
-| 智能照片收件箱 | 🟡 | Media Library 扫描 + 持久候选 + 事件分组 + 确认入库；后台扩展与人物识别待补 |
+| 智能照片收件箱 | 🟡 | Media Library 扫描 + 持久候选 + 事件分组 + 确认入库 + 本机头像比对；待真机大图库验证 |
 | 家庭问答 / 语义搜图 / 周报 | 🟡 | 已接自托管 AI 端点、真实出处和本地文字降级；待真机生产数据验收 |
 | 声音年轮 | 🟡 | 已接真实原声清单、渲染、下载播放和归档；待真机音频验收 |
 

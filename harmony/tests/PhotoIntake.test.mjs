@@ -16,7 +16,8 @@ function candidate(uri, createdAt, mediaType = 1, subtype = 0, burstKey = undefi
     duration: 0,
     subtype,
     burstKey,
-    state: PhotoIntakeState.discovered
+    state: PhotoIntakeState.discovered,
+    isLikelyChild: false
   };
 }
 

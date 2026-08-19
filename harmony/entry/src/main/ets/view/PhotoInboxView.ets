@@ -11,8 +11,10 @@ export struct PhotoInboxView {
   @State processingGroupId: string = '';
   @State notice: string = '';
   @State errorText: string = '';
+  @State identityEnabled: boolean = false;
 
   aboutToAppear(): void {
+    this.identityEnabled = PhotoIntakeService.shared.identityEnabled();
     this.reload();
   }
 
@@ -54,6 +56,20 @@ export struct PhotoInboxView {
             .fontColor(this.scanning ? BubuColor.secondaryText : Color.White)
             .borderRadius(BubuRadius.button)
             .onClick(() => { this.scan(); })
+
+          Row() {
+            Column({ space: 3 }) {
+              Text('用头像认布布').fontSize(15).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+              Text('只在本机比较，不上传人脸；只做提示，不自动隐藏照片。')
+                .fontSize(12).fontColor(BubuColor.secondaryText)
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.identityEnabled })
+              .selectedColor(BubuColor.primary)
+              .onChange((enabled: boolean) => {
+                this.identityEnabled = enabled;
+                PhotoIntakeService.shared.setIdentityEnabled(enabled);
+              })
+          }.width('100%').padding(14).backgroundColor(BubuColor.card).borderRadius(BubuRadius.small)
 
           if (this.notice.length > 0) {
             Text(this.notice)
@@ -195,6 +211,7 @@ export struct PhotoInboxView {
     if (group.photoCount > 0) parts.push(`${group.photoCount} 张照片`);
     if (group.videoCount > 0) parts.push(`${group.videoCount} 段视频`);
     if (group.movingPhotoCount > 0) parts.push(`${group.movingPhotoCount} 张动态照片`);
+    if (group.likelyChildCount > 0) parts.push(`可能有布布 ${group.likelyChildCount} 张`);
     return parts.join(' · ');
   }
 }

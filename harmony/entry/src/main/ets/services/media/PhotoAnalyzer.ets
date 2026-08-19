@@ -1,6 +1,7 @@
 import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { geoLocationManager } from '@kit.LocationKit';
+import { faceDetector } from '@kit.CoreVisionKit';
 
 const DOMAIN = 0x0000;
 
@@ -19,9 +20,7 @@ export interface PhotoAnalysis {
 // - EXIF：拍摄时间 + GPS 坐标（@kit.ImageKit image.ImageSource.getImageProperty）
 // - 地名：坐标 → 地名（HarmonyOS @kit.LocationKit geoLocationManager 反向地理编码）
 // - 标签/人脸：iOS 用 Vision（VNClassifyImageRequest / VNDetectFaceRectanglesRequest）。
-//   NOTE: Vision→HiAI —— HarmonyOS Core Vision Kit 的端侧分类/人脸 API 在当前 SDK 不稳定可用，
-//   这里实现一个可编译可工作的启发式 stub：按 EXIF/尺寸特征产出温暖标签，faceCount 暂返回 0。
-//   待 @kit.CoreVisionKit 的 subjectSegmentation / faceDetector 稳定后替换 classify/countFaces。
+// - 人脸：Core Vision Kit faceDetector，失败时安全降级为 0。
 export class PhotoAnalyzer {
   static readonly shared = new PhotoAnalyzer();
 
@@ -142,9 +141,19 @@ export class PhotoAnalyzer {
   }
 
   // iOS: countFaces(cgImage:) 用 VNDetectFaceRectanglesRequest。
-  // NOTE: Vision→HiAI —— 当前 stub 返回 0；待 Core Vision Kit faceDetector 稳定后替换。
   private static async countFaces(source: image.ImageSource): Promise<number> {
-    return 0;
+    let pixelMap: image.PixelMap | null = null;
+    try {
+      pixelMap = await source.createPixelMap({ desiredPixelFormat: image.PixelMapFormat.RGBA_8888 });
+      if (!(await faceDetector.init())) return 0;
+      const faces = await faceDetector.detect({ pixelMap });
+      return faces.filter((face: faceDetector.Face): boolean => face.probability >= 0.5).length;
+    } catch (e) {
+      return 0;
+    } finally {
+      try { await faceDetector.release(); } catch (e) {}
+      if (pixelMap) try { pixelMap.release(); } catch (e) {}
+    }
   }
 
   // iOS: localizedTag —— Vision 英文标识符 → 温暖中文标签（常见育儿场景）。

@@ -117,7 +117,7 @@ export class AppDatabase {
       assetUri TEXT PRIMARY KEY, state TEXT NOT NULL, displayName TEXT NOT NULL,
       createdAt INTEGER NOT NULL, mediaType INTEGER NOT NULL, width INTEGER NOT NULL,
       height INTEGER NOT NULL, duration REAL NOT NULL, subtype INTEGER NOT NULL,
-      burstKey TEXT, lastSeenAt INTEGER NOT NULL)`);
+      burstKey TEXT, isLikelyChild INTEGER NOT NULL DEFAULT 0, lastSeenAt INTEGER NOT NULL)`);
     await this.runSchemaMigrations();
   }
 
@@ -146,6 +146,7 @@ export class AppDatabase {
     await this.addColumnIfMissing('media', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
     await this.addColumnIfMissing('media', 'aiTags', 'TEXT');
     await this.addColumnIfMissing('media', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('photo_intake_asset', 'isLikelyChild', 'INTEGER NOT NULL DEFAULT 0');
 
     await this.addColumnIfMissing('child_profile', 'remoteId', 'TEXT');
     await this.addColumnIfMissing('child_profile', 'gender', 'TEXT');
@@ -1013,19 +1014,21 @@ export class AppDatabase {
   async upsertPhotoIntakeCandidates(candidates: PhotoIntakeCandidate[]): Promise<void> {
     if (candidates.length === 0) return;
     const sql = `INSERT INTO photo_intake_asset(
-      assetUri,state,displayName,createdAt,mediaType,width,height,duration,subtype,burstKey,lastSeenAt
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      assetUri,state,displayName,createdAt,mediaType,width,height,duration,subtype,burstKey,isLikelyChild,lastSeenAt
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(assetUri) DO UPDATE SET
       displayName=excluded.displayName,createdAt=excluded.createdAt,mediaType=excluded.mediaType,
       width=excluded.width,height=excluded.height,duration=excluded.duration,
-      subtype=excluded.subtype,burstKey=excluded.burstKey,lastSeenAt=excluded.lastSeenAt`;
+      subtype=excluded.subtype,burstKey=excluded.burstKey,
+      isLikelyChild=excluded.isLikelyChild,lastSeenAt=excluded.lastSeenAt`;
     const now = Date.now();
     await this.store!.executeSql('BEGIN IMMEDIATE');
     try {
       for (const item of candidates) {
         await this.store!.executeSql(sql, [
           item.assetUri, item.state, item.displayName, item.createdAt, item.mediaType,
-          item.width, item.height, item.duration, item.subtype, item.burstKey ?? null, now
+          item.width, item.height, item.duration, item.subtype, item.burstKey ?? null,
+          item.isLikelyChild ? 1 : 0, now
         ]);
       }
       await this.store!.executeSql('COMMIT');
@@ -1053,7 +1056,8 @@ export class AppDatabase {
         height: rs.getLong(rs.getColumnIndex('height')),
         duration: rs.getDouble(rs.getColumnIndex('duration')),
         subtype: rs.getLong(rs.getColumnIndex('subtype')),
-        burstKey: AppDatabase.optStr(rs, 'burstKey')
+        burstKey: AppDatabase.optStr(rs, 'burstKey'),
+        isLikelyChild: rs.getLong(rs.getColumnIndex('isLikelyChild')) === 1
       });
     }
     rs.close();

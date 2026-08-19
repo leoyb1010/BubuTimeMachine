@@ -12,6 +12,7 @@ import { EntryWriter } from './EntryWriter';
 import { MediaStore } from './MediaStore';
 import { ServerConfig } from './ServerConfig';
 import { SyncEngine } from '../sync/SyncEngine';
+import { ChildIdentityRecognizer } from './ChildIdentityRecognizer';
 
 export interface PhotoIntakeResult {
   entryId: string;
@@ -28,7 +29,12 @@ export class PhotoIntakeService {
 
   initialize(context: common.UIAbilityContext): void {
     this.context = context;
+    ChildIdentityRecognizer.shared.initialize(context);
   }
+
+  identityEnabled(): boolean { return ChildIdentityRecognizer.shared.isEnabled(); }
+
+  setIdentityEnabled(enabled: boolean): void { ChildIdentityRecognizer.shared.setEnabled(enabled); }
 
   async cachedGroups(): Promise<PhotoEventGroup[]> {
     return clusterPhotoCandidates(await AppDatabase.shared.fetchPhotoIntakePending());
@@ -75,9 +81,23 @@ export class PhotoIntakeService {
           duration: PhotoIntakeService.number(asset.get(photoAccessHelper.PhotoKeys.DURATION)) / 1000,
           subtype: PhotoIntakeService.number(asset.get(photoAccessHelper.PhotoKeys.PHOTO_SUBTYPE)),
           burstKey: PhotoIntakeService.optionalString(asset.get(photoAccessHelper.PhotoKeys.BURST_KEY)),
-          state: PhotoIntakeState.discovered
+          state: PhotoIntakeState.discovered,
+          isLikelyChild: false
         };
       }).filter((candidate: PhotoIntakeCandidate): boolean => candidate.createdAt > 0);
+      if (this.identityEnabled()) {
+        const profile = await AppDatabase.shared.fetchChildProfile();
+        if (profile?.avatarMediaFileName) {
+          const avatarPath = MediaStore.shared.fullPath(profile.avatarMediaFileName);
+          let checked = 0;
+          for (const candidate of candidates) {
+            if (candidate.mediaType !== 1 || checked >= 30) continue;
+            candidate.isLikelyChild = await ChildIdentityRecognizer.shared
+              .isLikelySamePerson(candidate.assetUri, avatarPath);
+            checked += 1;
+          }
+        }
+      }
       await AppDatabase.shared.upsertPhotoIntakeCandidates(candidates);
     } finally {
       result.close();

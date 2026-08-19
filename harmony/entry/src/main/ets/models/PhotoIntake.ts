@@ -18,6 +18,7 @@ export interface PhotoIntakeCandidate {
   subtype: number;
   burstKey?: string;
   state: string;
+  isLikelyChild: boolean;
 }
 
 export interface PhotoEventGroup {
@@ -28,6 +29,7 @@ export interface PhotoEventGroup {
   photoCount: number;
   videoCount: number;
   movingPhotoCount: number;
+  likelyChildCount: number;
 }
 
 export function clusterPhotoCandidates(candidates: PhotoIntakeCandidate[],
@@ -68,7 +70,8 @@ function makeGroup(items: PhotoIntakeCandidate[]): PhotoEventGroup {
     endedAt: items[items.length - 1].createdAt,
     photoCount: items.filter((item: PhotoIntakeCandidate): boolean => item.mediaType === 1).length,
     videoCount: items.filter((item: PhotoIntakeCandidate): boolean => item.mediaType === 2).length,
-    movingPhotoCount: items.filter((item: PhotoIntakeCandidate): boolean => item.subtype === 3).length
+    movingPhotoCount: items.filter((item: PhotoIntakeCandidate): boolean => item.subtype === 3).length,
+    likelyChildCount: items.filter((item: PhotoIntakeCandidate): boolean => item.isLikelyChild).length
   };
 }
 
