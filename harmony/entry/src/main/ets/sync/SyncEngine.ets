@@ -10,6 +10,7 @@ import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, Voice
   FamilyMember, GrowthMeasurement, VaccineRecord, Comment, FirstTime, PendingDeletion } from '../models/Models';
 import { UploadedFileResult } from '../services/DTOs';
 import { MILESTONE_PRESETS } from '../models/MilestoneTemplates';
+import { syncBackoffIntervalMs } from './SyncBackoff';
 
 const DOMAIN = 0x0000;
 
@@ -34,6 +35,8 @@ export class SyncEngine {
   private static readonly cursorOverlapMs: number = 60 * 1000;
 
   private pollTimerId: number = -1;
+  private polling: boolean = false;
+  private consecutiveFailures: number = 0;
   private syncing: boolean = false;
   private needsAnotherSync: boolean = false;
   private strictPullFailures: boolean = false;
@@ -52,52 +55,69 @@ export class SyncEngine {
     }
   }
 
-  // 回前台：启动 30s 轮询 + 立刻补一轮（对照 iOS start()）。
+  // 回前台：立刻补一轮；之后按结果在 30s–8min 之间退避轮询。
   start(): void {
     if (!ServerConfig.shared.isConfigured) {
       this.stopPolling();
       return;
     }
-    if (this.pollTimerId === -1) {
-      this.pollTimerId = setInterval(() => {
-        if (ServerConfig.shared.isConfigured) this.syncNow();
-      }, 30000);
-    }
-    this.syncNow();
+    this.polling = true;
+    this.consecutiveFailures = 0;
+    this.syncNow(false);
   }
 
   // 进后台：停轮询省电（对照 iOS stopPolling()）。
   stopPolling(): void {
+    this.polling = false;
     if (this.pollTimerId !== -1) {
-      clearInterval(this.pollTimerId);
+      clearTimeout(this.pollTimerId);
       this.pollTimerId = -1;
     }
   }
 
+  private scheduleNextPoll(): void {
+    if (!this.polling || !ServerConfig.shared.isConfigured) return;
+    if (this.pollTimerId !== -1) clearTimeout(this.pollTimerId);
+    const delay = syncBackoffIntervalMs(this.consecutiveFailures);
+    this.pollTimerId = setTimeout(() => {
+      this.pollTimerId = -1;
+      this.syncNow(false);
+    }, delay);
+  }
+
+  private updateBackoff(succeeded: boolean): void {
+    this.consecutiveFailures = succeeded ? 0 : Math.min(this.consecutiveFailures + 1, 8);
+    this.scheduleNextPoll();
+  }
+
   // 手动触发一次同步（设置页/下拉刷新可调，对照 iOS syncNow → scheduleSync）。
   // 已在跑则置 needsAnotherSync，跑完自动再来一轮（对照 iOS scheduleSync）。
-  async syncNow(): Promise<void> {
+  async syncNow(manual: boolean = true): Promise<void> {
     const cfg = ServerConfig.shared;
     if (!cfg.isConfigured) return;
+    if (manual) this.consecutiveFailures = 0;
     if (this.syncing) {
       this.needsAnotherSync = true;
       return;
     }
     if (!(await this.isServerBaselineReady())) {
-      await this.pullServerToLocalNow();
+      const result = await this.pullServerToLocalNow();
+      this.updateBackoff(result.indexOf('失败') < 0 && result.indexOf('需要') < 0);
       return;
     }
     this.syncing = true;
+    let succeeded: boolean = false;
     try {
-      await this.connectAndSync();
+      succeeded = await this.connectAndSync();
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `同步异常: ${JSON.stringify(e)}`);
     } finally {
       this.syncing = false;
+      this.updateBackoff(succeeded);
     }
     if (this.needsAnotherSync) {
       this.needsAnotherSync = false;
-      await this.syncNow();
+      await this.syncNow(false);
     }
   }
 
@@ -202,21 +222,22 @@ export class SyncEngine {
   }
 
   // 一轮：ping → 登录 → 推本地 → 拉远端 → 补下缺失文件（对照 iOS connectAndSync）。
-  private async connectAndSync(): Promise<void> {
+  private async connectAndSync(): Promise<boolean> {
     const ok = await APIClient.shared.ping();
     if (!ok) {
       hilog.warn(DOMAIN, 'Bubu', '同步：连不上家里的服务器，离线可用');
-      return;
+      return false;
     }
     const authed = await APIClient.shared.authenticate();
     if (!authed) {
       hilog.warn(DOMAIN, 'Bubu', '同步：账号状态需要重新确认');
-      return;
+      return false;
     }
     await this.pushLocal();
     await this.pullRemote();
     await this.downloadMissingFiles();
     hilog.info(DOMAIN, 'Bubu', '同步完成');
+    return true;
   }
 
   // MARK: - 推：本地 → 远端（对照 iOS pushLocal）

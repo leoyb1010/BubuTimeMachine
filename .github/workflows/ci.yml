@@ -15,8 +15,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Reject signing material and stale parity metadata
         run: bash harmony/scripts/check-repository-hygiene.sh
+      - name: Test pure HarmonyOS sync contracts
+        run: node --test harmony/tests/*.test.mjs
 
   ios:
     name: iOS build & test (Xcode 26)
