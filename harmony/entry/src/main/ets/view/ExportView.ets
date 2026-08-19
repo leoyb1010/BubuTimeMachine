@@ -1,6 +1,6 @@
 // MARK: - 全量档案导出（对照 iOS Features/Settings/ExportView.swift）
 // 一键把布布的一切导出成可双击打开的网页 + 媒体包（index.html + data.json + media/）。
-// iOS 打 zip 后调系统分享 sheet；HarmonyOS 暂无等价 zip+share，导出到 cacheDir 目录并展示路径。
+// 导出 zip 后使用 HarmonyOS Share Kit 分享到文件、隔空传送或其他家庭设备。
 // 导出完成写入 preferences 'bubu.lastExportAt'，供「备份健康度卡」判断是否过期（对照 iOS）。
 
 import { preferences } from '@kit.ArkData';
@@ -16,7 +16,8 @@ import {
   FirstTimeSnapshot, TimeCapsuleSnapshot
 } from '../services/media/ArchiveExporter';
 import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
-import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { ShareService } from '../services/ShareService';
 
 // 统计行数据。
 interface CountRow { key: string; value: string; }
@@ -223,15 +224,19 @@ export struct ExportView {
         healthRecords: healthSnaps, firstTimes: firstTimeSnaps, timeCapsules: capsuleSnaps
       };
 
-      const folder = await ArchiveExporter.shared.export(input);
-      this.resultPath = folder;
+      const archive = await ArchiveExporter.shared.exportZip(input);
+      this.resultPath = archive;
       // 记录导出时间戳（对照 iOS UserDefaults bubu.lastExportAt）。
       try {
         const store = preferences.getPreferencesSync(getContext(this), { name: 'bubu_widget' });
         store.putSync('bubu.lastExportAt', Math.floor(Date.now() / 1000));
         store.flush();
       } catch (e) {}
-      promptAction.showToast({ message: '导出完成 💛' });
+      try {
+        await ShareService.shareFile(getContext(this) as common.UIAbilityContext, archive, `${profile.name}的一生`);
+      } catch (shareError) {
+        this.errorText = '档案已经导出；分享面板被取消或暂时不可用，可以稍后再次导出分享。';
+      }
     } catch (e) {
       this.errorText = `导出失败：${e instanceof Error ? e.message : '请稍后再试'}`;
     }

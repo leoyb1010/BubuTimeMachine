@@ -1,6 +1,7 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { MediaStore } from '../MediaStore';
+import { zlib } from '@kit.BasicServicesKit';
 
 const DOMAIN = 0x0000;
 
@@ -135,6 +136,13 @@ export class ArchiveExporter {
     ArchiveExporter.writeText(`${root}/data.json`, ArchiveExporter.buildJSON(input));
     ArchiveExporter.writeText(`${root}/index.html`, ArchiveExporter.buildHTML(input));
     return root;
+  }
+
+  async exportZip(input: ExportInput): Promise<string> {
+    const folder = await this.export(input);
+    const zipPath = `${folder}.zip`;
+    await zlib.compressFile(folder, zipPath, {});
+    return zipPath;
   }
 
   // MARK: HTML

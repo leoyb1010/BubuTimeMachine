@@ -29,7 +29,7 @@
 | 家庭语义搜索、布布问答、每周报告 | 🟡 已接真实服务端、出处回查和本地检索降级，待真机/生产数据验收 | 复用服务端契约，端侧展示证据来源 |
 | 声音年轮 | 🟡 已接素材清单、移除、渲染、状态、下载播放与归档，待真机音频验收 | 自托管派生音频 + 原声来源 |
 | 智能照片收件箱、认布布、精选聚类 | 🟡 已有持久候选、事件分组、确认/忽略与真实入库；人物识别待补 | Media Library + Vision/MindSpore/服务端 |
-| 分享卡、传家宝开放档案、PDF/年鉴 | 🟡 基础导出已有 | Share Kit + PDF Kit/现有导出器 |
+| 分享卡、传家宝开放档案、PDF/年鉴 | 🟡 开放档案已压缩 ZIP 并接 Share Kit；分享卡/PDF 继续补 | Share Kit + PDF Kit/现有导出器 |
 | 姥姥模式、深色模式、完整无障碍 | 🟡 旧版视觉 | 系统关怀模式 + ArkUI 响应式语义 |
 
 ## P2：鸿蒙原生能力
@@ -41,7 +41,7 @@
 | Live Activity | Live View | ⏳ | 仅在权益和场景准入允许时接入 |
 | Photos Extension | Media Library + Background Tasks | 🔴 | 后台恢复、权限拒绝、大图库验证 |
 | WatchConnectivity/watchOS | Wear Engine + 穿戴侧 HAP | 🔴 | 消息、语音、照片包、离线队列实表通过 |
-| Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🔴 | 图片、视频、文本和目标页直达 |
+| Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🟡 开放档案已接系统分享 | 图片、视频、文本和目标页直达 |
 | iPad/Mac Catalyst | 平板、折叠屏、鸿蒙电脑 | 🟡 phone/tablet 声明 | 横竖屏、分栏、多窗口、长文本截图 |
 
 ## 发布门槛
