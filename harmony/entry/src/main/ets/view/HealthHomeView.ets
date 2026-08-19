@@ -1,11 +1,15 @@
-import { HealthRecord } from '../models/Models';
+import { FeedEvent, HealthRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
-import { HealthRecordKind, ALL_HEALTH_KINDS, healthKindMeta } from '../models/Enums';
+import { HealthRecordKind, ALL_HEALTH_KINDS, FeedEventKind, SyncState, healthKindMeta } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { GrowthCurveView } from './GrowthCurveView';
 import { VaccineView } from './VaccineView';
 import { HealthRecordSheet, HealthDraftUtil } from './HealthRecordSheet';
+import { ServerConfig } from '../services/ServerConfig';
+import { BubuActivityController } from '../services/BubuActivityController';
+import { BubuHaptics } from '../theme/BubuHaptics';
+import { util } from '@kit.ArkTS';
 
 // MARK: - 布布健康（对照 iOS Features/Health/HealthHomeView.swift）
 // 顶部说明卡 + 成长曲线/疫苗入口 + 7 类快速记录入口 + 今天 + 最近记录 + 免责声明。
@@ -16,8 +20,20 @@ export struct HealthHomeView {
   @State showGrowth: boolean = false;
   @State showVaccine: boolean = false;
   @State private viewportW: number = 0;
+  @State private sleepStartedAt: number = 0;
+  @State private sleepElapsed: string = '0:00';
+  private sleepTimer: number = -1;
 
-  aboutToAppear(): void { this.reload(); }
+  aboutToAppear(): void {
+    this.reload();
+    this.sleepStartedAt = ServerConfig.shared.sleepStartedAt;
+    if (this.sleepStartedAt > 0) {
+      this.startSleepTicker();
+      BubuActivityController.shared.startSleepTimer(ServerConfig.shared.childName, this.sleepStartedAt);
+    }
+  }
+
+  aboutToDisappear(): void { this.stopSleepTicker(); }
 
   private async reload(): Promise<void> {
     this.records = await AppDatabase.shared.fetchHealth() ?? [];
@@ -96,6 +112,8 @@ export struct HealthHomeView {
         }
         .width('100%').padding(16).backgroundColor(BubuColor.card).borderRadius(20)
 
+        this.sleepTimerCard()
+
 	        // 成长曲线 / 疫苗接种入口（对照 iOS insightLinks）
 	        if (this.isNarrow()) {
 	          Column({ space: 10 }) {
@@ -157,6 +175,93 @@ export struct HealthHomeView {
       const w = area.width as number;
       if (w > 0) this.viewportW = w;
     })
+  }
+
+  @Builder
+  sleepTimerCard() {
+    if (this.sleepStartedAt > 0) {
+      Row({ space: 12 }) {
+        Text('😴').fontSize(30)
+        Column({ space: 3 }) {
+          Text('布布睡着啦').fontSize(15).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+          Text(this.sleepElapsed).fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.primary)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Button('醒啦').backgroundColor(BubuColor.primary).fontColor(Color.White)
+          .onClick(() => { this.endSleep(); })
+      }
+      .width('100%').padding(14).backgroundColor('#1AF28C9E').borderRadius(20)
+      .accessibilityText(`哄睡计时 ${this.sleepElapsed}`)
+    } else {
+      Row({ space: 12 }) {
+        Text('🌙').fontSize(26)
+        Column({ space: 2 }) {
+          Text('开始哄睡计时').fontSize(15).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+          Text('锁屏实况窗能看到睡了多久，醒来点一下自动记好')
+            .fontSize(12).fontColor(BubuColor.secondaryText)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text('▶').fontSize(26).fontColor(BubuColor.primary)
+      }
+      .width('100%').padding(14).backgroundColor(BubuColor.card).borderRadius(20)
+      .accessibilityText('开始哄睡计时')
+      .onClick(() => { this.startSleep(); })
+    }
+  }
+
+  private async startSleep(): Promise<void> {
+    const now = Date.now();
+    this.sleepStartedAt = now;
+    await ServerConfig.shared.setSleepStartedAt(now);
+    this.startSleepTicker();
+    await BubuActivityController.shared.startSleepTimer(ServerConfig.shared.childName, now);
+    BubuHaptics.success();
+    this.getUIContext().getPromptAction().showToast({ message: '开始哄睡，计时中' });
+  }
+
+  private async endSleep(): Promise<void> {
+    const start = this.sleepStartedAt;
+    if (start <= 0) return;
+    const end = Date.now();
+    const amountText = HealthDraftUtil.durationText(start, end);
+    this.sleepStartedAt = 0;
+    this.stopSleepTicker();
+    await ServerConfig.shared.setSleepStartedAt(0);
+    const record: HealthRecord = {
+      id: util.generateRandomUUID(true), kind: HealthRecordKind.sleep, title: '睡觉', recordedAt: end,
+      amountText, amountValue: (end - start) / 3600000, amountUnit: '小时', startAt: start, endAt: end,
+      tags: [], syncState: SyncState.local, createdAt: end
+    };
+    await AppDatabase.shared.insertHealth(record);
+    const event: FeedEvent = {
+      id: util.generateRandomUUID(true), kind: FeedEventKind.healthRecorded,
+      actorRole: ServerConfig.shared.currentRole, summary: `记录了睡眠：${amountText}`,
+      targetLocalId: record.id, happenedAt: end, syncState: SyncState.local, createdAt: end
+    };
+    await AppDatabase.shared.insertFeedEvent(event);
+    await BubuActivityController.shared.endSleepTimer(amountText);
+    await this.reload();
+    BubuHaptics.success();
+    this.getUIContext().getPromptAction().showToast({ message: `睡了 ${amountText}，已记下` });
+  }
+
+  private startSleepTicker(): void {
+    this.stopSleepTicker();
+    this.updateSleepElapsed();
+    this.sleepTimer = setInterval(() => { this.updateSleepElapsed(); }, 1000);
+  }
+
+  private stopSleepTicker(): void {
+    if (this.sleepTimer >= 0) clearInterval(this.sleepTimer);
+    this.sleepTimer = -1;
+  }
+
+  private updateSleepElapsed(): void {
+    const total = Math.max(0, Math.floor((Date.now() - this.sleepStartedAt) / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    this.sleepElapsed = hours > 0
+      ? `${hours}:${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`
+      : `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   }
 
   @Builder

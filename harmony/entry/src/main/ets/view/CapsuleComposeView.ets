@@ -7,6 +7,7 @@ import { ServerConfig } from '../services/ServerConfig';
 import { CapsuleCrypto } from '../services/security/CapsuleCrypto';
 import { CapsuleVault, CapsulePayload, makeCapsulePayload } from '../services/security/CapsuleVault';
 import { CapsuleRecovery } from '../services/security/CapsuleRecovery';
+import { BubuActivityController } from '../services/BubuActivityController';
 import { BubuColor, BubuFont, BubuRadius, BubuSpacing, BubuShadow } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 
@@ -316,6 +317,8 @@ export struct CapsuleComposeView {
         createdAt: e !== null ? e.createdAt : now
       };
       await AppDatabase.shared.insertCapsule(capsule);
+      BubuActivityController.shared.startCapsuleCountdown(
+        capsule.title, capsule.unlockAt, ServerConfig.shared.childName);
       this.getUIContext().getPromptAction().showToast({ message: '已经封存啦 💌' });
       this.onSaved();
       this.onBack();

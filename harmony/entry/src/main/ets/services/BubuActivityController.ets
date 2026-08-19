@@ -1,127 +1,139 @@
 import { notificationManager } from '@kit.NotificationKit';
+import { liveViewManager } from '@kit.LiveViewKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN = 0x0000;
-
-// MARK: - Live Activity 启停控制（对照 iOS Services/BubuActivityController.swift）
-// iOS 用 ActivityKit 的 request/update/end 起一个灵动岛 / 锁屏实时活动，
-// 全部做可用性与授权降级：用户未开启、系统不支持时所有方法安静 no-op，主流程零影响。
-//
-// NOTE: LiveActivity→实况窗
-// HarmonyOS 的「实况窗 (Live View)」API 在当前 SDK 下尚不稳定/不确定，这里实现一个
-// 等价的、可编译的控制器：用 @kit.NotificationKit 的「常驻通知 (ongoing notification)」
-// 承担「录音中 / 胶囊倒计时」的持续可见提示——语义上等价于 iOS Live Activity 的
-// 起(request)/止(end)。所有方法在通知不可用时静默降级，对齐 iOS 的 areActivitiesEnabled 守卫。
-
-// iOS: enum kind { voiceRecording, capsuleCountdown }（来自 BubuActivityAttributes.kind）
-enum BubuActivityKind {
-  voiceRecording = 'voiceRecording',
-  capsuleCountdown = 'capsuleCountdown'
-}
-
-// 录音 Live Activity 固定占用一个通知 id（对应 iOS「同一时刻只允许一个」voiceActivity 句柄）。
-const VOICE_NOTIFICATION_ID = 9201;
-// 胶囊倒计时通知 id。
-const CAPSULE_NOTIFICATION_ID = 9202;
+const VOICE_ID = 9201;
+const CAPSULE_ID = 9202;
+const SLEEP_ID = 9203;
+const MAX_ALIVE_SECONDS = 28800;
 
 export class BubuActivityController {
   static readonly shared = new BubuActivityController();
-
-  // iOS: private static var voiceActivity: Activity? —— 当前录音 Activity 句柄（同一时刻只允许一个）。
-  // 这里以「是否有进行中的录音常驻通知」表达。
-  private hasVoiceActivity: boolean = false;
-
+  private activeLiveViews: Set<number> = new Set<number>();
   private constructor() {}
 
-  // iOS: private static var isEnabled { ActivityAuthorizationInfo().areActivitiesEnabled }
-  private async isEnabled(): Promise<boolean> {
+  async startVoiceRecording(childName: string): Promise<void> {
+    if (this.activeLiveViews.has(VOICE_ID)) return;
+    const title = `正在记录${childName}的声音`;
+    if (await this.startTimerLiveView(VOICE_ID, title, '录音中', 0, false, MAX_ALIVE_SECONDS)) return;
+    await this.publishFallback(VOICE_ID, title, '0:00', true);
+  }
+
+  async endVoiceRecording(elapsedText: string): Promise<void> {
+    await this.stop(VOICE_ID, '录音已收好', elapsedText);
+  }
+
+  async startSleepTimer(childName: string, startedAt: number): Promise<void> {
+    const elapsedMs = Math.max(0, Date.now() - startedAt);
+    const title = `${childName}睡着啦`;
+    if (await this.startTimerLiveView(SLEEP_ID, title, '哄睡计时', elapsedMs, false, MAX_ALIVE_SECONDS)) return;
+    await this.publishFallback(SLEEP_ID, title, '回到布布时光机点“醒啦”即可记好', true);
+  }
+
+  async endSleepTimer(elapsedText: string): Promise<void> {
+    await this.stop(SLEEP_ID, '睡眠已记下', elapsedText);
+  }
+
+  async startCapsuleCountdown(title: string, unlockAt: number, childName: string): Promise<void> {
+    const remaining = unlockAt - Date.now();
+    if (remaining <= 0 || remaining > MAX_ALIVE_SECONDS * 1000) return;
+    const liveTitle = title.trim().length > 0 ? title.trim() : `${childName}的时间胶囊`;
+    if (await this.startTimerLiveView(CAPSULE_ID, liveTitle, '即将解锁', remaining, true,
+      Math.max(15, Math.ceil(remaining / 1000)))) return;
+    await this.publishFallback(CAPSULE_ID, liveTitle, `${childName}的时间胶囊即将解锁`, false);
+  }
+
+  async endCapsuleCountdown(): Promise<void> {
+    await this.stop(CAPSULE_ID, '时间胶囊可以开启了', '现在就去看看');
+  }
+
+  private async startTimerLiveView(id: number, title: string, content: string, time: number,
+                                   isCountdown: boolean, aliveTime: number): Promise<boolean> {
     try {
-      return await notificationManager.isNotificationEnabled();
+      if (!(await liveViewManager.isLiveViewEnabled())) return false;
+      try {
+        await liveViewManager.getActiveLiveView(id);
+        this.activeLiveViews.add(id);
+        return true;
+      } catch (e) {}
+      const result = await liveViewManager.startLiveView(
+        this.timerLiveView(id, title, content, time, isCountdown, 1, 1, aliveTime));
+      if (result.resultCode !== 0) return false;
+      this.activeLiveViews.add(id);
+      return true;
     } catch (e) {
+      // 1003500005 表示尚未获 TIMER 场景权益；主流程自动降级到通知。
+      hilog.warn(DOMAIN, 'Bubu', `Live View 不可用，降级通知: ${JSON.stringify(e)}`);
       return false;
     }
   }
 
-  // MARK: 录音中
-
-  // iOS: static func startVoiceRecording(childName:)
-  // 开始录音时调用：起一个录音 Live Activity（这里为常驻通知）。
-  async startVoiceRecording(childName: string): Promise<void> {
-    // iOS: guard isEnabled, voiceActivity == nil else { return }
-    if (this.hasVoiceActivity) return;
-    if (!(await this.isEnabled())) return;
-    try {
-      const request: notificationManager.NotificationRequest = {
-        id: VOICE_NOTIFICATION_ID,
-        content: {
-          notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: {
-            // iOS: title = "正在记录\(childName)的声音"
-            title: `正在记录${childName}的声音`,
-            text: '0:00'
-          }
-        },
-        // 常驻：不可手动划掉，对齐 Live Activity 录音期间持续可见。
-        isOngoing: true,
-        isUnremovable: true,
-        notificationSlotType: notificationManager.SlotType.SOCIAL_COMMUNICATION
-      };
-      await notificationManager.publish(request);
-      this.hasVoiceActivity = true;
-    } catch (e) {
-      hilog.error(DOMAIN, 'Bubu', `起录音实况窗失败：${JSON.stringify(e)}`);
+  private async stop(id: number, title: string, finalText: string): Promise<void> {
+    if (!this.activeLiveViews.has(id)) {
+      try {
+        await liveViewManager.getActiveLiveView(id);
+        this.activeLiveViews.add(id);
+      } catch (e) {}
     }
-  }
-
-  // iOS: static func endVoiceRecording(elapsedText:)
-  // 停止录音时调用：定格时长并结束 Activity。
-  async endVoiceRecording(elapsedText: string): Promise<void> {
-    // iOS: guard voiceActivity != nil else { return }
-    if (!this.hasVoiceActivity) return;
-    this.hasVoiceActivity = false;
-    await this.endAll(BubuActivityKind.voiceRecording, elapsedText);
-  }
-
-  // iOS: private static func endAll(final:) async —— 结束全部进行中的录音 Activity。
-  // 这里撤销对应常驻通知；elapsedText 仅用于对齐 iOS 的「定格时长」语义（通知撤销后不再展示）。
-  private async endAll(kind: BubuActivityKind, elapsedText: string): Promise<void> {
-    try {
-      if (kind === BubuActivityKind.voiceRecording) {
-        await notificationManager.cancel(VOICE_NOTIFICATION_ID);
-      } else {
-        await notificationManager.cancel(CAPSULE_NOTIFICATION_ID);
+    if (this.activeLiveViews.has(id)) {
+      try {
+        const result = await liveViewManager.stopLiveView(
+          this.timerLiveView(id, title, finalText, 0, false, -1, 2, 60));
+        if (result.resultCode === 0) this.activeLiveViews.delete(id);
+      } catch (e) {
+        this.activeLiveViews.delete(id);
       }
-    } catch (e) {
-      // 通知已不存在：忽略。
     }
+    try { await notificationManager.cancel(id); } catch (e) {}
   }
 
-  // MARK: 时间胶囊倒计时
+  private timerLiveView(id: number, title: string, content: string, time: number,
+                        isCountdown: boolean, status: number, sequence: number,
+                        aliveTime: number): liveViewManager.LiveView {
+    return {
+      id,
+      event: 'TIMER',
+      sequence,
+      isMute: true,
+      lifeCycleMode: liveViewManager.LifeCycleMode.STOP_BY_APP,
+      timer: { time, isCountdown, isPaused: status < 0 },
+      liveViewData: {
+        primary: {
+          title,
+          content: [{ text: status < 0 ? content : '${placeholder.timer}', textColor: '#FF5A3D34' }],
+          keepTime: status < 0 ? 60 : 0,
+          aliveTime: Math.min(MAX_ALIVE_SECONDS, Math.max(15, aliveTime))
+        },
+        capsule: {
+          type: liveViewManager.CapsuleType.CAPSULE_TYPE_TIMER,
+          status,
+          content,
+          time,
+          isCountdown,
+          isPaused: status < 0,
+          backgroundColor: '#FFF28C9E'
+        }
+      }
+    };
+  }
 
-  // iOS: static func startCapsuleCountdown(title:unlockAt:childName:)
-  // 为临近解锁的时间胶囊起一个倒计时 Live Activity（这里为常驻通知）。
-  async startCapsuleCountdown(title: string, unlockAt: number, childName: string): Promise<void> {
-    // iOS: guard isEnabled, unlockAt > .now else { return }
-    if (unlockAt <= Date.now()) return;
-    if (!(await this.isEnabled())) return;
+  private async publishFallback(id: number, title: string, text: string, ongoing: boolean): Promise<void> {
     try {
+      if (!(await notificationManager.isNotificationEnabled())) return;
       const request: notificationManager.NotificationRequest = {
-        id: CAPSULE_NOTIFICATION_ID,
+        id,
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: {
-            title: title,
-            // 倒计时文案：对齐 iOS staleDate = unlockAt 的解锁时间提示。
-            text: `${childName}的时间胶囊即将解锁`
-          }
+          normal: { title, text }
         },
-        isOngoing: true,
-        isUnremovable: false,
+        isOngoing: ongoing,
+        isUnremovable: ongoing,
         notificationSlotType: notificationManager.SlotType.SOCIAL_COMMUNICATION
       };
       await notificationManager.publish(request);
     } catch (e) {
-      hilog.error(DOMAIN, 'Bubu', `起胶囊倒计时实况窗失败：${JSON.stringify(e)}`);
+      hilog.error(DOMAIN, 'Bubu', `持续状态提示失败: ${JSON.stringify(e)}`);
     }
   }
 }

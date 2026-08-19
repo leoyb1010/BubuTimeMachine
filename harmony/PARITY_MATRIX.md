@@ -38,7 +38,7 @@
 |---|---|---|---|
 | WidgetKit | Form Kit 服务卡片 | 🟡 已补持久刷新、最近时光、成长数据和里程碑快照 | 多规格、照片、刷新、点击路径真机通过 |
 | App Intents | InsightIntent | 🟡 已声明系统前台打开意图；带参数快捷记录继续补 | 意图声明、系统推荐与落地页真机通过 |
-| Live Activity | Live View | ⏳ | 仅在权益和场景准入允许时接入 |
+| Live Activity | Live View | ⏳ 已实现 TIMER 原生实况窗并接录音、持久哄睡、临近胶囊倒计时；无权益自动降级通知 | TIMER 场景权益、锁屏样式与真机启停待验收 |
 | Photos Extension | Media Library + Background Tasks | 🟡 已接持久候选和 WorkScheduler | 后台恢复、权限拒绝、大图库验证 |
 | Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🟡 开放档案已接系统分享 | 图片、视频、文本和目标页直达 |
 

@@ -7,6 +7,8 @@ import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
 import { CapsuleComposeView } from './CapsuleComposeView';
 import { CapsuleUnlockView } from './CapsuleUnlockView';
 import { CapsuleRecoveryView } from './CapsuleRecoveryView';
+import { BubuActivityController } from '../services/BubuActivityController';
+import { ServerConfig } from '../services/ServerConfig';
 
 // MARK: - 时间胶囊 · 列表（对照 iOS Features/Capsule/CapsuleHomeView.swift）
 // 写给未来布布的信，到期前加密锁定、只显示倒计时；到期后可庄重开启。
@@ -37,6 +39,14 @@ export struct CapsuleView {
 
   private async reload(): Promise<void> {
     this.capsules = await AppDatabase.shared.fetchCapsules() ?? [];
+    const next = this.capsules
+      .filter((item: TimeCapsule): boolean => item.unlockAt > Date.now())
+      .sort((a: TimeCapsule, b: TimeCapsule): number => a.unlockAt - b.unlockAt)[0];
+    if (next) {
+      BubuActivityController.shared.startCapsuleCountdown(next.title, next.unlockAt, ServerConfig.shared.childName);
+    } else {
+      BubuActivityController.shared.endCapsuleCountdown();
+    }
   }
 
   private canOpen(c: TimeCapsule): boolean {

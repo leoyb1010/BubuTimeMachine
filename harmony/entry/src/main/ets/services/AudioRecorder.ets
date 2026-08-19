@@ -3,6 +3,8 @@ import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { MediaStore } from './MediaStore';
+import { BubuActivityController } from './BubuActivityController';
+import { ServerConfig } from './ServerConfig';
 
 const DOMAIN = 0x0000;
 
@@ -91,6 +93,7 @@ export class AudioRecorder {
       this.elapsedValue = 0;
       this.levels = [];
       this.startTimer();
+      BubuActivityController.shared.startVoiceRecording(ServerConfig.shared.childName);
       return true;
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `录音启动失败: ${JSON.stringify(e)}`);
@@ -113,6 +116,7 @@ export class AudioRecorder {
     const fileName = this.filePath.split('/').pop() ?? '';
     // iOS: downsample(levels, to: 40)
     const waveform = AudioRecorder.downsample(this.levels, 40);
+    BubuActivityController.shared.endVoiceRecording(AudioRecorder.timeText(dur));
     this.stateValue = RecorderState.finished;
     this.cleanup();
     return { fileName, durationSec: dur, waveform };
@@ -124,6 +128,7 @@ export class AudioRecorder {
     }
     // iOS: 删除临时录音文件。
     const p = this.filePath;
+    BubuActivityController.shared.endVoiceRecording('0:00');
     this.cleanup();
     this.stateValue = RecorderState.idle;
     if (p.length > 0) {
