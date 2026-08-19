@@ -24,7 +24,7 @@
 
 ## Remaining risk
 
-- Known issues: ArkTS 当前仍有弃用 API、异常处理与可选 `@Prop` 等编译警告
+- Known issues: ArkTS 当前仍有弃用 API、异常处理与可选 `@Prop` 等编译警告；真实定位和离线自然记录已接通但待真机权限验证
 - Deferred work: 无；按能力矩阵持续推进
 - Visual verification outstanding: 是
 

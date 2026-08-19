@@ -47,6 +47,8 @@ export class CaptureModel {
   // —— 地点（对照 iOS includeLocation / currentLocation）——
   includeLocation: boolean = false;
   currentLocationName: string | null = null;
+  currentLatitude: number | null = null;
+  currentLongitude: number | null = null;
   locationError: string | null = null;
 
   // —— 状态 ——
@@ -71,6 +73,8 @@ export class CaptureModel {
     this.mood = undefined;
     this.includeLocation = false;
     this.currentLocationName = null;
+    this.currentLatitude = null;
+    this.currentLongitude = null;
     this.locationError = null;
     this.selectedPreviews = [];
     this.pickedPhotoNames = [];
@@ -203,7 +207,11 @@ export class CaptureModel {
         this.mood,
         this.pendingVoiceFileName,
         this.pendingVoiceDuration,
-        videoNames
+        videoNames,
+        Date.now(),
+        this.currentLocationName ?? undefined,
+        this.currentLatitude ?? undefined,
+        this.currentLongitude ?? undefined
       );
       this.lastSavedEntryID = id;
       const mediaCount = photoNames.length + videoNames.length;

@@ -109,7 +109,7 @@ export class LocationService {
         a.subLocality,
         a.locality,
         a.administrativeArea,
-        a.descriptions
+        a.descriptions && a.descriptions.length > 0 ? a.descriptions[0] : undefined
       ];
       for (const c of candidates) {
         if (c && c.trim().length > 0) {

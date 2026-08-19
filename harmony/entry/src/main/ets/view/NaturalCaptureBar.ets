@@ -3,10 +3,10 @@ import { BubuMotion } from '../theme/BubuMotion';
 import { BubuHaptics } from '../theme/BubuHaptics';
 import { BubuIcon, BubuIconName } from '../components/BubuIcon';
 import { AIService, nowISO } from '../services/AIService';
-import { MockAIService } from '../services/MockAIService';
+import { parseNaturalCaptureOfflineWire } from '../services/OnDeviceNaturalParser';
 import { ServerConfig } from '../services/ServerConfig';
 import {
-  NaturalCaptureRequest, NaturalCaptureParseResult
+  NaturalCaptureRequest, NaturalCaptureParseResult, decodeParseResult
 } from '../services/NaturalCaptureDTO';
 import { NaturalCaptureReviewSheet } from './NaturalCaptureReviewSheet';
 
@@ -152,7 +152,7 @@ export struct NaturalCaptureBar {
       try {
         result = await AIService.shared.parseNaturalCaptureFull(request);
       } catch (realError) {
-        result = await MockAIService.shared.parseNaturalCaptureFull(request);
+        result = decodeParseResult(parseNaturalCaptureOfflineWire(request));
       }
       this.reviewOriginalText = input;
       this.reviewResult = result;

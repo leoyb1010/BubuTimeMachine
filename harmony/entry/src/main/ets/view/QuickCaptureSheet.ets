@@ -14,6 +14,7 @@ import { AudioRecorder } from '../services/AudioRecorder';
 import { abilityAccessCtrl, common } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { LocationService } from '../services/LocationService';
 
 // MARK: - 快速记录面板（对照 iOS Features/Capture/QuickCaptureSheet.swift）
 // 拍/选媒体 + 一句话 + 心情 + 语音。全程可选填，任一有内容即可存。
@@ -517,14 +518,7 @@ export struct QuickCaptureSheet {
         Toggle({ type: ToggleType.Switch, isOn: this.model.includeLocation })
           .selectedColor(this.theme)
           .onChange((on: boolean) => {
-            this.model.includeLocation = on;
-            if (!on) {
-              this.model.currentLocationName = null;
-              this.model.locationError = null;
-            } else {
-              // NOTE: 定位服务未接入本切片，仅置标志；真实定位由 LocationService 后续补。
-              this.model.locationError = '定位将在记录时尝试获取';
-            }
+            this.updateLocation(on);
           })
       }
       .width('100%')
@@ -548,6 +542,26 @@ export struct QuickCaptureSheet {
     .border({ width: 1, color: '#76FFFFFF' })
     .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     .alignItems(HorizontalAlign.Start)
+  }
+
+  private async updateLocation(enabled: boolean): Promise<void> {
+    this.model.includeLocation = enabled;
+    this.model.currentLocationName = null;
+    this.model.currentLatitude = null;
+    this.model.currentLongitude = null;
+    this.model.locationError = null;
+    if (!enabled) return;
+    this.model.locationError = '正在获取一次位置…';
+    const context = getContext(this) as common.UIAbilityContext;
+    const captured = await LocationService.shared.currentPlacemark(context);
+    if (!captured) {
+      this.model.locationError = '没有取得位置，仍可正常保存记录';
+      return;
+    }
+    this.model.currentLatitude = captured.latitude;
+    this.model.currentLongitude = captured.longitude;
+    this.model.currentLocationName = captured.name ?? '当前位置';
+    this.model.locationError = null;
   }
 
   // 系统相册选择照片（对照 iOS PhotosPicker）。
