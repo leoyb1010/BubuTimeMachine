@@ -11,7 +11,10 @@ test('服务卡片持久注册 formId 并展示真实成长快照', () => {
   assert.ok(refresher.includes("store.putSync('formIds'"));
   assert.ok(ability.includes('WidgetRefresher.register(this.context, formId)'));
   assert.ok(ability.includes('WidgetRefresher.unregister(this.context, formId)'));
-  for (const field of ['recentTitle', 'statsText', 'growthText', 'nextMilestone']) {
+  for (const field of ['recentTitle', 'statsText', 'growthText', 'nextMilestone', 'recentPhotoUri']) {
     assert.ok(card.includes(`@LocalStorageProp('${field}')`));
   }
+  assert.ok(refresher.includes("store.putSync('recentPhotoUri'"));
+  assert.ok(card.includes('Image(this.recentPhotoUri)'));
+  assert.ok(card.includes("'action': 'router'"));
 });

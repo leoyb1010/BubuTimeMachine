@@ -24,7 +24,7 @@
 
 ## Remaining risk
 
-- Known issues: API 26 弃用 UI API 和可选 `@Prop` 警告已清理；Live View TIMER 已接入但权益未知，当前 515 条警告仍以 RDB/系统 API 的“可能抛异常”和设备能力提示为主
+- Known issues: API 26 弃用 UI API 和可选 `@Prop` 警告已清理；Live View TIMER 已接入但权益未知，当前 516 条警告仍以 RDB/系统 API 的“可能抛异常”和设备能力提示为主
 - Deferred work: 无；按能力矩阵持续推进
 - Visual verification outstanding: 是
 

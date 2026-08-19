@@ -2,6 +2,7 @@ import { formProvider, formBindingData } from '@kit.FormKit';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { AppDatabase } from '../data/AppDatabase';
+import { MediaStore } from '../services/MediaStore';
 
 export class WidgetRefresher {
   private static readonly snapshotStore: string = 'bubu_widget';
@@ -34,6 +35,16 @@ export class WidgetRefresher {
     const achieved = milestones.filter((item): boolean => item.happenedAt !== undefined);
     const next = milestones.find((item): boolean => item.happenedAt === undefined);
     const latest = entries.length > 0 ? entries[0] : undefined;
+    let recentPhotoUri = '';
+    if (latest) {
+      const media = await AppDatabase.shared.fetchMediaForEntry(latest.id);
+      const photo = media.find((item): boolean => item.typeRaw === 'photo');
+      if (photo?.thumbnailFileName) {
+        recentPhotoUri = `file://${MediaStore.shared.thumbnailPath(photo.thumbnailFileName)}`;
+      } else if (photo?.localFileName && MediaStore.shared.exists(photo.localFileName)) {
+        recentPhotoUri = `file://${MediaStore.shared.fullPath(photo.localFileName)}`;
+      }
+    }
     const measurement = growth.length > 0 ? growth[0] : undefined;
     const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.snapshotStore });
     store.putSync('birthday', profile?.birthday ?? 0);
@@ -44,6 +55,7 @@ export class WidgetRefresher {
     store.putSync('totalMilestones', milestones.length);
     store.putSync('recentTitle', latest?.title ?? latest?.note ?? '记录一个新瞬间');
     store.putSync('recentNote', latest?.note ?? '打开 App，留住今天的成长');
+    store.putSync('recentPhotoUri', recentPhotoUri);
     store.putSync('latestHeight', measurement?.heightCm ?? 0);
     store.putSync('latestWeight', measurement?.weightKg ?? 0);
     store.putSync('nextMilestone', next?.title ?? '记录新的第一次');

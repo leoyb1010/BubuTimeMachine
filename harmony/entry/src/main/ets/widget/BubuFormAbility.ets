@@ -13,6 +13,7 @@ interface CardData {
   statsText: string;
   growthText: string;
   nextMilestone: string;
+  recentPhotoUri: string;
 }
 
 // MARK: - 服务卡片提供方（对照 iOS WidgetKit 小组件）
@@ -43,6 +44,7 @@ export default class BubuFormAbility extends FormExtensionAbility {
     let statsText = '0 条时光 · 0 张照片';
     let growthText = '还没有成长测量';
     let nextMilestone = '记录新的第一次';
+    let recentPhotoUri = '';
     try {
       const opt: preferences.Options = { name: 'bubu_widget' };
       const store = preferences.getPreferencesSync(this.context, opt);
@@ -61,6 +63,7 @@ export default class BubuFormAbility extends FormExtensionAbility {
       recentTitle = store.getSync('recentTitle', recentTitle) as string;
       recentNote = store.getSync('recentNote', recentNote) as string;
       nextMilestone = store.getSync('nextMilestone', nextMilestone) as string;
+      recentPhotoUri = store.getSync('recentPhotoUri', '') as string;
       statsText = `${entryCount} 条时光 · ${photoCount} 张照片 · ${achieved}/${total} 里程碑`;
       if (height > 0 || weight > 0) {
         const parts: string[] = [];
@@ -71,7 +74,7 @@ export default class BubuFormAbility extends FormExtensionAbility {
     } catch (e) {
     }
     const data: CardData = {
-      name, ageText, daysText, recentTitle, recentNote, statsText, growthText, nextMilestone
+      name, ageText, daysText, recentTitle, recentNote, statsText, growthText, nextMilestone, recentPhotoUri
     };
     return data;
   }
