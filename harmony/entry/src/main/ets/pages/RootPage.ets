@@ -15,6 +15,7 @@ import { SyncEngine } from '../sync/SyncEngine';
 import { CHANGELOG } from '../models/Changelog';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
+import { SimpleModeView } from '../view/SimpleModeView';
 
 // MARK: - 根导航（对照 iOS App/RootTabView.swift + RootView）
 // 首启引导（无 ChildProfile 时）→ 主界面：4 Tab（首页/时光/里程碑/魔法屋）+ 中央记录键。
@@ -32,6 +33,7 @@ struct RootPage {
   @StorageLink('themeTick') themeTick: number = 0;  // 主题切换驱动重绘
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
   @StorageLink('bubuBackSignal') backSignal: number = 0;
+  @StorageLink('bubuSimpleMode') simpleMode: boolean = false;
 
   private whatsNewStore: preferences.Preferences | null = null;
 
@@ -108,6 +110,8 @@ struct RootPage {
           this.hasCompletedOnboarding = true;
           this.refreshWidget();
         }})
+      } else if (this.simpleMode) {
+        SimpleModeView({ onExit: () => { this.simpleMode = false; } })
       } else {
         this.mainShell()
       }

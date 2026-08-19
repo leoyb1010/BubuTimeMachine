@@ -1,6 +1,6 @@
 import { preferences } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
-import { FamilyRole } from '../models/Enums';
+import { ALL_FAMILY_ROLES, FamilyRole, isElderRole } from '../models/Enums';
 
 // MARK: - 服务器配置（对照 iOS ServerConfig）
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
@@ -22,6 +22,8 @@ export class ServerConfig {
   aiBaseURLString: string = ServerConfig.defaultAIBaseURL;
   aiAPIKey: string = '';
   aiEnabled: boolean = false;
+  simpleModeEnabled: boolean = false;
+  roleBeforeElderRaw: string = '';
 
   private constructor() {}
 
@@ -35,6 +37,9 @@ export class ServerConfig {
     this.aiBaseURLString = await this.getStr('aiBaseURL', ServerConfig.defaultAIBaseURL);
     this.aiAPIKey = await this.getStr('aiAPIKey', '');
     this.aiEnabled = await this.getBool('aiEnabled', false);
+    this.simpleModeEnabled = await this.getBool('simpleModeEnabled', isElderRole(this.currentRole));
+    this.roleBeforeElderRaw = await this.getStr('roleBeforeElder', '');
+    AppStorage.setOrCreate('bubuSimpleMode', this.simpleModeEnabled);
   }
 
   get currentRole(): FamilyRole {
@@ -52,8 +57,27 @@ export class ServerConfig {
   }
 
   async setRole(role: FamilyRole): Promise<void> {
+    if (isElderRole(role)) {
+      if (!isElderRole(this.currentRole)) this.roleBeforeElderRaw = this.currentRole;
+      this.simpleModeEnabled = true;
+    } else {
+      this.simpleModeEnabled = false;
+    }
     this.currentRoleRaw = role;
     await this.put('role', role);
+    await this.put('roleBeforeElder', this.roleBeforeElderRaw);
+    await this.putBool('simpleModeEnabled', this.simpleModeEnabled);
+    AppStorage.setOrCreate('bubuSimpleMode', this.simpleModeEnabled);
+  }
+
+  async exitSimpleMode(): Promise<void> {
+    const previous = ALL_FAMILY_ROLES.includes(this.roleBeforeElderRaw as FamilyRole)
+      ? this.roleBeforeElderRaw as FamilyRole : FamilyRole.mama;
+    this.simpleModeEnabled = false;
+    this.currentRoleRaw = previous;
+    await this.put('role', previous);
+    await this.putBool('simpleModeEnabled', false);
+    AppStorage.setOrCreate('bubuSimpleMode', false);
   }
 
   async setChildName(name: string): Promise<void> {

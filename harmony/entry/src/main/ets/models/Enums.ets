@@ -41,6 +41,11 @@ export const ALL_FAMILY_ROLES: FamilyRole[] = [
   FamilyRole.yeye, FamilyRole.nainai, FamilyRole.other
 ];
 
+export function isElderRole(role: FamilyRole): boolean {
+  return role === FamilyRole.grandma || role === FamilyRole.grandpa
+    || role === FamilyRole.yeye || role === FamilyRole.nainai;
+}
+
 // 心情标签（与 iOS Mood 一致，20 种；emoji 对照见 moodEmoji）
 export enum Mood {
   happy = '开心',
