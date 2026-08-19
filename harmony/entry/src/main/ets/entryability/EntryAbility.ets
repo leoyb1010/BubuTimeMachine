@@ -9,6 +9,7 @@ import { ServerConfig } from '../services/ServerConfig';
 import { APIClient } from '../services/APIClient';
 import { IosBaselineImporter } from '../bootstrap/IosBaselineImporter';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
+import '../intent/OpenBubuIntent';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
