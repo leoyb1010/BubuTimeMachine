@@ -133,11 +133,28 @@ struct WatchOverviewView: View {
                 }
             }
             .padding(.top, 2)
+            // 手表优先显示缓存快照：手机没在身边/没解锁时，这里可能是几小时甚至几天前的数据。
+            // 不标出来的话，长辈会以为「今天一条都没有」，其实只是没连上。
+            if let stale = staleText {
+                chip(stale, tint: WatchTheme.butter.opacity(0.85))
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 6)
         .onAppear { animateDays(to: days) }
         .onChange(of: days) { animateDays(to: days) }
+    }
+
+    /// 快照超过 2 小时才提示——手机在身边时快照本来就是每次抬腕都刷新的，
+    /// 每次都标「更新于 1 分钟前」纯属噪音。
+    private var staleText: String? {
+        guard let updatedAt = snap?.updatedAt else { return nil }
+        let seconds = Date.now.timeIntervalSince(updatedAt)
+        guard seconds >= 2 * 3600 else { return nil }
+        let hours = Int(seconds / 3600)
+        if hours < 24 { return "🕰 更新于 \(hours) 小时前" }
+        return "🕰 更新于 \(hours / 24) 天前"
     }
 
     private func chip(_ text: String, tint: Color) -> some View {

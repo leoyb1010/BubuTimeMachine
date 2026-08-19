@@ -15,19 +15,56 @@ enum TimelineSortMode: String, CaseIterable {
     }
 }
 
-// MARK: - 时光轴
-/// @Query 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；
-/// 分段在 rebuildSections 内存重排，排序方式可切（拍摄时间/记录时间），偏好持久记忆。
-/// 离线优先：UI 只读本地 SwiftData，断网全功能可用。
+// MARK: - 时光轴（分页外壳）
+/// 只做一件事：持有「当前取多少条」和排序方式，把它们喂给真正的列表视图。
+///
+/// 为什么需要这层壳：`@Query` 的取数描述符是在 `init` 里定下的，
+/// 视图内部的 `@State` 变了不会重建描述符。要做「先取一页、滚到底再取一页」，
+/// 就必须由**外层**把新的页大小作为参数传进来，触发内层重新 init。
+///
+/// 为什么要分页：原来是无 fetchLimit 的全量 `@Query`。三年量能扛，
+/// 十年（这个 App 的目标是陪到 18 岁）必然把冷启动和滚动一起拖垮。
 struct TimelineView: View {
+    /// 每页条数。一屏最多显示 3~4 条，200 条足够连翻很久都不触底。
+    static let pageStep = 200
+
+    @State private var pageLimit = TimelineView.pageStep
+    @AppStorage("bubu.timeline.sortMode") private var sortModeRaw = TimelineSortMode.capture.rawValue
+
+    var body: some View {
+        TimelineList(pageLimit: pageLimit,
+                     sortMode: TimelineSortMode(rawValue: sortModeRaw) ?? .capture,
+                     onNeedMore: { pageLimit += TimelineView.pageStep })
+    }
+}
+
+// MARK: - 时光轴列表
+/// @Query 按当前排序方式取一页本地 Entry，按「年-月」分段展示；
+/// 排序方式可切（拍摄时间/记录时间），偏好持久记忆。
+/// 离线优先：UI 只读本地 SwiftData，断网全功能可用。
+struct TimelineList: View {
+    /// 本次取数的上限，由外层 TimelineView 递增。
+    private let pageLimit: Int
+    /// 滚到底部时请求下一页。
+    private let onNeedMore: () -> Void
+
+    init(pageLimit: Int, sortMode: TimelineSortMode, onNeedMore: @escaping () -> Void) {
+        self.pageLimit = pageLimit
+        self.onNeedMore = onNeedMore
+        // 取数排序必须跟随 sortMode：只按 happenedAt 取前 N 条、再在内存里按 createdAt 重排，
+        // 拿到的会是「错的那 N 条」——批量导入的三年前旧照片正好会踩中这个坑。
+        var descriptor = FetchDescriptor<Entry>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: sortMode == .capture
+                ? [SortDescriptor(\Entry.happenedAt, order: .reverse)]
+                : [SortDescriptor(\Entry.createdAt, order: .reverse)])
+        descriptor.fetchLimit = pageLimit
+        _entries = Query(descriptor, animation: .default)
+    }
+
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
-    @Query(
-        filter: #Predicate<Entry> { !$0.isArchived },
-        sort: \Entry.happenedAt,
-        order: .reverse
-    )
-    private var entries: [Entry]
+    @Query private var entries: [Entry]
     @Query private var profiles: [ChildProfile]
     @State private var showFamilyFeed = false
     @State private var entryPendingDelete: Entry?
@@ -198,6 +235,20 @@ struct TimelineView: View {
                         sectionHeader(section)
                     }
                 }
+                // 触底加载下一页：取满一页说明后面很可能还有，
+                // 这个哨兵出现在视野里就把窗口再放大一页。搜索中不分页（本页内过滤即可）。
+                if entries.count >= pageLimit, searchText.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView().tint(BubuTheme.Color.primary)
+                        Text("正在翻出更早的时光…")
+                            .font(BubuTheme.Font.caption)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                        Spacer()
+                    }
+                    .padding(.vertical, BubuTheme.Spacing.l)
+                    .onAppear { onNeedMore() }
+                }
             }
             .padding()
         }
@@ -332,18 +383,13 @@ struct TimelineView: View {
         return parts.joined(separator: "，")
     }
 
-    /// 卡片标题：有标题用标题，没标题就把正文顶上来，都没有才是「记录此刻」。
+    /// 标题/副文案规则抽在 TimelineCardText（纯函数 + 单测），避免「同一句话上下重复」复发。
     private func cardHeadline(_ entry: Entry) -> String {
-        if let title = entry.title, !title.isEmpty { return title }
-        if let note = entry.note, !note.isEmpty { return note }
-        return "记录此刻"
+        TimelineCardText.headline(title: entry.title, note: entry.note)
     }
 
-    /// 卡片副文案：只有当它和标题不是同一句话时才显示，避免同屏上下两行重复。
     private func cardSubtitle(_ entry: Entry) -> String? {
-        guard let note = entry.note, !note.isEmpty else { return nil }
-        guard let title = entry.title, !title.isEmpty else { return nil }   // 无标题时正文已当标题
-        return note == title ? nil : note
+        TimelineCardText.subtitle(title: entry.title, note: entry.note)
     }
 
     /// 封面长宽比：取媒体真实比例并夹在可读区间。

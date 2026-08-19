@@ -76,30 +76,57 @@ final class WatchConnectivityManager: NSObject {
         return names
     }
 
+    /// 正在后台编码照片包。冷启动/回前台会连着推好几次快照，
+    /// 没有这个闸门就会同时起好几份 20 张图的解码任务。
+    private var encodingPhotoBundle = false
+
     private func pushPhotoBundle(names: [String], session: WCSession) {
         guard !names.isEmpty else { return }
         lastPhotoNames = names
         let fingerprint = WatchPhotoBundle.fingerprint(names)
         guard fingerprint != UserDefaults.standard.string(forKey: Self.sentFingerprintKey) else { return }
+        guard !encodingPhotoBundle else { return }
+        encodingPhotoBundle = true
 
-        let photos = WatchSnapshotBuilder.photosData(for: names)
-        guard !photos.isEmpty else { return }
-        let bundle = WatchPhotoBundle.encode(photos)
-        // 临时文件交给 WCSession 排队；didFinish 里删自己那份。
-        // 文件名带随机后缀：同指纹补发时若复用同名文件，第一笔传输完成的 removeItem
-        // 会把第二笔仍在排队的源文件删掉，第二笔必失败。
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("bubu-photobundle-\(fingerprint)-\(UUID().uuidString.prefix(8)).bin")
-        do {
-            try bundle.write(to: url, options: .atomic)
-        } catch {
-            log.error("photo bundle write failed: \(error.localizedDescription)")
-            return
+        // 约 20 张图的降采样 + JPEG 编码原来整段跑在主线程（冷启动与每次回前台都会走），
+        // 是可感知的卡顿源。搬到全局并发执行器，编码完再回主线程排队传输。
+        Task { [weak self] in
+            let encoded = await Self.encodePhotoBundleOffMain(names: names)
+            guard let self else { return }
+            self.encodingPhotoBundle = false
+            guard let encoded else { return }
+            // 临时文件交给 WCSession 排队；didFinish 里删自己那份。
+            // 文件名带随机后缀：同指纹补发时若复用同名文件，第一笔传输完成的 removeItem
+            // 会把第二笔仍在排队的源文件删掉，第二笔必失败。
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("bubu-photobundle-\(fingerprint)-\(UUID().uuidString.prefix(8)).bin")
+            do {
+                try encoded.bundle.write(to: url, options: .atomic)
+            } catch {
+                self.log.error("photo bundle write failed: \(error.localizedDescription)")
+                return
+            }
+            let session = WCSession.default
+            guard session.activationState == .activated else { return }
+            session.transferFile(url, metadata: [WatchLink.photoBundleKey: fingerprint])
+            // 乐观记账：真正失败时手表侧会走「缺图请求补发」兜底，不会永久卡住。
+            UserDefaults.standard.set(fingerprint, forKey: Self.sentFingerprintKey)
+            self.log.notice("photo bundle queued: \(encoded.count) photos, \(encoded.bundle.count) bytes")
         }
-        session.transferFile(url, metadata: [WatchLink.photoBundleKey: fingerprint])
-        // 乐观记账：真正失败时手表侧会走「缺图请求补发」兜底，不会永久卡住。
-        UserDefaults.standard.set(fingerprint, forKey: Self.sentFingerprintKey)
-        log.notice("photo bundle queued: \(photos.count) photos, \(bundle.count) bytes")
+    }
+
+    private struct EncodedPhotoBundle: Sendable {
+        let bundle: Data
+        let count: Int
+    }
+
+    /// @concurrent：approachable-concurrency 下 nonisolated async 默认继承调用方执行器，
+    /// 必须显式切到全局并发执行器，图片解码/JPEG 编码才真正离开主线程。
+    @concurrent
+    private nonisolated static func encodePhotoBundleOffMain(names: [String]) async -> EncodedPhotoBundle? {
+        let photos = WatchSnapshotBuilder.photosData(for: names)
+        guard !photos.isEmpty else { return nil }
+        return EncodedPhotoBundle(bundle: WatchPhotoBundle.encode(photos), count: photos.count)
     }
 
     /// 手表说缓存缺图（重装/LRU 清掉了）：作废指纹并立即重发。
@@ -433,8 +460,9 @@ enum WatchSnapshotBuilder {
     /// 把一批照片按名字裁成手表尺寸。
     /// 400px 长边 + JPEG 0.7 ≈ 20–30KB/张：手表最大屏（Ultra 2，410×502pt）显示一张卡够清晰，
     /// 20 张打包不到 600KB。再大是白给——手表看不出差别，传输却成倍变慢。
-    @MainActor
-    static func photosData(for names: [String]) -> [(name: String, data: Data)] {
+    /// nonisolated：整段只用 Sendable 的 MediaStore + nonisolated 的解码工具，
+    /// 可以（也应该）在非主执行器上跑。
+    nonisolated static func photosData(for names: [String]) -> [(name: String, data: Data)] {
         let store = MediaStore()
         var out: [(name: String, data: Data)] = []
         for name in names {

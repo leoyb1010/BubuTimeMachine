@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import OSLog
 import UIKit
 
 // MARK: - 同步引擎
@@ -12,6 +13,8 @@ final class SyncEngine {
     enum ConnectionState: Sendable {
         case offline, connecting, online
     }
+
+    nonisolated static let log = Logger(subsystem: "com.bubu.timemachine", category: "Sync")
 
     private(set) var connectionState: ConnectionState = .offline
     private(set) var lastSyncedAt: Date?
@@ -163,13 +166,17 @@ final class SyncEngine {
         }
     }
 
-    /// 手动触发一次同步（设置页/下拉刷新可调）。
+    /// 手动触发一次同步（设置页/下拉刷新/首页「重试」可调）。
+    /// 人主动点了就把退避清零：他很可能刚把 WiFi 连上或刚把家里的服务器插好电，
+    /// 这时候还按 8 分钟的退避节奏等下去是说不过去的。
     func syncNow() {
         guard config.isConfigured else {
             connectionState = .offline
             refreshPendingCount()
             return
         }
+        consecutiveFailures = 0
+        if pollTimer != nil { schedulePollTimer(after: Self.basePollInterval) }
         scheduleSync()
     }
 
@@ -227,14 +234,41 @@ final class SyncEngine {
 
     // MARK: - 连接
 
+    // MARK: 轮询与退避
+
+    private static let basePollInterval = SyncBackoff.baseInterval
+    private static let maxPollInterval = SyncBackoff.maxInterval
+    /// 连续失败次数，驱动指数退避。任一轮成功即清零。
+    private var consecutiveFailures = 0
+
+    private var currentPollInterval: TimeInterval { SyncBackoff.interval(failures: consecutiveFailures) }
+
     private func startPolling() {
-        guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        schedulePollTimer(after: Self.basePollInterval)
+    }
+
+    /// 重排轮询定时器。退避档位变化时调用；间隔没变就不重排，避免每轮都推迟下一次触发。
+    private func schedulePollTimer(after interval: TimeInterval) {
+        if let timer = pollTimer, abs(timer.timeInterval - interval) < 0.5 { return }
+        pollTimer?.invalidate()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.config.isConfigured else { return }
                 self.scheduleSync()
             }
         }
+    }
+
+    /// 一轮结束后按结果调整退避：成功清零回 30 秒，失败逐级拉长。
+    private func updateBackoff(succeeded: Bool) {
+        if succeeded {
+            guard consecutiveFailures != 0 else { return }
+            consecutiveFailures = 0
+        } else {
+            consecutiveFailures = min(consecutiveFailures + 1, 8)
+        }
+        guard pollTimer != nil else { return }
+        schedulePollTimer(after: currentPollInterval)
     }
 
     private func scheduleSync() {
@@ -268,6 +302,7 @@ final class SyncEngine {
             currentUploadProgress = nil
             recordFailure(APIError.network("连不上家里的服务器"), item: "连接")
             refreshPendingCount()
+            updateBackoff(succeeded: false)
             finalizeRun()
             return
         }
@@ -279,11 +314,13 @@ final class SyncEngine {
             currentUploadProgress = nil
             recordFailure(error, item: "账号")
             refreshPendingCount()
+            updateBackoff(succeeded: false)
             finalizeRun()
             return
         }
         guard !Task.isCancelled else { finalizeRun(); return }
         connectionState = .online
+        updateBackoff(succeeded: true)   // 连上了就回到 30 秒节奏
 
         await pushLocal()
         guard !Task.isCancelled else { finalizeRun(); return }
@@ -323,11 +360,9 @@ final class SyncEngine {
         // 先消费删除队列：删除意图优先于数据推送，避免「先推后删」竞态
         await processPendingDeletions(context)
         // 取所有未同步（local/failed）的 Entry
-        let descriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate {
-                $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
-            })
-        guard let locals = try? context.fetch(descriptor) else { return }
+        let locals = pendingBatch(context, Entry.self, predicate: #Predicate {
+            $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
+        })
         refreshPendingCount()
 
         for entry in locals {
@@ -373,9 +408,26 @@ final class SyncEngine {
         saveAndRefresh(context)
     }
 
-    private func saveAndRefresh(_ context: ModelContext) {
-        try? context.save()
-        refreshPendingCount()
+    /// 上次真正重算待办计数的时刻。
+    private var lastPendingCountAt = Date.distantPast
+    /// 计数重算的最小间隔。`saveAndRefresh` 在推送循环里每条都会调一次，
+    /// 而一次重算是 14 条 SQL COUNT——500 条待推就是 7000 次 COUNT 全在主线程。
+    /// 计数只是给进度条看的，节流到 0.4 秒完全够用。
+    private static let pendingCountMinInterval: TimeInterval = 0.4
+
+    private func saveAndRefresh(_ context: ModelContext, forceCount: Bool = false) {
+        // save 失败不能再静默吞掉：它意味着这一轮的改动根本没落盘，
+        // 而 UI 上仍显示「已同步」。记进 lastFailureReason，首页同步条会直接说出来。
+        do {
+            try context.save()
+        } catch {
+            recordFailure(error, item: "本地保存")
+            Self.log.error("同步保存失败：\(error.localizedDescription, privacy: .public)")
+        }
+        if forceCount || Date.now.timeIntervalSince(lastPendingCountAt) >= Self.pendingCountMinInterval {
+            lastPendingCountAt = .now
+            refreshPendingCount()
+        }
     }
 
     private func refreshWidgetSnapshot(_ context: ModelContext) {
@@ -419,6 +471,7 @@ final class SyncEngine {
     }
 
     private func beginSyncRun() {
+        lastPendingCountAt = .now
         refreshPendingCount()
         totalPendingAtStart = pendingCount
         processedThisRun = 0
@@ -535,12 +588,33 @@ final class SyncEngine {
             count(context, #Predicate<PendingDeletion> { _ in true })
     }
 
+    /// 一轮同步最多处理多少条待推。首次全家上云 / SSD 批量导入之后，
+    /// 待推可能是几千条；一次性全部取回内存并逐条推，会把这一轮拖到几分钟且全程占着主线程。
+    /// 分批处理：本轮推完这批就收工，剩下的下一轮继续（轮询与回前台都会触发），
+    /// 进度条读的是 fetchCount 的真实总数，用户看到的仍是「还剩 N 项」。
+    static let pushBatchCap = 200
+
+    /// 取一批「待推」对象（local / failed / uploading），按 fetchLimit 截断。
+    private func pendingBatch<T: PersistentModel>(_ context: ModelContext,
+                                                  _ type: T.Type = T.self,
+                                                  predicate: Predicate<T>) -> [T] {
+        var descriptor = FetchDescriptor<T>(predicate: predicate)
+        descriptor.fetchLimit = Self.pushBatchCap
+        do {
+            return try context.fetch(descriptor)
+        } catch {
+            recordFailure(error, item: "读取待同步内容")
+            Self.log.error("读取待同步内容失败：\(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
+
     private func count<T: PersistentModel>(_ context: ModelContext, _ predicate: Predicate<T>) -> Int {
         (try? context.fetchCount(FetchDescriptor<T>(predicate: predicate))) ?? 0
     }
 
     private func pushLocalJSONObjects(_ context: ModelContext) async {
-        let localMilestones = (try? context.fetch(FetchDescriptor<Milestone>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localMilestones = pendingBatch(context, Milestone.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         // 预设占位符不上云：批量标记为已同步，循环外统一保存一次，避免 N 次 save + widget 刷新。
         let placeholders = localMilestones.filter { Self.isLocalPresetPlaceholder($0) }
         if !placeholders.isEmpty {
@@ -555,7 +629,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let localFirstTimes = (try? context.fetch(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localFirstTimes = pendingBatch(context, FirstTime.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for item in localFirstTimes {
             guard !Task.isCancelled else { return }
             beginItem("同步第一次")
@@ -564,7 +638,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let localMembers = (try? context.fetch(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localMembers = pendingBatch(context, FamilyMember.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for item in localMembers {
             guard !Task.isCancelled else { return }
             beginItem("同步家庭成员")
@@ -573,7 +647,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let localProfiles = (try? context.fetch(FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localProfiles = pendingBatch(context, ChildProfile.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for item in localProfiles {
             guard !Task.isCancelled else { return }
             beginItem("同步布布档案")
@@ -600,7 +674,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let localHealth = (try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localHealth = pendingBatch(context, HealthRecord.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for item in localHealth {
             guard !Task.isCancelled else { return }
             beginItem("同步健康记录")
@@ -625,7 +699,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let localVaccines = (try? context.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localVaccines = pendingBatch(context, VaccineRecord.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for item in localVaccines {
             guard !Task.isCancelled else { return }
             beginItem("同步疫苗记录")
@@ -670,7 +744,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let localGrowth = (try? context.fetch(FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let localGrowth = pendingBatch(context, GrowthMeasurement.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for item in localGrowth {
             guard !Task.isCancelled else { return }
             beginItem("同步成长测量")
@@ -707,7 +781,7 @@ final class SyncEngine {
     }
 
     private func pushLocalFileObjects(_ context: ModelContext) async {
-        let comments = (try? context.fetch(FetchDescriptor<Comment>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let comments = pendingBatch(context, Comment.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for comment in comments {
             guard !Task.isCancelled else { return }
             beginItem("同步家人补充")
@@ -731,7 +805,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let notes = pendingBatch(context, VoiceNote.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for note in notes {
             guard !Task.isCancelled else { return }
             beginItem("同步记录语音")
@@ -755,7 +829,7 @@ final class SyncEngine {
             finishItem()
             saveAndRefresh(context)
         }
-        let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" }))) ?? []
+        let memos = pendingBatch(context, VoiceMemo.self, predicate: #Predicate { $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading" })
         for memo in memos {
             guard !Task.isCancelled else { return }
             beginItem("同步成长之声")
@@ -782,11 +856,9 @@ final class SyncEngine {
     }
 
     private func pushUnsyncedMedia(_ context: ModelContext) async {
-        let descriptor = FetchDescriptor<Media>(
-            predicate: #Predicate {
-                $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
-            })
-        let mediaItems = (try? context.fetch(descriptor)) ?? []
+        let mediaItems = pendingBatch(context, Media.self, predicate: #Predicate {
+            $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
+        })
         for media in mediaItems {
             guard !Task.isCancelled else { return }
             beginItem(media.type == .video ? "同步视频" : "同步媒体")
@@ -848,11 +920,9 @@ final class SyncEngine {
     }
 
     private func pushTimeCapsules(_ context: ModelContext) async {
-        let descriptor = FetchDescriptor<TimeCapsule>(
-            predicate: #Predicate {
-                $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
-            })
-        let capsules = (try? context.fetch(descriptor)) ?? []
+        let capsules = pendingBatch(context, TimeCapsule.self, predicate: #Predicate {
+            $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
+        })
         for capsule in capsules {
             guard !Task.isCancelled else { return }
             beginItem("同步时间胶囊")

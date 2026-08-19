@@ -1449,13 +1449,34 @@ private struct SaveHealthStrip: View {
                 Text(soft)
                     .font(BubuTheme.Font.scaled(11, weight: .regular, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
-            } else if let failure = env.syncEngine.lastFailureReason,
-                      env.syncEngine.pendingCount > 0 {
-                Text(failure)
-                    .font(BubuTheme.Font.scaled(11, weight: .regular, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.danger)
+            } else if let failure = env.syncEngine.lastFailureReason {
+                // 原来这条只在「还有待同步项」时显示。可是最常见的失败恰恰是
+                // 「连不上服务器」——此时没有待推项，家长只看到一句「离线」，
+                // 完全不知道是家里断电了、还是自己没连 WiFi。原因一律浮出来。
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(BubuTheme.Font.scaled(10, weight: .bold))
+                        .foregroundStyle(BubuTheme.Color.danger)
+                        .padding(.top, 1)
+                    Text(failure)
+                        .font(BubuTheme.Font.scaled(11, weight: .regular, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Button {
+                        BubuHaptics.tapLight()
+                        env.syncEngine.syncNow()
+                    } label: {
+                        Text("重试")
+                            .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
+                            .foregroundStyle(theme.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("立刻重试同步")
+                }
             }
         }
+        .animation(BubuMotion.gentle, value: env.syncEngine.lastFailureReason)
         .padding(12)
         .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme.primary)
