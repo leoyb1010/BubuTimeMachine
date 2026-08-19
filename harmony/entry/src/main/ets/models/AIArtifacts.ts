@@ -58,6 +58,39 @@ export interface WeeklyReport {
   sourceRefs: ArtifactSourceReference[];
 }
 
+export interface SoundRingClip {
+  sourceId: string;
+  photoSourceId: string;
+  ageYears: number;
+  kind: string;
+  title: string;
+  recordedAt: string;
+  transcript: string;
+  durationSeconds: number;
+  startSeconds: number;
+  endSeconds: number;
+}
+
+export interface SoundRing {
+  id: string;
+  artifactKey: string;
+  status: string;
+  title: string;
+  summary: string;
+  generatedAt: string;
+  modelVersion: string;
+  originalDurationSeconds: number;
+  renderedDurationSeconds: number;
+  attempts: number;
+  error: string;
+  narrator: string;
+  voiceCloning: boolean;
+  hasAudio: boolean;
+  clips: SoundRingClip[];
+  sourceRefs: ArtifactSourceReference[];
+  contentHash: string;
+}
+
 export function decodeQAAnswer(value: Record<string, Object>): QAAnswer {
   return {
     answer: stringValue(value, 'answer'),
@@ -111,6 +144,48 @@ export function decodeWeeklyReport(value: Record<string, Object>): WeeklyReport 
   };
 }
 
+export function decodeSoundRing(value: Record<string, Object>): SoundRing {
+  return {
+    id: stringValue(value, 'id'),
+    artifactKey: stringValue(value, 'artifact_key'),
+    status: stringValue(value, 'status'),
+    title: stringValue(value, 'title'),
+    summary: stringValue(value, 'summary'),
+    generatedAt: stringValue(value, 'generated_at'),
+    modelVersion: stringValue(value, 'model_version'),
+    originalDurationSeconds: numberValue(value, 'original_duration_seconds'),
+    renderedDurationSeconds: numberValue(value, 'rendered_duration_seconds'),
+    attempts: numberValue(value, 'attempts'),
+    error: stringValue(value, 'error'),
+    narrator: stringValue(value, 'narrator'),
+    voiceCloning: booleanValue(value, 'voice_cloning'),
+    hasAudio: booleanValue(value, 'has_audio'),
+    clips: objectArray(value['clips']).map((clip: Record<string, Object>): SoundRingClip => ({
+      sourceId: stringValue(clip, 'source_id'),
+      photoSourceId: stringValue(clip, 'photo_source_id'),
+      ageYears: numberValue(clip, 'age_years'),
+      kind: stringValue(clip, 'kind'),
+      title: stringValue(clip, 'title'),
+      recordedAt: stringValue(clip, 'recorded_at'),
+      transcript: stringValue(clip, 'transcript'),
+      durationSeconds: numberValue(clip, 'duration_seconds'),
+      startSeconds: numberValue(clip, 'start_seconds'),
+      endSeconds: numberValue(clip, 'end_seconds')
+    })),
+    sourceRefs: objectArray(value['source_refs']).map((source: Record<string, Object>): ArtifactSourceReference => ({
+      sourceId: stringValue(source, 'source_id'),
+      collection: stringValue(source, 'collection'),
+      recordId: stringValue(source, 'record_id'),
+      localId: stringValue(source, 'local_id'),
+      happenedAt: stringValue(source, 'happened_at'),
+      title: stringValue(source, 'title'),
+      excerpt: stringValue(source, 'excerpt'),
+      kind: stringValue(source, 'kind')
+    })),
+    contentHash: stringValue(value, 'content_hash')
+  };
+}
+
 function stringValue(value: Record<string, Object>, key: string): string {
   const raw = value[key];
   return typeof raw === 'string' ? raw : '';
@@ -119,6 +194,10 @@ function stringValue(value: Record<string, Object>, key: string): string {
 function numberValue(value: Record<string, Object>, key: string): number {
   const raw = value[key];
   return typeof raw === 'number' ? raw : 0;
+}
+
+function booleanValue(value: Record<string, Object>, key: string): boolean {
+  return value[key] === true;
 }
 
 function stringArray(value: Object | undefined): string[] {

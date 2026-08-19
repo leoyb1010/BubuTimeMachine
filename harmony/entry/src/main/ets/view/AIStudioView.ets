@@ -9,6 +9,7 @@ import { BubuStoryView } from './BubuStoryView';
 import { CapsuleView } from './CapsuleView';
 import { BubuQAView } from './BubuQAView';
 import { WeeklyReportView } from './WeeklyReportView';
+import { SoundRingView } from './SoundRingView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 
 // MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
@@ -30,7 +31,8 @@ const CAPABILITY_TILES: CapabilityTile[] = [
   { iconName: BubuIconName.home, title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' },
   { iconName: BubuIconName.sparkles, title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' },
   { iconName: BubuIconName.textBubble, title: '问问布布', subtitle: '有出处的家庭问答', tint: BubuColor.lav, route: 'qa' },
-  { iconName: BubuIconName.calendar, title: '布布周报', subtitle: '把一周轻轻收好', tint: BubuColor.peach, route: 'weekly' }
+  { iconName: BubuIconName.calendar, title: '布布周报', subtitle: '把一周轻轻收好', tint: BubuColor.peach, route: 'weekly' },
+  { iconName: BubuIconName.waveform, title: '声音年轮', subtitle: '听得见时间长大', tint: BubuColor.sky, route: 'soundRing' }
 ];
 
 @Component
@@ -76,6 +78,8 @@ export struct AIStudioView {
       BubuQAView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
     } else if (this.route === 'weekly') {
       WeeklyReportView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
+    } else if (this.route === 'soundRing') {
+      SoundRingView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
     } else if (this.route === 'story') {
       // 成长绘本（对照 iOS BubuStoryView 翻页绘本）
       Column() {
@@ -272,6 +276,7 @@ export struct AIStudioView {
 	        this.capabilityTile(CAPABILITY_TILES[3])
 	        this.capabilityTile(CAPABILITY_TILES[4])
 	        this.capabilityTile(CAPABILITY_TILES[5])
+	        this.capabilityTile(CAPABILITY_TILES[6])
 	      }
 	      .width('100%')
 	    } else {
@@ -287,6 +292,10 @@ export struct AIStudioView {
 	        Row({ space: 10 }) {
 	          this.capabilityTile(CAPABILITY_TILES[4])
 	          this.capabilityTile(CAPABILITY_TILES[5])
+	        }.width('100%')
+	        Row({ space: 10 }) {
+	          this.capabilityTile(CAPABILITY_TILES[6])
+	          Blank().layoutWeight(1)
 	        }.width('100%')
 	      }
 	      .width('100%')

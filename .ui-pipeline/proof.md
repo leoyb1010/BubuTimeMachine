@@ -3,7 +3,7 @@
 ## Verification scope
 
 - Release level: Level 3（跨端家庭数据产品）
-- Routes / screens: 已新增同步中心、照片收件箱、问问布布、布布周报，并把时光轴接入语义搜图；其余页面按 `harmony/PARITY_MATRIX.md` 逐项推进
+- Routes / screens: 已新增同步中心、照片收件箱、问问布布、布布周报、声音年轮，并把时光轴接入语义搜图；其余页面按 `harmony/PARITY_MATRIX.md` 逐项推进
 - Viewports / devices: 当前仅完成静态与编译基线；真机矩阵待接入
 - Browsers / simulators: 当前 `hdc list targets -v` 为 `[Empty]`
 

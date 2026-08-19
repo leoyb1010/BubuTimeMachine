@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   decodeQAAnswer,
+  decodeSoundRing,
   decodeSemanticSearch,
   decodeWeeklyReport
 } from '../entry/src/main/ets/models/AIArtifacts.ts';
@@ -10,6 +11,20 @@ test('AI 问答只保留服务端真实引用 id', () => {
   assert.deepEqual(decodeQAAnswer({ answer: '会走路了', used_ids: ['entry-1', 7] }), {
     answer: '会走路了', usedIds: ['entry-1']
   });
+});
+
+test('声音年轮保留原声清单与是否有成片', () => {
+  const ring = decodeSoundRing({
+    id: 'ring', artifact_key: 'sound:ring', status: 'ready', title: '声音年轮', summary: '3岁',
+    generated_at: '2026-08-19', model_version: 'v1', original_duration_seconds: 180,
+    rendered_duration_seconds: 175, attempts: 1, error: '', narrator: 'neutral',
+    voice_cloning: false, has_audio: true, content_hash: 'hash',
+    clips: [{ source_id: 'voice-1', photo_source_id: 'photo-1', age_years: 3, kind: 'childVoice', title: '叫妈妈', recorded_at: '2026-08-01', transcript: '妈妈', duration_seconds: 5, start_seconds: 0, end_seconds: 5 }],
+    source_refs: []
+  });
+  assert.equal(ring.hasAudio, true);
+  assert.equal(ring.clips[0].sourceId, 'voice-1');
+  assert.equal(ring.voiceCloning, false);
 });
 
 test('语义搜索解码保留本地 Entry 追溯关系', () => {

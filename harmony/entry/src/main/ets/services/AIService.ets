@@ -11,11 +11,14 @@ import {
   QAAnswer,
   QAContextRecord,
   SemanticSearchResponse,
+  SoundRing,
   WeeklyReport,
   decodeQAAnswer,
   decodeSemanticSearch,
+  decodeSoundRing,
   decodeWeeklyReport
 } from '../models/AIArtifacts';
+import { MediaStore } from './MediaStore';
 
 // MARK: - AI 服务（对照 iOS Services/AI/AIService.swift + BubuAIService.swift）
 // 隐私至上：AI 能力全部自托管 FastAPI（背后接 DeepSeek），UI 永不依赖具体后端。
@@ -249,6 +252,57 @@ export class AIService {
 
   async archiveWeeklyReport(id: string): Promise<WeeklyReport> {
     return decodeWeeklyReport(await this.post('weekly-report/archive', { 'artifact_id': id }));
+  }
+
+  async latestSoundRing(): Promise<SoundRing | undefined> {
+    const raw = await this.getJSON('sound-ring/latest', true);
+    return raw === undefined ? undefined : decodeSoundRing(raw as Record<string, Object>);
+  }
+
+  async soundRingHistory(): Promise<SoundRing[]> {
+    const raw = await this.getJSON('sound-ring/history');
+    if (!Array.isArray(raw)) return [];
+    return (raw as Object[]).map((item: Object): SoundRing => decodeSoundRing(item as Record<string, Object>));
+  }
+
+  async createSoundRingDraft(): Promise<SoundRing> {
+    return decodeSoundRing(await this.post('sound-ring/draft', {}));
+  }
+
+  async removeSoundRingClip(id: string, sourceId: string): Promise<SoundRing> {
+    return decodeSoundRing(await this.post('sound-ring/remove', { 'artifact_id': id, 'source_id': sourceId }));
+  }
+
+  async renderSoundRing(id: string): Promise<SoundRing> {
+    return decodeSoundRing(await this.post('sound-ring/render', { 'artifact_id': id }));
+  }
+
+  async soundRingStatus(id: string): Promise<SoundRing> {
+    const raw = await this.getJSON(`sound-ring/status/${encodeURIComponent(id)}`);
+    return decodeSoundRing(raw as Record<string, Object>);
+  }
+
+  async archiveSoundRing(id: string): Promise<SoundRing> {
+    return decodeSoundRing(await this.post('sound-ring/archive', { 'artifact_id': id }));
+  }
+
+  async downloadSoundRing(id: string): Promise<string> {
+    const req = http.createHttp();
+    try {
+      const resp = await req.request(`${this.baseURL}/sound-ring/file/${encodeURIComponent(id)}`, {
+        method: http.RequestMethod.GET,
+        header: this.authHeader(),
+        expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        connectTimeout: 30000,
+        readTimeout: 300000
+      });
+      if (resp.responseCode < 200 || resp.responseCode >= 300) throw new Error(`HTTP ${resp.responseCode}`);
+      const fileName = MediaStore.shared.saveBlob(resp.result as ArrayBuffer, 'm4a');
+      if (!fileName) throw new Error('声音年轮下载后无法保存');
+      return MediaStore.shared.fullPath(fileName);
+    } finally {
+      req.destroy();
+    }
   }
 
   // MARK: - 自然语言解析
