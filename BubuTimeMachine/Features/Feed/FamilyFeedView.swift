@@ -90,6 +90,8 @@ struct FamilyFeedView: View {
                 filters
                 ForEach(filteredRows) { row in
                     eventRow(row)
+                        // 切筛选时行是整批换的；没有过渡就像页面闪了一下。
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
                 if filteredRows.isEmpty { emptyState }
             }
@@ -100,6 +102,8 @@ struct FamilyFeedView: View {
         .navigationTitle("家庭动态")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Entry.self) { EntryDetailView(entry: $0) }
+        .animation(BubuMotion.gentle, value: selectedKind)
+        .animation(BubuMotion.gentle, value: rows.count)
         .onChange(of: fingerprint, initial: true) { _, _ in rebuildRows() }
     }
 
@@ -130,7 +134,10 @@ struct FamilyFeedView: View {
     }
 
     private func filterChip(_ text: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            BubuHaptics.tapLight()   // 筛选切换是纯视觉变化，没有触觉时手上完全没有回音
+            action()
+        } label: {
             Text(text)
                 .font(BubuTheme.Font.caption.weight(.semibold))
                 .foregroundStyle(selected ? .white : theme)

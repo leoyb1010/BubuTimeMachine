@@ -49,6 +49,8 @@ struct AlbumHomeView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("布布的相册")
         .navigationBarTitleDisplayMode(.inline)
+        // 相册整理完/新增照片后分组会重排；不带动画时整页内容会「跳」一下。
+        .animation(BubuMotion.gentle, value: totalCount)
         .onChange(of: fingerprint, initial: true) { _, _ in
             rebuildAlbums()
         }

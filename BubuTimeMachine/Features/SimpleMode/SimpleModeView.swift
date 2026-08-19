@@ -41,21 +41,35 @@ struct SimpleModeView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
-            VStack(spacing: 22) {
-                header
-                Spacer(minLength: 4)
-                bigButton(title: "拍一张", subtitle: "给\(childName)拍照片", icon: "camera.fill",
-                          tint: BubuTheme.Color.primary) { openCamera() }
-                bigButton(title: "说一段", subtitle: "说句话给\(childName)", icon: "mic.fill",
-                          tint: BubuTheme.Color.info) { showVoice = true }
-                bigButton(title: "看\(childName)", subtitle: "翻翻最近的照片", icon: "photo.stack.fill",
-                          tint: BubuTheme.Color.success) { showTimeline = true }
-                Spacer(minLength: 4)
-                exitButton
+            // 必须是可滚动容器：字号开到无障碍最大档时，三个大按钮 + 头部的理想高度
+            // 会超过一屏。原来是定高 VStack，超出部分不是滚动而是被压扁 —— 按钮里的字
+            // 直接溢出到按钮外面，整页糊成一片（真机 accessibility5 实测）。
+            GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 22) {
+                    header
+                    // 三个大按钮改用设计系统里的共享组件（原来是本页私有方法，与主设计系统双轨）。
+                    BubuBigActionButton(title: "拍一张", subtitle: "给\(childName)拍照片",
+                                        systemImage: "camera.fill",
+                                        tint: BubuTheme.Color.primary) { openCamera() }
+                    BubuBigActionButton(title: "说一段", subtitle: "说句话给\(childName)",
+                                        systemImage: "mic.fill",
+                                        tint: BubuTheme.Color.info) { showVoice = true }
+                    BubuBigActionButton(title: "看\(childName)", subtitle: "翻翻最近的照片",
+                                        systemImage: "photo.stack.fill",
+                                        tint: BubuTheme.Color.success) { showTimeline = true }
+                    exitButton
+                        .padding(.top, 6)
+                }
+                .bubuContentColumn(620)   // 长辈模式宽屏收口：按钮按比例放大而不是被拉长
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
+                // 常规字号下内容不满一屏，用 minHeight 把整组按钮垂直居中，观感与原来一致；
+                // 内容一旦超过一屏，minHeight 自动失效，ScrollView 接管。
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .center)
             }
-            .bubuContentColumn(620)   // 长辈模式宽屏收口：按钮按比例放大而不是被拉长
-        .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+            .scrollBounceBehavior(.basedOnSize)
+            }
 
             if let confirmation { confirmationOverlay(confirmation) }
             if saving { savingOverlay }
@@ -146,41 +160,6 @@ struct SimpleModeView: View {
             ThumbnailProvider.downsample(url: store.mediaURL(for: name), maxPixel: 200)
         }.value
         childAvatar = image
-    }
-
-    // MARK: 大按钮
-    private func bigButton(title: String, subtitle: String, icon: String,
-                           tint: Color, action: @escaping () -> Void) -> some View {
-        Button {
-            BubuHaptics.tapLight()
-            action()
-        } label: {
-            HStack(spacing: 18) {
-                Image(systemName: icon)
-                    .font(BubuTheme.Font.scaled(42, weight: .black, design: .default))
-                    .foregroundStyle(.white)
-                    .frame(width: 74, height: 74)
-                    .background(.white.opacity(0.22), in: Circle())
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(BubuTheme.Font.scaled(32, weight: .black))
-                        .foregroundStyle(.white)
-                    Text(subtitle)
-                        .font(BubuTheme.Font.scaled(17, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 22)
-            .frame(maxWidth: .infinity, minHeight: BubuAdaptive.value(sizeClass, compact: 118, regular: 156))
-            .background(
-                LinearGradient(colors: [tint, tint.opacity(0.82)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
-            )
-            .shadow(color: tint.opacity(0.3), radius: 12, y: 6)
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: 退出到完整版（把手机还给爸爸妈妈）

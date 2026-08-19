@@ -683,6 +683,9 @@ struct CaptureHomeView: View {
             RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
                 .stroke(.white.opacity(0.52), lineWidth: 1)
         }
+        // 四个碎片（日历图标/日期/天气图标/心情）逐个念出来毫无意义，合成一句。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("今天 \(todayText)，\(weatherMoodText)")
     }
 
     private var greetingText: String {
@@ -801,6 +804,7 @@ struct CaptureHomeView: View {
         }
     }
 
+    /// 首屏三个主动作的小方块。图标 + 标题 + 副标三段分别朗读会很啰嗦，合成一句。
     private func quickDockButton(icon: String, title: String, subtitle: String, tint: Color) -> some View {
         VStack(spacing: 3) {
             Image(systemName: icon)
@@ -816,12 +820,14 @@ struct CaptureHomeView: View {
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .lineLimit(1)
         }
-        .frame(width: 66, height: 64)
+        .frame(minWidth: 66, minHeight: 64)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                 .stroke(.white.opacity(0.54), lineWidth: 1)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title)，\(subtitle)")
     }
 
     /// 首页统计指纹：条数 + 媒体总数 + 当天（跨天重算「那年今日/今日一问」）。

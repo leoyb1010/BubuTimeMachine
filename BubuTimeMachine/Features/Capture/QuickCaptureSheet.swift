@@ -402,6 +402,7 @@ struct QuickCaptureSheet: View {
                                 .padding(5)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("移除这张素材")
                     }
                 }
             }
@@ -477,6 +478,7 @@ struct QuickCaptureSheet: View {
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("删除这段语音")
             }
         } else {
             VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in

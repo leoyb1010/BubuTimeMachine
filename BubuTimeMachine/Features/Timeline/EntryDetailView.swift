@@ -196,6 +196,7 @@ struct EntryDetailView: View {
                                     .foregroundStyle(.white, BubuTheme.Color.danger)
                                     .padding(6)
                             }
+                            .accessibilityLabel("移除这张素材")
                         }
                     }
                 }
@@ -375,6 +376,7 @@ struct EntryDetailView: View {
                                         .foregroundStyle(BubuTheme.Color.secondaryText)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("删除这段语音")
                             }
                         }
                     }

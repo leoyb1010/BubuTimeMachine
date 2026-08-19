@@ -536,11 +536,13 @@ private struct ServerMoviePlayer: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.9))
                     }
+                    .accessibilityLabel("关闭播放")
                     Spacer()
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up.circle.fill")
                             .font(BubuTheme.Font.scaled(30)).foregroundStyle(.white.opacity(0.9))
                     }
+                    .accessibilityLabel("分享这段影片")
                 }
                 .padding()
                 Spacer()

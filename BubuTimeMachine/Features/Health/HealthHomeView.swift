@@ -12,6 +12,9 @@ struct HealthHomeView: View {
     @State private var sleepStartedAt: Date? = SharedDefaults.sleepStartedAt
     @State private var editingRecord: HealthRecord?
     @State private var deletingRecord: HealthRecord?
+    /// 打卡/删除的轻提示。健康页原本是全 App 动效与触觉最薄的一域：
+    /// 加一条、删一条、开始哄睡都只是数字默默变一下，做完没有任何回音。
+    @State private var toast: BubuToastState?
 
     private var theme: Color { env.theme.theme.primary }
     private var todayRecords: [HealthRecord] { records.filter { Calendar.current.isDateInToday($0.recordedAt) } }
@@ -30,6 +33,10 @@ struct HealthHomeView: View {
             .padding()
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
+        .bubuToast($toast)
+        // 记录增删让列表带动画收放，而不是瞬间多一行/少一行。
+        .animation(BubuMotion.gentle, value: records.count)
+        .animation(BubuMotion.gentle, value: sleepStartedAt)
         // 手表可能已替这场哄睡收了尾：回到这页时重读共享状态，别让 @State 停在旧值。
         .onAppear { sleepStartedAt = SharedDefaults.sleepStartedAt }
         .navigationTitle("布布健康")
@@ -114,6 +121,7 @@ struct HealthHomeView: View {
         BubuActivityController.startSleepTimer(childName: env.config.childName, startedAt: now)
         pushSleepStateToWatch()
         BubuHaptics.success()
+        toast = BubuToastState(message: "开始哄睡，计时中", systemImage: "moon.zzz.fill")
     }
 
     /// 哄睡状态变了立刻推手表：不推的话手表快照里的 sleepingSince 还是旧的，
@@ -147,6 +155,8 @@ struct HealthHomeView: View {
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
         BubuHaptics.success()
+        toast = BubuToastState(message: "睡了 \(record.amountText ?? "一会儿")，已记下",
+                               systemImage: "checkmark.circle.fill")
     }
 
     private var header: some View {
@@ -321,6 +331,8 @@ struct HealthHomeView: View {
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
         deletingRecord = nil
+        BubuHaptics.warning()
+        toast = BubuToastState(message: "已删除这条记录", systemImage: "trash")
     }
 
     private func amountSummary(_ record: HealthRecord) -> String? {

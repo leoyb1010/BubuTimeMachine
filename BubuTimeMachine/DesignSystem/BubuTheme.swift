@@ -217,13 +217,19 @@ nonisolated enum BubuTheme {
 
         /// 固定字号的适老替代：按系统「文字大小」设置缩放（Dynamic Type），并钳在上限内。
         /// 老人把系统字体调大后，用它的文字会跟着变大——固定 .system(size:) 不会。
+        /// 姥姥模式这类「单列 + 大按钮 + 可自由长高」的版面，可以把上限再放开一档。
+        /// 只给明确抗放大的组件用，不改全局默认。
+        static let elderContentSizeCategory: UIContentSizeCategory = .accessibilityExtraExtraLarge
+
         static func scaled(_ size: CGFloat,
                            weight: SwiftUI.Font.Weight = .regular,
-                           design: SwiftUI.Font.Design = .rounded) -> SwiftUI.Font {
+                           design: SwiftUI.Font.Design = .rounded,
+                           cap: UIContentSizeCategory? = nil) -> SwiftUI.Font {
             // 把当前内容尺寸档位钳到上限（UIContentSizeCategory 定义了 > 比较），再交给
             // UIFontMetrics 按钳后档位缩放，保证 scaled() 的输出永远不超过上限、不爆版。
+            let limit = cap ?? maxContentSizeCategory
             let current = UITraitCollection.current.preferredContentSizeCategory
-            let capped = current > maxContentSizeCategory ? maxContentSizeCategory : current
+            let capped = current > limit ? limit : current
             let traits = UITraitCollection(preferredContentSizeCategory: capped)
             let scaledSize = UIFontMetrics(forTextStyle: .body)
                 .scaledValue(for: size, compatibleWith: traits)

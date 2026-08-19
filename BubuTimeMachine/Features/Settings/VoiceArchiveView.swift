@@ -51,6 +51,7 @@ struct VoiceArchiveView: View {
                         Label("家人对她说", systemImage: "heart.text.square")
                     }
                 } label: { Image(systemName: "mic.badge.plus") }
+                .accessibilityLabel("录一段声音")
             }
         }
         .sheet(isPresented: $showRecorder) {

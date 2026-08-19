@@ -317,6 +317,19 @@ struct TimelineView: View {
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
+        // 一张卡上有封面、日期、标题、正文、若干标签；逐个朗读要滑七八下才过一条记录。
+        // 合成一句「日期 · 标题 · 正文」，与视觉主次一致。
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(cardAccessibilityLabel(entry))
+    }
+
+    private func cardAccessibilityLabel(_ entry: Entry) -> String {
+        var parts = ["\(BubuDateFormat.monthDay(entry.happenedAt)) \(BubuDateFormat.shortTime(entry.happenedAt))"]
+        parts.append(cardHeadline(entry))
+        if let note = cardSubtitle(entry) { parts.append(note) }
+        if let mood = entry.mood { parts.append("心情\(mood.rawValue)") }
+        if let ft = entry.firstTime?.what, !ft.isEmpty { parts.append("第一次\(ft)") }
+        return parts.joined(separator: "，")
     }
 
     /// 卡片标题：有标题用标题，没标题就把正文顶上来，都没有才是「记录此刻」。

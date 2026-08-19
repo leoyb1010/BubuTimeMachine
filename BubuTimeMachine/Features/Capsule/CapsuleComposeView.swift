@@ -126,7 +126,9 @@ struct CapsuleComposeView: View {
                     Button { pendingVoice = nil } label: {
                         Image(systemName: "trash.circle.fill").font(BubuTheme.Font.scaled(26))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
-                    }.buttonStyle(.plain)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("删除这段语音")
                 }
             } else {
                 VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in

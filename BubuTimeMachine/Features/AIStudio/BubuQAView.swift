@@ -127,10 +127,11 @@ struct BubuQAView: View {
                 ask(input)
             } label: {
                 Image(systemName: "arrow.up.circle.fill").font(BubuTheme.Font.scaled(30))
-                    .foregroundStyle(canSend ? BubuTheme.Color.primary : .gray)
+                    .foregroundStyle(canSend ? BubuTheme.Color.primary : BubuTheme.Color.secondaryText.opacity(0.5))
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
+            .accessibilityLabel("发送问题")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.ultraThinMaterial)

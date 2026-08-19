@@ -424,7 +424,13 @@ struct RootView: View {
             // accessibility3，避免布局爆裂。这是较宽的上限，专给以大按钮/单列布局为主、
             // 抗放大能力强的 SimpleMode（老人模式）与引导页用；密集的 RootTabView 会在其内部
             // 再收紧到 accessibility1（见 RootTabView）。外松内紧：内层更严的夹取会生效。
-            .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+            // 姥姥模式（单列 + 大按钮 + 可自由长高）抗放大能力最强，放到 accessibility5；
+            // 其余情况保持 accessibility3 兜底，密集的 RootTabView 内部还会再收紧到 accessibility1。
+            // 注意必须在这一层分档：dynamicTypeSize 是逐层收紧的，
+            // 在内层再写一次更宽的范围不会把已经被外层夹小的值放回去。
+            .dynamicTypeSize(...(env.config.simpleModeEnabled
+                                 ? DynamicTypeSize.accessibility5
+                                 : DynamicTypeSize.accessibility3))
     }
 
     @MainActor
