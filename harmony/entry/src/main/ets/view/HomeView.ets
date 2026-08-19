@@ -37,8 +37,8 @@ export struct HomeView {
   @State profile: ChildProfile | null = null;
   @State entries: Entry[] = [];
   // 内部路由（对照 iOS NavigationStack / navigationDestination）。
-  @State route: HomeRoute = HomeRoute.home;
-  @State selectedEntry: Entry | null = null;
+  @State @Watch('syncNavigationDepth') route: HomeRoute = HomeRoute.home;
+  @State @Watch('syncNavigationDepth') selectedEntry: Entry | null = null;
   // entryId → 首张照片沙盒绝对路径（最近时光/那年今日卡片缩略图）。
   @State photoMap: Map<string, string> = new Map();
   // 统计
@@ -58,6 +58,7 @@ export struct HomeView {
   @State private viewportW: number = 0;
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
   @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
   @StorageLink('bubuHandledCaptureSignal') handledCaptureSignal: number = 0;
 
   private onCaptureSignal(): void {
@@ -68,7 +69,7 @@ export struct HomeView {
   }
 
   private onBackSignal(): void {
-    if (this.backSignal <= 0) return;
+    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
     if (this.selectedEntry !== null) {
       this.selectedEntry = null;
       this.tabBarVisible = true;
@@ -82,8 +83,13 @@ export struct HomeView {
     }
   }
 
+  private syncNavigationDepth(): void {
+    this.navigationDepth = this.selectedEntry !== null || this.route !== HomeRoute.home ? 1 : 0;
+  }
+
   aboutToAppear(): void {
     this.tabBarVisible = true;
+    this.syncNavigationDepth();
     this.reload();
     this.startHomeMotion();
     if (this.captureSignal > this.handledCaptureSignal) {

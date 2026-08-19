@@ -45,23 +45,29 @@ const SOUND_TILES: CapabilityTile[] = [
 @Component
 export struct AIStudioView {
   // 当前子页路由（空 = 魔法屋首页）。对照 iOS NavigationLink 的目的地。
-  @State private route: string = '';
+  @State @Watch('syncNavigationDepth') private route: string = '';
   @State private viewportW: number = 0;
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
   @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
   // 主题主色（对照 iOS env.theme.theme.primary）。
   private theme: string = BubuColor.primary;
 
   aboutToAppear(): void {
     this.tabBarVisible = true;
+    this.syncNavigationDepth();
   }
 
   private onBackSignal(): void {
-    if (this.backSignal <= 0) return;
+    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
     if (this.route.length > 0) {
       this.route = '';
       this.tabBarVisible = true;
     }
+  }
+
+  private syncNavigationDepth(): void {
+    this.navigationDepth = this.route.length > 0 ? 1 : 0;
   }
 
   private isCompact(): boolean {

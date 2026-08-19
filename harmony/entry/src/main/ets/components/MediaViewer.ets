@@ -23,6 +23,7 @@ export struct MediaGalleryViewer {
 
   @State private selectedIndex: number = 0;
   @State private remotePaths: Map<string, string> = new Map();
+  @State private zoomedMediaIds: Set<string> = new Set();
   @State private toastText: string = '';
   private swiperController: SwiperController = new SwiperController();
 
@@ -46,9 +47,9 @@ export struct MediaGalleryViewer {
             ForEach(this.mediaItems, (media: Media) => {
               MediaPageView({
                 media: media,
-                onSwipePage: (direction: number): void => { this.turnPage(direction); },
                 onRemoteReady: (id: string, path: string): void => { this.setRemotePath(id, path); },
-                onRemoteRemoved: (id: string): void => { this.removeRemotePath(id); }
+                onRemoteRemoved: (id: string): void => { this.removeRemotePath(id); },
+                onZoomChanged: (id: string, zoomed: boolean): void => { this.setZoomed(id, zoomed); }
               })
                 .width('100%')
                 .height('100%')
@@ -58,6 +59,7 @@ export struct MediaGalleryViewer {
           .loop(false)
           .indicator(false)
           .cachedCount(1)
+          .disableSwipe(true)
           .width('100%')
           .height('100%')
           .onChange((index: number) => { this.selectedIndex = index; })
@@ -67,6 +69,12 @@ export struct MediaGalleryViewer {
       .width('100%')
       .height('100%')
       .backgroundColor(Color.Black)
+      // 实机上图片的缩放/双击手势会抢走 Swiper 内建横滑。父级并行识别单指横拖，
+      // 原始比例时由这里可靠翻页；图片放大后父级退出，让子图片独占平移。
+      .parallelGesture(
+        PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 8 })
+          .onActionEnd((event: GestureEvent) => { this.handlePagerPan(event as PanGestureEvent); })
+      )
 
       // 关闭按钮 + 底部页码/提示
       Column() {
@@ -141,6 +149,13 @@ export struct MediaGalleryViewer {
     }
   }
 
+  private handlePagerPan(event: PanGestureEvent): void {
+    const current = this.currentMedia();
+    if (!current || this.zoomedMediaIds.has(current.id)) return;
+    if (event.offsetX <= -36) this.turnPage(1);
+    else if (event.offsetX >= 36) this.turnPage(-1);
+  }
+
   private currentMedia(): Media | undefined { return this.mediaItems[this.selectedIndex]; }
 
   private currentPath(): string {
@@ -161,6 +176,12 @@ export struct MediaGalleryViewer {
     const next = new Map(this.remotePaths);
     next.delete(id);
     this.remotePaths = next;
+  }
+
+  private setZoomed(id: string, zoomed: boolean): void {
+    const next = new Set(this.zoomedMediaIds);
+    if (zoomed) next.add(id); else next.delete(id);
+    this.zoomedMediaIds = next;
   }
 
   private async saveCurrent(): Promise<void> {
@@ -198,9 +219,9 @@ export struct MediaGalleryViewer {
 @Component
 struct MediaPageView {
   @Require @Prop media: Media;
-  onSwipePage: (direction: number) => void = () => {};
   onRemoteReady: (id: string, path: string) => void = () => {};
   onRemoteRemoved: (id: string) => void = () => {};
+  onZoomChanged: (id: string, zoomed: boolean) => void = () => {};
   @State private remoteFilePath: string = '';
   @State private remoteLoading: boolean = false;
   @State private remoteError: string = '';
@@ -247,7 +268,10 @@ struct MediaPageView {
   @Builder
   photoPage() {
     if (this.photoSrc().length > 0) {
-      ZoomableImage({ src: this.photoSrc(), onSwipePage: this.onSwipePage })
+      ZoomableImage({
+        src: this.photoSrc(),
+        onZoomChanged: (zoomed: boolean): void => { this.onZoomChanged(this.media.id, zoomed); }
+      })
     } else if ((this.media.remoteURL?.length ?? 0) > 0) {
       this.remotePlaceholder('照片')
     } else {
@@ -361,7 +385,7 @@ struct MediaPageView {
 @Component
 struct ZoomableImage {
   @Require @Prop src: string;
-  onSwipePage: (direction: number) => void = () => {};
+  onZoomChanged: (zoomed: boolean) => void = () => {};
 
   @State private scaleValue: number = 1;
   @State private offsetX: number = 0;
@@ -387,6 +411,7 @@ struct ZoomableImage {
           .onActionUpdate((event: GestureEvent) => {
             const next = this.baseScale * event.scale;
             this.scaleValue = Math.max(this.minScale, Math.min(this.maxScale, next));
+            this.onZoomChanged(this.scaleValue > 1.01);
           })
           .onActionEnd(() => {
             if (this.scaleValue <= 1.01) this.resetPosition();
@@ -401,12 +426,12 @@ struct ZoomableImage {
                 this.offsetX = 0;
                 this.offsetY = 0;
               }
+              this.onZoomChanged(this.scaleValue > 1.01);
             });
           })
       )
-      // 图片子组件会优先识别手势，原先 Pinch/Tap 抢走了 Swiper 的横滑。
-      // 这里明确处理单指横滑：1× 时翻页，放大后平移图片，不再让两个手势互相阻塞。
-      .priorityGesture(
+      // 放大后图片自己接管单指平移；原始比例的横拖由父级查看器翻页。
+      .parallelGesture(
         PanGesture({ fingers: 1, direction: PanDirection.All, distance: 8 })
           .onActionStart(() => {
             this.baseOffsetX = this.offsetX;
@@ -419,10 +444,7 @@ struct ZoomableImage {
             this.offsetY = this.baseOffsetY + pan.offsetY;
           })
           .onActionEnd((event: GestureEvent) => {
-            if (this.scaleValue > 1.01) return;
-            const pan = event as PanGestureEvent;
-            if (pan.offsetX <= -36) this.onSwipePage(1);
-            else if (pan.offsetX >= 36) this.onSwipePage(-1);
+            if (this.scaleValue <= 1.01) this.resetPosition();
           })
       )
   }
@@ -431,5 +453,6 @@ struct ZoomableImage {
     this.scaleValue = 1;
     this.offsetX = 0;
     this.offsetY = 0;
+    this.onZoomChanged(false);
   }
 }

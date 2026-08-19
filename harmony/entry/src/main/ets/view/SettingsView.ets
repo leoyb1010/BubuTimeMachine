@@ -36,20 +36,23 @@ export struct SettingsView {
   @State aiEnabled: boolean = true;
   @State childName: string = '布布';
   @State roleIndex: number = 1; // 默认妈妈
-  @State showMembers: boolean = false;
-  @State showAccount: boolean = false;
-  @State showWhatsNew: boolean = false;
-  @State showProfile: boolean = false;
-  @State showAdvanced: boolean = false;
-  @State showTheme: boolean = false;
-  @State showYearbook: boolean = false;
-  @State showExport: boolean = false;
-  @State showSyncCenter: boolean = false;
-  @State showPhotoInbox: boolean = false;
-  @State showPhotoFrame: boolean = false;
+  @State @Watch('syncNavigationDepth') showMembers: boolean = false;
+  @State @Watch('syncNavigationDepth') showAccount: boolean = false;
+  @State @Watch('syncNavigationDepth') showWhatsNew: boolean = false;
+  @State @Watch('syncNavigationDepth') showProfile: boolean = false;
+  @State @Watch('syncNavigationDepth') showAdvanced: boolean = false;
+  @State @Watch('syncNavigationDepth') showTheme: boolean = false;
+  @State @Watch('syncNavigationDepth') showYearbook: boolean = false;
+  @State @Watch('syncNavigationDepth') showExport: boolean = false;
+  @State @Watch('syncNavigationDepth') showSyncCenter: boolean = false;
+  @State @Watch('syncNavigationDepth') showPhotoInbox: boolean = false;
+  @State @Watch('syncNavigationDepth') showPhotoFrame: boolean = false;
   @State statusText: string = '';
+  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
 
   aboutToAppear(): void {
+    this.syncNavigationDepth();
     const c = ServerConfig.shared;
     this.baseURL = c.baseURLString;
     this.email = c.accountEmail;
@@ -59,6 +62,29 @@ export struct SettingsView {
     this.aiEnabled = c.aiEnabled;
     this.childName = c.childName;
     this.roleIndex = Math.max(0, ALL_FAMILY_ROLES.indexOf(c.currentRole));
+  }
+
+  private onBackSignal(): void {
+    if (this.backSignal <= 0 || this.navigationDepth !== 2) return;
+    if (this.showPhotoFrame) this.showPhotoFrame = false;
+    else if (this.showPhotoInbox) this.showPhotoInbox = false;
+    else if (this.showSyncCenter) this.showSyncCenter = false;
+    else if (this.showExport) this.showExport = false;
+    else if (this.showYearbook) this.showYearbook = false;
+    else if (this.showTheme) this.showTheme = false;
+    else if (this.showAdvanced) this.showAdvanced = false;
+    else if (this.showProfile) this.showProfile = false;
+    else if (this.showWhatsNew) this.showWhatsNew = false;
+    else if (this.showAccount) this.showAccount = false;
+    else if (this.showMembers) this.showMembers = false;
+  }
+
+  private syncNavigationDepth(): void {
+    const nested = this.showMembers || this.showAccount || this.showWhatsNew || this.showProfile
+      || this.showAdvanced || this.showTheme || this.showYearbook || this.showExport
+      || this.showSyncCenter || this.showPhotoInbox || this.showPhotoFrame;
+    if (nested) this.navigationDepth = 2;
+    else if (this.navigationDepth === 2) this.navigationDepth = 1;
   }
 
   build() {

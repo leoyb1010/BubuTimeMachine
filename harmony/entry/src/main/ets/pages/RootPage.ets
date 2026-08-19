@@ -31,6 +31,7 @@ struct RootPage {
   @StorageLink('themeTick') themeTick: number = 0;  // 主题切换驱动重绘
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
   @StorageLink('bubuBackSignal') backSignal: number = 0;
+  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
   @StorageLink('bubuSimpleMode') simpleMode: boolean = false;
   @StorageLink('bubuIntentDraft') @Watch('onIntentDraft') intentDraft: string = '';
 
@@ -92,9 +93,8 @@ struct RootPage {
       this.showWhatsNew = false;
       return true;
     }
-    this.backSignal = this.backSignal + 1;
-    if (!this.tabBarVisible) {
-      this.tabBarVisible = true;
+    if (this.navigationDepth > 0 || !this.tabBarVisible) {
+      this.backSignal = this.backSignal + 1;
       return true;
     }
     if (this.selection !== 0) {

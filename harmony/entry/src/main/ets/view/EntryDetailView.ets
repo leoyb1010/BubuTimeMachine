@@ -30,21 +30,40 @@ export struct EntryDetailView {
 
   @State private profile: ChildProfile | null = null;
   @State private media: Media[] = [];
+  @State private galleryMedia: Media[] = [];
   @State private comments: Comment[] = [];
   @State private voiceNotes: VoiceNote[] = [];
 
-  @State private editing: boolean = false;
+  @State @Watch('syncNavigationDepth') private editing: boolean = false;
   // 编辑态本地草稿（保存时落库）。
   @State private draftNote: string = '';
   @State private draftMood: Mood | undefined = undefined;
   @State private draftHappenedAt: number = 0;
 
-  @State private showCommentSheet: boolean = false;
-  @State private showReactionPicker: boolean = false;
-  @State private showShareCard: boolean = false;
-  @State private viewingMediaID: string | null = null;
+  @State @Watch('syncNavigationDepth') private showCommentSheet: boolean = false;
+  @State @Watch('syncNavigationDepth') private showReactionPicker: boolean = false;
+  @State @Watch('syncNavigationDepth') private showShareCard: boolean = false;
+  @State @Watch('syncNavigationDepth') private viewingMediaID: string | null = null;
+  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
 
-  aboutToAppear(): void { this.load(); }
+  aboutToAppear(): void { this.load(); this.syncNavigationDepth(); }
+
+  private onBackSignal(): void {
+    if (this.backSignal <= 0 || this.navigationDepth !== 2) return;
+    if (this.viewingMediaID !== null) this.viewingMediaID = null;
+    else if (this.showShareCard) this.showShareCard = false;
+    else if (this.showCommentSheet) this.showCommentSheet = false;
+    else if (this.showReactionPicker) this.showReactionPicker = false;
+    else if (this.editing) this.editing = false;
+  }
+
+  private syncNavigationDepth(): void {
+    const nested = this.editing || this.showCommentSheet || this.showReactionPicker
+      || this.showShareCard || this.viewingMediaID !== null;
+    if (nested) this.navigationDepth = 2;
+    else if (this.navigationDepth === 2) this.navigationDepth = 1;
+  }
 
   private theme(): string { return BubuColor.primary; }
   private myRole(): string { return ServerConfig.shared.currentRole; }
@@ -52,6 +71,17 @@ export struct EntryDetailView {
   private async load(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     this.media = await AppDatabase.shared.fetchMediaForEntry(this.entry.id);
+    const timelineEntries = await AppDatabase.shared.fetchEntries(false);
+    const entryTimes = new Map<string, number>();
+    for (const item of timelineEntries) entryTimes.set(item.id, item.happenedAt);
+    const allMedia = await AppDatabase.shared.fetchAllMedia();
+    this.galleryMedia = allMedia
+      .filter((item: Media): boolean => entryTimes.has(item.entryId)
+        && (item.typeRaw === MediaType.photo || item.typeRaw === MediaType.video))
+      .sort((a: Media, b: Media): number => {
+        const timeDiff = (entryTimes.get(b.entryId) ?? 0) - (entryTimes.get(a.entryId) ?? 0);
+        return timeDiff !== 0 ? timeDiff : a.createdAt - b.createdAt;
+      });
     this.comments = await AppDatabase.shared.fetchCommentsForEntry(this.entry.id);
     this.voiceNotes = await AppDatabase.shared.fetchVoiceForEntry(this.entry.id);
     if (!this.editing) {
@@ -64,6 +94,11 @@ export struct EntryDetailView {
   // 排序后的媒体（对照 iOS sortedMedia，按 createdAt 升序）。
   private sortedMedia(): Media[] {
     return this.media.slice().sort((a: Media, b: Media) => a.createdAt - b.createdAt);
+  }
+
+  // 从“时光”打开照片后可连续浏览前后记录，不受“一条记录通常只有一张图”限制。
+  private galleryItems(): Media[] {
+    return this.galleryMedia.length > 0 ? this.galleryMedia : this.sortedMedia();
   }
 
   // 「此时 / 那时」前缀（对照 iOS timePerspectivePrefix）。
@@ -135,7 +170,7 @@ export struct EntryDetailView {
       // 全屏媒体查看器（对照 iOS fullScreenCover MediaGalleryViewer）。
       if (this.viewingMediaID !== null) {
         MediaGalleryViewer({
-          mediaItems: this.sortedMedia(),
+          mediaItems: this.galleryItems(),
           initialMediaID: this.viewingMediaID!,
           onDismiss: () => { this.viewingMediaID = null; }
         })

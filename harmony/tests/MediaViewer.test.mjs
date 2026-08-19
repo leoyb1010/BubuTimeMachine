@@ -15,13 +15,17 @@ test('时光详情的多媒体查看器可用单指左右翻页，放大后改�
   assert.ok(viewer.includes('private swiperController: SwiperController = new SwiperController()'));
   assert.ok(viewer.includes('Swiper(this.swiperController)'));
   assert.ok(viewer.includes('.cachedCount(1)'));
-  assert.ok(viewer.includes('onSwipePage: (direction: number)'));
-  assert.ok(viewer.includes('priorityGesture('));
-  assert.ok(viewer.includes('PanGesture({ fingers: 1, direction: PanDirection.All'));
-  assert.ok(viewer.includes('if (this.scaleValue > 1.01) return'));
+  assert.ok(viewer.includes('.disableSwipe(true)'));
+  assert.ok(viewer.includes('parallelGesture('));
+  assert.ok(viewer.includes('PanGesture({ fingers: 1, direction: PanDirection.Horizontal'));
+  assert.ok(viewer.includes('this.zoomedMediaIds.has(current.id)'));
+  assert.ok(viewer.includes('onZoomChanged'));
   assert.ok(viewer.includes('this.swiperController.showNext()'));
   assert.ok(viewer.includes('this.swiperController.showPrevious()'));
-  assert.ok(detail.includes('mediaItems: this.sortedMedia()'), '详情页必须把该条时光的全部媒体传给分页查看器');
+  assert.ok(detail.includes('mediaItems: this.galleryItems()'), '详情页必须把整条时光轴的可视媒体传给分页查看器');
+  assert.ok(detail.includes('AppDatabase.shared.fetchAllMedia()'));
+  assert.ok(detail.includes('entryTimes.has(item.entryId)'));
+  assert.ok(detail.includes('MediaType.photo || item.typeRaw === MediaType.video'));
 });
 
 test('远端受保护照片和视频先带家庭登录态下载，失败可重试且退出后清理临时文件', () => {

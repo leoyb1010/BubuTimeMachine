@@ -45,15 +45,17 @@ export struct TimelineView {
   @State private loadingMore: boolean = false;
   @State private searchExpanded: boolean = false;
 
-	  @State showFamilyFeed: boolean = false;
-	  @State detailEntry: Entry | null = null;
-	  @State shareEntry: Entry | null = null;
+	  @State @Watch('syncNavigationDepth') showFamilyFeed: boolean = false;
+	  @State @Watch('syncNavigationDepth') detailEntry: Entry | null = null;
+	  @State @Watch('syncNavigationDepth') shareEntry: Entry | null = null;
 	  @State private pageIn: boolean = false;
 	  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
 	  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
+	  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
 	
 	  aboutToAppear(): void {
 	    this.tabBarVisible = true;
+	    this.syncNavigationDepth();
 	    this.sortModeRaw = ServerConfig.shared.timelineSortModeRaw === 'recorded' ? 'recorded' : 'capture';
 	    this.reload();
 	    this.pageIn = false;
@@ -61,7 +63,11 @@ export struct TimelineView {
 	  }
 
   private onBackSignal(): void {
-    if (this.backSignal <= 0) return;
+    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
+    if (this.shareEntry !== null) {
+      this.shareEntry = null;
+      return;
+    }
     if (this.detailEntry !== null) {
       this.detailEntry = null;
       this.tabBarVisible = true;
@@ -73,6 +79,10 @@ export struct TimelineView {
       this.tabBarVisible = true;
       this.reload();
     }
+  }
+
+  private syncNavigationDepth(): void {
+    this.navigationDepth = this.detailEntry !== null || this.showFamilyFeed || this.shareEntry !== null ? 1 : 0;
   }
 
   private theme(): string { return BubuColor.primary; }
