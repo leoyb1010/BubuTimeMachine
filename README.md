@@ -5,7 +5,7 @@
 
 原生 iOS（SwiftUI + SwiftData）与 HarmonyOS（ArkTS + ArkUI）双端工程，为家庭记录孩子成长、传承一生。离线优先、隐私至上、自托管。
 
-> HarmonyOS 正在以 iOS 2.11.0 为基准做全能力追平；真实进度和验收边界见
+> HarmonyOS 已完成 iOS 2.11.0 的代码能力追平，当前等待手机真机与平台权益验收；真实进度和边界见
 > [`harmony/PARITY_MATRIX.md`](harmony/PARITY_MATRIX.md)，不再以“页面存在”代替完成。
 
 ## 当前进度
@@ -36,7 +36,7 @@
 - ✅ 预设库（6 领域 24 项）一键添加 + 完全自定义
 - ✅ 已点亮（高亮）/ 待点亮（灰）网格 + 进度环 + 达成仪式动画
 
-**Wave E · AI 工坊（Mock 可玩，留真 LLM 接口）**
+**Wave E · AI 工坊（真实自托管 AI + 可验证降级）**
 - ✅ 第一人称日记（父母视角 → 布布口吻）
 - ✅ 年度成长电影：分阶段生成流程 + **真实可播放**的 Ken Burns 幻灯片（缩放平移 + 交叉淡入 + 旁白字幕）
 - ✅ 家人合奏 / 成长洞察（漏记的「第一次」提醒）
@@ -49,8 +49,7 @@
 - ✅ 写信（文字 + 语音）给未来的布布，设解锁时间（明年今天 / 6·12·18 岁生日快捷项）
 - ✅ AES-GCM 加密封存（v2：密钥由规范化解锁时间派生，同步往返安全；兼容解开 v1 旧信）
 - ✅ 倒计时锁定列表（未到期只显示倒计时），到期「庄重开启」仪式动画 + 解密读信
-- ⚠️ 定位是「仪式感时间锁」而非严格端到端加密：密钥材料随记录同步，防的是到期前的
-  随手翻看；真 E2E（随机密钥 + iCloud Keychain + 恢复码）在路线图上
+- ✅ v3 真 E2E：24 词家庭恢复码派生密钥，恢复码不随记录同步；兼容解开 v1/v2 旧信
 
 **Wave H · 后端同步 + 真实 AI + 传承兜底**
 - ✅ `PocketBaseClient`：REST 鉴权（token 复用 + 401 自动重登）+ 幂等 CRUD（localId 去重）+ 分页拉全量 + multipart 上传带进度
@@ -71,14 +70,14 @@
 | 隐私至上 | AI 走自托管 FastAPI（只发文字不传图）；时间胶囊 AES-GCM 端到端加密；Tailscale 内网；无第三方分析 |
 | 数据可迁移 | 媒体原文件 + 结构化数据双备份，一键导出可离线打开的全量档案 |
 | 适老化一等公民 | 姥姥能用 = 验收标准 |
-| 接口先行 | 网络/AI 能力均为 protocol，Mock 与真实实现可热切换，UI 不依赖具体后端 |
+| 接口先行 | 网络/AI 能力均为 protocol，真实实现与确定性降级解耦，UI 不依赖具体模型供应商 |
 
 ## 自托管部署
 
 后端在 `server/` 目录，详见 [`server/README.md`](server/README.md)：
 - **PocketBase**（数据库+文件+鉴权+同步）跑在 Mac mini + 外接 SSD，Tailscale 内网访问
 - **FastAPI**（DeepSeek AI）独立服务，App 设置页填地址即可启用
-- App 设置页：填服务器地址 + 家庭账户 → 三台手机自动同步；开启 AI → 工坊从 Mock 变真实
+- App 设置页：填服务器地址 + 家庭账户 → 多台手机自动同步；开启 AI → 启用自托管创作与检索能力
 
 ## 构建运行
 
@@ -127,8 +126,8 @@ BubuTimeMachine/
 └── Resources/      # Assets
 ```
 
-## 后续路线（按计划书）
+## 当前发布路线
 
-- **M2 上传同步**：部署 PocketBase（Mac）+ Tailscale，实现 `PocketBaseClient` + `UploadQueue` 后台分片上传 + `SyncEngine` 状态收敛
-- **M3 AI 归类**：FastAPI 服务（EXIF/视觉打标/事件聚类/"这是第一次吗"），结果回写时光轴自动重排
-- 之后：时间胶囊 → 成长之声 → 第一人称日记 → 家人合奏 → 年度成长电影
+- iOS：继续以 App Store / TestFlight 实际发布证据为准。
+- HarmonyOS：完成签名、旧版覆盖安装、跨端同步、权限/弱网/杀进程、服务卡片、Live View 和小艺意图真机验收。
+- 任何平台都不以“源码存在”代替用户路径可运行；逐项证据见 [`harmony/PARITY_MATRIX.md`](harmony/PARITY_MATRIX.md)。

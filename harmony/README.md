@@ -1,147 +1,82 @@
-# 布布时光机 · 鸿蒙端（HarmonyOS NEXT / ArkTS）
+# 布布时光机 · HarmonyOS 手机端
 
-iOS 端的鸿蒙原生重写。与 iOS **共用同一套自托管后端**（PocketBase + FastAPI），
-客户端用 ArkTS / ArkUI 重写。本目录是一个**真实可编译的 DevEco 工程**。
+iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketBase + FastAPI 自托管后端。
 
-当前产品范围仅包含 HarmonyOS 手机；平板、折叠屏、鸿蒙电脑和穿戴端不在本次追平范围。
+本工程只支持 HarmonyOS 手机。平板、折叠屏、鸿蒙电脑和穿戴端不在本次范围，`module.json5` 仅声明 `phone`。
 
----
+## 当前结论
 
-## 编译基线
+- API 26 代码能力已完成追平；逐项状态和真机验收边界见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
+- 本地 `51` 个逻辑/契约测试通过，API 26 unsigned HAP 构建通过。
+- 当前工作站没有在线鸿蒙设备，UI、权限、弱网、覆盖安装、桌面卡片、Live View 与小艺意图仍为 `HOLD`，不能写成真机已验证。
+- Live View 使用 TIMER 原生实况窗；未获华为场景权益时自动降级为持续通知。
 
-仓库提供不依赖 DevEco 自动生成 wrapper 的统一构建入口：
+## 已实现能力
 
-```
-hvigor 6.26.1 + HarmonyOS 26.0.0 SDK + JBR 21
-$ ./scripts/build-local.sh
-> BUILD SUCCESSFUL
-产物：entry/build/default/outputs/default/entry-default-unsigned.hap
-```
+- 记录：文字、照片、视频、语音、真实一次定位、发生时间编辑、追加媒体和家人回应。
+- 时光轴：拍摄/记录时间双排序、RDB 200 条触底分页、全文搜索和语义搜图。
+- 数据：RDB 幂等迁移、全部集合双向同步、服务器游标、墓碑删除、退避重试、WorkScheduler 后台恢复。
+- 媒体：文件流式上传、系统落盘下载、缩略图、人脸数量、认布布提示、端侧物体标签、照片收件箱。
+- 成长：健康、持久哄睡计时、WHO 插值、成长曲线、疫苗、里程碑、第一次和旧数据迁移。
+- 创作：第一人称日记、用户收录式成长绘本、家人合奏、成长报告、周报、问答、声音年轮和服务端成长电影成片。
+- 传承：v3 E2E 时间胶囊（文字+语音）、24 词恢复码、开放档案 ZIP、真实 PDF 年册、三版式分享卡。
+- 鸿蒙原生：2×2/2×4 服务卡片、最近照片封面、Share Kit、PDF Kit、InsightIntent 参数记录、Live View、系统备用图标。
+- 体验：姥姥三动作模式、系统/星夜深色、核心屏幕朗读语义、旧手机全屏相框模式。
 
-当前工程已迁移到 HarmonyOS API 26：
+## 构建与检查
 
-- `build-profile.json5`: `compatibleSdkVersion/targetSdkVersion = 26.0.0`
-- `AppScope/app.json5`: `minAPIVersion/targetAPIVersion = 26`
-
-构建默认不带签名，避免把证书路径或口令提交到仓库。安装真机前在 DevEco 的 Project Structure 中配置本机自动签名。
-
----
-
-## 模块完成度
-
-| 模块 | 状态 | 文件 |
-|---|---|---|
-| 工程骨架/配置/入口 | ✅ 完成 | `AppScope/`、`entry/src/main/module.json5`、`EntryAbility.ets` |
-| 枚举（同步态/媒体/角色/心情） | ✅ 完成（值对齐 iOS） | `models/Enums.ets` |
-| 数据模型（15 实体） | ✅ 完成 | `models/Models.ets` |
-| 年龄计算 | ✅ 完成（逐行对照 iOS） | `models/AgeCalculator.ets` |
-| 本地库 RelationalStore + DAO | ✅ 核心完成（Entry/ChildProfile/建表全量） | `data/AppDatabase.ets` |
-| 网络层（PocketBase REST） | ✅ 核心完成（鉴权/upsert/增量拉取） | `services/APIClient.ets`、`DTOs.ets` |
-| 服务器配置（Preferences） | ✅ 完成 | `services/ServerConfig.ets` |
-| 无 UI 写入层 | ✅ 完成 | `services/EntryWriter.ets` |
-| 同步引擎 | 🟡 骨架（推送 Entry/Profile + 拉取游标已通；见下） | `sync/SyncEngine.ets` |
-| 5 Tab 根导航 | ✅ 完成 | `pages/RootPage.ets` |
-| 首页仪表盘 + 身份卡 | ✅ 完成 | `view/HomeView.ets`、`IdentityCard.ets` |
-| 记录流程（文字） | ✅ 完成（走 EntryWriter） | `view/HomeView.ets` |
-| 时光轴 | ✅ 完成（数据驱动列表） | `view/TimelineView.ets` |
-| 布布档案编辑（性别/血型 Picker） | ✅ 完成（对齐 iOS） | `view/ChildProfileView.ets` |
-| 主题 token | ✅ 完成 | `theme/BubuTheme.ets` |
-
-### 已补齐（后续轮次）
-
-| 模块 | 状态 | 文件 |
-|---|---|---|
-| 记录：拍照/选图 | ✅ | HomeView + MediaStore + PhotoViewPicker |
-| 记录：录音 | ✅ | AudioRecorder(AVRecorder) + EntryWriter.entryWithPhoto(voice) |
-| 时光轴照片显示 + 详情页 | ✅ | TimelineView + EntryDetailView（大图/删除） |
-| 照片墙 | ✅ | AlbumView |
-| 健康（7类记录） | ✅ | HealthHomeView |
-| 里程碑墙（10预置可点亮） | ✅ | MilestonesView |
-| 时间胶囊（写信/解锁日） | ✅ | CapsuleView |
-| 布布的故事（AI入口） | ✅ | AIStudioView |
-| 设置（身份/服务器/同步） | ✅ | SettingsView |
-| 家庭成员管理 | ✅ | MembersView |
-| 身份卡翻面（性别/血型/出生地） | ✅ | IdentityCard（rotate 动画） |
-| UI/动效 | ✅ | clickEffect 按压、列表入场 transition、身份卡渐变质感 |
-
-### 已补齐（最终轮）
-
-| 模块 | 状态 | 文件 |
-|---|---|---|
-| 自然语言一句话记录 | ✅ | AIService + HomeView 一句话条（AI 解析，离线降级原文） |
-| 成长曲线图（Canvas 自绘） | ✅ | GrowthCurveView（健康页进入） |
-| 服务卡片（≈iOS 小组件） | ✅ | BubuFormAbility + widget/pages/BubuCard + form_config.json |
-| 智能照片收件箱 | 🟡 | Media Library 扫描 + 持久候选 + 事件分组 + 确认入库 + 本机头像比对；待真机大图库验证 |
-| 家庭问答 / 语义搜图 / 周报 | 🟡 | 已接自托管 AI 端点、真实出处和本地文字降级；待真机生产数据验收 |
-| 声音年轮 | 🟡 | 已接真实原声清单、渲染、下载播放和归档；待真机音频验收 |
-| 成长电影 | 🟡 | 本地 Ken Burns 预览 + 服务端 ffmpeg 成片、进度、系统落盘与播放；待真机验收 |
-
-### 🟡 / ⬜ 仍待续（长尾）
-
-| 模块 | 状态 | 说明 |
-|---|---|---|
-| 同步引擎完整化 | 🟡 | 已通：轮询/启停/登录/推 Entry+Profile/拉取游标。**待补**：媒体文件上传下载、其余 collection 双向映射、冲突合并、待删队列。 |
-| 疫苗表 UI | 🟡 | DAO 已就绪（vaccine_record + insert/fetch/markDone），列表 UI 待接。 |
-| 实况窗（≈灵动岛）/ 意图（≈App Intents） | ⬜ | 鸿蒙 LiveView / InsightIntent，独立能力。 |
-| 单元测试 | ⬜ | 对照 iOS WaveNTests。 |
-
----
-
-## 在 DevEco Studio 里打开 / 继续
-
-1. DevEco Studio → Open → 选 `harmony/` 目录。
-2. 首次会提示同步依赖（File → Sync）。
-3. 配置签名：File → Project Structure → Signing Configs → 勾选自动签名（需登录华为账号）。
-4. 连真机/模拟器 → Run。
-5. 首次进 App：首页点「建立布布的档案」填生日 → 即可记录、看时光轴。
-6. 在设置 → 服务器中配置家庭服务地址与账号；不要把账号写入源码。
-
-## 命令行编译（复现验证）
+要求：DevEco Studio 26.0.0+、HarmonyOS API 26 SDK、JBR 21。
 
 ```bash
 cd harmony
+./scripts/check-repository-hygiene.sh
+NODE_OPTIONS=--no-warnings=MODULE_TYPELESS_PACKAGE_JSON node --test tests/*.test.mjs
 ./scripts/build-local.sh
 ```
 
-## 一键安装到当前鸿蒙模拟器
+产物：
 
-先在 DevEco 启动模拟器，确认 `hdc list targets` 能看到目标，然后：
+```text
+entry/build/default/outputs/default/entry-default-unsigned.hap
+```
+
+工程默认不带签名。真机安装前在 DevEco Project Structure 配置本机自动签名；证书、私钥、口令和绝对路径不得提交。
+
+## 真机验收清单
+
+1. 旧 HAP 覆盖安装，确认档案、媒体、胶囊、健康、绘本收录不丢失。
+2. 离线新增/修改/删除，再联网；iOS 与鸿蒙交叉操作不复活、不误删。
+3. 大文件弱网上传、杀进程、重启后恢复；远端媒体系统下载可播放。
+4. 麦克风、相机、图库、定位权限拒绝/再次授权；录音中断不丢文件。
+5. 2×2/2×4 服务卡片的照片、刷新和点击；7 套主题图标与生日图标刷新。
+6. TIMER 权益下验证录音、哄睡和临近胶囊 Live View；无权益验证通知降级。
+7. 小艺平台登记 `BubuOpenApp`、`BubuRecordMoment`，验证参数原话进入确认页。
+8. 浅色/深色、系统大字、屏幕朗读焦点顺序；保留截图、日志和设备/系统版本。
+
+## 安装到当前设备
 
 ```bash
-cd harmony
+hdc list targets -v
 ./scripts/run-on-harmony-device.sh
 ```
 
-如有多个设备，可指定目标：
+多设备时：
 
 ```bash
-./scripts/run-on-harmony-device.sh 127.0.0.1:5555
+./scripts/run-on-harmony-device.sh <target>
 ```
 
-> 本机 DevEco 不在默认 `/Applications/DevEco-Studio.app` 时，通过
-> `DEVECO_STUDIO_CONTENTS=/path/to/DevEco-Studio.app/Contents ./scripts/build-local.sh` 指定。
+## 架构对照
 
-## 安全规则
-
-- `build-profile.json5` 只保留无签名构建配置。
-- 证书、私钥、口令和本机绝对路径不得提交到 Git。
-- 运行 `./scripts/check-repository-hygiene.sh` 可在提交前执行同一套 CI 检查。
-- 历史版本曾包含调试签名字段；旧签名必须在开发者后台作废并重新生成。
-
-完整追平状态见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
-
----
-
-## 架构对照（iOS → 鸿蒙）
-
-| iOS | 鸿蒙 |
+| iOS | HarmonyOS |
 |---|---|
-| SwiftUI | ArkUI（ArkTS 声明式） |
-| SwiftData @Model | RelationalStore + interface 模型 |
-| ModelContainer | AppDatabase 单例 |
-| URLSession + Codable | @ohos.net.http + interface DTO |
-| UserDefaults/@AppStorage | Preferences |
-| SyncEngine | SyncEngine（同协议、同游标 clientUpdatedAt） |
-| EntryWriter（无 UI 写入） | EntryWriter（同语义） |
+| SwiftUI | ArkUI |
+| SwiftData | RelationalStore |
+| UserDefaults / AppStorage | Preferences / AppStorage |
+| WidgetKit | Form Kit |
+| App Intents | InsightIntent |
+| Live Activity | Live View TIMER |
+| UIKit/ImageRenderer PDF | ArkGraphics2D + PDF Kit |
+| Share Sheet | Share Kit |
 
-**后端零改动**：PocketBase collection / API 契约 / clientUpdatedAt 增量游标全部沿用。
+后端 collection、`localId` 幂等键、软删除字段和 AI API 契约保持跨端一致。

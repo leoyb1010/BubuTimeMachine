@@ -27,7 +27,7 @@ import { MediaStore } from './MediaStore';
 
 // MARK: - AI 服务（对照 iOS Services/AI/AIService.swift + BubuAIService.swift）
 // 隐私至上：AI 能力全部自托管 FastAPI（背后接 DeepSeek），UI 永不依赖具体后端。
-// 任意一步失败都抛错，UI 层各视图自行降级（保留 Mock 体验或提示稍后再试）。只发文字，不上传照片。
+// 任意一步失败都抛错，UI 层各视图采用确定性本地降级或提示稍后再试；不使用 Mock 编造事实。
 
 // AI 对一条 Entry 的归类结果（对照 DTOs.swift AIClassification）。
 export interface AIClassification {
