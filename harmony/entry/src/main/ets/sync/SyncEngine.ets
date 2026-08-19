@@ -12,6 +12,7 @@ import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, Voice
 import { UploadedFileResult } from '../services/DTOs';
 import { MILESTONE_PRESETS } from '../models/MilestoneTemplates';
 import { syncBackoffIntervalMs } from './SyncBackoff';
+import { laterServerTimestamp, overlappedServerCursor } from './SyncCursor';
 
 const DOMAIN = 0x0000;
 
@@ -24,16 +25,19 @@ interface GrowthMetricValues {
 // MARK: - 同步引擎（对照 iOS Services/Sync/SyncEngine.swift）
 // 双向收敛：本地未同步（local/failed/uploading）的各集合推送到 PocketBase；远端变更按游标拉回本地。
 // 离线优先：未配置或断网时静默保持离线，本地全功能可用；联网后自动补传。
-// 增量游标 clientUpdatedAt 按集合持久化（Preferences）；任一集合拉取失败该集合游标不推进，下轮补拉。
-// 游标回退 60 秒容忍时钟偏差（合并幂等）。轮询 30s；进后台停轮询省电。
+// 增量游标使用 PocketBase 服务器 updated；任一集合拉取失败该集合游标不推进，下轮补拉。
+// 游标回退 60 秒覆盖边界，远端 tombstone 负责跨设备删除传播。
 // 冲突解决：以 syncState===synced 为「本地无未推改动」的判据——仅当本地已同步时才用远端覆盖，
 //           避免踩掉本地草稿（对照 iOS mergeRemoteX 内的 existing.syncState == .synced 判断），
 //           等价于「clientUpdatedAt 较新者胜」的实际效果（本地有 dirty 即视为本地较新）。
 export class SyncEngine {
   static readonly shared = new SyncEngine();
 
-  // iOS: cursorOverlap = 60s —— 游标回退 60 秒容忍时钟偏差。
-  private static readonly cursorOverlapMs: number = 60 * 1000;
+  private static readonly cursorCollections: string[] = [
+    'entries', 'media', 'milestones', 'firsttimes', 'members', 'childprofile',
+    'healthrecords', 'vaccinerecords', 'growthmeasurements', 'comments',
+    'voicenotes', 'voicememos', 'timecapsules'
+  ];
 
   private pollTimerId: number = -1;
   private polling: boolean = false;
@@ -54,6 +58,7 @@ export class SyncEngine {
     if (!this.cursorStore) {
       this.cursorStore = await preferences.getPreferences(context, 'bubu_sync_cursor');
     }
+    await this.migrateCursorsIfNeeded();
   }
 
   // 回前台：立刻补一轮；之后按结果在 30s–8min 之间退避轮询。
@@ -773,10 +778,12 @@ export class SyncEngine {
     collection: string,
     merge: (r: Record<string, Object>) => Promise<boolean | void>
   ): Promise<void> {
-    const startedMs = Date.now();
     try {
       const cursor = await this.getCursor(collection);
-      const records = await APIClient.shared.fetchRecords(collection, cursor);
+      const activeRequest = APIClient.shared.fetchRecords(collection, cursor);
+      const tombstoneRequest = APIClient.shared.fetchDeletedTombstones(collection, cursor);
+      const records = await activeRequest;
+      const tombstones = await tombstoneRequest;
       if (this.serverMirrorMode) {
         const seen = new Set<string>();
         for (const r of records) {
@@ -786,17 +793,16 @@ export class SyncEngine {
         }
         this.serverSeen.set(collection, seen);
       }
-      let fullyMerged = true;
+      let maxUpdated: string | undefined;
       for (const r of records) {
-        const merged = await merge(r);
-        if (merged === false) fullyMerged = false;
+        await merge(r);
+        maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(r, 'updated'));
       }
-      if (!fullyMerged) {
-        hilog.warn(DOMAIN, 'Bubu', `拉取 ${collection} 有记录暂未合并，游标保留等待下轮补拉`);
-        return;
+      await this.removeRemoteTombstones(collection, tombstones);
+      for (const tombstone of tombstones) {
+        maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(tombstone, 'updated'));
       }
-      // 游标回退 60s 容忍时钟偏差（对照 iOS setCursor 的 -cursorOverlap）。
-      await this.setCursor(collection, APIClient.syncTimestampString(new Date(startedMs - SyncEngine.cursorOverlapMs)));
+      if (maxUpdated !== undefined) await this.setCursor(collection, maxUpdated);
     } catch (e) {
       if (SyncEngine.isMissingOptionalCollectionError(e, collection)) {
         hilog.warn(DOMAIN, 'Bubu', `服务器暂缺可选集合 ${collection}，已走兼容同步`);
@@ -814,6 +820,107 @@ export class SyncEngine {
     if (remoteId === undefined || remoteId.length === 0) return false;
     const pendings = await AppDatabase.shared.fetchPendingDeletions();
     return pendings.some((d: PendingDeletion): boolean => d.collection === collection && d.remoteId === remoteId);
+  }
+
+  private async removeRemoteTombstones(collection: string,
+                                       tombstones: Record<string, Object>[]): Promise<void> {
+    if (collection === 'members' || collection === 'childprofile') return;
+    for (const tombstone of tombstones) {
+      const localId = SyncEngine.recordLocalId(tombstone);
+      if (localId !== undefined) await this.removeSyncedLocal(collection, localId);
+    }
+  }
+
+  // 远端删除只作用于已同步本地项；本机仍有未推改动时保留，随后由 pushLocal 收敛。
+  private async removeSyncedLocal(collection: string, localId: string): Promise<void> {
+    if (collection === 'entries') {
+      const entry = (await AppDatabase.shared.fetchEntries(true)).find((item: Entry): boolean => item.id === localId);
+      if (!entry || entry.syncState !== SyncState.synced) return;
+      for (const media of await AppDatabase.shared.fetchMediaForEntry(localId)) {
+        MediaStore.shared.deleteLocalFiles(media.localFileName, media.thumbnailFileName);
+      }
+      for (const note of await AppDatabase.shared.fetchVoiceForEntry(localId)) {
+        MediaStore.shared.deleteLocalFiles(note.localFileName);
+      }
+      for (const comment of await AppDatabase.shared.fetchCommentsForEntry(localId)) {
+        MediaStore.shared.deleteLocalFiles(comment.voiceFileName);
+      }
+      await AppDatabase.shared.deleteEntryHard(localId);
+      await AppDatabase.shared.deleteFeedEventsForTarget(localId);
+      return;
+    }
+    if (collection === 'media') {
+      const item = (await AppDatabase.shared.fetchAllMedia()).find((value: Media): boolean => value.id === localId);
+      if (!item || item.syncState !== SyncState.synced) return;
+      MediaStore.shared.deleteLocalFiles(item.localFileName, item.thumbnailFileName);
+      await AppDatabase.shared.deleteMedia(localId);
+      return;
+    }
+    if (collection === 'milestones') {
+      const item = (await AppDatabase.shared.fetchMilestones()).find((value: Milestone): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteMilestone(localId);
+      return;
+    }
+    if (collection === 'firsttimes') {
+      const item = (await AppDatabase.shared.fetchFirstTimes()).find((value: FirstTime): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteFirstTime(localId);
+      return;
+    }
+    if (collection === 'healthrecords') {
+      const item = (await AppDatabase.shared.fetchHealth()).find((value: HealthRecord): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) {
+        await AppDatabase.shared.deleteHealth(localId);
+        await AppDatabase.shared.deleteFeedEventsForTarget(localId);
+      }
+      return;
+    }
+    if (collection === 'vaccinerecords') {
+      const item = (await AppDatabase.shared.fetchVaccines()).find((value: VaccineRecord): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteVaccine(localId);
+      return;
+    }
+    if (collection === 'growthmeasurements') {
+      const item = (await AppDatabase.shared.fetchGrowth()).find((value: GrowthMeasurement): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteGrowth(localId);
+      return;
+    }
+    if (collection === 'comments') {
+      for (const entry of await AppDatabase.shared.fetchEntries(true)) {
+        const item = (await AppDatabase.shared.fetchCommentsForEntry(entry.id))
+          .find((value: Comment): boolean => value.id === localId);
+        if (item?.syncState === SyncState.synced) {
+          MediaStore.shared.deleteLocalFiles(item.voiceFileName);
+          await AppDatabase.shared.deleteComment(localId);
+        }
+      }
+      return;
+    }
+    if (collection === 'voicenotes') {
+      for (const entry of await AppDatabase.shared.fetchEntries(true)) {
+        const item = (await AppDatabase.shared.fetchVoiceForEntry(entry.id))
+          .find((value: VoiceNote): boolean => value.id === localId);
+        if (item?.syncState === SyncState.synced) {
+          MediaStore.shared.deleteLocalFiles(item.localFileName);
+          await AppDatabase.shared.deleteVoiceNote(localId);
+        }
+      }
+      return;
+    }
+    if (collection === 'voicememos') {
+      const item = (await AppDatabase.shared.fetchVoiceMemos()).find((value: VoiceMemo): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) {
+        MediaStore.shared.deleteLocalFiles(item.localFileName);
+        await AppDatabase.shared.deleteVoiceMemo(localId);
+      }
+      return;
+    }
+    if (collection === 'timecapsules') {
+      const item = (await AppDatabase.shared.fetchCapsules()).find((value: TimeCapsule): boolean => value.id === localId);
+      if (item?.syncState === SyncState.synced) {
+        MediaStore.shared.deleteLocalFiles(item.encryptedBlobFileName);
+        await AppDatabase.shared.deleteCapsule(localId);
+      }
+    }
   }
 
   private async pruneLocalToServerMirror(): Promise<void> {
@@ -1950,22 +2057,21 @@ export class SyncEngine {
     return v.length > 0 ? v : undefined;
   }
 
-  private async setCursor(collection: string, iso: string): Promise<void> {
+  private async setCursor(collection: string, serverUpdated: string): Promise<void> {
     await this.ensureCursorStore();
     if (!this.cursorStore) return;
-    await this.cursorStore.put(`cursor_${collection}`, iso);
+    const candidate = overlappedServerCursor(serverUpdated);
+    const existing = await this.getCursor(collection);
+    const next = laterServerTimestamp(existing, candidate);
+    if (next === undefined || next === existing) return;
+    await this.cursorStore.put(`cursor_${collection}`, next);
     await this.cursorStore.flush();
   }
 
   private async resetCursors(): Promise<void> {
     await this.ensureCursorStore();
     if (!this.cursorStore) return;
-    const collections: string[] = [
-      'entries', 'media', 'milestones', 'firsttimes', 'members', 'childprofile',
-      'healthrecords', 'vaccinerecords', 'growthmeasurements', 'comments',
-      'voicenotes', 'voicememos', 'timecapsules'
-    ];
-    for (const c of collections) {
+    for (const c of SyncEngine.cursorCollections) {
       await this.cursorStore.put(`cursor_${c}`, '');
     }
     await this.cursorStore.flush();
@@ -1975,6 +2081,19 @@ export class SyncEngine {
     if (!this.cursorStore && this.appContext) {
       this.cursorStore = await preferences.getPreferences(this.appContext, 'bubu_sync_cursor');
     }
+  }
+
+  private async migrateCursorsIfNeeded(): Promise<void> {
+    if (!this.cursorStore) return;
+    const key = 'server_updated_cursor_migration_v1';
+    const migrated = await this.cursorStore.get(key, false) as boolean;
+    if (migrated) return;
+    for (const collection of SyncEngine.cursorCollections) {
+      await this.cursorStore.put(`cursor_${collection}`, '');
+    }
+    await this.cursorStore.put(key, true);
+    await this.cursorStore.flush();
+    hilog.info(DOMAIN, 'Bubu', '同步游标已迁移到服务器 updated 权威时钟');
   }
 
   private async isServerBaselineReady(): Promise<boolean> {

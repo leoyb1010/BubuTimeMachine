@@ -151,7 +151,7 @@ export class APIClient {
     const existing = await this.findByLocalId(collection, localId);
     body['localId'] = localId;
     body['clientUpdatedAt'] = APIClient.syncTimestampString();
-    body = this.activeRecordBody(body);
+    body = this.activeRecordBody(body, existing === null);
     if (existing) {
       const id = existing['id'] as string;
       const resp = await this.request('PATCH', `/api/collections/${collection}/records/${id}`, JSON.stringify(body), true);
@@ -162,24 +162,34 @@ export class APIClient {
     }
   }
 
-  // 增量拉取：since 用 clientUpdatedAt 游标（对齐服务端迁移 add_client_updated_at）
-  // 翻页拉全量，对照 iOS fetchRecords 的 while(page) 循环。
+  // 增量拉取统一使用 PocketBase 服务器字段 updated，避免设备时钟偏移造成永久漏拉。
   async fetchRecords(collection: string, sinceISO?: string): Promise<Record<string, Object>[]> {
+    return await this.fetchRecordPages(collection, sinceISO, false);
+  }
+
+  // 跨设备删除通过软删除 tombstone 传播；返回 localId + updated 等完整原始字段。
+  async fetchDeletedTombstones(collection: string, sinceISO?: string): Promise<Record<string, Object>[]> {
+    return await this.fetchRecordPages(collection, sinceISO, true);
+  }
+
+  private async fetchRecordPages(collection: string, sinceISO: string | undefined,
+                                 onlyDeleted: boolean): Promise<Record<string, Object>[]> {
     const all: Record<string, Object>[] = [];
     let page = 1;
     while (true) {
-      let path = `/api/collections/${collection}/records?perPage=200&page=${page}&sort=clientUpdatedAt`;
+      let path = `/api/collections/${collection}/records?perPage=200&page=${page}&sort=updated`;
+      const clauses: string[] = [];
       if (sinceISO) {
-        // 注意：PocketBase filter 用单引号包裹，转义单引号杜绝注入面（对照 iOS filterEscape）
         const sinceFilter = APIClient.normalizeSyncTimestamp(sinceISO);
-        const filter = encodeURIComponent(`(clientUpdatedAt>'${APIClient.filterEscape(sinceFilter)}')`);
-        path += `&filter=${filter}`;
+        clauses.push(`(updated>'${APIClient.filterEscape(sinceFilter)}')`);
       }
+      if (onlyDeleted) clauses.push('(isDeleted=true)');
+      if (clauses.length > 0) path += `&filter=${encodeURIComponent(clauses.join(' && '))}`;
       const resp = await this.request('GET', path, undefined, true);
       const parsed = JSON.parse(resp) as Record<string, Object>;
       const items = (parsed['items'] as Record<string, Object>[] | undefined) ?? [];
       for (const it of items) {
-        if (it['isDeleted'] === true) continue;
+        if (!onlyDeleted && it['isDeleted'] === true) continue;
         all.push(it);
       }
       const totalPages = (parsed['totalPages'] as number | undefined) ?? 1;
@@ -251,7 +261,7 @@ export class APIClient {
     // 组装普通字段：补 localId + clientUpdatedAt（对照 iOS addSyncTimestamp）。
     fields['localId'] = localId;
     fields['clientUpdatedAt'] = APIClient.syncTimestampString();
-    fields = this.activeRecordFields(fields);
+    fields = this.activeRecordFields(fields, !isPatch);
     const formData: Array<FormField> = [];
     const keys = Object.keys(fields).sort();
     for (const k of keys) {
@@ -456,8 +466,8 @@ export class APIClient {
 
   // MARK: - 私有辅助 ----------------------------------------------------------
 
-  private activeRecordBody(body: Record<string, Object>): Record<string, Object> {
-    if (body['isDeleted'] === undefined) body['isDeleted'] = false;
+  private activeRecordBody(body: Record<string, Object>, defaultIsDeleted: boolean): Record<string, Object> {
+    if (defaultIsDeleted && body['isDeleted'] === undefined) body['isDeleted'] = false;
     if (body['authorUserId'] === undefined && this.currentUserId.length > 0) {
       body['authorUserId'] = this.currentUserId;
     }
@@ -467,8 +477,8 @@ export class APIClient {
     return body;
   }
 
-  private activeRecordFields(fields: Record<string, string>): Record<string, string> {
-    if (fields['isDeleted'] === undefined) fields['isDeleted'] = 'false';
+  private activeRecordFields(fields: Record<string, string>, defaultIsDeleted: boolean): Record<string, string> {
+    if (defaultIsDeleted && fields['isDeleted'] === undefined) fields['isDeleted'] = 'false';
     if (fields['authorUserId'] === undefined && this.currentUserId.length > 0) {
       fields['authorUserId'] = this.currentUserId;
     }

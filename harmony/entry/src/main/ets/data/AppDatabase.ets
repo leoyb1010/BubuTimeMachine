@@ -996,6 +996,12 @@ export class AppDatabase {
     await this.store!.delete(pred);
   }
 
+  async deleteFeedEventsForTarget(localId: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('feed_event');
+    pred.equalTo('targetLocalId', localId);
+    await this.store!.delete(pred);
+  }
+
   async clearServerBackedData(): Promise<void> {
     const tables: string[] = [
       'pending_deletion',
