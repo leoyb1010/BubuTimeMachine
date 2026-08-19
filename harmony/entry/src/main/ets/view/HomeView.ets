@@ -11,7 +11,7 @@ import { BubuIdentityCard } from '../components/BubuIdentityCard';
 import { BubuIcon, BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { ChildProfileView } from './ChildProfileView';
 import { HealthHomeView } from './HealthHomeView';
-import { GrowthCurveView } from './GrowthCurveView';
+import { GrowthHomeView } from './GrowthHomeView';
 import { SettingsView } from './SettingsView';
 import { AlbumView } from './AlbumView';
 import { TimelineView } from './TimelineView';
@@ -220,12 +220,10 @@ export struct HomeView {
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.route === HomeRoute.growth) {
-      Column() {
-        this.panelHeader('成长曲线')
-        GrowthCurveView()
-          .layoutWeight(1)
-      }
-      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+      GrowthHomeView({
+        onBack: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); },
+        onOpenMilestones: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.openMilestones(); }
+      }).width('100%').height('100%')
     } else if (this.route === HomeRoute.settings) {
       SettingsView({
         onClose: () => {
