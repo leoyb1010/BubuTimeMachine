@@ -135,6 +135,7 @@ export struct ShareCardSheet {
             if (this.previewPath.length > 0) {
               Image(`file://${this.previewPath}`).width('100%').constraintSize({ maxHeight: 430 })
                 .objectFit(ImageFit.Contain).borderRadius(BubuRadius.card)
+                .accessibilityText(`${this.layout === ShareCardLayout.thenNow ? '那年今日' : '成长'}分享卡预览`)
             } else {
               LoadingProgress().width(44).height(44).color(BubuColor.primary)
             }

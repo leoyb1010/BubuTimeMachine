@@ -43,6 +43,7 @@ export struct BubuIcon {
       .height(this.iconSize)
       .onReady(() => { this.draw(); })
       .hitTestBehavior(HitTestMode.None)
+      .accessibilityLevel('no')
   }
 
   private draw(): void {

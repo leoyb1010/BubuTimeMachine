@@ -48,6 +48,15 @@ export struct MediaThumbnail {
     }
   }
 
+  private accessibilityLabel(): string {
+    if (this.isAwaitingRemote()) return '媒体正在下载';
+    switch (this.mediaType()) {
+      case MediaType.video: return '视频';
+      case MediaType.audio: return '语音';
+      default: return '照片';
+    }
+  }
+
   aboutToAppear(): void {
     if (this.isAwaitingRemote()) {
       this.startPulse();
@@ -98,5 +107,9 @@ export struct MediaThumbnail {
     .alignContent(Alignment.BottomStart)
     .clip(true)
     .borderRadius(this.cornerRadius)
+    .accessibilityGroup(true)
+    .accessibilityText(this.accessibilityLabel())
+    .accessibilityDescription(this.mediaType() === MediaType.photo ? '打开照片查看' : '打开媒体查看')
+    .accessibilityLevel('yes')
   }
 }

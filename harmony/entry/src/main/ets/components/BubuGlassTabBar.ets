@@ -83,6 +83,10 @@ export struct BubuGlassTabBar {
     .backgroundColor('#00000000')
     .borderRadius(this.compact ? 14 : 16)
     .animation(BubuMotion.quick)
+    .accessibilityGroup(true)
+    .accessibilityText(item.title)
+    .accessibilityDescription(this.selection === item.id ? '当前页面' : `打开${item.title}`)
+    .accessibilityLevel('yes')
     .onClick(() => {
       BubuHaptics.selection();
       this.tabBarVisible = true;
@@ -114,6 +118,10 @@ export struct BubuGlassTabBar {
     .scale({ x: this.centerBreath ? 1.018 : 1, y: this.centerBreath ? 1.018 : 1 })
     .animation(BubuMotion.breathe)
     .margin({ left: this.compact ? 2 : 3, right: this.compact ? 2 : 3 })
+    .accessibilityGroup(true)
+    .accessibilityText('记录此刻')
+    .accessibilityDescription('打开快速记录')
+    .accessibilityLevel('yes')
     .onClick(() => {
       BubuHaptics.tapLight();
       this.getUIContext().animateTo(BubuMotion.quick, () => { this.onCenterTap(); });

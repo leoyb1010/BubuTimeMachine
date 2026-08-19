@@ -32,6 +32,7 @@ export struct WaveformView {
       .width('100%')
       .height('100%')
       .onReady(() => { this.ready = true; this.draw(); })
+      .accessibilityLevel('no')
   }
 
   private draw(): void {
@@ -159,6 +160,9 @@ export struct VoiceRecorderBar {
       Text(this.isRecording ? '⏹' : '🎙')
         .fontSize(40)
         .fontColor(this.isRecording ? Color.Red : this.tint)
+        .accessibilityText(this.isRecording ? '停止并保存录音' : '开始录音')
+        .accessibilityDescription(this.isRecording ? `已录制 ${this.timeString(this.elapsed)}` : '点两下开始录音')
+        .accessibilityLevel('yes')
         .onClick(() => { this.toggle(); })
 
       if (this.isRecording) {
@@ -234,6 +238,9 @@ export struct VoicePlayerBubble {
       Text(this.isPlayingThis ? '⏸' : '▶')
         .fontSize(32)
         .fontColor(this.tint)
+        .accessibilityText(this.isPlayingThis ? '暂停语音' : '播放语音')
+        .accessibilityDescription(`语音时长 ${this.timeString(this.duration)}`)
+        .accessibilityLevel('yes')
         .onClick(() => { AudioPlayer.shared.toggle(this.path()); })
 
       WaveformView({

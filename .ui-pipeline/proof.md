@@ -10,7 +10,7 @@
 ## Evidence
 
 - Screenshots / visual diffs: 待真机/模拟器在线后建立
-- Storybook stories and tests: 不适用 ArkUI；当前 33 个 Node 契约/逻辑测试通过，鸿蒙 UI 测试待真机补
+- Storybook stories and tests: 不适用 ArkUI；当前 34 个 Node 契约/逻辑测试通过，鸿蒙 UI 测试待真机补
 - End-to-end interactions: 待补
 - Accessibility checks: 设计契约已记录，运行验证待补
 - Console / network checks: API 26 unsigned HAP 构建成功；运行日志待补
