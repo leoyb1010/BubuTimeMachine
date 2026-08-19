@@ -443,27 +443,42 @@ export class AppDatabase {
     const rs = await this.store!.query(pred);
     const out: Entry[] = [];
     while (rs.goToNextRow()) {
-      out.push({
-        id: rs.getString(rs.getColumnIndex('id')),
-        remoteId: AppDatabase.optStr(rs, 'remoteId'),
-        title: AppDatabase.optStr(rs, 'title'),
-        note: AppDatabase.optStr(rs, 'note'),
-        firstPersonNote: AppDatabase.optStr(rs, 'firstPersonNote'),
-        happenedAt: rs.getLong(rs.getColumnIndex('happenedAt')),
-        locationName: AppDatabase.optStr(rs, 'locationName'),
-        latitude: AppDatabase.optNum(rs, 'latitude'),
-        longitude: AppDatabase.optNum(rs, 'longitude'),
-        authorRole: rs.getString(rs.getColumnIndex('authorRole')),
-        moodRaw: AppDatabase.optStr(rs, 'moodRaw'),
-        syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
-        isArchived: rs.getLong(rs.getColumnIndex('isArchived')) === 1,
-        inStorybook: rs.getLong(rs.getColumnIndex('inStorybook')) === 1,
-        editedAt: AppDatabase.optNum(rs, 'editedAt'),
-        createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
-      });
+      out.push(AppDatabase.rowToEntry(rs));
     }
     rs.close();
     return out;
+  }
+
+  async fetchEntriesPage(limit: number, offset: number, byCreatedAt: boolean): Promise<Entry[]> {
+    const pred = new relationalStore.RdbPredicates('entry');
+    pred.equalTo('isArchived', 0);
+    pred.orderByDesc(byCreatedAt ? 'createdAt' : 'happenedAt');
+    pred.limitAs(Math.max(1, limit));
+    pred.offsetAs(Math.max(0, offset));
+    const rs = await this.store!.query(pred);
+    const out: Entry[] = [];
+    while (rs.goToNextRow()) out.push(AppDatabase.rowToEntry(rs));
+    rs.close();
+    return out;
+  }
+
+  private static rowToEntry(rs: relationalStore.ResultSet): Entry {
+    return {
+      id: rs.getString(rs.getColumnIndex('id')),
+      remoteId: AppDatabase.optStr(rs, 'remoteId'),
+      title: AppDatabase.optStr(rs, 'title'), note: AppDatabase.optStr(rs, 'note'),
+      firstPersonNote: AppDatabase.optStr(rs, 'firstPersonNote'),
+      happenedAt: rs.getLong(rs.getColumnIndex('happenedAt')),
+      locationName: AppDatabase.optStr(rs, 'locationName'),
+      latitude: AppDatabase.optNum(rs, 'latitude'), longitude: AppDatabase.optNum(rs, 'longitude'),
+      authorRole: rs.getString(rs.getColumnIndex('authorRole')),
+      moodRaw: AppDatabase.optStr(rs, 'moodRaw'),
+      syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
+      isArchived: rs.getLong(rs.getColumnIndex('isArchived')) === 1,
+      inStorybook: rs.getLong(rs.getColumnIndex('inStorybook')) === 1,
+      editedAt: AppDatabase.optNum(rs, 'editedAt'),
+      createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
+    };
   }
 
   // —— Media ——

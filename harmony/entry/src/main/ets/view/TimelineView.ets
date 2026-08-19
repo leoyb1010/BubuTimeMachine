@@ -30,6 +30,7 @@ interface TimelineSection {
 
 @Component
 export struct TimelineView {
+  private static readonly pageSize: number = 200;
   @State entries: Entry[] = [];
   @State profile: ChildProfile | null = null;
   // entryId → 首张照片沙盒绝对 file:// 路径（卡片大图占位）。
@@ -40,6 +41,9 @@ export struct TimelineView {
   @State semanticEntryIds: Set<string> = new Set<string>();
   @State semanticSearchState: string = 'idle';
   @State private sortModeRaw: string = 'capture';
+  @State private hasMore: boolean = false;
+  @State private loadingMore: boolean = false;
+  @State private searchExpanded: boolean = false;
 
 	  @State showFamilyFeed: boolean = false;
 	  @State detailEntry: Entry | null = null;
@@ -75,18 +79,26 @@ export struct TimelineView {
 
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
-    const entries = await AppDatabase.shared.fetchEntries(false);
+    const entries = await AppDatabase.shared.fetchEntriesPage(
+      TimelineView.pageSize, 0, this.sortModeRaw === 'recorded');
     this.entries = this.sortedEntries(entries);
-    const map = new Map<string, string>();
+    this.hasMore = entries.length === TimelineView.pageSize;
+    this.searchExpanded = false;
+    this.photoMap = await this.loadPhotoMap(entries, new Map<string, string>());
+    this.rebuildSections();
+  }
+
+  private async loadPhotoMap(entries: Entry[], base: Map<string, string>): Promise<Map<string, string>> {
+    const map = new Map<string, string>(base);
     for (const e of entries) {
+      if (map.has(e.id)) continue;
       const media = await AppDatabase.shared.fetchMediaForEntry(e.id);
       const photo = media.find((m: Media) => m.typeRaw === 'photo' && m.localFileName !== undefined && m.localFileName.length > 0);
       if (photo && photo.localFileName) {
         map.set(e.id, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
       }
     }
-    this.photoMap = map;
-    this.rebuildSections();
+    return map;
   }
 
   // MARK: 分段（对照 iOS rebuildSections）：按年月分组，section 内按时间倒序。
@@ -228,10 +240,7 @@ export struct TimelineView {
         .width('100%')
         .margin({ left: 16, right: 16, bottom: 8 })
         .onChange((v: string) => {
-          this.searchText = v;
-          this.semanticEntryIds = new Set<string>();
-          this.semanticSearchState = 'idle';
-          this.rebuildSections();
+          this.handleSearchChange(v);
         })
         .onSubmit((v: string) => { this.runSemanticSearch(v); })
 
@@ -274,6 +283,39 @@ export struct TimelineView {
 	    .width('100%')
       .scrollable(ScrollDirection.Vertical)
     .scrollBar(BarState.Off)
+    .onScrollEdge((side: Edge) => { if (side === Edge.Bottom) this.loadMore(); })
+  }
+
+  private async loadMore(): Promise<void> {
+    if (!this.hasMore || this.loadingMore || this.searchText.trim().length > 0) return;
+    this.loadingMore = true;
+    try {
+      const page = await AppDatabase.shared.fetchEntriesPage(
+        TimelineView.pageSize, this.entries.length, this.sortModeRaw === 'recorded');
+      this.entries = this.sortedEntries(this.entries.concat(page));
+      this.photoMap = await this.loadPhotoMap(page, this.photoMap);
+      this.hasMore = page.length === TimelineView.pageSize;
+      this.rebuildSections();
+    } finally {
+      this.loadingMore = false;
+    }
+  }
+
+  private async handleSearchChange(value: string): Promise<void> {
+    this.searchText = value;
+    this.semanticEntryIds = new Set<string>();
+    this.semanticSearchState = 'idle';
+    if (value.trim().length > 0 && !this.searchExpanded) {
+      const all = await AppDatabase.shared.fetchEntries(false);
+      if (this.searchText.trim().length === 0) return;
+      this.entries = this.sortedEntries(all);
+      this.photoMap = await this.loadPhotoMap(all, this.photoMap);
+      this.searchExpanded = true;
+    } else if (value.trim().length === 0 && this.searchExpanded) {
+      await this.reload();
+      return;
+    }
+    this.rebuildSections();
   }
 
   private sortedEntries(entries: Entry[]): Entry[] {
@@ -287,8 +329,7 @@ export struct TimelineView {
   private toggleSortMode(): void {
     this.sortModeRaw = this.sortModeRaw === 'capture' ? 'recorded' : 'capture';
     ServerConfig.shared.setTimelineSortMode(this.sortModeRaw);
-    this.entries = this.sortedEntries(this.entries);
-    this.rebuildSections();
+    this.reload();
   }
 
   @Builder
