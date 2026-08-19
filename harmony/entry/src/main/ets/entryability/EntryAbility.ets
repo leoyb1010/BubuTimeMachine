@@ -9,6 +9,7 @@ import { ServerConfig } from '../services/ServerConfig';
 import { APIClient } from '../services/APIClient';
 import { IosBaselineImporter } from '../bootstrap/IosBaselineImporter';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
+import { AIService } from '../services/AIService';
 import '../intent/OpenBubuIntent';
 import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 
@@ -32,6 +33,7 @@ export default class EntryAbility extends UIAbility {
       MediaStore.shared.initialize(this.context);
       PhotoIntakeService.shared.initialize(this.context);
       APIClient.shared.initialize(this.context);
+      AIService.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
       await IosBaselineImporter.runIfNeeded(this.context);
       await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences

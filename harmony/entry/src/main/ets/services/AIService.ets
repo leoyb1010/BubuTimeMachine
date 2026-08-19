@@ -1,5 +1,7 @@
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
+import { request } from '@kit.BasicServicesKit';
+import { common } from '@kit.AbilityKit';
 import { ServerConfig } from './ServerConfig';
 import { Media } from '../models/Models';
 import {
@@ -10,10 +12,13 @@ import {
 import {
   QAAnswer,
   QAContextRecord,
+  MovieRenderPhoto,
+  MovieRenderStatus,
   SemanticSearchResponse,
   SoundRing,
   WeeklyReport,
   decodeQAAnswer,
+  decodeMovieRenderStatus,
   decodeSemanticSearch,
   decodeSoundRing,
   decodeWeeklyReport
@@ -63,7 +68,10 @@ interface ParseRequestWire {
 
 export class AIService {
   static readonly shared = new AIService();
+  private appContext: common.BaseContext | null = null;
   private constructor() {}
+
+  initialize(context: common.BaseContext): void { this.appContext = context; }
 
   private get baseURL(): string {
     return ServerConfig.shared.aiBaseURLString.replace(/\/+$/, '');
@@ -287,22 +295,65 @@ export class AIService {
   }
 
   async downloadSoundRing(id: string): Promise<string> {
-    const req = http.createHttp();
-    try {
-      const resp = await req.request(`${this.baseURL}/sound-ring/file/${encodeURIComponent(id)}`, {
-        method: http.RequestMethod.GET,
-        header: this.authHeader(),
-        expectDataType: http.HttpDataType.ARRAY_BUFFER,
-        connectTimeout: 30000,
-        readTimeout: 300000
+    return await this.downloadProtectedFile(`sound-ring/file/${encodeURIComponent(id)}`, 'm4a');
+  }
+
+  async startMovieRender(childName: string, year: number, template: string,
+                         photos: MovieRenderPhoto[], narration: string): Promise<MovieRenderStatus> {
+    const wirePhotos: Record<string, Object>[] = photos.slice(0, 60)
+      .map((photo: MovieRenderPhoto): Record<string, Object> => ({
+        'url': photo.url,
+        'caption': photo.caption.substring(0, 120)
+      }));
+    return decodeMovieRenderStatus(await this.post('movie/render', {
+      'child_name': childName,
+      'year': year,
+      'template': template,
+      'narration': narration.substring(0, 2000),
+      'photos': wirePhotos
+    }));
+  }
+
+  async movieRenderStatus(jobId: string): Promise<MovieRenderStatus> {
+    const raw = await this.getJSON(`movie/status/${encodeURIComponent(jobId)}`);
+    return decodeMovieRenderStatus(raw as Record<string, Object>);
+  }
+
+  async downloadRenderedMovie(jobId: string): Promise<string> {
+    return await this.downloadProtectedFile(`movie/file/${encodeURIComponent(jobId)}`, 'mp4');
+  }
+
+  private async downloadProtectedFile(path: string, extension: string): Promise<string> {
+    if (!this.appContext) throw new Error('缺少下载上下文');
+    const fileName = `ai_${util.generateRandomUUID(true)}.${extension}`;
+    const destination = MediaStore.shared.fullPath(fileName);
+    const task = await request.downloadFile(this.appContext, {
+      url: `${this.baseURL}/${path}`,
+      filePath: destination,
+      header: this.authHeader(),
+      background: false,
+      enableMetered: true,
+      enableRoaming: true,
+      title: 'Bubu AI media'
+    });
+    return await new Promise<string>((resolve, reject) => {
+      let finished = false;
+      task.on('complete', () => {
+        if (finished) return;
+        finished = true;
+        resolve(destination);
       });
-      if (resp.responseCode < 200 || resp.responseCode >= 300) throw new Error(`HTTP ${resp.responseCode}`);
-      const fileName = MediaStore.shared.saveBlob(resp.result as ArrayBuffer, 'm4a');
-      if (!fileName) throw new Error('声音年轮下载后无法保存');
-      return MediaStore.shared.fullPath(fileName);
-    } finally {
-      req.destroy();
-    }
+      task.on('fail', (errorCode: number) => {
+        if (finished) return;
+        finished = true;
+        reject(new Error(`文件下载失败 ${errorCode}`));
+      });
+      setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        reject(new Error('文件下载超时'));
+      }, 300000);
+    });
   }
 
   // MARK: - 自然语言解析

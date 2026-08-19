@@ -10,6 +10,7 @@ import { BubuMascotBadge } from '../components/BubuMascotBadge';
 import { BubuExpression } from '../theme/BubuExpression';
 import { MediaThumbnail } from '../components/MediaThumbnail';
 import { GrowthMoviePlayer, MovieDraft } from './GrowthMoviePlayer';
+import { MovieRenderPhoto, MovieRenderStatus } from '../models/AIArtifacts';
 
 // MARK: - 年度成长电影（对照 iOS Features/AIStudio/GrowthMovieView.swift）
 // 端侧生成「电影草稿」：按年龄/地点/时间筛选真实照片，套用模板播放（GrowthMoviePlayer）。
@@ -49,6 +50,10 @@ export struct GrowthMovieView {
   @State private stageIndex: number = -1;
   @State private draft: MovieDraft | null = null;
   @State private showPlayer: boolean = false;
+  @State private renderStatus: MovieRenderStatus | null = null;
+  @State private renderedMoviePath: string = '';
+  @State private showRenderedMovie: boolean = false;
+  @State private renderError: string = '';
 
   private theme: string = BubuColor.primary;
   private readonly stages: string[] = ['筛选照片素材…', '整理时间和地点…', '套用电影模板…', '生成片头和字幕…'];
@@ -69,7 +74,14 @@ export struct GrowthMovieView {
   }
 
   build() {
-    if (this.showPlayer && this.draft !== null) {
+    if (this.showRenderedMovie && this.renderedMoviePath.length > 0) {
+      Stack() {
+        Video({ src: `file://${this.renderedMoviePath}` }).controls(true).width('100%').height('100%')
+        Text('✕').fontSize(28).fontColor(Color.White).width(48).height(48).textAlign(TextAlign.Center)
+          .position({ x: 12, y: 12 }).backgroundColor('#66000000').borderRadius(24)
+          .onClick(() => { this.showRenderedMovie = false; })
+      }.width('100%').height('100%').backgroundColor(Color.Black)
+    } else if (this.showPlayer && this.draft !== null) {
       GrowthMoviePlayer({
         draft: this.draft,
         tint: this.theme,
@@ -369,6 +381,25 @@ export struct GrowthMovieView {
           .backgroundColor('#1AF28C9E')
           .borderRadius(25)
           .onClick(() => { this.showPlayer = true; })
+        if (this.canServerRender()) {
+          Text(this.renderStatus?.status === 'rendering' ? `正在合成 ${Math.round((this.renderStatus?.progress ?? 0) * 100)}%` : '生成可分享成片')
+            .fontSize(BubuFont.body).fontWeight(FontWeight.Bold)
+            .fontColor(Color.White).textAlign(TextAlign.Center)
+            .width('100%').height(50)
+            .backgroundColor(this.renderStatus?.status === 'rendering' ? BubuColor.secondaryText : BubuColor.deepRose)
+            .borderRadius(25)
+            .onClick(() => { if (this.renderStatus?.status !== 'rendering') this.startServerRender(); })
+        }
+        if (this.renderedMoviePath.length > 0) {
+          Text('▶ 播放可分享成片')
+            .fontSize(BubuFont.body).fontWeight(FontWeight.Bold).fontColor(BubuColor.deepRose)
+            .textAlign(TextAlign.Center).width('100%').height(48)
+            .backgroundColor(BubuColor.card).borderRadius(24)
+            .onClick(() => { this.showRenderedMovie = true; })
+        }
+        if (this.renderError.length > 0) {
+          Text(this.renderError).fontSize(12).fontColor(BubuColor.danger).width('100%')
+        }
       }
     }
     .width('100%')
@@ -458,6 +489,9 @@ export struct GrowthMovieView {
   private async generateDraft(): Promise<void> {
     if (this.selectedPhotoFiles().length === 0) return;
     this.draft = null;
+    this.renderStatus = null;
+    this.renderedMoviePath = '';
+    this.renderError = '';
     for (let i = 0; i < this.stages.length; i++) {
       this.stageIndex = i;
       await new Promise<void>((resolve: () => void) => setTimeout(resolve, 420));
@@ -493,6 +527,49 @@ export struct GrowthMovieView {
       narration: narration
     };
     this.stageIndex = -1;
+  }
+
+  private remoteMoviePhotos(): MovieRenderPhoto[] {
+    const captions = this.draft?.captions ?? [];
+    return this.selectedPreviewMedia().filter((media: Media): boolean => {
+      return media.remoteURL !== undefined && media.remoteURL.length > 0;
+    }).map((media: Media, index: number): MovieRenderPhoto => ({
+      url: media.remoteURL!,
+      caption: index < captions.length ? captions[index] : ''
+    })).slice(0, 60);
+  }
+
+  private canServerRender(): boolean {
+    return this.draft !== null && ServerConfig.shared.isAIConfigured && this.remoteMoviePhotos().length > 0;
+  }
+
+  private async startServerRender(): Promise<void> {
+    if (!this.canServerRender() || this.draft === null) return;
+    this.renderError = '';
+    try {
+      const year = this.selectedYear !== -1 ? this.selectedYear : new Date().getFullYear();
+      this.renderStatus = await AIService.shared.startMovieRender(
+        ServerConfig.shared.childName, year, this.selectedTemplate,
+        this.remoteMoviePhotos(), this.draft.narration ?? '');
+      await this.pollServerRender();
+    } catch (e) {
+      this.renderError = e instanceof Error ? e.message : '服务端合成没有启动';
+    }
+  }
+
+  private async pollServerRender(): Promise<void> {
+    const jobId = this.renderStatus?.jobId ?? '';
+    if (jobId.length === 0) return;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (this.renderStatus?.ready === true || this.renderStatus?.status === 'failed') break;
+      await new Promise<void>((resolve: () => void) => setTimeout(resolve, 2000));
+      this.renderStatus = await AIService.shared.movieRenderStatus(jobId);
+    }
+    if (this.renderStatus?.ready === true) {
+      this.renderedMoviePath = await AIService.shared.downloadRenderedMovie(jobId);
+    } else if (this.renderStatus?.status === 'failed') {
+      this.renderError = this.renderStatus.error.length > 0 ? this.renderStatus.error : '服务端合成失败，可以重试';
+    }
   }
 
   // 草稿标题（对照 iOS draftTitle）。

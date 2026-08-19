@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   decodeQAAnswer,
+  decodeMovieRenderStatus,
   decodeSoundRing,
   decodeSemanticSearch,
   decodeWeeklyReport
@@ -11,6 +12,15 @@ test('AI 问答只保留服务端真实引用 id', () => {
   assert.deepEqual(decodeQAAnswer({ answer: '会走路了', used_ids: ['entry-1', 7] }), {
     answer: '会走路了', usedIds: ['entry-1']
   });
+});
+
+test('成长电影渲染状态保留任务和真实进度', () => {
+  const status = decodeMovieRenderStatus({
+    job_id: 'movie-1', status: 'rendering', progress: 0.65, error: '', ready: false, year: 3
+  });
+  assert.equal(status.jobId, 'movie-1');
+  assert.equal(status.progress, 0.65);
+  assert.equal(status.ready, false);
 });
 
 test('声音年轮保留原声清单与是否有成片', () => {

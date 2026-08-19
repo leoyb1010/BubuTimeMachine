@@ -91,6 +91,20 @@ export interface SoundRing {
   contentHash: string;
 }
 
+export interface MovieRenderPhoto {
+  url: string;
+  caption: string;
+}
+
+export interface MovieRenderStatus {
+  jobId: string;
+  status: string;
+  progress: number;
+  error: string;
+  ready: boolean;
+  year: number;
+}
+
 export function decodeQAAnswer(value: Record<string, Object>): QAAnswer {
   return {
     answer: stringValue(value, 'answer'),
@@ -183,6 +197,17 @@ export function decodeSoundRing(value: Record<string, Object>): SoundRing {
       kind: stringValue(source, 'kind')
     })),
     contentHash: stringValue(value, 'content_hash')
+  };
+}
+
+export function decodeMovieRenderStatus(value: Record<string, Object>): MovieRenderStatus {
+  return {
+    jobId: stringValue(value, 'job_id'),
+    status: stringValue(value, 'status'),
+    progress: numberValue(value, 'progress'),
+    error: stringValue(value, 'error'),
+    ready: booleanValue(value, 'ready'),
+    year: numberValue(value, 'year')
   };
 }
 
