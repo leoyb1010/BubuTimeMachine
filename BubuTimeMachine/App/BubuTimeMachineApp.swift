@@ -507,6 +507,12 @@ struct RootView: View {
             NavigationStack { AdvancedSettingsView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-capsule") {
             NavigationStack { CapsuleHomeView() }
+        // 视觉核验探针：这两页有大面积按色相上色的卡底，是深色模式最容易出问题的地方，
+        // 但都藏在二级导航后面、脚本点不到。补上直达入口。
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-milestones") {
+            NavigationStack { MilestonesHomeView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-story") {
+            NavigationStack { BubuStoryView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth-entry") {
             HealthRecordSheet(kind: .checkup, growthOnly: true)
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-growth-curve") {

@@ -53,6 +53,7 @@ xcrun simctl io "iPhone 17 Pro" screenshot /tmp/shot.png
 - `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
   时间胶囊已并入魔法屋，iPhone 只有 4 个 Tab + 中央「记一笔」；N≥4 会被夹到 3（档案馆 tag 4 只在 Mac Catalyst 侧栏存在）
 - 直达页面：`-uitest-simple` / `-uitest-capture` / `-uitest-timeline` / `-uitest-ai` / `-uitest-growth` /
+  `-uitest-milestones` / `-uitest-story` /
   `-uitest-growth-curve` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-movie` / `-uitest-diary` /
   `-uitest-capsule` / `-uitest-sound-ring` / `-uitest-settings` / `-uitest-advanced-settings` /
   `-uitest-voice` / `-uitest-export`

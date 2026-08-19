@@ -42,7 +42,7 @@ GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMa
 - `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
   时间胶囊已并入魔法屋；iPhone 是 4 Tab + 中央「记一笔」，N≥4 会被夹到 3
   （tag 4「档案馆」只存在于 Mac Catalyst 的宽屏侧栏）
-- 直达页面：`-uitest-capsule` / `-uitest-growth` / `-uitest-growth-curve` / `-uitest-diary` / `-uitest-settings` / `-uitest-advanced-settings` / `-uitest-voice` / `-uitest-export` / `-uitest-timeline` / `-uitest-ai` / `-uitest-movie` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-sound-ring` / `-uitest-capture` / `-uitest-simple`
+- 直达页面：`-uitest-milestones` / `-uitest-story` / `-uitest-capsule` / `-uitest-growth` / `-uitest-growth-curve` / `-uitest-diary` / `-uitest-settings` / `-uitest-advanced-settings` / `-uitest-voice` / `-uitest-export` / `-uitest-timeline` / `-uitest-ai` / `-uitest-movie` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-sound-ring` / `-uitest-capture` / `-uitest-simple`
 - 手表端：bundle id `com.bubu.timemachine.watchkitapp`，App Group `group.com.bubu.timemachine.watch`；可用 `xcrun simctl` 往手表模拟器 App Group 容器注入 plist 快照数据后截图验证（本地有专用模拟器 `BubuWatchSim`）
 
 ## 当前路线图

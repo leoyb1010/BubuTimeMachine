@@ -24,15 +24,19 @@ enum ThumbnailPathRepair {
 
     static func perform(context: ModelContext) throws {
         let store = MediaStore()
-        let all = try context.fetch(FetchDescriptor<Media>())
+        // 只取真的有缩略图字段的行：没有 thumbnailFileName 的记录（视频原片、还没生成缩略图的
+        // 新照片）压根不可能错位，没必要 faulting 出来。大库启动时这一刀省的是实打实的时间。
+        let descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.thumbnailFileName != nil })
+        let candidates = try context.fetch(descriptor)
         var repaired = 0
-        for media in all {
+        for media in candidates {
             guard let thumbName = media.thumbnailFileName, !thumbName.isEmpty else { continue }
+            // 防御：历史上不会出现 thumbnail 与原片同名，真出现时改为拷贝，绝不把原片搬走。
             let keepSource = (media.localFileName == thumbName)
             if store.relocateStrayThumbnail(named: thumbName, keepSource: keepSource) {
                 repaired += 1
             }
         }
-        log.notice("缩略图错位自愈完成：扫描 \(all.count, privacy: .public) 条，搬回 \(repaired, privacy: .public) 个文件")
+        log.notice("缩略图错位自愈完成：扫描 \(candidates.count, privacy: .public) 条，搬回 \(repaired, privacy: .public) 个文件")
     }
 }

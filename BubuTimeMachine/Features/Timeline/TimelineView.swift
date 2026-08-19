@@ -27,13 +27,25 @@ enum TimelineSortMode: String, CaseIterable {
 struct TimelineView: View {
     /// 每页条数。一屏最多显示 3~4 条，200 条足够连翻很久都不触底。
     static let pageStep = 200
+    /// 搜索时的取数上限。搜索是在内存里跨 7 个字段做的，只在「当前这一页」里找
+    /// 会让分页把搜索范围也一起截断——那是功能倒退。搜索期间把窗口整个放开。
+    /// 仍留一个很高的上限，纯粹是防御性的（十万条时至少不会把内存打爆）。
+    static let searchWindow = 20_000
 
     @State private var pageLimit = TimelineView.pageStep
+    /// 搜索词提到外层：它决定要取多大的窗口，而窗口只能在内层的 init 里定。
+    @State private var searchText = TimelineList.semanticVisualProbe ? "扶着沙发学走路" : ""
     @AppStorage("bubu.timeline.sortMode") private var sortModeRaw = TimelineSortMode.capture.rawValue
 
+    private var effectiveLimit: Int {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? pageLimit : TimelineView.searchWindow
+    }
+
     var body: some View {
-        TimelineList(pageLimit: pageLimit,
+        TimelineList(pageLimit: effectiveLimit,
                      sortMode: TimelineSortMode(rawValue: sortModeRaw) ?? .capture,
+                     searchText: $searchText,
                      onNeedMore: { pageLimit += TimelineView.pageStep })
     }
 }
@@ -48,9 +60,11 @@ struct TimelineList: View {
     /// 滚到底部时请求下一页。
     private let onNeedMore: () -> Void
 
-    init(pageLimit: Int, sortMode: TimelineSortMode, onNeedMore: @escaping () -> Void) {
+    init(pageLimit: Int, sortMode: TimelineSortMode,
+         searchText: Binding<String>, onNeedMore: @escaping () -> Void) {
         self.pageLimit = pageLimit
         self.onNeedMore = onNeedMore
+        self._searchText = searchText
         // 取数排序必须跟随 sortMode：只按 happenedAt 取前 N 条、再在内存里按 createdAt 重排，
         // 拿到的会是「错的那 N 条」——批量导入的三年前旧照片正好会踩中这个坑。
         var descriptor = FetchDescriptor<Entry>(
@@ -71,7 +85,8 @@ struct TimelineList: View {
     /// 长按「分享这一刻」选中的记录。
     @State private var entryPendingShare: Entry?
     @State private var sections: [TimelineSection] = []
-    @State private var searchText = Self.semanticVisualProbe ? "扶着沙发学走路" : ""
+    /// 由外层持有：搜索期间外层会把取数窗口整个放开，避免分页截断搜索范围。
+    @Binding private var searchText: String
     @State private var semanticMatches: [UUID: SemanticSearchHit] = [:]
     @State private var semanticSearchState: SemanticSearchState = .idle
     /// 排序方式偏好：默认按拍摄时间（成长回顾心智），可切按记录时间（家庭动态心智）。
@@ -237,7 +252,8 @@ struct TimelineList: View {
                 }
                 // 触底加载下一页：取满一页说明后面很可能还有，
                 // 这个哨兵出现在视野里就把窗口再放大一页。搜索中不分页（本页内过滤即可）。
-                if entries.count >= pageLimit, searchText.isEmpty {
+                if entries.count >= pageLimit,
+                   searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     HStack {
                         Spacer()
                         ProgressView().tint(BubuTheme.Color.primary)
@@ -492,7 +508,7 @@ struct TimelineList: View {
         ((env.config.semanticSearchEnabled && env.config.isAIConfigured) || Self.semanticVisualProbe)
     }
 
-    private static var semanticVisualProbe: Bool {
+    static var semanticVisualProbe: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-uitest-semantic-result")
         #else

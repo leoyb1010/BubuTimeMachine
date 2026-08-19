@@ -36,11 +36,11 @@ struct ExportView: View {
                     infoCard
                     exportButton
                     if let missingNote {
-                        Text(missingNote).font(BubuTheme.Font.caption).foregroundStyle(.orange)
+                        Text(missingNote).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.warning)
                             .multilineTextAlignment(.center)
                     }
                     if let errorText {
-                        Text(errorText).font(BubuTheme.Font.caption).foregroundStyle(.red)
+                        Text(errorText).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.danger)
                     }
                 }
                 .padding()

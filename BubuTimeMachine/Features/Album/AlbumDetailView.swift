@@ -61,7 +61,7 @@ struct AlbumDetailView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 4)], spacing: 4) {
                         ForEach(0..<6, id: \.self) { _ in
                             BubuSkeletonBlock(cornerRadius: BubuTheme.Radius.xs)
-                                .aspectRatio(1, contentMode: .fill)
+                                .aspectRatio(1, contentMode: .fit)
                         }
                     }
                     .padding(.horizontal, 8)
