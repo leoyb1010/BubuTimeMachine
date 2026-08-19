@@ -1,52 +1,72 @@
-// MARK: - 小组件刷新（对照 iOS DesignSystem/WidgetRefresher.swift）
-// 主 App 改了会显示在桌面卡片上的数据后，通知卡片框架重载，否则卡片只会按系统低频节奏更新。
-// iOS 用 WidgetCenter.reloadTimelines；HarmonyOS 用 @kit.FormKit formProvider。
-// NOTE: HarmonyOS 主动刷新需持有已添加卡片的 formId（系统不提供「刷新全部」的等价 API）。
-//       这里把卡片的 formId 持久化清单交给 BubuFormAbility 维护；reload 遍历清单逐个 updateForm。
-//       若拿不到 formId（无已添加卡片），静默跳过——与 iOS 行为一致（无卡片则无操作）。
-
 import { formProvider, formBindingData } from '@kit.FormKit';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
+import { AppDatabase } from '../data/AppDatabase';
 
 export class WidgetRefresher {
-  /// 已添加卡片的 formId 清单（由 BubuFormAbility.onAddForm/onRemoveForm 维护）。
-  private static formIds: string[] = [];
+  private static readonly snapshotStore: string = 'bubu_widget';
+  private static readonly formStore: string = 'bubu_widget_forms';
 
-  static register(formId: string): void {
-    if (!WidgetRefresher.formIds.includes(formId)) {
-      WidgetRefresher.formIds.push(formId);
-    }
-  }
-
-  static unregister(formId: string): void {
-    WidgetRefresher.formIds = WidgetRefresher.formIds.filter(id => id !== formId);
-  }
-
-  /// 把首页档案快照写到卡片可读的 Preferences（对照 iOS refreshWidgetSnapshot 写 App Group）。
-  /// 卡片侧 BubuFormAbility.buildData 从同一个 'bubu_widget' 读 birthday / childName。
-  static publishSnapshot(context: common.UIAbilityContext, birthdayMs: number, childName: string): void {
-    try {
-      const opt: preferences.Options = { name: 'bubu_widget' };
-      const store = preferences.getPreferencesSync(context, opt);
-      store.putSync('birthday', birthdayMs);
-      store.putSync('childName', childName);
+  static register(context: common.Context, formId: string): void {
+    if (formId.length === 0) return;
+    const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.formStore });
+    const ids = WidgetRefresher.readFormIds(store);
+    if (!ids.includes(formId)) {
+      ids.push(formId);
+      store.putSync('formIds', JSON.stringify(ids));
       store.flush();
-    } catch (e) {
-      // 卡片快照非关键路径，失败静默。
     }
   }
 
-  /// 触发所有已添加卡片重载（对照 iOS reloadAllTimelines）。
-  static reload(): void {
-    for (const id of WidgetRefresher.formIds) {
-      try {
-        // 传空数据触发卡片重新拉取（卡片侧 onUpdateForm 会重算）。
-        const empty = formBindingData.createFormBindingData({});
-        formProvider.updateForm(id, empty).catch(() => {});
-      } catch (e) {
-        // 刷新失败静默：卡片非关键路径。
-      }
+  static unregister(context: common.Context, formId: string): void {
+    const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.formStore });
+    const ids = WidgetRefresher.readFormIds(store).filter((id: string): boolean => id !== formId);
+    store.putSync('formIds', JSON.stringify(ids));
+    store.flush();
+  }
+
+  static async publishCurrentSnapshot(context: common.Context): Promise<void> {
+    const profile = await AppDatabase.shared.fetchChildProfile();
+    const entries = await AppDatabase.shared.fetchEntries(false);
+    const photos = await AppDatabase.shared.fetchAllPhotos();
+    const milestones = await AppDatabase.shared.fetchMilestones();
+    const growth = await AppDatabase.shared.fetchGrowth();
+    const achieved = milestones.filter((item): boolean => item.happenedAt !== undefined);
+    const next = milestones.find((item): boolean => item.happenedAt === undefined);
+    const latest = entries.length > 0 ? entries[0] : undefined;
+    const measurement = growth.length > 0 ? growth[0] : undefined;
+    const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.snapshotStore });
+    store.putSync('birthday', profile?.birthday ?? 0);
+    store.putSync('childName', profile?.name ?? '布布');
+    store.putSync('entryCount', entries.length);
+    store.putSync('photoCount', photos.length);
+    store.putSync('achievedMilestones', achieved.length);
+    store.putSync('totalMilestones', milestones.length);
+    store.putSync('recentTitle', latest?.title ?? latest?.note ?? '记录一个新瞬间');
+    store.putSync('recentNote', latest?.note ?? '打开 App，留住今天的成长');
+    store.putSync('latestHeight', measurement?.heightCm ?? 0);
+    store.putSync('latestWeight', measurement?.weightKg ?? 0);
+    store.putSync('nextMilestone', next?.title ?? '记录新的第一次');
+    store.flush();
+  }
+
+  static reload(context: common.Context): void {
+    const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.formStore });
+    for (const id of WidgetRefresher.readFormIds(store)) {
+      const empty = formBindingData.createFormBindingData({});
+      formProvider.updateForm(id, empty).catch(() => {});
+    }
+  }
+
+  private static readFormIds(store: preferences.Preferences): string[] {
+    try {
+      const raw = store.getSync('formIds', '[]') as string;
+      const parsed = JSON.parse(raw) as Object;
+      if (!Array.isArray(parsed)) return [];
+      return (parsed as Object[]).filter((item: Object): boolean => typeof item === 'string')
+        .map((item: Object): string => item as string);
+    } catch (e) {
+      return [];
     }
   }
 }

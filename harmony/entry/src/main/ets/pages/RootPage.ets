@@ -44,8 +44,8 @@ struct RootPage {
     this.booted = true;
     // 回前台立刻补一轮同步 + 刷新服务卡片快照（对照 iOS scenePhase .active）。
     SyncEngine.shared.start();
-    if (profile) WidgetRefresher.publishSnapshot(ctx, profile.birthday, profile.name);
-    WidgetRefresher.reload();
+    await WidgetRefresher.publishCurrentSnapshot(ctx);
+    WidgetRefresher.reload(ctx);
     await this.maybeShowWhatsNew(ctx);
   }
 
@@ -67,7 +67,9 @@ struct RootPage {
   }
 
   private async refreshWidget(): Promise<void> {
-    WidgetRefresher.reload();
+    const ctx = getContext(this) as common.UIAbilityContext;
+    await WidgetRefresher.publishCurrentSnapshot(ctx);
+    WidgetRefresher.reload(ctx);
   }
 
   private isCompact(): boolean {
