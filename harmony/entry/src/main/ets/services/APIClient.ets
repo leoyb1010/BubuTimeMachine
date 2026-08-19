@@ -144,6 +144,11 @@ export class APIClient {
     return this.token;
   }
 
+  // 给同一家庭的 FastAPI 摄取接口复用 PocketBase 登录态；不向 UI 暴露、也不持久化 token。
+  async accessToken(): Promise<string> {
+    return await this.ensureToken();
+  }
+
   // MARK: 通用 CRUD（幂等）----------------------------------------------------
 
   // 通用 upsert：localId 已存在则 PATCH，否则 POST（与 iOS upsert 同语义）

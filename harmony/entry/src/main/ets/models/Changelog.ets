@@ -1,4 +1,4 @@
-// MARK: - 版本更新记录（对齐 iOS 1.2.0）
+// MARK: - 版本更新记录（对齐 iOS 2.11.0）
 export interface ReleaseNote {
   version: string;
   date: string;
@@ -7,6 +7,19 @@ export interface ReleaseNote {
 }
 
 export const CHANGELOG: ReleaseNote[] = [
+  {
+    version: '2.11.0',
+    date: '2026-08-19',
+    title: '手机端追平 iOS 2.11',
+    highlights: [
+      '时光详情的多张照片和视频支持左右翻页，照片可双击、捏合与放大后平移，也能存到系统相册或分享',
+      '首页只留身份、记录、今日一问和最近时光，里程碑与成长回到成长页',
+      '魔法屋改为问问布布主入口，并按回顾、创作、声音分区',
+      '健康不再藏在设置里，成长之声迁入魔法屋',
+      '姥姥模式明确区分当前使用者与正在记录的孩子',
+      '同步退避、时光轴分页、深色模式、无障碍和鸿蒙原生能力继续追平'
+    ]
+  },
   {
     version: '1.2.0',
     date: '2026-06-13',

@@ -1,4 +1,4 @@
-import { abilityAccessCtrl, common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { dataSharePredicates } from '@kit.ArkData';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { AppDatabase } from '../data/AppDatabase';
@@ -13,6 +13,7 @@ import { MediaStore } from './MediaStore';
 import { ServerConfig } from './ServerConfig';
 import { SyncEngine } from '../sync/SyncEngine';
 import { ChildIdentityRecognizer } from './ChildIdentityRecognizer';
+import { PermissionService } from './PermissionService';
 
 export interface PhotoIntakeResult {
   entryId: string;
@@ -43,13 +44,7 @@ export class PhotoIntakeService {
   async scanRecent(days: number = 14): Promise<PhotoEventGroup[]> {
     const context = this.context;
     if (!context) throw new Error('照片收件箱还没有初始化');
-    const manager = abilityAccessCtrl.createAtManager();
-    const permission = await manager.requestPermissionsFromUser(context, ['ohos.permission.READ_IMAGEVIDEO']);
-    let denied = false;
-    for (const value of permission.authResults) {
-      if (value !== abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) denied = true;
-    }
-    if (denied) {
+    if (!(await PermissionService.request(context, 'ohos.permission.READ_IMAGEVIDEO'))) {
       throw new Error('需要允许读取照片，才能扫描最近新增内容');
     }
 

@@ -11,9 +11,10 @@ import { MoodPicker } from '../components/MoodPicker';
 import { VoiceRecorderBar, VoicePlayerBubble } from '../components/VoiceComponents';
 import { MediaStore } from '../services/MediaStore';
 import { AudioRecorder } from '../services/AudioRecorder';
-import { abilityAccessCtrl, common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { LocationService } from '../services/LocationService';
+import { PermissionService } from '../services/PermissionService';
 
 // MARK: - 快速记录面板（对照 iOS Features/Capture/QuickCaptureSheet.swift）
 // 拍/选媒体 + 一句话 + 心情 + 语音。全程可选填，任一有内容即可存。
@@ -600,9 +601,14 @@ export struct QuickCaptureSheet {
   private async requestCamera(video: boolean): Promise<void> {
     const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
-      const atManager = abilityAccessCtrl.createAtManager();
-      await atManager.requestPermissionsFromUser(ctx, ['ohos.permission.CAMERA']);
-    } catch (e) {}
+      if (!(await PermissionService.request(ctx, 'ohos.permission.CAMERA'))) {
+        this.getUIContext().getPromptAction().showToast({ message: '需要相机权限，也可以从相册选择' });
+        return;
+      }
+    } catch (e) {
+      this.getUIContext().getPromptAction().showToast({ message: '相机权限暂时不可用，也可以从相册选择' });
+      return;
+    }
     if (video) {
       const uri = await VideoCaptureView.captureVideo(ctx);
       if (uri) {

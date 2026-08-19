@@ -2,6 +2,8 @@ import { Entry } from '../models/Models';
 import { ArtifactSourceReference, WeeklyReport, WeeklyReportSection } from '../models/AIArtifacts';
 import { AppDatabase } from '../data/AppDatabase';
 import { AIService } from '../services/AIService';
+import { WeeklyReportNotifier } from '../services/WeeklyReportNotifier';
+import { common } from '@kit.AbilityKit';
 import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
 import { EntryDetailView } from './EntryDetailView';
 
@@ -159,6 +161,10 @@ export struct WeeklyReportView {
       }
       this.report = (await AIService.shared.latestWeeklyReport()) ?? null;
       this.history = await AIService.shared.weeklyReportHistory();
+      if (this.report) {
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        await WeeklyReportNotifier.notifyIfNew(context, this.report!);
+      }
     } catch (e) {
       this.errorText = e instanceof Error ? e.message : '周报暂时无法读取';
     } finally {
@@ -173,6 +179,8 @@ export struct WeeklyReportView {
     try {
       this.report = await AIService.shared.generateWeeklyReport();
       this.history = await AIService.shared.weeklyReportHistory();
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await WeeklyReportNotifier.notifyIfNew(context, this.report!);
     } catch (e) {
       this.errorText = e instanceof Error ? e.message : '这次没有生成周报';
     } finally {

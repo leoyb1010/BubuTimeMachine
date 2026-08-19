@@ -1,6 +1,7 @@
 import { geoLocationManager } from '@kit.LocationKit';
-import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { PermissionService } from './PermissionService';
 
 const DOMAIN = 0x0000;
 
@@ -42,11 +43,7 @@ export class LocationService {
   // 已授权直接返回 true；被拒返回 false。需由调用方传入 UIAbilityContext（对齐工程约定）。
   async requestPermissionIfNeeded(context: common.UIAbilityContext): Promise<boolean> {
     try {
-      const mgr = abilityAccessCtrl.createAtManager();
-      const perms: Permissions[] = ['ohos.permission.APPROXIMATELY_LOCATION'];
-      const result = await mgr.requestPermissionsFromUser(context, perms);
-      const granted = result.authResults;
-      this.authorized = granted.length > 0 && granted[0] === 0;
+      this.authorized = await PermissionService.request(context, 'ohos.permission.APPROXIMATELY_LOCATION');
       return this.authorized;
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `定位授权失败: ${JSON.stringify(e)}`);

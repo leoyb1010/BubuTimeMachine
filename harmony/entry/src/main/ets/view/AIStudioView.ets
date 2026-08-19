@@ -10,13 +10,14 @@ import { CapsuleView } from './CapsuleView';
 import { BubuQAView } from './BubuQAView';
 import { WeeklyReportView } from './WeeklyReportView';
 import { SoundRingView } from './SoundRingView';
+import { VoiceArchiveView } from './VoiceArchiveView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 
 // MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
 // 自托管 AI 的创作中心：成长绘本 / 未来胶囊 / 第一人称日记 / 成长电影 / 家人合奏 / 成长报告。
 // RootPage 把本组件直接作为「故事」Tab 渲染（无 NavPathStack），故内部用 @State route 就地切换子页。
 
-// 魔法屋创作能力（对照 iOS creativeGrid 的 capabilityTile）。
+// 魔法屋能力（对照 iOS 2.11：一个主位 + 回顾 / 创作 / 声音三个分区）。
 interface CapabilityTile {
   iconName: string;
   title: string;
@@ -25,14 +26,20 @@ interface CapabilityTile {
   route: string;
 }
 
-const CAPABILITY_TILES: CapabilityTile[] = [
-  { iconName: BubuIconName.textBubble, title: '第一人称日记', subtitle: '改写成布布的话', tint: BubuColor.pink, route: 'diary' },
-  { iconName: BubuIconName.video, title: '成长电影', subtitle: '精选照片成短片', tint: BubuColor.sky, route: 'movie' },
-  { iconName: BubuIconName.home, title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' },
+const REVIEW_TILES: CapabilityTile[] = [
+  { iconName: BubuIconName.calendar, title: '布布周报', subtitle: '这一周的小故事', tint: BubuColor.peach, route: 'weekly' },
   { iconName: BubuIconName.sparkles, title: '成长报告', subtitle: '整理成长变化', tint: BubuColor.butter, route: 'report' },
-  { iconName: BubuIconName.textBubble, title: '问问布布', subtitle: '有出处的家庭问答', tint: BubuColor.lav, route: 'qa' },
-  { iconName: BubuIconName.calendar, title: '布布周报', subtitle: '把一周轻轻收好', tint: BubuColor.peach, route: 'weekly' },
-  { iconName: BubuIconName.waveform, title: '声音年轮', subtitle: '听得见时间长大', tint: BubuColor.sky, route: 'soundRing' }
+  { iconName: BubuIconName.video, title: '成长电影', subtitle: '精选照片成短片', tint: BubuColor.sky, route: 'movie' }
+];
+
+const CREATION_TILES: CapabilityTile[] = [
+  { iconName: BubuIconName.textBubble, title: '第一人称日记', subtitle: '改写成布布的话', tint: BubuColor.pink, route: 'diary' },
+  { iconName: BubuIconName.home, title: '家人合奏', subtitle: '合成完整故事', tint: BubuColor.mint, route: 'ensemble' }
+];
+
+const SOUND_TILES: CapabilityTile[] = [
+  { iconName: BubuIconName.waveform, title: '声音年轮', subtitle: '一圈是一岁', tint: BubuColor.lav, route: 'soundRing' },
+  { iconName: BubuIconName.mic, title: '成长之声', subtitle: '按岁归档的语音', tint: BubuColor.sky, route: 'voiceArchive' }
 ];
 
 @Component
@@ -80,6 +87,8 @@ export struct AIStudioView {
       WeeklyReportView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
     } else if (this.route === 'soundRing') {
       SoundRingView({ onBack: (): void => { this.route = ''; this.tabBarVisible = true; } })
+    } else if (this.route === 'voiceArchive') {
+      VoiceArchiveView({ onClose: (): void => { this.route = ''; this.tabBarVisible = true; } })
     } else if (this.route === 'story') {
       // 成长绘本（对照 iOS BubuStoryView 翻页绘本）
       Column() {
@@ -118,18 +127,16 @@ export struct AIStudioView {
     Scroll() {
       Column({ space: 18 }) {
         this.banner()
+        this.askBubuCard()
         this.storybookCard()
         this.capsuleCard()
 
-        // 「布布的魔法屋」分组标题（对照 iOS caption.semibold）。
-	        Text('布布的魔法屋')
-	          .fontSize(BubuFont.caption)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(BubuColor.secondaryText)
-          .width('100%')
-          .margin({ left: 6, top: 2 })
-	
-	        this.creativeGrid()
+        this.sectionHeader('回顾', '把已经发生的整理给你看')
+        this.tileGrid(REVIEW_TILES)
+        this.sectionHeader('创作', '把素材改写成新的东西')
+        this.tileGrid(CREATION_TILES)
+        this.sectionHeader('声音', '听见布布慢慢长大')
+        this.tileGrid(SOUND_TILES)
 	        Blank().height(130)
 	      }
       .padding(16)
@@ -143,6 +150,45 @@ export struct AIStudioView {
 	      if (w > 0) this.viewportW = w;
 	    })
 	  }
+
+  // 魔法屋主位：家庭记忆问答比普通磁贴更像整个页面的入口。
+  @Builder
+  askBubuCard() {
+    Row({ space: 14 }) {
+      BubuIconBadge({
+        name: BubuIconName.textBubble,
+        badgeSize: 60,
+        iconSize: 28,
+        color: '#FFFFFF',
+        fill: BubuColor.primary,
+        radius: 18,
+        strokeWidth: 2.5
+      })
+      Column({ space: 4 }) {
+        Text('问问布布')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bolder)
+          .fontColor(BubuColor.warmBrown)
+        Text('她这几年的记录，都可以直接问')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(BubuColor.secondaryText)
+          .maxLines(2)
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      Text('›').fontSize(18).fontWeight(FontWeight.Bolder).fontColor(BubuColor.secondaryText)
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor('#F2FFFFFF')
+    .borderRadius(24)
+    .border({ width: 1, color: '#99FFFFFF' })
+    .shadow({ radius: 12, color: '#38DCC9FF', offsetY: 6 })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.97 })
+    .accessibilityText('问问布布，她这几年的记录都可以直接问')
+    .onClick(() => { this.tabBarVisible = false; this.route = 'qa'; })
+  }
 
   // 顶部 banner（对照 iOS banner：主色渐变 + 布布画画表情）。
   @Builder
@@ -265,42 +311,47 @@ export struct AIStudioView {
     .onClick(() => { this.tabBarVisible = false; this.route = 'capsule'; })
   }
 
-  // 创作能力 2×2 宫格（对照 iOS creativeGrid 的 LazyVGrid）。
   @Builder
-	  creativeGrid() {
+  sectionHeader(title: string, subtitle: string) {
+    Column({ space: 2 }) {
+      Text(title).fontSize(15).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+      Text(subtitle).fontSize(12).fontColor(BubuColor.secondaryText)
+    }
+    .alignItems(HorizontalAlign.Start)
+    .width('100%')
+    .margin({ left: 6 })
+  }
+
+  // 手机端固定两列；奇数项最后一行保留一个空位，维持清晰分区。
+  @Builder
+  tileGrid(tiles: CapabilityTile[]) {
 	    if (this.isNarrow()) {
 	      Column({ space: 10 }) {
-	        this.capabilityTile(CAPABILITY_TILES[0])
-	        this.capabilityTile(CAPABILITY_TILES[1])
-	        this.capabilityTile(CAPABILITY_TILES[2])
-	        this.capabilityTile(CAPABILITY_TILES[3])
-	        this.capabilityTile(CAPABILITY_TILES[4])
-	        this.capabilityTile(CAPABILITY_TILES[5])
-	        this.capabilityTile(CAPABILITY_TILES[6])
+	        ForEach(tiles, (tile: CapabilityTile) => { this.capabilityTile(tile) }, (tile: CapabilityTile) => tile.route)
 	      }
 	      .width('100%')
 	    } else {
 	      Column({ space: 10 }) {
-	        Row({ space: 10 }) {
-	          this.capabilityTile(CAPABILITY_TILES[0])
-	          this.capabilityTile(CAPABILITY_TILES[1])
-	        }.width('100%')
-	        Row({ space: 10 }) {
-	          this.capabilityTile(CAPABILITY_TILES[2])
-	          this.capabilityTile(CAPABILITY_TILES[3])
-	        }.width('100%')
-	        Row({ space: 10 }) {
-	          this.capabilityTile(CAPABILITY_TILES[4])
-	          this.capabilityTile(CAPABILITY_TILES[5])
-	        }.width('100%')
-	        Row({ space: 10 }) {
-	          this.capabilityTile(CAPABILITY_TILES[6])
-	          Blank().layoutWeight(1)
-	        }.width('100%')
+	        ForEach(this.tileRows(tiles), (row: CapabilityTile[]) => {
+          Row({ space: 10 }) {
+            this.capabilityTile(row[0])
+            if (row.length > 1) {
+              this.capabilityTile(row[1])
+            } else {
+              Blank().layoutWeight(1)
+            }
+          }.width('100%')
+        }, (row: CapabilityTile[]) => row[0].route)
 	      }
 	      .width('100%')
 	    }
 	  }
+
+  private tileRows(tiles: CapabilityTile[]): CapabilityTile[][] {
+    const rows: CapabilityTile[][] = [];
+    for (let i = 0; i < tiles.length; i += 2) rows.push(tiles.slice(i, i + 2));
+    return rows;
+  }
 
   // 单块创作能力磁贴（对照 iOS capabilityTile：图标徽 + 标题 + 副标题，渐变卡）。
   @Builder

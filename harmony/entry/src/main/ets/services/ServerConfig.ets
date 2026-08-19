@@ -6,8 +6,8 @@ import { ALL_FAMILY_ROLES, FamilyRole, isElderRole } from '../models/Enums';
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
 export class ServerConfig {
   static readonly shared = new ServerConfig();
-  static readonly versionName: string = '1.2.0';
-  static readonly versionCode: string = '2026061312';
+  static readonly versionName: string = '2.11.0';
+  static readonly versionCode: string = '2026081901';
   static readonly defaultBaseURL: string = '';
   static readonly defaultAIBaseURL: string = '';
   static readonly baseURLPlaceholder: string = 'https://你的服务器地址:8090';

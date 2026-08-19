@@ -24,6 +24,7 @@ import {
   decodeWeeklyReport
 } from '../models/AIArtifacts';
 import { MediaStore } from './MediaStore';
+import { APIClient } from './APIClient';
 
 // MARK: - AI 服务（对照 iOS Services/AI/AIService.swift + BubuAIService.swift）
 // 隐私至上：AI 能力全部自托管 FastAPI（背后接 DeepSeek），UI 永不依赖具体后端。
@@ -56,6 +57,24 @@ export interface NaturalCaptureResult {
   note: string;       // 规整后的记录文字
   mood?: string;      // 识别到的心情
   domain?: string;    // 归类：日常/健康/里程碑…
+}
+
+export interface SSDIntakeEntryInfo {
+  happenedAt: string;
+  sourcePaths: string[];
+  captureTimeSources: string[];
+}
+
+export interface SSDIntakeItem {
+  fileName: string;
+  mediaType: string;
+}
+
+export interface SSDIntakeCandidate {
+  id: string;
+  state: string;
+  entry: SSDIntakeEntryInfo;
+  items: SSDIntakeItem[];
 }
 
 // /parse-natural-capture 请求体线格式（snake_case，对照服务端与 iOS .iso8601 编码）。
@@ -116,6 +135,48 @@ export class AIService {
     } finally {
       req.destroy();
     }
+  }
+
+  // 移动硬盘/家庭 mini 生成的待确认候选：与 iOS 共用同一 FastAPI 和 PocketBase 家庭登录态。
+  async intakeCandidates(): Promise<SSDIntakeCandidate[]> {
+    const raw = await this.intakeRequest('GET', 'intake/candidates');
+    if (!Array.isArray(raw)) return [];
+    return raw.map((value: Object): SSDIntakeCandidate => {
+      const item = value as Record<string, Object>;
+      const entry = (item['entry'] ?? {}) as Record<string, Object>;
+      const rawItems = item['items'] as Object[] | undefined;
+      return {
+        id: (item['id'] as string | undefined) ?? '',
+        state: (item['state'] as string | undefined) ?? '',
+        entry: {
+          happenedAt: (entry['happened_at'] as string | undefined) ?? '',
+          sourcePaths: (entry['source_paths'] as string[] | undefined) ?? [],
+          captureTimeSources: (entry['capture_time_sources'] as string[] | undefined) ?? []
+        },
+        items: (rawItems ?? []).map((rawItem: Object): SSDIntakeItem => {
+          const media = rawItem as Record<string, Object>;
+          return {
+            fileName: (media['file_name'] as string | undefined) ?? '',
+            mediaType: (media['media_type'] as string | undefined) ?? ''
+          };
+        })
+      };
+    }).filter((candidate: SSDIntakeCandidate): boolean => candidate.id.length > 0);
+  }
+
+  async updateIntakeCandidate(id: string, happenedAt: number): Promise<void> {
+    await this.intakeRequest('POST', 'intake/candidates/update', {
+      'batch_id': id,
+      'happened_at': new Date(happenedAt).toISOString()
+    });
+  }
+
+  async confirmIntakeCandidate(id: string): Promise<void> {
+    await this.intakeRequest('POST', 'intake/confirm', { 'batch_id': id });
+  }
+
+  async cancelIntakeCandidate(id: string): Promise<void> {
+    await this.intakeRequest('POST', 'intake/cancel', { 'batch_id': id });
   }
 
   // 第一人称改写（对照 rewriteFirstPerson）。
@@ -437,6 +498,32 @@ export class AIService {
         readTimeout: 90000
       });
       if (allowNotFound && resp.responseCode === 404) return undefined;
+      if (resp.responseCode < 200 || resp.responseCode >= 300) {
+        throw new Error(`HTTP ${resp.responseCode}`);
+      }
+      return JSON.parse(resp.result as string) as Object;
+    } finally {
+      req.destroy();
+    }
+  }
+
+  private async intakeRequest(method: 'GET' | 'POST', path: string,
+                              body?: Record<string, Object>): Promise<Object> {
+    const token = await APIClient.shared.accessToken();
+    if (token.length === 0) throw new Error('请先登录家庭服务器');
+    const req = http.createHttp();
+    try {
+      const header: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      const resp = await req.request(this.baseURL + '/' + path, {
+        method: method === 'GET' ? http.RequestMethod.GET : http.RequestMethod.POST,
+        header: header,
+        extraData: body ? JSON.stringify(body) : undefined,
+        connectTimeout: 30000,
+        readTimeout: 90000
+      });
       if (resp.responseCode < 200 || resp.responseCode >= 300) {
         throw new Error(`HTTP ${resp.responseCode}`);
       }

@@ -1,4 +1,4 @@
-import { ChildProfile, Entry, GrowthMeasurement } from '../models/Models';
+import { ChildProfile, Entry } from '../models/Models';
 import { Mood, SyncState, moodEmoji, FamilyRole } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
 import { ServerConfig } from '../services/ServerConfig';
@@ -23,7 +23,10 @@ import { QuickCaptureSheet } from './QuickCaptureSheet';
 import { OnThisDayView } from './OnThisDayView';
 import { DailyQuestion } from './DailyQuestion';
 import { NaturalCaptureBar } from './NaturalCaptureBar';
-import { HomeRoute, BirthdayCountdownView } from './HomeDestinations';
+import { HomeRoute } from './HomeDestinations';
+import { AIService } from '../services/AIService';
+import { SSDIntakeView } from './SSDIntakeView';
+import { BubuMovedHint } from '../components/BubuMovedHint';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS Features/Capture/CaptureHomeView.swift）
 // 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（里程碑/成长/故事/今日一问）
@@ -40,12 +43,8 @@ export struct HomeView {
   @State photoMap: Map<string, string> = new Map();
   // 统计
   @State photoCount: number = 0;
-  @State healthCount: number = 0;
-  @State milestoneTotal: number = 0;
-  @State milestoneDoneCount: number = 0;
-  @State storyChapterCount: number = 0;
   @State pendingSyncCount: number = 0;
-  @State growthMeasurements: GrowthMeasurement[] = [];
+  @State ssdCandidateCount: number = 0;
   // 快速记录业务模型（对照 iOS @State model: CaptureModel?）。
   @State model: CaptureModel = new CaptureModel(ServerConfig.shared.currentRole);
   // 底栏中央「记录」键触发计数（对照 iOS quickCaptureTrigger）。RootPage 自增 → 打开快速记录。
@@ -114,11 +113,6 @@ export struct HomeView {
     const milestones = await AppDatabase.shared.fetchMilestones() ?? [];
     const capsules = await AppDatabase.shared.fetchCapsules() ?? [];
     this.photoCount = photos.length;
-    this.healthCount = health.length;
-    this.growthMeasurements = growth;
-    this.milestoneTotal = milestones.length;
-    this.milestoneDoneCount = milestones.filter(m => m.happenedAt !== undefined).length;
-    this.storyChapterCount = milestones.filter(m => m.happenedAt !== undefined && (m.detail ?? '').trim().length > 0).length;
     this.pendingSyncCount =
       this.entries.filter(e => e.syncState !== SyncState.synced).length +
       health.filter(h => h.syncState !== SyncState.synced).length +
@@ -135,6 +129,19 @@ export struct HomeView {
       }
     }
     this.photoMap = map;
+    this.refreshSSDIntake();
+  }
+
+  private async refreshSSDIntake(): Promise<void> {
+    if (!ServerConfig.shared.isConfigured || ServerConfig.shared.aiBaseURLString.trim().length === 0) {
+      this.ssdCandidateCount = 0;
+      return;
+    }
+    try {
+      this.ssdCandidateCount = (await AIService.shared.intakeCandidates()).length;
+    } catch (e) {
+      // 首页不因家庭 mini 离线而失败；进入同步/候选页时再显示具体错误。
+    }
   }
 
   private entryList(): Entry[] {
@@ -176,10 +183,6 @@ export struct HomeView {
 
   private isCompact(): boolean {
     return this.viewportW <= 0 || this.viewportW < 1500;
-  }
-
-  private isNarrow(): boolean {
-    return this.viewportW > 0 && this.viewportW < 320;
   }
 
   build() {
@@ -274,13 +277,10 @@ export struct HomeView {
           .layoutWeight(1)
       }
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
-    } else if (this.route === HomeRoute.birthday) {
-      Column() {
-        this.panelHeader('下个生日')
-        BirthdayCountdownView({ profile: this.profile })
-          .layoutWeight(1)
-      }
-      .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.route === HomeRoute.ssdIntake) {
+      SSDIntakeView({
+        onClose: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); }
+      })
     } else {
       this.homePage()
     }
@@ -293,10 +293,19 @@ export struct HomeView {
         Column({ space: this.isCompact() ? 10 : 12 }) {
           this.greetingRow()
           this.identityCardTop()
+          this.ssdCandidateCard()
           this.primaryActionDock()
-          this.dashboardGridTop()
-          this.recentMomentsSection()
-          this.onThisDaySection()
+          BubuMovedHint({
+            storageKey: 'bubu.moved.home.v2110',
+            message: '里程碑和成长数据搬到了「成长」，故事绘本搬到了「魔法屋」。'
+          })
+          if (this.entryList().length === 0) {
+            this.firstRecordEmptyState()
+          } else {
+            this.dailyQuestionStrip()
+            this.recentMomentsSection()
+            this.onThisDaySection()
+          }
           this.saveHealthStrip()
           // 给底部悬浮 Tab 栏与浮动按钮留出空间。
 	          Blank().height(this.isCompact() ? 142 : 130)
@@ -310,7 +319,7 @@ export struct HomeView {
       .backgroundColor(BubuColor.cream)
       .width('100%').height('100%')
 
-      // 一句话智能记录浮动按钮：对齐 iOS 1.2.0，手机/折叠屏都保留轻量入口。
+      // 一句话智能记录浮动按钮：手机端保留轻量入口。
       this.naturalCaptureFloatingButton()
 
       // 保存成功贴纸（对照 iOS savedToast）。
@@ -371,6 +380,24 @@ export struct HomeView {
     }
     .width('100%')
     .padding({ top: this.isCompact() ? 0 : 2 })
+  }
+
+  @Builder
+  ssdCandidateCard() {
+    if (this.ssdCandidateCount > 0) {
+      Row({ space: 12 }) {
+        BubuIconBadge({ name: BubuIconName.checkCloud, badgeSize: 42, iconSize: 21,
+          color: BubuColor.primary, fill: BubuColor.softFill, radius: 14, strokeWidth: 2.2 })
+        Column({ space: 3 }) {
+          Text(`移动硬盘有 ${this.ssdCandidateCount} 段待确认`)
+            .fontSize(14).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+          Text('确认以后才会进入正式时光').fontSize(11).fontColor(BubuColor.secondaryText)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text('去确认 ›').fontSize(12).fontWeight(FontWeight.Bold).fontColor(BubuColor.primary)
+      }
+      .width('100%').padding(14).backgroundColor(BubuColor.card).borderRadius(20)
+      .onClick(() => { this.navigate(HomeRoute.ssdIntake); })
+    }
   }
 
   @Builder
@@ -518,244 +545,49 @@ export struct HomeView {
     .onClick(action)
   }
 
-  // MARK: 紧凑四宫格 — 里程碑 / 成长数据 / 故事 / 今日一问（对照 iOS dashboardGridTop）
-
   @Builder
-	  dashboardGridTop() {
-	    if (this.isNarrow()) {
-	      Column({ space: 10 }) {
-	        this.constellationTile()
-	        this.growthTile()
-	        this.storyTile()
-	        this.dailyQuestionTile()
-	      }
-	      .width('100%')
-	    } else {
-	      Column({ space: 10 }) {
-	        Row({ space: 10 }) {
-	          this.constellationTile()
-	          this.growthTile()
-	        }.width('100%')
-	        Row({ space: 10 }) {
-	          this.storyTile()
-	          this.dailyQuestionTile()
-	        }.width('100%')
-	      }
-	      .width('100%')
-	    }
-	  }
-
-  @Builder
-  tileSurface(fill: string) {
-    // 占位：实际内容由各 tile 自行铺，这里仅留作样式约定参考。
-  }
-
-  @Builder
-  constellationTile() {
-    Column({ space: 6 }) {
-      Row({ space: 8 }) {
-        BubuIconBadge({
-          name: BubuIconName.sparkles,
-          badgeSize: 38,
-          iconSize: 16,
-          color: BubuColor.deepRose,
-          fill: '#61FFC2D6',
-          radius: 19,
-          strokeWidth: 1.8,
-          filled: true
-        })
-        Column({ space: 2 }) {
-          Text('里程碑')
-            .fontSize(14)
-            .fontWeight(FontWeight.Bolder)
-            .fontColor(BubuColor.warmBrown)
-          Text(`${this.milestoneDoneCount}/${Math.max(this.milestoneTotal, 1)} 颗`)
-            .fontSize(11)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(BubuColor.deepRose)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-      }
-      .width('100%')
-      // 迷你星座装饰（对照 iOS BubuMiniConstellation）。
-      Row({ space: 6 }) {
-        ForEach([0, 1, 2, 3, 4], (i: number) => {
-          BubuIcon({
-            name: BubuIconName.star,
-            iconSize: 14,
-            color: i < this.milestoneDoneCount ? BubuColor.butter : BubuColor.secondaryText,
-            strokeWidth: 1.6,
-            filled: i < this.milestoneDoneCount
-          })
-        }, (i: number) => `star-${i}`)
-      }
-    }
-    .layoutWeight(1)
-    .height(this.isCompact() ? 96 : 104)
-    .padding(this.isCompact() ? 10 : 12)
-    .justifyContent(FlexAlign.Center)
-    .alignItems(HorizontalAlign.Start)
-    .backgroundColor(BubuColor.card)
-    .borderRadius(24)
-    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => { this.openMilestones(); })
-  }
-
-  @Builder
-  growthTile() {
-    Column({ space: this.isCompact() ? 4 : 6 }) {
-      Row({ space: 6 }) {
-        this.growthStat('身高', 'height', 'cm')
-        this.growthStat('体重', 'weight', 'kg')
-      }.width('100%')
-      // 渐升 bar（装饰，对照 iOS growthBars）。
-      Row({ space: 4 }) {
-        ForEach([40, 55, 62, 70, 76, 88, 100], (h: number, i: number) => {
-          Column()
-            .layoutWeight(1)
-            .height((this.isCompact() ? 24 : 30) * h / 100)
-            .backgroundColor(i === 6 ? BubuColor.primary : BubuColor.peach)
-            .borderRadius(3)
-        }, (h: number, i: number) => `bar-${i}`)
-      }
-      .height(this.isCompact() ? 24 : 30)
-      .alignItems(VerticalAlign.Bottom)
-      .width('100%')
-      Text('成长数据')
-        .fontSize(11)
-        .fontColor(BubuColor.secondaryText)
-    }
-    .layoutWeight(1)
-    .height(this.isCompact() ? 96 : 104)
-    .padding(this.isCompact() ? 12 : 14)
-    .alignItems(HorizontalAlign.Start)
-    .backgroundColor(BubuColor.card)
-    .borderRadius(24)
-    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => {
-      this.navigate(HomeRoute.growth);
-    })
-  }
-
-  @Builder
-  growthStat(title: string, kind: 'height' | 'weight', unit: string) {
-    Column({ space: 1 }) {
-      Text(title)
-        .fontSize(11)
-        .fontColor(BubuColor.secondaryText)
-      Row({ space: 1 }) {
-        Text(this.latestGrowthValue(kind))
-          .fontSize(this.isCompact() ? 17 : 19)
-          .fontWeight(FontWeight.Bolder)
-          .fontColor(BubuColor.warmBrown)
-        Text(unit)
-          .fontSize(this.isCompact() ? 11 : 12)
-          .fontColor(BubuColor.warmBrown)
-      }
-      .alignItems(VerticalAlign.Bottom)
-    }
-    .layoutWeight(1)
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  private latestGrowthValue(kind: 'height' | 'weight'): string {
-    const ordered = this.growthMeasurements
-      .slice()
-      .sort((a: GrowthMeasurement, b: GrowthMeasurement) => b.measuredAt - a.measuredAt);
-    for (const g of ordered) {
-      const value = kind === 'height' ? g.heightCm : g.weightKg;
-      if (value !== undefined && value !== null) {
-        return Math.round(value) === value ? `${Math.round(value)}` : value.toFixed(1);
-      }
-    }
-    return '—';
-  }
-
-  @Builder
-  storyTile() {
-    Row({ space: 10 }) {
-      BubuIconBadge({
-        name: BubuIconName.sparkles,
-        badgeSize: 46,
-        iconSize: 24,
-        color: BubuColor.deepRose,
-        fill: '#FFFFFF',
-        radius: 13,
-        strokeWidth: 2,
-        filled: true
-      })
-      Column({ space: 3 }) {
-        Text('故事绘本')
-          .fontSize(14)
-          .fontWeight(FontWeight.Bolder)
-          .fontColor(BubuColor.warmBrown)
-        Text(this.storyHeadline())
-          .fontSize(12)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(BubuColor.deepRose)
-        Text('自动编成故事')
-          .fontSize(10)
-          .fontColor(BubuColor.secondaryText)
-          .maxLines(1)
+  dailyQuestionStrip() {
+    Row({ space: 11 }) {
+      BubuMascotBadge({ badgeSize: 34, expression: BubuExpression.surprised })
+      Column({ space: 2 }) {
+        Text('今日一问').fontSize(14).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+        Text(DailyQuestion.todays(this.profile ? this.profile!.birthday : undefined))
+          .fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2)
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
+      Text('答一句')
+        .fontSize(12).fontWeight(FontWeight.Bold).fontColor(Color.White)
+        .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+        .backgroundColor(BubuColor.primary).borderRadius(16)
     }
-    .layoutWeight(1)
-    .height(this.isCompact() ? 96 : 104)
-    .padding(this.isCompact() ? 10 : 12)
-    .justifyContent(FlexAlign.Center)
-    .linearGradient({
-      angle: 135,
-      colors: [[BubuColor.butter, 0.0], [BubuColor.peach, 0.5], [BubuColor.pink, 1.0]]
-    })
-    .borderRadius(24)
-    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
-    .onClick(() => {
-      this.navigate(HomeRoute.timeline);
-    })
-  }
-
-  @Builder
-  dailyQuestionTile() {
-    Row({ space: 9 }) {
-      BubuMascotBadge({ badgeSize: 38, expression: BubuExpression.surprised })
-      Column({ space: 3 }) {
-        Text('今日一问')
-          .fontSize(14)
-          .fontWeight(FontWeight.Bolder)
-          .fontColor(BubuColor.warmBrown)
-        Text('答一句就成时光')
-          .fontSize(11)
-          .fontColor(BubuColor.secondaryText)
-          .maxLines(1)
-        Text('记录')
-          .fontSize(10)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-          .backgroundColor(BubuColor.primary)
-          .borderRadius(10)
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-    }
-    .layoutWeight(1)
-    .height(this.isCompact() ? 96 : 104)
-    .padding(this.isCompact() ? 10 : 12)
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor(BubuColor.card)
-    .borderRadius(24)
-    .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .backgroundColor('#F2FFFFFF').borderRadius(22)
+    .accessibilityText(`今日一问，${DailyQuestion.todays(this.profile ? this.profile!.birthday : undefined)}`)
     .onClick(() => {
       const birthday = this.profile ? this.profile!.birthday : undefined;
       this.startQuickCapture(`【今日一问】${DailyQuestion.todays(birthday)}\n`);
     })
   }
 
-  private storyHeadline(): string {
-    return this.storyChapterCount > 0 ? `已写到第 ${Math.min(this.storyChapterCount, 99)} 篇` : '翻开第一页';
+  @Builder
+  firstRecordEmptyState() {
+    Column({ space: 14 }) {
+      BubuMascotBadge({ badgeSize: 76, expression: BubuExpression.happy })
+      Text(`给${this.profile?.name ?? '布布'}记第一笔`)
+        .fontSize(20).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+      Text('一张照片、一句话，或者按住说一段。\n以后这里会长成她的时光轴。')
+        .fontSize(13).fontColor(BubuColor.secondaryText).textAlign(TextAlign.Center)
+      Text('记第一笔')
+        .fontSize(16).fontWeight(FontWeight.Bolder).fontColor(Color.White)
+        .padding({ left: 34, right: 34, top: 14, bottom: 14 })
+        .backgroundColor(BubuColor.primary).borderRadius(24)
+        .onClick(() => { this.startQuickCapture(); })
+    }
+    .width('100%')
+    .padding({ left: 18, right: 18, top: 34, bottom: 34 })
+    .backgroundColor('#F2FFFFFF').borderRadius(28)
   }
 
   // MARK: 最近时光（行卡，对照 iOS recentMomentsSection）

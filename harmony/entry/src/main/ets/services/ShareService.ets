@@ -15,6 +15,12 @@ export class ShareService {
     await ShareService.share(context, path, title, 'general.image', '布布时光机成长分享卡');
   }
 
+  static async shareMedia(context: common.UIAbilityContext, path: string, title: string,
+                          isVideo: boolean): Promise<void> {
+    await ShareService.share(context, path, title, isVideo ? 'general.video' : 'general.image',
+      isVideo ? '布布时光机视频' : '布布时光机照片');
+  }
+
   private static async share(context: common.UIAbilityContext, path: string, title: string,
                              utd: string, description: string): Promise<void> {
     const record: systemShare.SharedRecord = {

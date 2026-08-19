@@ -7,8 +7,6 @@ import { MembersView } from './MembersView';
 import { AccountView } from './AccountView';
 import { WhatsNewView } from './WhatsNewView';
 import { ChildProfileView } from './ChildProfileView';
-import { HealthHomeView } from './HealthHomeView';
-import { VoiceArchiveView } from './VoiceArchiveView';
 import { ThemeSettingsView } from './ThemeSettingsView';
 import { YearbookView } from './YearbookView';
 import { ExportView } from './ExportView';
@@ -18,6 +16,7 @@ import { PhotoInboxView } from './PhotoInboxView';
 import { PhotoFrameView } from './PhotoFrameView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { promptAction } from '@kit.ArkUI';
+import { BubuMovedHint } from '../components/BubuMovedHint';
 
 @Extend(Row)
 function settingRow() {
@@ -41,9 +40,7 @@ export struct SettingsView {
   @State showAccount: boolean = false;
   @State showWhatsNew: boolean = false;
   @State showProfile: boolean = false;
-  @State showHealth: boolean = false;
   @State showAdvanced: boolean = false;
-  @State showVoiceArchive: boolean = false;
   @State showTheme: boolean = false;
   @State showYearbook: boolean = false;
   @State showExport: boolean = false;
@@ -73,12 +70,8 @@ export struct SettingsView {
       this.whatsNewPage()
     } else if (this.showProfile) {
       this.profilePage()
-    } else if (this.showHealth) {
-      this.healthPage()
     } else if (this.showAdvanced) {
       this.advancedPage()
-    } else if (this.showVoiceArchive) {
-      this.voiceArchivePage()
     } else if (this.showTheme) {
       this.themePage()
     } else if (this.showYearbook) {
@@ -191,28 +184,6 @@ export struct SettingsView {
   }
 
   @Builder
-  healthPage() {
-    Column() {
-      Row({ space: 12 }) {
-        Button('返回')
-          .backgroundColor('#F3F3F3')
-          .fontColor(BubuColor.warmBrown)
-          .onClick(() => { this.showHealth = false; })
-        Text('健康记录')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(BubuColor.warmBrown)
-        Blank()
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 8 })
-      HealthHomeView()
-        .layoutWeight(1)
-    }
-    .width('100%').height('100%').backgroundColor(BubuColor.cream)
-  }
-
-  @Builder
   mainPage() {
     Scroll() {
       Column({ space: 18 }) {
@@ -263,6 +234,11 @@ export struct SettingsView {
         .borderRadius(20)
         .onClick(() => { this.showMembers = true; })
 
+        BubuMovedHint({
+          storageKey: 'bubu.moved.settings.v2110',
+          message: '「健康」在首页和成长页，「成长之声」在魔法屋的声音分区。设置只留配置。'
+        })
+
         this.bubuGroup()
         this.familyGroup()
         this.appearanceGroup()
@@ -289,11 +265,6 @@ export struct SettingsView {
   @Builder
   advancedPage() {
     AdvancedSettingsView({ onClose: () => { this.showAdvanced = false; this.aboutToAppear(); } })
-  }
-
-  @Builder
-  voiceArchivePage() {
-    VoiceArchiveView({ onClose: () => { this.showVoiceArchive = false; } })
   }
 
   @Builder
@@ -349,8 +320,6 @@ export struct SettingsView {
         .padding({ left: 6 })
       Column({ space: 0 }) {
         this.navRow('布布的档案', '👧', '生日、性别、血型、头像和首页背景', () => { this.showProfile = true; })
-        this.navRow('成长之声', '🎙️', '按一岁一岁收好布布的声音和家人寄语', () => { this.showVoiceArchive = true; })
-        this.navRow('健康记录', '🩺', '餐食、零食、营养补充、睡眠和不舒服', () => { this.showHealth = true; })
       }
       .width('100%')
       .padding({ top: 4, bottom: 4 })

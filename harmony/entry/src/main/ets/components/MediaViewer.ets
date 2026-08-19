@@ -3,6 +3,12 @@ import { MediaType } from '../models/Enums';
 import { MediaStore } from '../services/MediaStore';
 import { BubuColor } from '../theme/BubuTheme';
 import { VoicePlayerBubble } from './VoiceComponents';
+import { APIClient } from '../services/APIClient';
+import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
+import { common } from '@kit.AbilityKit';
+import { MediaLibraryService } from '../services/MediaLibraryService';
+import { ShareService } from '../services/ShareService';
 
 // MARK: - 媒体相册查看器（对照 iOS DesignSystem/Components/MediaViewer.swift MediaGalleryViewer）
 // 全屏黑底；左右滑动切换媒体（iOS TabView .page → ArkUI Swiper）；
@@ -16,6 +22,9 @@ export struct MediaGalleryViewer {
   onDismiss?: () => void;
 
   @State private selectedIndex: number = 0;
+  @State private remotePaths: Map<string, string> = new Map();
+  @State private toastText: string = '';
+  private swiperController: SwiperController = new SwiperController();
 
   aboutToAppear(): void {
     const idx = this.mediaItems.findIndex((m: Media) => m.id === this.initialMediaID);
@@ -33,9 +42,14 @@ export struct MediaGalleryViewer {
             Text('没有可查看的媒体').fontSize(16).fontColor(Color.White)
           }
         } else {
-          Swiper() {
+          Swiper(this.swiperController) {
             ForEach(this.mediaItems, (media: Media) => {
-              MediaPageView({ media: media })
+              MediaPageView({
+                media: media,
+                onSwipePage: (direction: number): void => { this.turnPage(direction); },
+                onRemoteReady: (id: string, path: string): void => { this.setRemotePath(id, path); },
+                onRemoteRemoved: (id: string): void => { this.removeRemotePath(id); }
+              })
                 .width('100%')
                 .height('100%')
             }, (media: Media) => media.id)
@@ -43,6 +57,7 @@ export struct MediaGalleryViewer {
           .index(this.selectedIndex)
           .loop(false)
           .indicator(false)
+          .cachedCount(1)
           .width('100%')
           .height('100%')
           .onChange((index: number) => { this.selectedIndex = index; })
@@ -56,6 +71,17 @@ export struct MediaGalleryViewer {
       // 关闭按钮 + 底部页码/提示
       Column() {
         Row() {
+          if (this.currentPath().length > 0) {
+            Text('保存').fontSize(13).fontWeight(FontWeight.Bold).fontColor(Color.White)
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .backgroundColor('#73000000').borderRadius(18)
+              .accessibilityText('存到系统相册')
+              .onClick(() => { this.saveCurrent(); })
+            Text('分享').fontSize(13).fontWeight(FontWeight.Bold).fontColor(Color.White)
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .backgroundColor('#73000000').borderRadius(18).margin({ left: 8 })
+              .onClick(() => { this.shareCurrent(); })
+          }
           Blank()
           Text('✕')
             .fontSize(15)
@@ -70,6 +96,12 @@ export struct MediaGalleryViewer {
         }
         .width('100%')
         .padding({ left: 18, right: 18, top: 12 })
+
+        if (this.toastText.length > 0) {
+          Text(this.toastText).fontSize(13).fontWeight(FontWeight.Bold).fontColor(Color.White)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .backgroundColor('#8C000000').borderRadius(18).margin({ top: 8 })
+        }
 
         Blank()
 
@@ -100,12 +132,86 @@ export struct MediaGalleryViewer {
     .width('100%')
     .height('100%')
   }
+
+  private turnPage(direction: number): void {
+    if (direction > 0 && this.selectedIndex < this.mediaItems.length - 1) {
+      this.swiperController.showNext();
+    } else if (direction < 0 && this.selectedIndex > 0) {
+      this.swiperController.showPrevious();
+    }
+  }
+
+  private currentMedia(): Media | undefined { return this.mediaItems[this.selectedIndex]; }
+
+  private currentPath(): string {
+    const media = this.currentMedia();
+    if (!media) return '';
+    const local = media.localFileName;
+    if (local && MediaStore.shared.exists(local)) return MediaStore.shared.fullPath(local);
+    return this.remotePaths.get(media.id) ?? '';
+  }
+
+  private setRemotePath(id: string, path: string): void {
+    const next = new Map(this.remotePaths);
+    next.set(id, path);
+    this.remotePaths = next;
+  }
+
+  private removeRemotePath(id: string): void {
+    const next = new Map(this.remotePaths);
+    next.delete(id);
+    this.remotePaths = next;
+  }
+
+  private async saveCurrent(): Promise<void> {
+    const media = this.currentMedia();
+    const path = this.currentPath();
+    if (!media || path.length === 0) return;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const saved = await MediaLibraryService.save(context, path, media.typeRaw === MediaType.video);
+      this.showToast(saved ? '已存到系统相册 ✓' : '已取消保存');
+    } catch (e) {
+      this.showToast('没存成功，请稍后重试');
+    }
+  }
+
+  private async shareCurrent(): Promise<void> {
+    const media = this.currentMedia();
+    const path = this.currentPath();
+    if (!media || path.length === 0) return;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await ShareService.shareMedia(context, path, '布布时光', media.typeRaw === MediaType.video);
+    } catch (e) {
+      this.showToast('暂时没能打开分享');
+    }
+  }
+
+  private showToast(message: string): void {
+    this.toastText = message;
+    setTimeout(() => { if (this.toastText === message) this.toastText = ''; }, 2000);
+  }
 }
 
 // MARK: - 单页媒体（对照 iOS MediaPageView）
 @Component
 struct MediaPageView {
   @Require @Prop media: Media;
+  onSwipePage: (direction: number) => void = () => {};
+  onRemoteReady: (id: string, path: string) => void = () => {};
+  onRemoteRemoved: (id: string) => void = () => {};
+  @State private remoteFilePath: string = '';
+  @State private remoteLoading: boolean = false;
+  @State private remoteError: string = '';
+  private pageVisible: boolean = false;
+
+  aboutToAppear(): void {
+    this.pageVisible = true;
+    if (!this.hasLocalFile() && (this.media.remoteURL?.length ?? 0) > 0) this.loadRemote();
+  }
+
+  aboutToDisappear(): void { this.pageVisible = false; this.cleanupRemote(); }
 
   private mediaType(): MediaType {
     return this.media.typeRaw as MediaType;
@@ -117,9 +223,7 @@ struct MediaPageView {
     if (local !== undefined && local.length > 0 && MediaStore.shared.exists(local)) {
       return `file://${MediaStore.shared.fullPath(local)}`;
     }
-    // NOTE: 远端图片在 iOS 走 APIClient.downloadFile 鉴权下载；本切片仅支持本地与裸 remoteURL。
-    const remote = this.media.remoteURL;
-    return remote !== undefined ? remote : '';
+    return this.remoteFilePath.length > 0 ? `file://${this.remoteFilePath}` : '';
   }
 
   private videoSrc(): string {
@@ -127,8 +231,7 @@ struct MediaPageView {
     if (local !== undefined && local.length > 0 && MediaStore.shared.exists(local)) {
       return `file://${MediaStore.shared.fullPath(local)}`;
     }
-    const remote = this.media.remoteURL;
-    return remote !== undefined ? remote : '';
+    return this.remoteFilePath.length > 0 ? `file://${this.remoteFilePath}` : '';
   }
 
   build() {
@@ -144,7 +247,9 @@ struct MediaPageView {
   @Builder
   photoPage() {
     if (this.photoSrc().length > 0) {
-      ZoomableImage({ src: this.photoSrc() })
+      ZoomableImage({ src: this.photoSrc(), onSwipePage: this.onSwipePage })
+    } else if ((this.media.remoteURL?.length ?? 0) > 0) {
+      this.remotePlaceholder('照片')
     } else {
       this.missing('本地照片文件找不到了')
     }
@@ -158,6 +263,8 @@ struct MediaPageView {
         .objectFit(ImageFit.Contain)
         .width('100%')
         .height('100%')
+    } else if ((this.media.remoteURL?.length ?? 0) > 0) {
+      this.remotePlaceholder('视频')
     } else {
       this.missing('本地视频文件找不到了')
     }
@@ -197,6 +304,56 @@ struct MediaPageView {
     .height('100%')
     .justifyContent(FlexAlign.Center)
   }
+
+  @Builder
+  remotePlaceholder(kind: string) {
+    Column({ space: 12 }) {
+      if (this.remoteLoading) {
+        LoadingProgress().width(36).height(36).color(Color.White)
+        Text(`${kind}正在下载…`).fontSize(15).fontColor('#D9FFFFFF')
+      } else {
+        Text(this.remoteError.length > 0 ? this.remoteError : `${kind}还没下载好`)
+          .fontSize(15).fontColor('#D9FFFFFF')
+        Button('重试').fontColor(Color.White).backgroundColor('#29FFFFFF')
+          .onClick(() => { this.loadRemote(); })
+      }
+    }.width('100%').height('100%').justifyContent(FlexAlign.Center)
+  }
+
+  private hasLocalFile(): boolean {
+    const local = this.media.localFileName;
+    return local !== undefined && local.length > 0 && MediaStore.shared.exists(local);
+  }
+
+  private async loadRemote(): Promise<void> {
+    const remote = this.media.remoteURL ?? '';
+    if (remote.length === 0 || this.remoteLoading || this.remoteFilePath.length > 0) return;
+    this.remoteLoading = true;
+    this.remoteError = '';
+    const extension = this.mediaType() === MediaType.video ? 'mp4' : 'jpg';
+    const destination = MediaStore.shared.fullPath(`viewer_${util.generateRandomUUID(true)}.${extension}`);
+    try {
+      const path = await APIClient.shared.downloadFile(remote, destination);
+      if (!this.pageVisible) {
+        try { if (fileIo.accessSync(path)) fileIo.unlinkSync(path); } catch (cleanupError) {}
+        return;
+      }
+      this.remoteFilePath = path;
+      this.onRemoteReady(this.media.id, path);
+    } catch (e) {
+      try { if (fileIo.accessSync(destination)) fileIo.unlinkSync(destination); } catch (cleanupError) {}
+      this.remoteError = `${this.mediaType() === MediaType.video ? '视频' : '照片'}下载失败，请稍后重试`;
+    } finally {
+      this.remoteLoading = false;
+    }
+  }
+
+  private cleanupRemote(): void {
+    if (this.remoteFilePath.length === 0) return;
+    try { if (fileIo.accessSync(this.remoteFilePath)) fileIo.unlinkSync(this.remoteFilePath); } catch (e) {}
+    this.onRemoteRemoved(this.media.id);
+    this.remoteFilePath = '';
+  }
 }
 
 // MARK: - 可缩放图片（对照 iOS ZoomableImageView / ZoomingImageScrollView）
@@ -204,9 +361,14 @@ struct MediaPageView {
 @Component
 struct ZoomableImage {
   @Require @Prop src: string;
+  onSwipePage: (direction: number) => void = () => {};
 
   @State private scaleValue: number = 1;
+  @State private offsetX: number = 0;
+  @State private offsetY: number = 0;
   private baseScale: number = 1;
+  private baseOffsetX: number = 0;
+  private baseOffsetY: number = 0;
   private readonly minScale: number = 1;
   private readonly maxScale: number = 5;
   private readonly doubleTapScale: number = 2.8;
@@ -217,6 +379,7 @@ struct ZoomableImage {
       .width('100%')
       .height('100%')
       .scale({ x: this.scaleValue, y: this.scaleValue })
+      .translate({ x: this.offsetX, y: this.offsetY })
       .gesture(
         // 捏合缩放（对照 iOS minimumZoomScale 1 / maximumZoomScale 5）。
         PinchGesture()
@@ -225,14 +388,48 @@ struct ZoomableImage {
             const next = this.baseScale * event.scale;
             this.scaleValue = Math.max(this.minScale, Math.min(this.maxScale, next));
           })
+          .onActionEnd(() => {
+            if (this.scaleValue <= 1.01) this.resetPosition();
+          })
       )
       .gesture(
         TapGesture({ count: 2 })
           .onAction(() => {
             this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
               this.scaleValue = this.scaleValue > 1.01 ? this.minScale : this.doubleTapScale;
+              if (this.scaleValue === this.minScale) {
+                this.offsetX = 0;
+                this.offsetY = 0;
+              }
             });
           })
       )
+      // 图片子组件会优先识别手势，原先 Pinch/Tap 抢走了 Swiper 的横滑。
+      // 这里明确处理单指横滑：1× 时翻页，放大后平移图片，不再让两个手势互相阻塞。
+      .priorityGesture(
+        PanGesture({ fingers: 1, direction: PanDirection.All, distance: 8 })
+          .onActionStart(() => {
+            this.baseOffsetX = this.offsetX;
+            this.baseOffsetY = this.offsetY;
+          })
+          .onActionUpdate((event: GestureEvent) => {
+            if (this.scaleValue <= 1.01) return;
+            const pan = event as PanGestureEvent;
+            this.offsetX = this.baseOffsetX + pan.offsetX;
+            this.offsetY = this.baseOffsetY + pan.offsetY;
+          })
+          .onActionEnd((event: GestureEvent) => {
+            if (this.scaleValue > 1.01) return;
+            const pan = event as PanGestureEvent;
+            if (pan.offsetX <= -36) this.onSwipePage(1);
+            else if (pan.offsetX >= 36) this.onSwipePage(-1);
+          })
+      )
+  }
+
+  private resetPosition(): void {
+    this.scaleValue = 1;
+    this.offsetX = 0;
+    this.offsetY = 0;
   }
 }

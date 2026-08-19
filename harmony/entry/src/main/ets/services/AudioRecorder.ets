@@ -1,10 +1,11 @@
 import { media } from '@kit.MediaKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { MediaStore } from './MediaStore';
 import { BubuActivityController } from './BubuActivityController';
 import { ServerConfig } from './ServerConfig';
+import { PermissionService } from './PermissionService';
 
 const DOMAIN = 0x0000;
 
@@ -56,11 +57,7 @@ export class AudioRecorder {
   // AVAudioApplication.requestRecordPermission → HarmonyOS abilityAccessCtrl 申请 MICROPHONE。
   async requestPermission(context: common.UIAbilityContext): Promise<boolean> {
     try {
-      const mgr = abilityAccessCtrl.createAtManager();
-      const perms: Permissions[] = ['ohos.permission.MICROPHONE'];
-      const result = await mgr.requestPermissionsFromUser(context, perms);
-      const granted = result.authResults;
-      return granted.length > 0 && granted[0] === 0;
+      return await PermissionService.request(context, 'ohos.permission.MICROPHONE');
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `麦克风授权失败: ${JSON.stringify(e)}`);
       return false;

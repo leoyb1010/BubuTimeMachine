@@ -21,16 +21,16 @@ export class AppVersion {
     }
   }
 
-  /// 营销版本号，如 "1.2.0"（对照 CFBundleShortVersionString）。
+  /// 营销版本号，如 "2.11.0"（对照 CFBundleShortVersionString）。
   static get marketing(): string { return AppVersion.cachedMarketing; }
 
   /// 构建号，如 "2026061303"（对照 CFBundleVersion）。
   static get build(): string { return AppVersion.cachedBuild; }
 
-  /// 展示用："v1.2.0"。
+  /// 展示用："v2.11.0"。
   static get displayShort(): string { return 'v' + AppVersion.cachedMarketing; }
 
-  /// 展示用（带构建号）："v1.2.0 (2026061303)"。
+  /// 展示用（带构建号）："v2.11.0 (2026081901)"。
   static get displayFull(): string {
     return 'v' + AppVersion.cachedMarketing + ' (' + AppVersion.cachedBuild + ')';
   }

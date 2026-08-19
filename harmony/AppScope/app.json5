@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.bubu.timemachine",
     "vendor": "bubu",
-    "versionCode": 2026061312,
-    "versionName": "1.2.0",
+    "versionCode": 2026081901,
+    "versionName": "2.11.0",
     "icon": "$media:app_icon",
     "alternateIcons": [
       { "name": "AppIcon-sky", "icon": "$media:app_icon_sky" },
