@@ -1,4 +1,4 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { AppDatabase } from '../data/AppDatabase';
@@ -12,6 +12,7 @@ import { PhotoIntakeService } from '../services/PhotoIntakeService';
 import { AIService } from '../services/AIService';
 import '../intent/OpenBubuIntent';
 import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
+import { ThemeManager } from '../theme/ThemeManager';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -24,6 +25,10 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, 'Bubu', 'EntryAbility onDestroy');
+  }
+
+  onConfigurationUpdate(newConfig: Configuration): void {
+    ThemeManager.shared.updateSystemColorMode(newConfig.colorMode);
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {

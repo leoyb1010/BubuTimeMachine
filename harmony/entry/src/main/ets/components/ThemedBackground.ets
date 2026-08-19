@@ -4,7 +4,6 @@
 // SwiftUI ZStack → ArkUI Stack；LinearGradient → .linearGradient。
 
 import { ThemeManager, BackgroundStyleKind } from '../theme/ThemeManager';
-import { BubuColor } from '../theme/BubuTheme';
 import { BubuBlobBackground } from './MacaronComponents';
 import { PaperTextureOverlay } from './PaperTextureOverlay';
 
@@ -16,9 +15,7 @@ export struct ThemedBackground {
   build() {
     Stack() {
       // 1) 主题背景（纯色或双色渐变；深色主题用暖黑底）。
-      if (this.theme.theme.isDark) {
-        Column().width('100%').height('100%').backgroundColor(BubuColor.background)
-      } else if (this.theme.theme.backgroundStyle.kind === BackgroundStyleKind.gradient) {
+      if (this.theme.theme.backgroundStyle.kind === BackgroundStyleKind.gradient) {
         Column()
           .width('100%').height('100%')
           .linearGradient({

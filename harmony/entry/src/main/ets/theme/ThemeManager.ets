@@ -4,7 +4,7 @@
 // 持久化到 preferences（对照 iOS UserDefaults），全局单例注入。
 
 import { preferences } from '@kit.ArkData';
-import type { common } from '@kit.AbilityKit';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { mixHex, BubuColor } from './BubuTheme';
 
 // MARK: 背景样式（对照 iOS BackgroundStyle）
@@ -140,12 +140,20 @@ export class ThemeManager {
   private static readonly heroKey = 'bubu.theme.heroMode';
 
   private store: preferences.Preferences | null = null;
+  private context: common.UIAbilityContext | null = null;
+  private systemDark: boolean = false;
+  private renderTick: number = 0;
   currentThemeId: string = BubuThemeDefinition.defaultTheme.id;
   heroModeRaw: string = HeroBackgroundMode.theme;
 
   // 在 Ability 启动时调用一次，注入 context 完成初始化与回读。
   initialize(context: common.UIAbilityContext): void {
-    if (this.store) return;
+    this.context = context;
+    this.systemDark = context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    if (this.store) {
+      this.applyColorMode();
+      return;
+    }
     try {
       this.store = preferences.getPreferencesSync(context, { name: ThemeManager.storeName });
       this.currentThemeId =
@@ -155,6 +163,7 @@ export class ThemeManager {
     } catch (e) {
       this.store = null;
     }
+    this.applyColorMode();
   }
 
   get theme(): BubuThemeDefinition {
@@ -174,8 +183,35 @@ export class ThemeManager {
   /// 选择主题并持久化（对照 iOS select）。动效切换交由 view 用 animateTo 包裹。
   select(theme: BubuThemeDefinition): void {
     this.currentThemeId = theme.id;
+    this.applyColorMode();
     this.persist(ThemeManager.themeKey, theme.id);
     // NOTE: HarmonyOS 桌面图标随主题切换机制不同，见 AppIconManager.ets。
+  }
+
+  updateSystemColorMode(mode: ConfigurationConstant.ColorMode | undefined): void {
+    if (this.theme.isDark || mode === undefined) return;
+    this.systemDark = mode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    BubuColor.setDarkMode(this.systemDark);
+    this.notifyThemeChanged();
+  }
+
+  private applyColorMode(): void {
+    const forceDark = this.theme.isDark;
+    BubuColor.setDarkMode(forceDark || this.systemDark);
+    const context = this.context;
+    if (context) {
+      try {
+        context.setColorMode(forceDark
+          ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+      } catch (e) {}
+    }
+    this.notifyThemeChanged();
+  }
+
+  private notifyThemeChanged(): void {
+    this.renderTick += 1;
+    AppStorage.setOrCreate('themeTick', this.renderTick);
   }
 
   private persist(key: string, value: string): void {
