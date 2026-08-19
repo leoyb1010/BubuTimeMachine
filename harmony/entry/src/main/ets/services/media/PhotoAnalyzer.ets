@@ -1,7 +1,7 @@
 import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { geoLocationManager } from '@kit.LocationKit';
-import { faceDetector } from '@kit.CoreVisionKit';
+import { faceDetector, objectDetection, visionBase } from '@kit.CoreVisionKit';
 
 const DOMAIN = 0x0000;
 
@@ -19,8 +19,7 @@ export interface PhotoAnalysis {
 // 全部端侧、零后端、隐私至上：
 // - EXIF：拍摄时间 + GPS 坐标（@kit.ImageKit image.ImageSource.getImageProperty）
 // - 地名：坐标 → 地名（HarmonyOS @kit.LocationKit geoLocationManager 反向地理编码）
-// - 标签/人脸：iOS 用 Vision（VNClassifyImageRequest / VNDetectFaceRectanglesRequest）。
-// - 人脸：Core Vision Kit faceDetector，失败时安全降级为 0。
+// - 标签/人脸：Core Vision Kit objectDetection / faceDetector，失败时安全降级为空。
 export class PhotoAnalyzer {
   static readonly shared = new PhotoAnalyzer();
 
@@ -133,11 +132,46 @@ export class PhotoAnalyzer {
 
   // MARK: 标签 / 人脸（端侧）
 
-  // iOS: classify(cgImage:) 用 VNClassifyImageRequest。
-  // NOTE: Vision→HiAI —— 当前用启发式 stub。返回空数组（无可靠端侧分类 API），
-  // 待 @kit.CoreVisionKit 稳定后替换为真正的场景分类，并经 localizedTag 映射中文。
+  // iOS 用 VNClassifyImageRequest；HarmonyOS 用 Core Vision 多目标识别的稳定内置标签集。
   private static async classify(source: image.ImageSource): Promise<string[]> {
-    return [];
+    let pixelMap: image.PixelMap | null = null;
+    let detector: objectDetection.ObjectDetector | null = null;
+    try {
+      pixelMap = await source.createPixelMap({
+        desiredSize: { width: 1024, height: 1024 },
+        desiredPixelFormat: image.PixelMapFormat.RGBA_8888
+      });
+      detector = await objectDetection.ObjectDetector.create();
+      const request: visionBase.Request = {
+        inputData: { pixelMap },
+        scene: visionBase.SceneMode.FOREGROUND
+      };
+      const response = await detector.process(request);
+      const tags = new Set<string>();
+      for (const object of response.objects) {
+        if (object.score < 0.6) continue;
+        for (const label of object.labels) {
+          const localized = PhotoAnalyzer.objectLabel(label);
+          if (localized) tags.add(localized);
+          if (tags.size >= 4) return Array.from(tags);
+        }
+      }
+      return Array.from(tags);
+    } catch (e) {
+      return [];
+    } finally {
+      if (detector) try { await detector.destroy(); } catch (e) {}
+      if (pixelMap) try { pixelMap.release(); } catch (e) {}
+    }
+  }
+
+  static objectLabel(label: number): string | undefined {
+    const labels: Record<number, string> = {
+      1: '小动物', 2: '植物', 3: '建筑', 5: '人像', 6: '桌子', 7: '文字',
+      8: '人物', 9: '猫咪', 10: '狗狗', 11: '美食', 12: '汽车', 13: '人物',
+      21: '文档', 22: '卡片'
+    };
+    return labels[label];
   }
 
   // iOS: countFaces(cgImage:) 用 VNDetectFaceRectanglesRequest。
