@@ -64,7 +64,7 @@ export struct HomeView {
   private onCaptureSignal(): void {
     if (this.captureSignal > this.handledCaptureSignal) {
       this.handledCaptureSignal = this.captureSignal;
-      this.startQuickCapture();
+      this.startQuickCapture(this.consumeIntentDraft());
     }
   }
 
@@ -90,7 +90,7 @@ export struct HomeView {
     if (this.captureSignal > this.handledCaptureSignal) {
       this.handledCaptureSignal = this.captureSignal;
       setTimeout(() => {
-        this.startQuickCapture();
+        this.startQuickCapture(this.consumeIntentDraft());
       }, 80);
     }
   }
@@ -149,6 +149,13 @@ export struct HomeView {
     setTimeout(() => {
       this.getUIContext().animateTo(BubuMotion.gentle, () => { this.route = HomeRoute.record; });
     }, 40);
+  }
+
+  private consumeIntentDraft(): string {
+    const value = AppStorage.get('bubuIntentDraft') as string | undefined;
+    const draft = value?.trim() ?? '';
+    if (draft.length > 0) AppStorage.setOrCreate('bubuIntentDraft', '');
+    return draft;
   }
 
   private navigate(route: HomeRoute): void {

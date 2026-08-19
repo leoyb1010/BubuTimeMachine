@@ -11,6 +11,7 @@ import { IosBaselineImporter } from '../bootstrap/IosBaselineImporter';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
 import { AIService } from '../services/AIService';
 import '../intent/OpenBubuIntent';
+import '../intent/RecordMomentIntent';
 import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 import { ThemeManager } from '../theme/ThemeManager';
 

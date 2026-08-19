@@ -32,6 +32,7 @@ struct RootPage {
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
   @StorageLink('bubuBackSignal') backSignal: number = 0;
   @StorageLink('bubuSimpleMode') simpleMode: boolean = false;
+  @StorageLink('bubuIntentDraft') @Watch('onIntentDraft') intentDraft: string = '';
 
   private whatsNewStore: preferences.Preferences | null = null;
 
@@ -47,6 +48,13 @@ struct RootPage {
     await WidgetRefresher.publishCurrentSnapshot(ctx);
     WidgetRefresher.reload(ctx);
     await this.maybeShowWhatsNew(ctx);
+    this.onIntentDraft();
+  }
+
+  private onIntentDraft(): void {
+    if (this.intentDraft.trim().length === 0 || !this.booted || !this.hasCompletedOnboarding) return;
+    this.selection = 0;
+    this.captureSignal = this.captureSignal + 1;
   }
 
   // 升级后首次启动弹更新内容；全新安装不弹（对照 iOS WhatsNewGate）。
@@ -102,6 +110,7 @@ struct RootPage {
         OnboardingView({ onComplete: () => {
           this.hasCompletedOnboarding = true;
           this.refreshWidget();
+          this.onIntentDraft();
         }})
       } else if (this.simpleMode) {
         SimpleModeView({ onExit: () => { this.simpleMode = false; } })
