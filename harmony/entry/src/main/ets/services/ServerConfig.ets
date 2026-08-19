@@ -25,6 +25,7 @@ export class ServerConfig {
   simpleModeEnabled: boolean = false;
   roleBeforeElderRaw: string = '';
   sleepStartedAt: number = 0;
+  timelineSortModeRaw: string = 'capture';
 
   private constructor() {}
 
@@ -41,6 +42,7 @@ export class ServerConfig {
     this.simpleModeEnabled = await this.getBool('simpleModeEnabled', isElderRole(this.currentRole));
     this.roleBeforeElderRaw = await this.getStr('roleBeforeElder', '');
     this.sleepStartedAt = await this.getNum('sleepStartedAt', 0);
+    this.timelineSortModeRaw = await this.getStr('timelineSortMode', 'capture');
     AppStorage.setOrCreate('bubuSimpleMode', this.simpleModeEnabled);
   }
 
@@ -92,6 +94,11 @@ export class ServerConfig {
     if (!this.store) return;
     await this.store.put('sleepStartedAt', value);
     await this.store.flush();
+  }
+
+  async setTimelineSortMode(value: string): Promise<void> {
+    this.timelineSortModeRaw = value === 'recorded' ? 'recorded' : 'capture';
+    await this.put('timelineSortMode', this.timelineSortModeRaw);
   }
 
   // 持久化服务器配置（地址/账号/密码）。

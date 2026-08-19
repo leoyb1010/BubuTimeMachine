@@ -37,6 +37,7 @@ export struct EntryDetailView {
   // 编辑态本地草稿（保存时落库）。
   @State private draftNote: string = '';
   @State private draftMood: Mood | undefined = undefined;
+  @State private draftHappenedAt: number = 0;
 
   @State private showCommentSheet: boolean = false;
   @State private showReactionPicker: boolean = false;
@@ -53,8 +54,11 @@ export struct EntryDetailView {
     this.media = await AppDatabase.shared.fetchMediaForEntry(this.entry.id);
     this.comments = await AppDatabase.shared.fetchCommentsForEntry(this.entry.id);
     this.voiceNotes = await AppDatabase.shared.fetchVoiceForEntry(this.entry.id);
-    this.draftNote = this.entry.note ?? '';
-    this.draftMood = this.entry.moodRaw as Mood | undefined;
+    if (!this.editing) {
+      this.draftNote = this.entry.note ?? '';
+      this.draftMood = this.entry.moodRaw as Mood | undefined;
+      this.draftHappenedAt = this.entry.happenedAt;
+    }
   }
 
   // 排序后的媒体（对照 iOS sortedMedia，按 createdAt 升序）。
@@ -262,9 +266,16 @@ export struct EntryDetailView {
   metaSection() {
     if (this.editing) {
       Column({ space: 12 }) {
-        // 发生时间只读展示（DatePicker 在切片中省略，保持时间不可误改）。
-        Text(`发生时间 · ${BubuDateFormat.shortDateTime(new Date(this.entry.happenedAt))}`)
-          .fontSize(15).fontColor(BubuColor.secondaryText)
+        Row({ space: 10 }) {
+          Text('发生时间').fontSize(15).fontColor(BubuColor.secondaryText)
+          Blank()
+          Button(BubuDateFormat.shortDate(new Date(this.draftHappenedAt)))
+            .backgroundColor(BubuColor.softFill).fontColor(this.theme())
+            .onClick(() => { this.pickHappenedDate(); })
+          Button(BubuDateFormat.shortTime(new Date(this.draftHappenedAt)))
+            .backgroundColor(BubuColor.softFill).fontColor(this.theme())
+            .onClick(() => { this.pickHappenedTime(); })
+        }.width('100%')
         MoodPicker({
           selection: this.draftMood,
           tint: this.theme(),
@@ -474,15 +485,40 @@ export struct EntryDetailView {
       await AppDatabase.shared.updateEntryFields(this.entry.id, {
         note: trimmed.length === 0 ? null : trimmed,
         moodRaw: this.draftMood ?? null,
+        happenedAt: this.draftHappenedAt,
         editedAt: now,
         syncState: SyncState.local
       });
       this.entry.note = trimmed.length === 0 ? undefined : trimmed;
       this.entry.moodRaw = this.draftMood;
+      this.entry.happenedAt = this.draftHappenedAt;
       this.entry.editedAt = now;
       this.entry.syncState = SyncState.local;
     }
     this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseInOut }, () => { this.editing = !this.editing; });
+  }
+
+  private pickHappenedDate(): void {
+    const current = this.draftHappenedAt;
+    this.getUIContext().showDatePickerDialog({
+      start: new Date(1990, 0, 1), end: new Date(), selected: new Date(current),
+      onDateAccept: (value: Date) => {
+        const base = new Date(current);
+        value.setHours(base.getHours(), base.getMinutes(), 0, 0);
+        this.draftHappenedAt = value.getTime();
+      }
+    });
+  }
+
+  private pickHappenedTime(): void {
+    const current = new Date(this.draftHappenedAt);
+    this.getUIContext().showTimePickerDialog({
+      selected: current, useMilitaryTime: true,
+      onAccept: (value) => {
+        current.setHours(value.hour, value.minute, 0, 0);
+        this.draftHappenedAt = Math.min(current.getTime(), Date.now());
+      }
+    });
   }
 
   // 切换反应（对照 iOS toggleReaction）：同一人只保留一条；点已选的反应=取消。

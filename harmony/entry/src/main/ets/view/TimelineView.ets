@@ -39,6 +39,7 @@ export struct TimelineView {
   @State searchText: string = '';
   @State semanticEntryIds: Set<string> = new Set<string>();
   @State semanticSearchState: string = 'idle';
+  @State private sortModeRaw: string = 'capture';
 
 	  @State showFamilyFeed: boolean = false;
 	  @State detailEntry: Entry | null = null;
@@ -49,6 +50,7 @@ export struct TimelineView {
 	
 	  aboutToAppear(): void {
 	    this.tabBarVisible = true;
+	    this.sortModeRaw = ServerConfig.shared.timelineSortModeRaw === 'recorded' ? 'recorded' : 'capture';
 	    this.reload();
 	    this.pageIn = false;
 	    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
@@ -74,7 +76,7 @@ export struct TimelineView {
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     const entries = await AppDatabase.shared.fetchEntries(false);
-    this.entries = entries;
+    this.entries = this.sortedEntries(entries);
     const map = new Map<string, string>();
     for (const e of entries) {
       const media = await AppDatabase.shared.fetchMediaForEntry(e.id);
@@ -93,7 +95,7 @@ export struct TimelineView {
     const groupKeys: string[] = [];
     const groups: Map<string, Entry[]> = new Map();
     for (const e of filtered) {
-      const d = new Date(e.happenedAt);
+      const d = new Date(this.sortTimestamp(e));
       const key = `${d.getFullYear()}年${d.getMonth() + 1}月`;
       if (!groups.has(key)) { groups.set(key, []); groupKeys.push(key); }
       groups.get(key)!.push(e);
@@ -104,8 +106,8 @@ export struct TimelineView {
       return section;
     });
     out.sort((a: TimelineSection, b: TimelineSection) => {
-      const at = a.entries.length > 0 ? a.entries[0].happenedAt : 0;
-      const bt = b.entries.length > 0 ? b.entries[0].happenedAt : 0;
+      const at = a.entries.length > 0 ? this.sortTimestamp(a.entries[0]) : 0;
+      const bt = b.entries.length > 0 ? this.sortTimestamp(b.entries[0]) : 0;
       return bt - at;
     });
     this.sections = out;
@@ -196,6 +198,12 @@ export struct TimelineView {
         Text('时光轴')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         Blank()
+	        Text(this.sortModeRaw === 'recorded' ? '按记录时间' : '按拍摄时间')
+	          .fontSize(12).fontColor(BubuColor.secondaryText)
+	          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+	          .backgroundColor(BubuColor.softFill).borderRadius(100)
+	          .accessibilityDescription('轻触切换排序方式')
+	          .onClick(() => { this.toggleSortMode(); })
 	        Row({ space: 4 }) {
 	          BubuIconBadge({
 	            name: BubuIconName.home,
@@ -266,6 +274,21 @@ export struct TimelineView {
 	    .width('100%')
       .scrollable(ScrollDirection.Vertical)
     .scrollBar(BarState.Off)
+  }
+
+  private sortedEntries(entries: Entry[]): Entry[] {
+    return entries.slice().sort((a: Entry, b: Entry): number => this.sortTimestamp(b) - this.sortTimestamp(a));
+  }
+
+  private sortTimestamp(entry: Entry): number {
+    return this.sortModeRaw === 'recorded' ? entry.createdAt : entry.happenedAt;
+  }
+
+  private toggleSortMode(): void {
+    this.sortModeRaw = this.sortModeRaw === 'capture' ? 'recorded' : 'capture';
+    ServerConfig.shared.setTimelineSortMode(this.sortModeRaw);
+    this.entries = this.sortedEntries(this.entries);
+    this.rebuildSections();
   }
 
   @Builder
