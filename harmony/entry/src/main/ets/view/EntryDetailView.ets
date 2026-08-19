@@ -16,6 +16,7 @@ import { promptAction } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 import { relationalStore } from '@kit.ArkData';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { ShareCardSheet } from './ShareCardSheet';
 
 // MARK: - 记录详情（对照 iOS Features/Timeline/EntryDetailView.swift）
 // 已上传内容不再只读：可改文字/心情、追加语音、家人多视角补充、点亲亲。
@@ -39,6 +40,7 @@ export struct EntryDetailView {
 
   @State private showCommentSheet: boolean = false;
   @State private showReactionPicker: boolean = false;
+  @State private showShareCard: boolean = false;
   @State private viewingMediaID: string | null = null;
 
   aboutToAppear(): void { this.load(); }
@@ -134,6 +136,10 @@ export struct EntryDetailView {
           onDismiss: () => { this.viewingMediaID = null; }
         })
       }
+
+      if (this.showShareCard) {
+        ShareCardSheet({ entry: this.entry, onClose: () => { this.showShareCard = false; } })
+      }
     }
     .width('100%').height('100%')
   }
@@ -145,6 +151,9 @@ export struct EntryDetailView {
       Button(this.editing ? '完成' : '编辑')
         .backgroundColor('#1AF28C9E').fontColor(this.theme()).fontWeight(FontWeight.Medium)
         .onClick(() => { this.toggleEditing(); })
+      Button('分享这一刻')
+        .backgroundColor('#1AF28C9E').fontColor(this.theme()).fontWeight(FontWeight.Medium)
+        .onClick(() => { this.showShareCard = true; })
       Blank()
       Button('🗑 删除记录')
         .backgroundColor('#FFE5E5').fontColor('#D9534F')

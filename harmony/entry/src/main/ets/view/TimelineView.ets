@@ -15,6 +15,7 @@ import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
 import { promptAction } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 import { AIService } from '../services/AIService';
+import { ShareCardSheet } from './ShareCardSheet';
 
 // MARK: - 时光轴（对照 iOS Features/Timeline/TimelineView.swift）
 // 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；离线优先，只读本地数据库。
@@ -41,6 +42,7 @@ export struct TimelineView {
 
 	  @State showFamilyFeed: boolean = false;
 	  @State detailEntry: Entry | null = null;
+	  @State shareEntry: Entry | null = null;
 	  @State private pageIn: boolean = false;
 	  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
 	  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
@@ -150,14 +152,19 @@ export struct TimelineView {
   }
 
 	  build() {
-	    if (this.detailEntry) {
-	      this.detailPanel()
-	    } else if (this.showFamilyFeed) {
-	      FamilyFeedView({ onClose: () => { this.showFamilyFeed = false; this.tabBarVisible = true; this.reload(); } })
-	        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
-	    } else {
-	      this.mainPage()
-	    }
+	    Stack() {
+	      if (this.detailEntry) {
+	        this.detailPanel()
+	      } else if (this.showFamilyFeed) {
+	        FamilyFeedView({ onClose: () => { this.showFamilyFeed = false; this.tabBarVisible = true; this.reload(); } })
+	          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
+	      } else {
+	        this.mainPage()
+	      }
+	      if (this.shareEntry) {
+	        ShareCardSheet({ entry: this.shareEntry!, onClose: () => { this.shareEntry = null; } })
+	      }
+	    }.width('100%').height('100%')
 	  }
 
   // 详情面板（对照 iOS navigationDestination → EntryDetailView）。保留与 HomeView 一致的 prop 契约。
@@ -298,7 +305,7 @@ export struct TimelineView {
 		    .alignItems(VerticalAlign.Top)
         .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.985 })
         .onClick(() => { this.openDetail(entry); })
-        .gesture(TapGesture().onAction(() => { this.openDetail(entry); }))
+	      .gesture(LongPressGesture().onAction(() => { this.shareEntry = entry; BubuHaptics.selection(); }))
 		  }
 
 	  private openDetail(entry: Entry): void {
@@ -372,7 +379,6 @@ export struct TimelineView {
 		    .clip(true)
 		    .shadow({ radius: 14, color: '#33B57870', offsetY: 8 })
         .onClick(() => { this.openDetail(entry); })
-        .gesture(TapGesture().onAction(() => { this.openDetail(entry); }))
 		  }
 
   // 月份 + 当时年龄锚点（对照 iOS sectionHeader）。

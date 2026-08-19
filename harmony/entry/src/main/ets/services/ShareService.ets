@@ -11,6 +11,10 @@ export class ShareService {
     await ShareService.share(context, path, title, 'com.adobe.pdf', '布布时光机可打印年册');
   }
 
+  static async shareImage(context: common.UIAbilityContext, path: string, title: string): Promise<void> {
+    await ShareService.share(context, path, title, 'general.image', '布布时光机成长分享卡');
+  }
+
   private static async share(context: common.UIAbilityContext, path: string, title: string,
                              utd: string, description: string): Promise<void> {
     const record: systemShare.SharedRecord = {
