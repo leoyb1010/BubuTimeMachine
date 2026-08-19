@@ -4,16 +4,13 @@ import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { MediaStore } from '../MediaStore';
 import { ThumbnailProvider } from './ThumbnailProvider';
+import { pdfService } from '@kit.PDFKit';
 
 const DOMAIN = 0x0000;
 
 // MARK: - 年册导出（对照 iOS Services/Media/YearbookExporter.swift）
 // 选一个年龄段，把布布这一年导出：封面 + 记录页 + 里程碑 + 家人寄语。
-// iOS 用 ImageRenderer 逐页渲染 SwiftUI 视图进 UIGraphicsPDFRenderer 输出单个 PDF。
-// NOTE: PDF→图片 —— HarmonyOS 当前无稳定的「视图渲染进 PDF」等价 API。
-//   这里用 @kit.ArkGraphics2D drawing 把每页画到一张 A4 像素图（595×842 @2x），
-//   逐页导出 PNG（page-1.png ...）到 cacheDir 下的年册目录，返回该目录路径。
-//   待 HarmonyOS PDF 生成 API 稳定后，可把这些页面合成单个 PDF。
+// ArkGraphics2D 逐页绘制 A4 像素图，再由 PDF Kit 合成单个可打印 PDF。
 
 // A4 @ 72dpi（与 iOS pageSize 一致）
 const PAGE_W = 595;
@@ -53,7 +50,7 @@ export class YearbookExporter {
   private constructor() {}
 
   // iOS: func makePDF(_ input:) -> URL?
-  // 返回导出目录路径（含 page-N.png）；失败返回 null。
+  // 返回单个 PDF 路径；失败返回 null。
   async makePDF(input: YearbookInput): Promise<string | null> {
     try {
       const cacheBase = this.mediaStore.cacheDir();
@@ -84,7 +81,9 @@ export class YearbookExporter {
         await this.drawListPage(dir, pageIndex++, '家人想对你说', '♥', input.messages, primary);
       }
 
-      return dir;
+      const pdfPath = `${dir}.pdf`;
+      YearbookExporter.assemblePDF(dir, pageIndex, pdfPath);
+      return pdfPath;
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `年册导出失败: ${JSON.stringify(e)}`);
       return null;
@@ -313,11 +312,37 @@ export class YearbookExporter {
       fileIo.closeSync(file);
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `年册页保存失败: ${JSON.stringify(e)}`);
+      throw new Error('年册页保存失败');
     } finally {
       if (packer) {
         try { packer.release(); } catch (e) {}
       }
       try { ctx.pixelMap.release(); } catch (e) {}
+    }
+  }
+
+  private static assemblePDF(dir: string, pageCount: number, pdfPath: string): void {
+    const document = new pdfService.PdfDocument();
+    try {
+      if (pageCount <= 0 || !document.createDocument(PAGE_W, PAGE_H)) {
+        throw new Error('无法创建 PDF 文档');
+      }
+      for (let index = 0; index < pageCount; index++) {
+        if (index > 0) {
+          document.insertBlankPage(index, PAGE_W, PAGE_H);
+        }
+        document.getPage(index).addImageObject(`${dir}/page-${index + 1}.png`, 0, 0, PAGE_W, PAGE_H);
+      }
+      if (!document.saveDocument(pdfPath)) {
+        throw new Error('无法保存 PDF 文档');
+      }
+      for (let index = 0; index < pageCount; index++) {
+        const pagePath = `${dir}/page-${index + 1}.png`;
+        if (fileIo.accessSync(pagePath)) fileIo.unlinkSync(pagePath);
+      }
+      fileIo.rmdirSync(dir);
+    } finally {
+      document.releaseDocument();
     }
   }
 

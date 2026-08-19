@@ -5,7 +5,6 @@ import { AIStudioView } from '../view/AIStudioView';
 import { OnboardingView } from '../view/OnboardingView';
 import { WhatsNewView } from '../view/WhatsNewView';
 import { BubuGlassTabBar } from '../components/BubuGlassTabBar';
-import { DesignGallery } from '../components/DesignGallery';
 import { BubuColor } from '../theme/BubuTheme';
 import { BubuMotion } from '../theme/BubuMotion';
 import { ThemeManager } from '../theme/ThemeManager';
@@ -27,7 +26,6 @@ struct RootPage {
   @State captureSignal: number = 0;          // 中央键 → HomeView 打开快速记录
   @State hasCompletedOnboarding: boolean = true;
   @State booted: boolean = false;
-  @State showGallery: boolean = false;   // 恒 false，仅用于强制编译设计组件
   @State showWhatsNew: boolean = false;
   @State viewportW: number = 0;
   @StorageLink('themeTick') themeTick: number = 0;  // 主题切换驱动重绘
@@ -98,13 +96,8 @@ struct RootPage {
   build() {
     Stack() {
       if (!this.booted) {
-        // 启动占位（极短）。showGallery 恒为 false：仅为强制类型检查设计组件，运行期不展示。
-        Stack() {
-          Column().width('100%').height('100%').backgroundColor(BubuColor.cream)
-          if (this.showGallery) {
-            DesignGallery()
-          }
-        }.width('100%').height('100%')
+        // 数据库和主题初始化期间使用纯色启动底，不挂载任何不可达的演示组件。
+        Column().width('100%').height('100%').backgroundColor(BubuColor.cream)
       } else if (!this.hasCompletedOnboarding) {
         OnboardingView({ onComplete: () => {
           this.hasCompletedOnboarding = true;

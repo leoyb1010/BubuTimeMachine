@@ -174,7 +174,7 @@ export struct AIStudioView {
   }
 
   // 成长绘本主卡（butter→peach→pink；对照 iOS storybookCard）。
-  // NOTE: iOS 点进 BubuStoryView（翻页绘本），不在本切片范围内，暂作占位无跳转。
+  // 点击后进入真实成长绘本阅读器。
   @Builder
   storybookCard() {
     Row({ space: 14 }) {
@@ -218,7 +218,7 @@ export struct AIStudioView {
   }
 
   // 未来胶囊卡（lav→sky 信封；对照 iOS capsuleCard）。
-  // NOTE: iOS 点进 CapsuleHomeView，本 App 的胶囊 Tab 已单列（RootPage 第 5 个 Tab），此处作视觉占位无跳转。
+  // 点击后进入未来胶囊真实列表、创建与恢复流程。
   @Builder
   capsuleCard() {
     Row({ space: 14 }) {

@@ -1,6 +1,6 @@
 // MARK: - PDF 年册导出（对照 iOS Features/Settings/YearbookView.swift）
 // 选一个年龄段（如「1 岁这一年」），生成 A4 竖版年册并分享。
-// iOS 用 ImageRenderer→PDF；HarmonyOS 用 YearbookExporter 逐页绘 PNG 到 cacheDir 目录（见该服务 NOTE）。
+// HarmonyOS 用 ArkGraphics2D 排版，再由 PDF Kit 合成单个 A4 PDF。
 
 import { AppDatabase } from '../data/AppDatabase';
 import { Entry, Media, Milestone, ChildProfile, Comment } from '../models/Models';
@@ -10,6 +10,8 @@ import { YearbookExporter, YearbookInput, YearbookPage } from '../services/media
 import { ThemeManager } from '../theme/ThemeManager';
 import { BubuColor, BubuFont, BubuRadius, BubuSpacing } from '../theme/BubuTheme';
 import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
+import { ShareService } from '../services/ShareService';
 
 @Component
 export struct YearbookView {
@@ -159,8 +161,12 @@ export struct YearbookView {
             Text(this.errorText).fontSize(BubuFont.caption).fontColor(BubuColor.danger).width('100%')
           }
           if (this.resultPath.length > 0) {
-            Text(`已生成到：\n${this.resultPath}`)
+            Text('PDF 年册已生成，可以交给系统分享或打印。')
               .fontSize(BubuFont.caption).fontColor(BubuColor.success).width('100%').textAlign(TextAlign.Center)
+            Button('分享 / 打印 PDF')
+              .width('100%').height(50)
+              .backgroundColor(BubuColor.warmBrown).fontColor(Color.White).borderRadius(25)
+              .onClick(() => { this.shareResult(); })
           }
         }
         .padding(16).width('100%')
@@ -235,9 +241,9 @@ export struct YearbookView {
         secondaryColorHex: theme.secondary
       };
 
-      const dir = await YearbookExporter.shared.makePDF(input);
-      if (dir) {
-        this.resultPath = dir;
+      const pdfPath = await YearbookExporter.shared.makePDF(input);
+      if (pdfPath) {
+        this.resultPath = pdfPath;
         this.getUIContext().getPromptAction().showToast({ message: '年册已生成 💛' });
       } else {
         this.errorText = '年册生成失败了，稍后再试试。';
@@ -246,5 +252,11 @@ export struct YearbookView {
       this.errorText = `年册生成失败：${e instanceof Error ? e.message : '稍后再试'}`;
     }
     this.generating = false;
+  }
+
+  private async shareResult(): Promise<void> {
+    if (this.resultPath.length === 0 || this.profile === null) return;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    await ShareService.sharePDF(context, this.resultPath, `${this.profile.name}${this.yearLabel(this.selectedYear)}年册`);
   }
 }

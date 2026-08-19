@@ -3,14 +3,14 @@
 ## Verification scope
 
 - Release level: Level 3（跨端家庭数据产品）
-- Routes / screens: 已新增同步中心、照片收件箱、成长中心、问问布布、布布周报、声音年轮和三动作姥姥模式，并把时光轴接入语义搜图
+- Routes / screens: 已新增同步中心、照片收件箱、成长中心、问问布布、布布周报、声音年轮、三动作姥姥模式和真实 PDF 年册，并把时光轴接入语义搜图
 - Viewports / devices: 当前仅完成静态与编译基线；真机矩阵待接入
 - Browsers / simulators: 当前 `hdc list targets -v` 为 `[Empty]`
 
 ## Evidence
 
 - Screenshots / visual diffs: 待真机/模拟器在线后建立
-- Storybook stories and tests: 不适用 ArkUI；鸿蒙单元/UI 测试待补
+- Storybook stories and tests: 不适用 ArkUI；当前 30 个 Node 契约/逻辑测试通过，鸿蒙 UI 测试待真机补
 - End-to-end interactions: 待补
 - Accessibility checks: 设计契约已记录，运行验证待补
 - Console / network checks: API 26 unsigned HAP 构建成功；运行日志待补
@@ -24,7 +24,7 @@
 
 ## Remaining risk
 
-- Known issues: API 26 弃用 UI API 和可选 `@Prop` 警告已清理；剩余 492 条中 455 条为 RDB/系统 API 的“可能抛异常”提示，继续按数据风险收敛
+- Known issues: API 26 弃用 UI API 和可选 `@Prop` 警告已清理；接入 PDF Kit 后当前 499 条警告仍以 RDB/系统 API 的“可能抛异常”和设备能力提示为主，继续按数据风险收敛
 - Deferred work: 无；按能力矩阵持续推进
 - Visual verification outstanding: 是
 
