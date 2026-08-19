@@ -1,0 +1,50 @@
+#!/bin/zsh
+# 布布影像增量工作流 · 一条命令跑完
+#   放新照片 → 去重归档 → 识别布布 → 有意义命名 → 缩略图 → 检索网页 → 进时光
+# 用法：bubu-incr [待导入目录] [--dry-run]
+set -euo pipefail
+HERE="/Users/leo/BubuTimeMachineServer/photo-archive"
+VENV="/Users/leo/BubuTimeMachineServer/releases/v2.8.0-candidate/server/ai/.venv/bin/python"
+ARCH="/Volumes/别动小爷的SSD/影像档案"
+INBOX="${1:-$ARCH/00_导入暂存/iPhone_待导入}"
+[[ "${1:-}" == --* ]] && INBOX="$ARCH/00_导入暂存/iPhone_待导入"
+DRY=""; NOTL=""; for a in "$@"; do [[ "$a" == "--dry-run" ]] && DRY="1"; [[ "$a" == "--no-timeline" ]] && NOTL="1"; done
+APPLY="--apply"; [[ -n "$DRY" ]] && APPLY=""
+
+[[ -d "$ARCH" ]] || { echo "✗ 移动硬盘未挂载：$ARCH"; exit 1; }
+echo "═══ 布布影像增量工作流 ═══"
+echo "待导入：$INBOX"; [[ -n "$DRY" ]] && echo "（演练模式，不写入）"
+
+echo "\n【1/6】扫描去重 + 收进待确认区"
+python3 "$HERE/stage1_ingest.py" "$INBOX" $APPLY | sed 's/^/    /'
+[[ -n "$DRY" ]] && { echo "\n演练结束。去掉 --dry-run 正式执行。"; exit 0; }
+
+BATCH=$(cat /tmp/bubu_incr/batch.txt 2>/dev/null || true)
+if [[ -z "$BATCH" ]]; then echo "\n没有待处理素材，结束。"; exit 0; fi
+echo "\n本次批次：$BATCH"
+
+echo "\n【2/6】数据库备份"
+TS=$(date +%Y%m%d_%H%M%S)
+sqlite3 "$ARCH/99_影像检索与报告/影像数据库.sqlite" \
+  ".backup '$ARCH/99_影像检索与报告/清理记录/增量前数据库_$TS.sqlite'"
+echo "    已备份 增量前数据库_$TS.sqlite"
+
+echo "\n【3/6】内容识别 + 布布识别（端侧 Vision，全程离线）"
+python3 "$HERE/vision_pass.py" "$BATCH" | sed 's/^/    /'
+
+echo "\n【4/6】分类 + 有意义文件名 + 归档"
+BUBU_BATCH="$BATCH" python3 "$HERE/enrich.py" --apply | tail -3 | sed 's/^/    /'
+BUBU_BATCH="$BATCH" python3 "$HERE/relocate.py" --apply | tail -2 | sed 's/^/    /'
+
+echo "\n【5/6】缩略图 + 检索网页"
+BUBU_BATCH="$BATCH" python3 "$HERE/thumbs_web.py" | sed 's/^/    /'
+
+if [[ -n "$NOTL" ]]; then
+  echo "\n【6/6】跳过进时光（--no-timeline）"
+else
+  echo "\n【6/6】布布素材按事件批次进时光"
+  BUBU_BATCH="$BATCH" "$VENV" "$HERE/to_timeline.py" --apply | tail -25 | sed 's/^/    /'
+fi
+
+echo "\n═══ 完成 ═══"
+echo "手机 App 下拉同步即可看到；原片可在手机检索网页下载。"
