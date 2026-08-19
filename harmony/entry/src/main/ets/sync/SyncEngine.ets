@@ -340,6 +340,7 @@ export class SyncEngine {
         'happenedAt': new Date(e.happenedAt).toISOString(),
         'authorRole': e.authorRole,
         'isArchived': e.isArchived,
+        'inStorybook': e.inStorybook === true,
         'createdAt': new Date(e.createdAt).toISOString()
       };
       if (e.title !== undefined) body['title'] = e.title;
@@ -1216,6 +1217,7 @@ export class SyncEngine {
     e.authorRole = SyncEngine.rStr(r, 'authorRole') ?? e.authorRole;
     e.moodRaw = SyncEngine.rStr(r, 'mood');
     e.isArchived = SyncEngine.rBool(r, 'isArchived');
+    e.inStorybook = SyncEngine.rBool(r, 'inStorybook');
     const edited = SyncEngine.rStr(r, 'editedAt');
     e.editedAt = edited !== undefined ? Date.parse(edited) : undefined;
   }
@@ -1223,7 +1225,7 @@ export class SyncEngine {
   private static entryToFields(e: Entry): relationalStore.ValuesBucket {
     const f: relationalStore.ValuesBucket = {
       happenedAt: e.happenedAt, authorRole: e.authorRole,
-      isArchived: e.isArchived ? 1 : 0, syncState: e.syncState
+      isArchived: e.isArchived ? 1 : 0, inStorybook: e.inStorybook ? 1 : 0, syncState: e.syncState
     };
     f['title'] = e.title ?? '';
     f['note'] = e.note ?? '';

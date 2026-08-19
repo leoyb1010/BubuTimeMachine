@@ -19,6 +19,7 @@ export interface Entry {
   moodRaw?: string;
   syncState: SyncState;
   isArchived: boolean;
+  inStorybook?: boolean;
   editedAt?: number;
   createdAt: number;
 }

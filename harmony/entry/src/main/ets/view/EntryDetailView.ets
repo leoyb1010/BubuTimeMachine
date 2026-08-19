@@ -158,6 +158,9 @@ export struct EntryDetailView {
       Button('分享这一刻')
         .backgroundColor('#1AF28C9E').fontColor(this.theme()).fontWeight(FontWeight.Medium)
         .onClick(() => { this.showShareCard = true; })
+      Button(this.entry.inStorybook ? '移出绘本' : '收进绘本')
+        .backgroundColor('#1AF28C9E').fontColor(this.theme()).fontWeight(FontWeight.Medium)
+        .onClick(() => { this.toggleStorybook(); })
       Blank()
       Button('🗑 删除记录')
         .backgroundColor('#FFE5E5').fontColor('#D9534F')
@@ -496,6 +499,18 @@ export struct EntryDetailView {
       this.entry.syncState = SyncState.local;
     }
     this.getUIContext().animateTo({ duration: 200, curve: Curve.EaseInOut }, () => { this.editing = !this.editing; });
+  }
+
+  private async toggleStorybook(): Promise<void> {
+    const next = this.entry.inStorybook !== true;
+    const now = Date.now();
+    await AppDatabase.shared.updateEntryFields(this.entry.id, {
+      inStorybook: next ? 1 : 0, editedAt: now, syncState: SyncState.local
+    });
+    this.entry.inStorybook = next;
+    this.entry.editedAt = now;
+    this.entry.syncState = SyncState.local;
+    this.getUIContext().getPromptAction().showToast({ message: next ? '已收进成长绘本' : '已移出成长绘本' });
   }
 
   private pickHappenedDate(): void {

@@ -36,7 +36,8 @@ export class AppDatabase {
       id TEXT PRIMARY KEY, remoteId TEXT, title TEXT, note TEXT, firstPersonNote TEXT,
       happenedAt INTEGER NOT NULL, locationName TEXT, latitude REAL, longitude REAL,
       authorRole TEXT NOT NULL, moodRaw TEXT, syncState TEXT NOT NULL,
-      isArchived INTEGER NOT NULL DEFAULT 0, editedAt INTEGER, createdAt INTEGER NOT NULL)`);
+      isArchived INTEGER NOT NULL DEFAULT 0, inStorybook INTEGER NOT NULL DEFAULT 0,
+      editedAt INTEGER, createdAt INTEGER NOT NULL)`);
     // Media（对照 iOS Media：含时长/尺寸/上传进度/syncState）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS media (
       id TEXT PRIMARY KEY, remoteId TEXT, entryId TEXT NOT NULL, typeRaw TEXT NOT NULL,
@@ -132,6 +133,7 @@ export class AppDatabase {
     await this.addColumnIfMissing('entry', 'longitude', 'REAL');
     await this.addColumnIfMissing('entry', 'moodRaw', 'TEXT');
     await this.addColumnIfMissing('entry', 'isArchived', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('entry', 'inStorybook', 'INTEGER NOT NULL DEFAULT 0');
     await this.addColumnIfMissing('entry', 'editedAt', 'INTEGER');
 
     await this.addColumnIfMissing('media', 'remoteId', 'TEXT');
@@ -428,7 +430,8 @@ export class AppDatabase {
       firstPersonNote: e.firstPersonNote ?? null, happenedAt: e.happenedAt,
       locationName: e.locationName ?? null, latitude: e.latitude ?? null, longitude: e.longitude ?? null,
       authorRole: e.authorRole, moodRaw: e.moodRaw ?? null, syncState: e.syncState,
-      isArchived: e.isArchived ? 1 : 0, editedAt: e.editedAt ?? null, createdAt: e.createdAt
+      isArchived: e.isArchived ? 1 : 0, inStorybook: e.inStorybook ? 1 : 0,
+      editedAt: e.editedAt ?? null, createdAt: e.createdAt
     };
     await this.store!.insert('entry', v);
   }
@@ -454,6 +457,7 @@ export class AppDatabase {
         moodRaw: AppDatabase.optStr(rs, 'moodRaw'),
         syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
         isArchived: rs.getLong(rs.getColumnIndex('isArchived')) === 1,
+        inStorybook: rs.getLong(rs.getColumnIndex('inStorybook')) === 1,
         editedAt: AppDatabase.optNum(rs, 'editedAt'),
         createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
       });

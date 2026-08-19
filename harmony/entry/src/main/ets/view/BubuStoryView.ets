@@ -1,18 +1,21 @@
 // MARK: - 布布的成长绘本（首页）（对照 iOS Features/Story/BubuStoryView.swift）
 // butter→peach→pink 大横幅 +「共 N 章」+ 倾斜书卡列表。
-// 章节由已达成里程碑实时编织（StoryChapterBuilder），点进翻页阅读器。
+// 章节由用户主动收进绘本的时光记录实时编织，点进翻页阅读器。
 
-import { Milestone } from '../models/Models';
+import { Entry, Media } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { StoryChapter, StoryChapterBuilder, chapterNoText } from './StoryChapter';
 import { BubuStoryReaderView, dreamPhoto } from './BubuStoryReaderView';
 import { BubuColor, BubuShadow } from '../theme/BubuTheme';
 import { BubuSparkle } from '../components/MacaronComponents';
+import { MediaStore } from '../services/MediaStore';
 
 @Component
 export struct BubuStoryView {
   @Prop compact: boolean = false;
-  @State private milestones: Milestone[] = [];
+  @State private entries: Entry[] = [];
+  @State private birthday: number | undefined = undefined;
+  @State private coverByEntry: Map<string, string> = new Map<string, string>();
   // 阅读器覆盖（iOS NavigationLink → ArkUI 内部 @State 整页覆盖；RootPage 导航另波次接管）。
   @State private readerOpen: boolean = false;
   @State private readerStart: number = 0;
@@ -20,11 +23,24 @@ export struct BubuStoryView {
   aboutToAppear(): void { this.reload(); }
 
   private async reload(): Promise<void> {
-    this.milestones = await AppDatabase.shared.fetchMilestones() ?? [];
+    this.entries = (await AppDatabase.shared.fetchEntries(false) ?? [])
+      .filter((entry: Entry): boolean => entry.inStorybook === true);
+    this.birthday = (await AppDatabase.shared.fetchChildProfile())?.birthday;
+    const covers = new Map<string, string>();
+    for (const entry of this.entries) {
+      const media = await AppDatabase.shared.fetchMediaForEntry(entry.id);
+      const photo = media.find((item: Media): boolean => item.typeRaw === 'photo');
+      if (photo?.thumbnailFileName) {
+        covers.set(entry.id, `file://${MediaStore.shared.thumbnailPath(photo.thumbnailFileName)}`);
+      } else if (photo?.localFileName && MediaStore.shared.exists(photo.localFileName)) {
+        covers.set(entry.id, `file://${MediaStore.shared.fullPath(photo.localFileName)}`);
+      }
+    }
+    this.coverByEntry = covers;
   }
 
   private chapters(): StoryChapter[] {
-    return StoryChapterBuilder.chapters(this.milestones);
+    return StoryChapterBuilder.chapters(this.entries, this.birthday, this.coverByEntry);
   }
 
   build() {
@@ -103,7 +119,11 @@ export struct BubuStoryView {
     Row({ space: 14 }) {
       // 倾斜小图（对照 iOS rotationEffect ±3°）
       Stack() {
-        dreamPhoto(ch.hue, 64, 12, ch.emoji)
+        if (ch.photoFileName) {
+          Image(ch.photoFileName).width(64).height(80).objectFit(ImageFit.Cover).borderRadius(12)
+        } else {
+          dreamPhoto(ch.hue, 64, 12, ch.emoji)
+        }
       }
       .rotate({ angle: index % 2 === 0 ? -3 : 3 })
       Column({ space: 3 }) {
@@ -132,7 +152,7 @@ export struct BubuStoryView {
     Column({ space: 10 }) {
       Text('✦').fontSize(44).fontColor(BubuColor.peach)
       Text('绘本还是空白的').fontSize(16).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
-      Text('去「里程碑」点亮布布的第一次，\n并写下那一天的故事，这里就会长出第一章')
+      Text('在「时光」里打开喜欢的记录，\n点「收进绘本」，这里就会长出一章一章的故事')
         .fontSize(13).fontWeight(FontWeight.Medium).fontColor(BubuColor.secondaryText)
         .textAlign(TextAlign.Center)
     }

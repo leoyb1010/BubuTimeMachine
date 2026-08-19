@@ -91,9 +91,15 @@ export struct BubuStoryReaderView {
   private page(ch: StoryChapter) {
     Scroll() {
       Column() {
-        // 大图（梦幻照片占位，对照 iOS BubuDreamPhoto 150pt）
+        // 优先真实记录照片，无图时使用梦幻渐变兜底。
         Stack() {
-          dreamPhoto(ch.hue, 150, 30, ch.emoji)
+          if (ch.photoFileName) {
+            Image(ch.photoFileName).width(150).height(150).objectFit(ImageFit.Cover).borderRadius(30)
+              .border({ width: 6, color: '#99FFFFFF' })
+              .shadow({ radius: 16, color: '#2E000000', offsetY: 8 })
+          } else {
+            dreamPhoto(ch.hue, 150, 30, ch.emoji)
+          }
         }
         .margin({ top: 14, bottom: 22 })
 
