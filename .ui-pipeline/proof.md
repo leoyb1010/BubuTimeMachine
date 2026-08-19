@@ -3,7 +3,7 @@
 ## Verification scope
 
 - Release level: Level 3（跨端家庭数据产品）
-- Routes / screens: 全量 HarmonyOS 页面，按 `harmony/PARITY_MATRIX.md` 逐项推进
+- Routes / screens: 已新增“同步与备份”真实状态页；其余页面按 `harmony/PARITY_MATRIX.md` 逐项推进
 - Viewports / devices: 当前仅完成静态与编译基线；真机矩阵待接入
 - Browsers / simulators: 当前 `hdc list targets -v` 为 `[Empty]`
 

@@ -13,6 +13,7 @@ import { ThemeSettingsView } from './ThemeSettingsView';
 import { YearbookView } from './YearbookView';
 import { ExportView } from './ExportView';
 import { AdvancedSettingsView } from './AdvancedSettingsView';
+import { SyncCenterView } from './SyncCenterView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { promptAction } from '@kit.ArkUI';
 
@@ -44,8 +45,8 @@ export struct SettingsView {
   @State showTheme: boolean = false;
   @State showYearbook: boolean = false;
   @State showExport: boolean = false;
+  @State showSyncCenter: boolean = false;
   @State statusText: string = '';
-  @State isPullingServer: boolean = false;
 
   aboutToAppear(): void {
     const c = ServerConfig.shared;
@@ -80,6 +81,8 @@ export struct SettingsView {
       this.yearbookPage()
     } else if (this.showExport) {
       this.exportPage()
+    } else if (this.showSyncCenter) {
+      this.syncCenterPage()
     } else {
       this.mainPage()
     }
@@ -318,6 +321,11 @@ export struct SettingsView {
   }
 
   @Builder
+  syncCenterPage() {
+    SyncCenterView({ onClose: () => { this.showSyncCenter = false; } })
+  }
+
+  @Builder
   bubuGroup() {
     Column({ space: 10 }) {
       Text('布布')
@@ -390,8 +398,7 @@ export struct SettingsView {
         .width('100%')
         .padding({ left: 6 })
       Column({ space: 0 }) {
-        this.infoRow('备份健康度', BubuIconName.checkCloud, ServerConfig.shared.isConfigured ? '已连接家里的服务器' : '离线也能用，登录后自动同步', ServerConfig.shared.isConfigured ? '已配置' : '未登录')
-        this.navRow(this.isPullingServer ? '正在从服务器同步' : '从服务器同步到本机', BubuIconName.sync, '补齐 iOS 上传的时光、里程碑、健康和媒体', () => { this.pullServerToLocal(); })
+        this.navRow('同步与备份', BubuIconName.checkCloud, '查看状态、立即同步或重新核对全部内容', () => { this.showSyncCenter = true; })
         this.navRow('做一本 PDF 年册', BubuIconName.photo, '把布布的一年做成可打印的书', () => { this.showYearbook = true; })
         this.navRow('导出布布的全量档案', BubuIconName.send, '网页 + 全部媒体，永久离线可读', () => { this.showExport = true; })
       }
@@ -469,32 +476,11 @@ export struct SettingsView {
     .onClick(action)
   }
 
-  @Builder
-  infoRow(title: string, icon: string, subtitle: string, value: string) {
-    Row({ space: 14 }) {
-      BubuIconBadge({
-        name: this.iconName(icon),
-        badgeSize: 36,
-        iconSize: 19,
-        color: BubuColor.primary,
-        fill: '#FFF0F4',
-        radius: 10,
-        strokeWidth: 2.1
-      })
-      Column({ space: 2 }) {
-        Text(title).fontSize(16).fontColor(BubuColor.warmBrown)
-        Text(subtitle).fontSize(11).fontColor(BubuColor.secondaryText).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      Text(value).fontSize(12).fontColor(BubuColor.primary)
-    }
-    .width('100%')
-    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-  }
-
   private syncText(): string {
-    return ServerConfig.shared.isConfigured ? '已同步' : '离线';
+    const snapshot = SyncEngine.shared.statusSnapshot();
+    if (snapshot.syncing || snapshot.state === 'connecting') return '同步中';
+    if (snapshot.state === 'online') return '已同步';
+    return '离线';
   }
 
   private iconName(icon: string): string {
@@ -516,19 +502,6 @@ export struct SettingsView {
       case '🎨': return BubuIconName.sparkles;
       default: return BubuIconName.sparkles;
     }
-  }
-
-  private async pullServerToLocal(): Promise<void> {
-    if (this.isPullingServer) return;
-    if (!ServerConfig.shared.isConfigured) {
-      promptAction.showToast({ message: '请先登录服务器账号' });
-      return;
-    }
-    this.isPullingServer = true;
-    promptAction.showToast({ message: '开始从服务器同步到本机' });
-    const message = await SyncEngine.shared.pullServerToLocalNow();
-    this.isPullingServer = false;
-    promptAction.showToast({ message: message });
   }
 
   private async saveAndSync(): Promise<void> {

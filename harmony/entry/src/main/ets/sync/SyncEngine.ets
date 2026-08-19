@@ -22,6 +22,14 @@ interface GrowthMetricValues {
   headCircumferenceCm?: number;
 }
 
+export interface SyncStatusSnapshot {
+  state: string;
+  syncing: boolean;
+  lastSyncedAt: number;
+  lastFailureReason: string;
+  nextRetrySeconds: number;
+}
+
 // MARK: - 同步引擎（对照 iOS Services/Sync/SyncEngine.swift）
 // 双向收敛：本地未同步（local/failed/uploading）的各集合推送到 PocketBase；远端变更按游标拉回本地。
 // 离线优先：未配置或断网时静默保持离线，本地全功能可用；联网后自动补传。
@@ -42,6 +50,9 @@ export class SyncEngine {
   private pollTimerId: number = -1;
   private polling: boolean = false;
   private consecutiveFailures: number = 0;
+  private connectionState: string = 'offline';
+  private lastSyncedAt: number = 0;
+  private lastFailureReason: string = '';
   private syncing: boolean = false;
   private needsAnotherSync: boolean = false;
   private strictPullFailures: boolean = false;
@@ -51,6 +62,16 @@ export class SyncEngine {
   private appContext: common.UIAbilityContext | null = null;
 
   private constructor() {}
+
+  statusSnapshot(): SyncStatusSnapshot {
+    return {
+      state: this.connectionState,
+      syncing: this.syncing,
+      lastSyncedAt: this.lastSyncedAt,
+      lastFailureReason: this.lastFailureReason,
+      nextRetrySeconds: Math.round(syncBackoffIntervalMs(this.consecutiveFailures) / 1000)
+    };
+  }
 
   // 由 EntryAbility 注入上下文，打开游标用的 Preferences 实例（对照 iOS UserDefaults）。
   async initialize(context: common.UIAbilityContext): Promise<void> {
@@ -100,23 +121,35 @@ export class SyncEngine {
   // 已在跑则置 needsAnotherSync，跑完自动再来一轮（对照 iOS scheduleSync）。
   async syncNow(manual: boolean = true): Promise<void> {
     const cfg = ServerConfig.shared;
-    if (!cfg.isConfigured) return;
+    if (!cfg.isConfigured) {
+      this.connectionState = 'offline';
+      return;
+    }
     if (manual) this.consecutiveFailures = 0;
     if (this.syncing) {
       this.needsAnotherSync = true;
       return;
     }
     if (!(await this.isServerBaselineReady())) {
+      this.connectionState = 'connecting';
       const result = await this.pullServerToLocalNow();
-      this.updateBackoff(result.indexOf('失败') < 0 && result.indexOf('需要') < 0);
+      const succeeded = result.indexOf('失败') < 0 && result.indexOf('需要') < 0;
+      this.connectionState = succeeded ? 'online' : 'offline';
+      this.lastFailureReason = succeeded ? '' : result;
+      if (succeeded) this.lastSyncedAt = Date.now();
+      this.updateBackoff(succeeded);
       return;
     }
     this.syncing = true;
+    this.connectionState = 'connecting';
+    this.lastFailureReason = '';
     let succeeded: boolean = false;
     try {
       succeeded = await this.connectAndSync();
     } catch (e) {
-      hilog.error(DOMAIN, 'Bubu', `同步异常: ${JSON.stringify(e)}`);
+      this.connectionState = 'offline';
+      this.lastFailureReason = SyncEngine.errorText(e);
+      hilog.error(DOMAIN, 'Bubu', `同步异常: ${this.lastFailureReason}`);
     } finally {
       this.syncing = false;
       this.updateBackoff(succeeded);
@@ -231,17 +264,24 @@ export class SyncEngine {
   private async connectAndSync(): Promise<boolean> {
     const ok = await APIClient.shared.ping();
     if (!ok) {
+      this.connectionState = 'offline';
+      this.lastFailureReason = '连不上家里的服务器，记录仍安全保存在本机';
       hilog.warn(DOMAIN, 'Bubu', '同步：连不上家里的服务器，离线可用');
       return false;
     }
     const authed = await APIClient.shared.authenticate();
     if (!authed) {
+      this.connectionState = 'offline';
+      this.lastFailureReason = '服务器账号验证失败，请检查登录信息';
       hilog.warn(DOMAIN, 'Bubu', '同步：账号状态需要重新确认');
       return false;
     }
     await this.pushLocal();
     await this.pullRemote();
     await this.downloadMissingFiles();
+    this.connectionState = 'online';
+    this.lastFailureReason = '';
+    this.lastSyncedAt = Date.now();
     hilog.info(DOMAIN, 'Bubu', '同步完成');
     return true;
   }
