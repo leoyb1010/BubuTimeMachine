@@ -2,6 +2,9 @@ import { Entry, Comment } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
+import { AIService } from '../services/AIService';
+import { ServerConfig } from '../services/ServerConfig';
+import { ReactionUtil } from './Reaction';
 
 // MARK: - 家人合奏（对照 iOS Features/AIStudio/FamilyEnsembleView.swift）
 // 找出有多位家人补充（Comment）的记录，把多视角「合成」成一段完整的故事。
@@ -21,6 +24,8 @@ export struct FamilyEnsembleView {
   @State private generating: boolean = false;
   @State private story: string = '';
   @State private displayed: string = '';
+  @State private fallbackHint: string = '';
+  private generationToken: number = 0;
 
   private theme: string = BubuColor.primary;
 
@@ -31,7 +36,8 @@ export struct FamilyEnsembleView {
     const entries = await AppDatabase.shared.fetchEntries(false) ?? [];
     const out: EnsembleCandidate[] = [];
     for (const e of entries) {
-      const comments = await AppDatabase.shared.fetchCommentsForEntry(e.id);
+      const comments = (await AppDatabase.shared.fetchCommentsForEntry(e.id))
+        .filter((comment: Comment): boolean => !ReactionUtil.isReaction(comment));
       if (comments.length > 0) out.push({ entry: e, comments: comments });
     }
     this.candidates = out;
@@ -143,6 +149,9 @@ export struct FamilyEnsembleView {
           this.selectedId = c.entry.id;
           this.story = '';
           this.displayed = '';
+          this.fallbackHint = '';
+          this.generationToken += 1;
+          this.generating = false;
         })
       }, (c: EnsembleCandidate) => c.entry.id)
     }
@@ -191,6 +200,9 @@ export struct FamilyEnsembleView {
           .backgroundColor('#12F28C9E')
           .borderRadius(BubuRadius.card)
       }
+      if (this.fallbackHint.length > 0) {
+        Text(this.fallbackHint).fontSize(11).fontColor(BubuColor.secondaryText).width('100%')
+      }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -217,11 +229,13 @@ export struct FamilyEnsembleView {
     return comments.slice().sort((a: Comment, b: Comment): number => a.createdAt - b.createdAt);
   }
 
-  // Mock 合成：把多视角拼成一段温暖叙述（对照 iOS synthesize，端侧文案模板）。
+  // 配置真实 AI 时复用 rewrite-first-person 织成第三人称故事；失败才回落确定性本地模板。
   private async synthesize(c: EnsembleCandidate): Promise<void> {
+    const token = this.generationToken + 1;
+    this.generationToken = token;
     this.generating = true;
     this.displayed = '';
-    await new Promise<void>((resolve: () => void) => setTimeout(resolve, 1000));
+    this.fallbackHint = '';
     const perspectives: string[] = [];
     perspectives.push(`${c.entry.authorRole}说：${c.entry.note !== undefined && c.entry.note.length > 0 ? c.entry.note : '记录了这一刻'}`);
     for (const cm of this.sortedComments(c.comments)) {
@@ -229,15 +243,31 @@ export struct FamilyEnsembleView {
         perspectives.push(`${cm.authorRole}说：${cm.text}`);
       }
     }
-    this.story = `那是 ${BubuDateFormat.longDate(new Date(c.entry.happenedAt))}。\n${perspectives.join('；')}。\n同一个瞬间，在每个人心里留下了不一样的温柔。这就是属于布布的、被全家人一起记住的一天。`;
-    await this.typewriter(this.story);
+    if (AIService.shared.isConfigured) {
+      try {
+        const prompt = `请以第三人称、150字左右，把家人对同一瞬间的多视角记录织成一段温暖完整的小故事，保留每个人的称谓；不要添加原文没有的事实。\n日期：${BubuDateFormat.longDate(new Date(c.entry.happenedAt))}\n${perspectives.join('\n')}`;
+        const woven = (await AIService.shared.rewriteFirstPerson(prompt, ServerConfig.shared.childName)).trim();
+        if (woven.length > 0 && token === this.generationToken) {
+          this.story = woven;
+          await this.typewriter(this.story, token);
+          this.generating = false;
+          return;
+        }
+      } catch (e) {}
+    }
+    await new Promise<void>((resolve: () => void) => setTimeout(resolve, 400));
+    if (token !== this.generationToken) return;
+    this.fallbackHint = AIService.shared.isConfigured ? 'AI 暂时没连上，下面是本机简易合奏。' : '当前使用本机简易合奏。';
+    this.story = `那是 ${BubuDateFormat.longDate(new Date(c.entry.happenedAt))}。\n${perspectives.join('；')}。\n同一个瞬间，在每个人心里留下了不一样的温柔。这就是属于${ServerConfig.shared.childName}的、被全家人一起记住的一天。`;
+    await this.typewriter(this.story, token);
     this.generating = false;
   }
 
-  private async typewriter(text: string): Promise<void> {
+  private async typewriter(text: string, token: number): Promise<void> {
     this.displayed = '';
     const chars = Array.from(text);
     for (const ch of chars) {
+      if (token !== this.generationToken) return;
       this.displayed += ch;
       await new Promise<void>((resolve: () => void) => setTimeout(resolve, 22));
     }
