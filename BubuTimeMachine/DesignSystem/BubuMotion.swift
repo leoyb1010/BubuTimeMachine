@@ -94,3 +94,39 @@ extension View {
         modifier(BubuEntranceEffect(index: index))
     }
 }
+
+// MARK: - Tab 内容切换过渡
+/// 切 Tab 时以前只有 haptic + 底栏图标弹跳，内容区是硬切——两个页面的观感差异全靠瞬间替换，
+/// 显得生硬。这里给被选中的页面一次极轻的入场（透明度 + 10pt 上移）。
+///
+/// 为什么不换掉 TabView 做真正的横向转场：TabView 负责保活各 Tab 的 NavigationStack、
+/// 滚动位置与懒加载状态。为一个过渡把它换成 ZStack，代价是每次切页丢状态，得不偿失。
+/// reduceMotion 时完全静止。
+private struct BubuTabContentTransition: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let isActive: Bool
+    @State private var settled = true
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content
+                .opacity(settled ? 1 : 0)
+                .offset(y: settled ? 0 : 10)
+                .onChange(of: isActive) { _, active in
+                    guard active else { return }
+                    settled = false
+                    withAnimation(BubuMotion.gentle) { settled = true }
+                }
+        }
+    }
+}
+
+extension View {
+    /// 被选中时播一次轻入场。`isActive` 由 Tab selection 驱动。
+    nonisolated func bubuTabContentTransition(isActive: Bool) -> some View {
+        modifier(BubuTabContentTransition(isActive: isActive))
+    }
+}

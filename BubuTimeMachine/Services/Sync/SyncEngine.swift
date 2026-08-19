@@ -1169,7 +1169,11 @@ final class SyncEngine {
         do {
             let tempURL = try await api.downloadFileToTemporaryURL(from: spec.remoteURL, thumb: spec.thumb)
             defer { try? FileManager.default.removeItem(at: tempURL) }
-            let name = try store.importFile(from: tempURL, preferredExtension: spec.ext, sniffImage: spec.sniff)
+            // 预览小图通道落 Thumbnails/，原图通道落 Media/。两者目录必须与字段语义一致：
+            // 写进 thumbnailFileName 的文件名，只会被 thumbnailURL / 小组件的缩略图目录去解析。
+            let name = spec.assignAsThumbnailOnly
+                ? try store.importThumbnail(from: tempURL, preferredExtension: spec.ext)
+                : try store.importFile(from: tempURL, preferredExtension: spec.ext, sniffImage: spec.sniff)
             var thumbName: String? = nil
             if spec.makePhotoThumb,
                let image = ThumbnailProvider.downsample(url: store.mediaURL(for: name), maxPixel: 600) {

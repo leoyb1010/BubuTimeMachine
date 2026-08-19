@@ -206,9 +206,15 @@ struct GrowthReportView: View {
     private struct AuthorCount { let role: String; let count: Int }
     private var authorCounts: [AuthorCount] { Dictionary(grouping: entries.map(\.authorRole)) { $0 }.map { AuthorCount(role: $0.key, count: $0.value.count) }.sorted { $0.count > $1.count } }
 
+    /// 副标题必须和下面那张图同口径：图画的是「最近 N 个月的每月条数」，
+    /// 副标题却写「最近 30 天」，两个时间窗对不上，读者会以为柱子加起来就是那个数。
     private var rhythmText: String {
         let recent = entries.filter { $0.happenedAt >= (Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now) }.count
-        return recent == 0 ? "最近 30 天还没有新记录。" : "最近 30 天记录了 \(recent) 个瞬间。"
+        let months = monthlyCounts.count
+        let head = recent == 0 ? "最近 30 天还没有新记录" : "最近 30 天记录了 \(recent) 个瞬间"
+        guard months > 0 else { return head + "。" }
+        return months == 1 ? "\(head)。下图是本月的记录条数。"
+                           : "\(head)。下图是最近 \(months) 个月的每月记录条数。"
     }
 
     private var suggestionText: String {

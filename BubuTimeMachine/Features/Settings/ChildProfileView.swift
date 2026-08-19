@@ -12,6 +12,8 @@ struct ChildProfileView: View {
 
     @State private var avatarPick: PhotosPickerItem?
     @State private var heroPick: PhotosPickerItem?
+    /// 头像降采样失败时的提示。宁可不换头像，也不落一张会让桌面小组件空白的原图。
+    @State private var avatarLoadFailed = false
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
@@ -46,6 +48,11 @@ struct ChildProfileView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: avatarPick) { _, item in Task { await loadAvatar(item) } }
+        .alert("这张照片没能处理成头像", isPresented: $avatarLoadFailed) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("换一张普通照片再试试。原图太大时桌面小组件会显示不出来，所以这里必须先压缩。")
+        }
         .onChange(of: heroPick) { _, item in Task { await loadHero(item) } }
 
     }
@@ -148,7 +155,6 @@ struct ChildProfileView: View {
     private func commitProfile() {
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
         env.syncEngine.syncNow()
     }
 
@@ -200,14 +206,22 @@ struct ChildProfileView: View {
         guard let item, let data = try? await item.loadTransferable(type: Data.self),
               let profile else { return }
         // 头像降采样到 600px 再存：原图动辄十几 MB 超过小组件 2MB 上限，
-        // 桌面小组件的头像会永远是"布"字兜底（R4 待核-头像）
+        // 桌面小组件的头像会永远是"布"字兜底（R4 待核-头像）。
+        // 三级降级，保证「入库的头像一定是小图」：
+        //   ① byPreparingThumbnail（走系统解码，最省内存）
+        //   ② bubu_resized（UIGraphicsImageRenderer 兜底，前者偶发返回 nil）
+        //   ③ 都失败就不存 —— 宁可保持旧头像，也不落一张会让桌面空白的原图。
         let avatarData: Data
         if let image = UIImage(data: data),
-           let small = await image.byPreparingThumbnail(ofSize: Self.avatarSize(for: image.size)),
+           let small = await image.byPreparingThumbnail(ofSize: Self.avatarSize(for: image.size))
+                        ?? image.bubu_resized(maxPixel: 600),
            let jpeg = small.jpegData(compressionQuality: 0.9) {
             avatarData = jpeg
-        } else {
+        } else if data.count <= 2 * 1_048_576 {
             avatarData = data
+        } else {
+            avatarLoadFailed = true
+            return
         }
         if let name = try? env.mediaStore.savePhoto(avatarData) {
             profile.avatarMediaFileName = name
@@ -215,7 +229,6 @@ struct ChildProfileView: View {
             profile.syncState = .local
             try? context.save()
             env.refreshWidgetSnapshot(context: context)
-            WidgetRefresher.reload()        // 头像变了，刷新桌面小组件
         }
     }
 

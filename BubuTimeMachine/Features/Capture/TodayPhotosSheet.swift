@@ -811,12 +811,18 @@ struct TodayPhotosSheet: View {
         let store = env.mediaStore
         let modelContext = context
         Task {
+            var changed = false
             for (media, asset) in pendingThumbs {
                 if let image = await PhotoLibraryScanner.loadThumb(asset, targetPixel: 1200) {
                     media.thumbnailFileName = store.makePhotoThumbnail(fromImage: image)
+                    changed = true
                 }
             }
             try? modelContext.save()
+            // 缩略图补完必须重写快照并 reload：上面那次 refreshWidgetSnapshot 发生在
+            // 「还没有缩略图」的瞬间，桌面拿到的是一份没有照片名的快照，
+            // 不补这一刀，新收的照片要等系统下一次低频刷新才会出现在桌面。
+            if changed { env.refreshWidgetSnapshot(context: modelContext) }
         }
     }
 }

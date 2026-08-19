@@ -43,6 +43,9 @@ struct TimelineView: View {
     @State private var hasUnseenFamilyActivity = false
     @Namespace private var zoomNS
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// 删除后的撤销提示。软删除（isArchived）本来就可逆，把这条退路显式给到用户。
+    @State private var undoToast: BubuToastState?
 
     /// 宽屏（iPad 全屏/半屏）：时光轴改双列、封面限高。窄屏（含 iPad 1/3 分屏）保持单列。
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
@@ -73,14 +76,25 @@ struct TimelineView: View {
         }
         .navigationTitle("时光轴")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: env.config.semanticSearchEnabled
+        // 显式钉在导航栏抽屉里。不指定时，iOS 26 会按容器自行决定：
+        // 在 Tab 容器内落到顶部（现状正确），脱离 Tab 容器（如直达探针）则改成底部悬浮条，
+        // 直接压在列表内容上。搜索位置不该随容器漂移，这里固定住。
+        .searchable(text: $searchText,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: env.config.semanticSearchEnabled
                     ? "找文字或照片里的画面" : "找找\(profiles.first?.name ?? "布布")的记录")
         // 本地文字结果立即出现；停顿 300ms 后再请求家中语义索引。请求失败不影响离线结果。
         .task(id: semanticTaskKey) { await updateSearch(semanticTaskKey) }
         .onAppear { rebuildSectionsIfNeeded(); refreshUnseenBadge() }
         .onChange(of: entries) { _, _ in
             entriesRevision += 1
-            rebuildSections()
+            // 卡片的增删都由 sections 驱动。不裹动画的话，删除是「瞬间蒸发」——
+            // 与保存成功的仪式感落差极大，也让人怀疑是不是点错了。
+            if reduceMotion {
+                rebuildSections()
+            } else {
+                withAnimation(BubuMotion.gentle) { rebuildSections() }
+            }
             refreshUnseenBadge()
         }
         .onChange(of: sortModeRaw) { _, _ in rebuildSections() }
@@ -128,6 +142,7 @@ struct TimelineView: View {
         } message: {
             Text("删除后会从时光轴隐藏，本地记录会标记为待同步删除。")
         }
+        .bubuToast($undoToast)
     }
 
     /// 上次看过动态之后，家里其他人有没有新动作（新记录/新评论）。一次性算好写入缓存。
@@ -199,7 +214,9 @@ struct TimelineView: View {
 
     // 单条：左侧 hue 圆点 + 右侧大图卡片
     private func timelineRow(_ entry: Entry, sectionIndex: Int) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        // scrollTransition 的闭包是 Sendable 的，不能在里面读 @Environment；先取成局部值。
+        let animates = !reduceMotion
+        return HStack(alignment: .top, spacing: 14) {
             Circle()
                 .fill(BubuTheme.Color.hue(entry.id.bubuStableHue, lightness: 0.78))
                 .frame(width: 14, height: 14)
@@ -212,8 +229,16 @@ struct TimelineView: View {
             .buttonStyle(.plain)
             .matchedTransitionSource(id: entry.id, in: zoomNS)
             .entranceEffect(index: entranceIndex(sectionIndex: sectionIndex, entryId: entry.id))
+            // 进出视口时轻微淡入淡出 + 缩放。幅度刻意很小：时光轴是每天翻的页面，
+            // 动效要像纸张的质感，不能像特效。reduceMotion 时整段跳过。
+            .scrollTransition(.interactive) { view, phase in
+                view.opacity(animates && !phase.isIdentity ? 0.72 : 1)
+                    .scaleEffect(animates && !phase.isIdentity ? 0.97 : 1)
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            // 删除不再是卡片上常驻的裸垃圾桶键（每天翻时光轴，误触代价是丢一条回忆）。
+            // 统一收进长按菜单：多一步长按当摩擦，删完还有 3.5 秒撤销。
             .contextMenu {
                 Button { entryPendingShare = entry } label: {
                     Label("分享这一刻", systemImage: "square.and.arrow.up")
@@ -222,20 +247,8 @@ struct TimelineView: View {
                     Label("删除记录", systemImage: "trash")
                 }
             }
-            // 行尾删除键只在窄屏显示：宽屏是网格，它会挤占卡片宽度并和相邻列碰撞。
-            // 宽屏删除走长按菜单（contextMenu 里已有「删除记录」）。
-            if !isWide {
-                Button(role: .destructive) {
-                    entryPendingDelete = entry
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(.body, design: .rounded).weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .background(BubuTheme.Color.danger.opacity(0.10), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("删除记录")
-            }
+            .accessibilityAction(named: "分享这一刻") { entryPendingShare = entry }
+            .accessibilityAction(named: "删除记录") { entryPendingDelete = entry }
         }
     }
 
@@ -267,12 +280,12 @@ struct TimelineView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.title?.isEmpty == false ? entry.title! :
-                        (entry.note?.isEmpty == false ? entry.note! : "记录此刻"))
+                Text(cardHeadline(entry))
                     .font(BubuTheme.Font.scaled(15.5, weight: .heavy, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(1)
-                if let note = entry.note, !note.isEmpty {
+                // 无标题时正文已被顶上去当标题，这里不能再原样重复一遍。
+                if let note = cardSubtitle(entry) {
                     Text(note)
                         .font(BubuTheme.Font.scaled(12.5, weight: .regular, design: .rounded))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -304,6 +317,20 @@ struct TimelineView: View {
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .bubuCardShadow()
+    }
+
+    /// 卡片标题：有标题用标题，没标题就把正文顶上来，都没有才是「记录此刻」。
+    private func cardHeadline(_ entry: Entry) -> String {
+        if let title = entry.title, !title.isEmpty { return title }
+        if let note = entry.note, !note.isEmpty { return note }
+        return "记录此刻"
+    }
+
+    /// 卡片副文案：只有当它和标题不是同一句话时才显示，避免同屏上下两行重复。
+    private func cardSubtitle(_ entry: Entry) -> String? {
+        guard let note = entry.note, !note.isEmpty else { return nil }
+        guard let title = entry.title, !title.isEmpty else { return nil }   // 无标题时正文已当标题
+        return note == title ? nil : note
     }
 
     /// 封面长宽比：取媒体真实比例并夹在可读区间。
@@ -609,8 +636,27 @@ struct TimelineView: View {
         // 删除后与 EntryDetailView.deleteEntry 一致：刷新小组件快照 + 推送墓碑同步，
         // 否则小组件仍显示已删记录、其它设备不知情。
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
         env.syncEngine.syncNow()
         entryPendingDelete = nil
+        let deletedID = entry.id
+        undoToast = BubuToastState(message: "已删除这条时光", systemImage: "trash",
+                                   actionTitle: "撤销") { restoreEntry(deletedID) }
+    }
+
+    /// 撤销删除：isArchived 是软删字段（会随同步双向传播），置回 false 再推一次即可全家恢复。
+    private func restoreEntry(_ id: UUID) {
+        let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+        guard let entry = try? context.fetch(descriptor).first else { return }
+        BubuHaptics.tapLight()
+        entry.isArchived = false
+        entry.editedAt = .now
+        entry.syncState = .local
+        context.insert(FeedEvent(kind: .entryCreated,
+                                 actorRole: env.config.currentRole.rawValue,
+                                 summary: "撤销了一条删除",
+                                 targetLocalId: entry.id.uuidString))
+        try? context.save()
+        env.refreshWidgetSnapshot(context: context)
+        env.syncEngine.syncNow()
     }
 }

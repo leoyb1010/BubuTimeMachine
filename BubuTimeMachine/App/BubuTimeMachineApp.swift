@@ -102,7 +102,6 @@ struct BubuTimeMachineApp: App {
                             Task { @MainActor in
                                 env.syncEngine.syncNow()
                                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                                WidgetRefresher.reload()
                                 pushWatchSnapshot()
                             }
                         }
@@ -111,7 +110,6 @@ struct BubuTimeMachineApp: App {
                     WatchConnectivityManager.shared.appContext = modelContainer.mainContext
                     WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                    WidgetRefresher.reload()
                     pushWatchSnapshot()
                 }
         }
@@ -123,7 +121,6 @@ struct BubuTimeMachineApp: App {
                 env.syncEngine.start()
                 WatchConnectivityManager.shared.retryPendingVoiceImports()   // 进前台重试手表语音应急导入（W-P1-3）
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                WidgetRefresher.reload()
                 pushWatchSnapshot()
                 case .background:
                 env.syncEngine.stopPolling()

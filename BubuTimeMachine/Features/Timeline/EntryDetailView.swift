@@ -572,7 +572,6 @@ struct EntryDetailView: View {
 
     private func refreshWidgets() {
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
     }
 
     private func deleteEntry() {

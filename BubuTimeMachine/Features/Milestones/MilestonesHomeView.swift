@@ -95,7 +95,6 @@ struct MilestonesHomeView: View {
                 milestone.syncState = .local
                 try? context.save()
                 env.refreshWidgetSnapshot(context: context)
-                WidgetRefresher.reload()
                 ceremonyFor = nil
             }
         }

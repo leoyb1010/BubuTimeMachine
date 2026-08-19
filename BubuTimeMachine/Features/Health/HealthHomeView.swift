@@ -319,7 +319,6 @@ struct HealthHomeView: View {
         context.delete(record)
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
         env.syncEngine.syncNow()
         deletingRecord = nil
     }

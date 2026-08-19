@@ -39,8 +39,10 @@ sleep 4 && xcrun simctl io "iPhone 17 Pro" screenshot /tmp/shot.png
 ## 模拟器视觉验证（DEBUG 启动参数）
 GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMachineApp.swift` 与 `RootTabView.swift`，仅 DEBUG 生效）：
 - `-uitest-seed`：注入布布档案 + 成员 + 记录 + 里程碑 + 胶囊，跳过引导
-- `-uitest-tab N`：直达第 N 个 tab（0记录/1时光轴/2里程碑/3AI工坊/4时间胶囊）
-- 直达页面：`-uitest-capsule` / `-uitest-growth` / `-uitest-diary` / `-uitest-settings` / `-uitest-voice` / `-uitest-export` / `-uitest-timeline` / `-uitest-ai` / `-uitest-movie` / `-uitest-report` / `-uitest-capture` / `-uitest-simple`
+- `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
+  时间胶囊已并入魔法屋；iPhone 是 4 Tab + 中央「记一笔」，N≥4 会被夹到 3
+  （tag 4「档案馆」只存在于 Mac Catalyst 的宽屏侧栏）
+- 直达页面：`-uitest-capsule` / `-uitest-growth` / `-uitest-growth-curve` / `-uitest-diary` / `-uitest-settings` / `-uitest-advanced-settings` / `-uitest-voice` / `-uitest-export` / `-uitest-timeline` / `-uitest-ai` / `-uitest-movie` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-sound-ring` / `-uitest-capture` / `-uitest-simple`
 - 手表端：bundle id `com.bubu.timemachine.watchkitapp`，App Group `group.com.bubu.timemachine.watch`；可用 `xcrun simctl` 往手表模拟器 App Group 容器注入 plist 快照数据后截图验证（本地有专用模拟器 `BubuWatchSim`）
 
 ## 当前路线图

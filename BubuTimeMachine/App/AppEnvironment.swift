@@ -93,7 +93,10 @@ final class AppEnvironment {
         [
             DataMigration(id: "vaccine-legacy-v1") { try VaccineLegacyMigrator.perform(context: $0) },
             DataMigration(id: "growth-backfill-v1") { try GrowthMeasurementBackfill.perform(context: $0) },
-            DataMigration(id: "birthday-normalize-v1") { try BirthdayNormalizationMigrator.perform(context: $0) }
+            DataMigration(id: "birthday-normalize-v1") { try BirthdayNormalizationMigrator.perform(context: $0) },
+            // 存量脏数据自愈：预览小图曾被落进 Media/ 却写进 thumbnailFileName，
+            // 导致主 App 缩略图与桌面小组件永远查不到（桌面照片整体消失的根因）。
+            DataMigration(id: "thumbnail-path-repair-v1") { try ThumbnailPathRepair.perform(context: $0) }
         ]
     }
 
@@ -155,9 +158,16 @@ final class AppEnvironment {
 
     /// 小组件不直接依赖主 App 进程。把它需要的档案/头像/最近照片写入 App Group defaults，
     /// 避免 WidgetKit 进程直接打开 SwiftData store 失败时显示空白。
+    /// 写快照 **并**通知 WidgetKit 重载时间线。
+    /// 只写 defaults 不 reload 时，桌面要等系统的低频节奏才更新，表现为「收了照片桌面没反应」。
+    /// reload 本身有 2 秒合并节流（见 WidgetRefresher），高频调用不会打爆当日预算。
     func refreshWidgetSnapshot(context: ModelContext) {
-        guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
-        SharedDefaults.saveWidgetSnapshot(snapshot)
+        if let snapshot = SharedWidgetSnapshot.make(context: context) {
+            SharedDefaults.saveWidgetSnapshot(snapshot)
+        }
+        // reload 放在 guard 之外：档案还没建好（make 返回 nil）时桌面也该刷成占位态，
+        // 而不是留着上一份已失效的快照。
+        WidgetRefresher.reload()
     }
 
     /// 订阅后台缩略图补齐：把生成的缩略图文件名回填进 SwiftData 的 `Media.thumbnailFileName`，

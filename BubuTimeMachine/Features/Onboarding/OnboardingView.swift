@@ -239,7 +239,6 @@ struct OnboardingView: View {
         env.config.childName = profile.name
         env.config.currentRoleRaw = selectedRelation.rawValue
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
         withAnimation(.smooth) {
             env.hasCompletedOnboarding = true
         }

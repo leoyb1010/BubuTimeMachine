@@ -143,6 +143,7 @@ struct RootTabView: View {
                     CaptureHomeView(openTimeline: { selection = 1 },
                                     quickCaptureTrigger: quickCaptureTrigger)
                 }
+                .bubuTabContentTransition(isActive: selection == 0)
                 .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("首页", systemImage: "house.fill") }
                 .tag(0)
@@ -151,6 +152,7 @@ struct RootTabView: View {
                 NavigationStack {
                     TimelineView()
                 }
+                .bubuTabContentTransition(isActive: selection == 1)
                 .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("时光", systemImage: "clock.fill") }
                 .tag(1)
@@ -159,6 +161,7 @@ struct RootTabView: View {
                 NavigationStack {
                     GrowthHomeView()
                 }
+                .bubuTabContentTransition(isActive: selection == 2)
                 .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("成长", systemImage: "chart.xyaxis.line") }
                 .tag(2)
@@ -167,6 +170,7 @@ struct RootTabView: View {
                 NavigationStack {
                     AIStudioHomeView()
                 }
+                .bubuTabContentTransition(isActive: selection == 3)
                 .safeAreaInset(edge: .bottom) { tabBarSpacer }
                 .tabItem { Label("魔法屋", systemImage: "wand.and.stars.inverse") }
                 .tag(3)

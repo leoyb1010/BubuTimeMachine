@@ -145,7 +145,6 @@ struct HealthRecordSheet: View {
         do {
             try context.save()
             env.refreshWidgetSnapshot(context: context)
-            WidgetRefresher.reload()
             env.syncEngine.syncNow()
             dismiss()
         } catch {

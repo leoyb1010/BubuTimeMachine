@@ -78,6 +78,47 @@ nonisolated struct MediaStore: Sendable {
         return name
     }
 
+    /// 将外部下载的**预览小图**拷进缩略图目录，返回相对文件名（`thumb_` 前缀）。
+    /// 为什么必须单独一条通道：同步的「预览秒出」阶段拉回的是服务端 600px 小图，
+    /// 它会被写进 `Media.thumbnailFileName`。若沿用 `importFile` 落到 Media/ 目录，
+    /// 主 App 的 `thumbnailURL(for:)` 与桌面小组件的缩略图查找都会永远 miss ——
+    /// 桌面照片整体消失、时光轴在原图到齐前一直是占位底色。
+    func importThumbnail(from sourceURL: URL, preferredExtension ext: String = "jpg") throws -> String {
+        let fm = FileManager.default
+        let resolvedExt = Self.sniffImageExtension(at: sourceURL) ?? Self.cleanExtension(ext, fallback: "jpg")
+        let name = "thumb_\(UUID().uuidString).\(resolvedExt)"
+        let dest = thumbnailDir.appendingPathComponent(name)
+        if fm.fileExists(atPath: dest.path) {
+            try fm.removeItem(at: dest)
+        }
+        try fm.copyItem(at: sourceURL, to: dest)
+        return name
+    }
+
+    /// 自愈：把误落在 Media/ 的缩略图搬回 Thumbnails/（文件名不变，模型字段无需改）。
+    /// 返回是否真的搬了。已经在缩略图目录（含旧沙盒回退位）的直接返回 false，不做无谓 IO。
+    @discardableResult
+    func relocateStrayThumbnail(named fileName: String, keepSource: Bool = false) -> Bool {
+        let fm = FileManager.default
+        let target = thumbnailDir.appendingPathComponent(fileName)
+        if fm.fileExists(atPath: target.path) { return false }
+        if fm.fileExists(atPath: BubuStorage.legacyThumbnailDirectory.appendingPathComponent(fileName).path) {
+            return false
+        }
+        let source = mediaURL(for: fileName)
+        guard fm.fileExists(atPath: source.path) else { return false }
+        do {
+            if keepSource {
+                try fm.copyItem(at: source, to: target)
+            } else {
+                try fm.moveItem(at: source, to: target)
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
     static func sniffImageExtension(at url: URL) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }

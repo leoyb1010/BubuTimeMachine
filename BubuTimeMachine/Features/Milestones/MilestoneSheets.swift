@@ -76,7 +76,6 @@ struct MilestonePickerSheet: View {
         }
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
         dismiss()
     }
 }
@@ -273,7 +272,6 @@ struct MilestoneEditSheet: View {
         }
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
-        WidgetRefresher.reload()
         dismiss()
     }
 
@@ -283,7 +281,6 @@ struct MilestoneEditSheet: View {
             context.delete(m)
             try? context.save()
             env.refreshWidgetSnapshot(context: context)
-            WidgetRefresher.reload()
             env.syncEngine.syncNow()
         }
         dismiss()

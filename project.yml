@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.10.1"
-    CURRENT_PROJECT_VERSION: "2026080913"
+    MARKETING_VERSION: "2.11.0"
+    CURRENT_PROJECT_VERSION: "2026081901"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -188,6 +188,7 @@ targets:
       - path: BubuTimeMachine/App/GrowthMeasurementExtractor.swift
       - path: BubuTimeMachine/App/SharedDefaults.swift
       - path: BubuTimeMachine/App/WidgetWallpaper.swift
+      - path: BubuTimeMachine/App/WidgetImageResolver.swift
       - path: BubuTimeMachine/App/BubuAppIntents.swift
       - path: BubuTimeMachine/App/BubuActivityAttributes.swift
       - path: BubuTimeMachine/Services/EntryWriter.swift

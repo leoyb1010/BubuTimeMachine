@@ -12,8 +12,10 @@
 
 - **仓库路径**：`/Users/leoyuan/Desktop/leoworkspace/BubuTimeMachine`
 - **工程管理**：xcodegen（改 `project.yml` 后必须重跑 `xcodegen generate`）
-- **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 18+ 部署目标
-- **规模**：68 个 Swift 文件 + 10 个后端文件，约 7300 行 Swift
+- **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 26.0、watchOS 11.0 部署目标
+- **规模**（2026-08-19 实测）：201 个 Swift 文件、约 4.5 万行（其中主 App 180 文件 / 4.04 万行），
+  另有 21 个测试文件（139 测试 / 23 套件全绿）；后端在 `server/`（FastAPI 137 个 pytest + PocketBase 迁移/hook）
+- **当前版本**：v2.11.0
 
 ---
 
@@ -47,9 +49,13 @@ xcrun simctl io "iPhone 17 Pro" screenshot /tmp/shot.png
 ```
 
 **DEBUG 启动参数**（仅 DEBUG 编译有效，定义在 `App/BubuTimeMachineApp.swift` 与 `RootTabView.swift`）：
-- `-uitest-seed`：注入布布档案 + 成员 + 4 条记录 + 里程碑 + 2 封时间胶囊，并跳过引导
-- `-uitest-tab N`：直达第 N 个 tab（0记录/1时光轴/2里程碑/3AI工坊/4时间胶囊）
-- `-uitest-settings` / `-uitest-voice` / `-uitest-export`：直达对应页面
+- `-uitest-seed`：注入布布档案 + 成员 + 记录 + 里程碑 + 时间胶囊，并跳过引导（`-uitest-seed-big` 再铺 400 条压测数据）
+- `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
+  时间胶囊已并入魔法屋，iPhone 只有 4 个 Tab + 中央「记一笔」；N≥4 会被夹到 3（档案馆 tag 4 只在 Mac Catalyst 侧栏存在）
+- 直达页面：`-uitest-simple` / `-uitest-capture` / `-uitest-timeline` / `-uitest-ai` / `-uitest-growth` /
+  `-uitest-growth-curve` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-movie` / `-uitest-diary` /
+  `-uitest-capsule` / `-uitest-sound-ring` / `-uitest-settings` / `-uitest-advanced-settings` /
+  `-uitest-voice` / `-uitest-export`
 
 > 截图后建议 `xcrun simctl uninstall "iPhone 17 Pro" com.bubu.timemachine` 清掉，
 > 保证真机/用户首次运行能看到全新引导。
@@ -63,7 +69,7 @@ BubuTimeMachine/
 ├── App/
 │   ├── BubuTimeMachineApp.swift   @main：Schema 装配 + DEBUG 种子 + RootView(引导/主界面切换)
 │   ├── AppEnvironment.swift       ★ DI 容器(@Observable @MainActor)。按配置动态装配 Mock vs 真实
-│   └── RootTabView.swift          5 Tab 导航
+│   └── RootTabView.swift          4 Tab + 中央记一笔（iPhone）／NavigationSplitView（iPad）
 ├── Models/                        11 个 @Model（SwiftData，唯一真相源）
 │   └── Enums / AgeCalculator      Mood/Relation/SyncState + 年龄计算（全 App 年龄展示来源）
 ├── Services/
@@ -79,9 +85,11 @@ BubuTimeMachine/
 │   │                             AudioRecorder/Player / ArchiveExporter(全量HTML导出)
 │   ├── Security/                  CapsuleCrypto(AES-GCM) / CapsuleVault(时间胶囊封存)
 │   └── ReminderScheduler.swift    那年今日每日本地通知
-├── Features/                      按页面组织（View + 局部 @Observable Model）
-│   ├── Capture/  Timeline/  Milestones/  AIStudio/  Capsule/
-│   ├── Settings/  (含 ChildProfile/Members/Theme/VoiceArchive/Export)
+├── Features/                      按页面组织（View + 局部 @Observable Model），共 16 个域
+│   ├── Capture/(首页+记录面板)  Timeline/  Growth/  AIStudio/(魔法屋)  Milestones/
+│   ├── Health/  Album/  Feed/  Story/  PhotoFrame/  NaturalCapture/  Capsule/  Share/
+│   ├── Settings/  (含 ChildProfile/Members/Theme/VoiceArchive/Export/WidgetWallpaper)
+│   ├── SimpleMode/(姥姥模式)
 │   └── Onboarding/
 └── DesignSystem/  BubuTheme / ThemeManager / 组件库
 
