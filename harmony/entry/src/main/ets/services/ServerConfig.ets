@@ -26,6 +26,7 @@ export class ServerConfig {
   roleBeforeElderRaw: string = '';
   sleepStartedAt: number = 0;
   timelineSortModeRaw: string = 'capture';
+  photoFrameDwellSeconds: number = 8;
 
   private constructor() {}
 
@@ -43,6 +44,7 @@ export class ServerConfig {
     this.roleBeforeElderRaw = await this.getStr('roleBeforeElder', '');
     this.sleepStartedAt = await this.getNum('sleepStartedAt', 0);
     this.timelineSortModeRaw = await this.getStr('timelineSortMode', 'capture');
+    this.photoFrameDwellSeconds = await this.getNum('photoFrameDwellSeconds', 8);
     AppStorage.setOrCreate('bubuSimpleMode', this.simpleModeEnabled);
   }
 
@@ -99,6 +101,14 @@ export class ServerConfig {
   async setTimelineSortMode(value: string): Promise<void> {
     this.timelineSortModeRaw = value === 'recorded' ? 'recorded' : 'capture';
     await this.put('timelineSortMode', this.timelineSortModeRaw);
+  }
+
+  async setPhotoFrameDwellSeconds(value: number): Promise<void> {
+    const allowed = [5, 8, 15, 30];
+    this.photoFrameDwellSeconds = allowed.includes(value) ? value : 8;
+    if (!this.store) return;
+    await this.store.put('photoFrameDwellSeconds', this.photoFrameDwellSeconds);
+    await this.store.flush();
   }
 
   // 持久化服务器配置（地址/账号/密码）。

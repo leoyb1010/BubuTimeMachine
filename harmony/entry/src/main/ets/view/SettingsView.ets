@@ -15,6 +15,7 @@ import { ExportView } from './ExportView';
 import { AdvancedSettingsView } from './AdvancedSettingsView';
 import { SyncCenterView } from './SyncCenterView';
 import { PhotoInboxView } from './PhotoInboxView';
+import { PhotoFrameView } from './PhotoFrameView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { promptAction } from '@kit.ArkUI';
 
@@ -48,6 +49,7 @@ export struct SettingsView {
   @State showExport: boolean = false;
   @State showSyncCenter: boolean = false;
   @State showPhotoInbox: boolean = false;
+  @State showPhotoFrame: boolean = false;
   @State statusText: string = '';
 
   aboutToAppear(): void {
@@ -87,6 +89,8 @@ export struct SettingsView {
       this.syncCenterPage()
     } else if (this.showPhotoInbox) {
       this.photoInboxPage()
+    } else if (this.showPhotoFrame) {
+      PhotoFrameView({ onClose: () => { this.showPhotoFrame = false; } })
     } else {
       this.mainPage()
     }
@@ -388,6 +392,7 @@ export struct SettingsView {
         .padding({ left: 6 })
       Column({ space: 0 }) {
         this.navRow('主题与外观', '🎨', '马卡龙主题配色与首页背景', () => { this.showTheme = true; })
+        this.navRow('相框模式', BubuIconName.photo, '把这台手机变成布布的全屏数字相框', () => { this.showPhotoFrame = true; })
       }
       .width('100%')
       .padding({ top: 4, bottom: 4 })
