@@ -2,6 +2,11 @@ import { http } from '@kit.NetworkKit';
 import { FamilyRole } from '../models/Enums';
 import { ServerConfig } from './ServerConfig';
 
+interface AccountAuthResult {
+  token: string;
+  recordId: string;
+}
+
 export class AccountService {
   private static readonly emailDomain: string = 'bubu.family';
 
@@ -35,8 +40,8 @@ export class AccountService {
     let lastError: Error | null = null;
     for (const identity of AccountService.identityCandidates(u)) {
       try {
-        await this.authWithPassword(identity, password);
-        await this.persist(identity, password, role);
+        const auth = await this.authWithPassword(identity, password);
+        await this.persist(identity, password, role, auth.recordId);
         return;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error('登录失败，请稍后再试');
@@ -53,15 +58,33 @@ export class AccountService {
     await ServerConfig.shared.logout();
   }
 
-  private async persist(email: string, password: string, role: FamilyRole): Promise<void> {
+  async changePassword(oldPassword: string, newPassword: string, confirmPassword: string): Promise<void> {
+    const cfg = ServerConfig.shared;
+    if (!cfg.isConfigured) throw new Error('请先登录，再修改密码');
+    if (newPassword.length < 8) throw new Error('新密码至少 8 位');
+    if (newPassword !== confirmPassword) throw new Error('两次输入的新密码不一样');
+    if (oldPassword === newPassword) throw new Error('新密码不能和原密码相同');
+    const auth = await this.authWithPassword(cfg.accountEmail, oldPassword);
+    const recordId = cfg.accountRecordId.length > 0 ? cfg.accountRecordId : auth.recordId;
+    const body = JSON.stringify({
+      oldPassword: oldPassword, password: newPassword, passwordConfirm: confirmPassword
+    });
+    await this.authorizedRequest('PATCH', `/api/collections/users/records/${recordId}`, body, auth.token);
+    cfg.accountRecordId = recordId;
+    cfg.accountPassword = newPassword;
+    await cfg.persistServer();
+  }
+
+  private async persist(email: string, password: string, role: FamilyRole, recordId: string): Promise<void> {
     const cfg = ServerConfig.shared;
     cfg.accountEmail = email;
     cfg.accountPassword = password;
+    cfg.accountRecordId = recordId;
     await cfg.setRole(role);
     await cfg.persistServer();
   }
 
-  private async authWithPassword(identity: string, password: string): Promise<string> {
+  private async authWithPassword(identity: string, password: string): Promise<AccountAuthResult> {
     const body = JSON.stringify({ identity: identity, password: password });
     const resp = await this.request('POST', '/api/collections/users/auth-with-password', body);
     const obj = JSON.parse(resp) as Record<string, Object>;
@@ -69,7 +92,10 @@ export class AccountService {
     if (!token || token.length === 0) {
       throw new Error('登录响应异常');
     }
-    return token;
+    const record = obj['record'] as Record<string, Object> | undefined;
+    const recordId = record?.['id'] as string | undefined;
+    if (!recordId || recordId.length === 0) throw new Error('登录响应缺少账号标识');
+    return { token: token, recordId: recordId };
   }
 
   private async firstWorkingIdentity(username: string, password: string): Promise<string> {
@@ -93,12 +119,19 @@ export class AccountService {
   }
 
   private async request(method: string, path: string, body: string): Promise<string> {
+    return await this.authorizedRequest(method, path, body, '');
+  }
+
+  private async authorizedRequest(method: string, path: string, body: string, token: string): Promise<string> {
     const req = http.createHttp();
     try {
-      const methodEnum = method === 'POST' ? http.RequestMethod.POST : http.RequestMethod.GET;
+      const methodEnum = method === 'POST' ? http.RequestMethod.POST
+        : method === 'PATCH' ? http.RequestMethod.PATCH : http.RequestMethod.GET;
+      const header: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token.length > 0) header['Authorization'] = `Bearer ${token}`;
       const resp = await req.request(this.baseURL() + path, {
         method: methodEnum,
-        header: { 'Content-Type': 'application/json' } as Record<string, string>,
+        header: header,
         extraData: body,
         connectTimeout: 30000,
         readTimeout: 90000
