@@ -17,6 +17,7 @@ import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { CeremonyAnimation } from '../components/CeremonyAnimation';
 import { BubuConstellationView } from './BubuConstellationView';
 import { MilestonePickerSheet, MilestoneEditSheet } from './MilestoneSheets';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 @Component
 export struct MilestonesView {
@@ -28,20 +29,18 @@ export struct MilestonesView {
   @State private isConstellation: boolean = false;   // 展示方式：星盘视图 / 奖章墙
 
   // 弹层状态（iOS .sheet → ArkUI @State + Stack 覆盖）
-  @State @Watch('syncNavigationDepth') private showPicker: boolean = false;
-  @State @Watch('syncNavigationDepth') private showCustom: boolean = false;
-  @State @Watch('syncNavigationDepth') private detailFor: Milestone | null = null;
+  @State @Watch('syncBackHandler') private showPicker: boolean = false;
+  @State @Watch('syncBackHandler') private showCustom: boolean = false;
+  @State @Watch('syncBackHandler') private detailFor: Milestone | null = null;
   // 仪式（iOS .fullScreenCover）
-  @State @Watch('syncNavigationDepth') private ceremonyFor: Milestone | null = null;
-  @State @Watch('syncNavigationDepth') private showAddMenu: boolean = false;
+  @State @Watch('syncBackHandler') private ceremonyFor: Milestone | null = null;
+  @State @Watch('syncBackHandler') private showAddMenu: boolean = false;
   @State private pageIn: boolean = false;
   @State private viewportW: number = 0;
-  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
-  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
 
   aboutToAppear(): void {
     this.reload();
-    this.syncNavigationDepth();
+    this.syncBackHandler();
     this.pageIn = false;
     this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
   }
@@ -52,32 +51,37 @@ export struct MilestonesView {
     this.checkPendingCeremony();
   }
 
-  private onBackSignal(): void {
-    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('milestones'); }
+
+  private handleBack(): boolean {
     if (this.showAddMenu) {
       this.showAddMenu = false;
-      return;
+      return true;
     }
     if (this.showPicker) {
       this.showPicker = false;
-      return;
+      return true;
     }
     if (this.showCustom) {
       this.showCustom = false;
-      return;
+      return true;
     }
     if (this.detailFor !== null) {
       this.detailFor = null;
-      return;
+      return true;
     }
     if (this.ceremonyFor !== null) {
       this.ceremonyFor = null;
+      return true;
     }
+    return false;
   }
 
-  private syncNavigationDepth(): void {
-    this.navigationDepth = this.showAddMenu || this.showPicker || this.showCustom
-      || this.detailFor !== null || this.ceremonyFor !== null ? 1 : 0;
+  private syncBackHandler(): void {
+    const nested = this.showAddMenu || this.showPicker || this.showCustom
+      || this.detailFor !== null || this.ceremonyFor !== null;
+    if (nested) BackDispatcher.shared.register('milestones', 10, (): boolean => this.handleBack());
+    else BackDispatcher.shared.unregister('milestones');
   }
 
   // —— 计算属性（对照 iOS）——

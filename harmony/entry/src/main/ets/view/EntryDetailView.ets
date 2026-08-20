@@ -18,6 +18,7 @@ import { relationalStore } from '@kit.ArkData';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { ShareCardSheet } from './ShareCardSheet';
 import { buildTimelineMediaSequence } from '../services/MediaGalleryModel';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 // MARK: - 记录详情（对照 iOS Features/Timeline/EntryDetailView.swift）
 // 已上传内容不再只读：可改文字/心情、追加语音、家人多视角补充、点亲亲。
@@ -35,35 +36,34 @@ export struct EntryDetailView {
   @State private comments: Comment[] = [];
   @State private voiceNotes: VoiceNote[] = [];
 
-  @State @Watch('syncNavigationDepth') private editing: boolean = false;
+  @State @Watch('syncBackHandler') private editing: boolean = false;
   // 编辑态本地草稿（保存时落库）。
   @State private draftNote: string = '';
   @State private draftMood: Mood | undefined = undefined;
   @State private draftHappenedAt: number = 0;
 
-  @State @Watch('syncNavigationDepth') private showCommentSheet: boolean = false;
-  @State @Watch('syncNavigationDepth') private showReactionPicker: boolean = false;
-  @State @Watch('syncNavigationDepth') private showShareCard: boolean = false;
-  @State @Watch('syncNavigationDepth') private viewingMediaID: string | null = null;
-  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
-  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
+  @State @Watch('syncBackHandler') private showCommentSheet: boolean = false;
+  @State @Watch('syncBackHandler') private showReactionPicker: boolean = false;
+  @State @Watch('syncBackHandler') private showShareCard: boolean = false;
+  @State @Watch('syncBackHandler') private viewingMediaID: string | null = null;
 
-  aboutToAppear(): void { this.load(); this.syncNavigationDepth(); }
+  aboutToAppear(): void { this.load(); this.syncBackHandler(); }
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('entry-detail'); }
 
-  private onBackSignal(): void {
-    if (this.backSignal <= 0 || this.navigationDepth !== 2) return;
-    if (this.viewingMediaID !== null) this.viewingMediaID = null;
-    else if (this.showShareCard) this.showShareCard = false;
-    else if (this.showCommentSheet) this.showCommentSheet = false;
-    else if (this.showReactionPicker) this.showReactionPicker = false;
-    else if (this.editing) this.editing = false;
+  private handleBack(): boolean {
+    if (this.viewingMediaID !== null) { this.viewingMediaID = null; return true; }
+    if (this.showShareCard) { this.showShareCard = false; return true; }
+    if (this.showCommentSheet) { this.showCommentSheet = false; return true; }
+    if (this.showReactionPicker) { this.showReactionPicker = false; return true; }
+    if (this.editing) { this.editing = false; return true; }
+    return false;
   }
 
-  private syncNavigationDepth(): void {
+  private syncBackHandler(): void {
     const nested = this.editing || this.showCommentSheet || this.showReactionPicker
       || this.showShareCard || this.viewingMediaID !== null;
-    if (nested) this.navigationDepth = 2;
-    else if (this.navigationDepth === 2) this.navigationDepth = 1;
+    if (nested) BackDispatcher.shared.register('entry-detail', 30, (): boolean => this.handleBack());
+    else BackDispatcher.shared.unregister('entry-detail');
   }
 
   private theme(): string { return BubuColor.primary; }

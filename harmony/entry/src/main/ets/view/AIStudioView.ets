@@ -12,6 +12,7 @@ import { WeeklyReportView } from './WeeklyReportView';
 import { SoundRingView } from './SoundRingView';
 import { VoiceArchiveView } from './VoiceArchiveView';
 import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 // MARK: - 布布的魔法屋（对照 iOS Features/AIStudio/AIStudioHomeView.swift）
 // 自托管 AI 的创作中心：成长绘本 / 未来胶囊 / 第一人称日记 / 成长电影 / 家人合奏 / 成长报告。
@@ -45,29 +46,34 @@ const SOUND_TILES: CapabilityTile[] = [
 @Component
 export struct AIStudioView {
   // 当前子页路由（空 = 魔法屋首页）。对照 iOS NavigationLink 的目的地。
-  @State @Watch('syncNavigationDepth') private route: string = '';
+  @State @Watch('syncBackHandler') private route: string = '';
   @State private viewportW: number = 0;
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
-  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
-  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
   // 主题主色（对照 iOS env.theme.theme.primary）。
   private theme: string = BubuColor.primary;
 
   aboutToAppear(): void {
     this.tabBarVisible = true;
-    this.syncNavigationDepth();
+    this.syncBackHandler();
   }
 
-  private onBackSignal(): void {
-    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('ai-studio'); }
+
+  private handleBack(): boolean {
     if (this.route.length > 0) {
       this.route = '';
       this.tabBarVisible = true;
+      return true;
     }
+    return false;
   }
 
-  private syncNavigationDepth(): void {
-    this.navigationDepth = this.route.length > 0 ? 1 : 0;
+  private syncBackHandler(): void {
+    if (this.route.length > 0) {
+      BackDispatcher.shared.register('ai-studio', 10, (): boolean => this.handleBack());
+    } else {
+      BackDispatcher.shared.unregister('ai-studio');
+    }
   }
 
   private isCompact(): boolean {

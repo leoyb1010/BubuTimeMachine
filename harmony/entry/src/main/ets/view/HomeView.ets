@@ -27,6 +27,7 @@ import { HomeRoute } from './HomeDestinations';
 import { AIService } from '../services/AIService';
 import { SSDIntakeView } from './SSDIntakeView';
 import { BubuMovedHint } from '../components/BubuMovedHint';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS Features/Capture/CaptureHomeView.swift）
 // 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（里程碑/成长/故事/今日一问）
@@ -37,8 +38,8 @@ export struct HomeView {
   @State profile: ChildProfile | null = null;
   @State entries: Entry[] = [];
   // 内部路由（对照 iOS NavigationStack / navigationDestination）。
-  @State @Watch('syncNavigationDepth') route: HomeRoute = HomeRoute.home;
-  @State @Watch('syncNavigationDepth') selectedEntry: Entry | null = null;
+  @State @Watch('syncBackHandler') route: HomeRoute = HomeRoute.home;
+  @State @Watch('syncBackHandler') selectedEntry: Entry | null = null;
   // entryId → 首张照片沙盒绝对路径（最近时光/那年今日卡片缩略图）。
   @State photoMap: Map<string, string> = new Map();
   // 统计
@@ -57,8 +58,6 @@ export struct HomeView {
   @State private heroBreath: boolean = false;
   @State private viewportW: number = 0;
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
-  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
-  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
   @StorageLink('bubuHandledCaptureSignal') handledCaptureSignal: number = 0;
 
   private onCaptureSignal(): void {
@@ -68,28 +67,33 @@ export struct HomeView {
     }
   }
 
-  private onBackSignal(): void {
-    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
+  private handleBack(): boolean {
     if (this.selectedEntry !== null) {
       this.selectedEntry = null;
       this.tabBarVisible = true;
       this.reload();
-      return;
+      return true;
     }
     if (this.route !== HomeRoute.home) {
       this.route = HomeRoute.home;
       this.tabBarVisible = true;
       this.reload();
+      return true;
     }
+    return false;
   }
 
-  private syncNavigationDepth(): void {
-    this.navigationDepth = this.selectedEntry !== null || this.route !== HomeRoute.home ? 1 : 0;
+  private syncBackHandler(): void {
+    if (this.selectedEntry !== null || this.route !== HomeRoute.home) {
+      BackDispatcher.shared.register('home', 10, (): boolean => this.handleBack());
+    } else {
+      BackDispatcher.shared.unregister('home');
+    }
   }
 
   aboutToAppear(): void {
     this.tabBarVisible = true;
-    this.syncNavigationDepth();
+    this.syncBackHandler();
     this.reload();
     this.startHomeMotion();
     if (this.captureSignal > this.handledCaptureSignal) {
@@ -99,6 +103,8 @@ export struct HomeView {
       }, 80);
     }
   }
+
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('home'); }
 
   private startHomeMotion(): void {
     this.pageIn = false;

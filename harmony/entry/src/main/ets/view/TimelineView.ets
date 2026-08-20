@@ -17,6 +17,7 @@ import { util } from '@kit.ArkTS';
 import { AIService } from '../services/AIService';
 import { ShareCardSheet } from './ShareCardSheet';
 import { SyncEngine } from '../sync/SyncEngine';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 // MARK: - 时光轴（对照 iOS Features/Timeline/TimelineView.swift）
 // 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；离线优先，只读本地数据库。
@@ -46,46 +47,51 @@ export struct TimelineView {
   @State private loadingMore: boolean = false;
   @State private searchExpanded: boolean = false;
 
-	  @State @Watch('syncNavigationDepth') showFamilyFeed: boolean = false;
-	  @State @Watch('syncNavigationDepth') detailEntry: Entry | null = null;
-	  @State @Watch('syncNavigationDepth') shareEntry: Entry | null = null;
+	  @State @Watch('syncBackHandler') showFamilyFeed: boolean = false;
+	  @State @Watch('syncBackHandler') detailEntry: Entry | null = null;
+	  @State @Watch('syncBackHandler') shareEntry: Entry | null = null;
 	  @State private undoEntryId: string = '';
 	  private undoTimer: number = -1;
 	  @State private pageIn: boolean = false;
 	  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
-	  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
-	  @StorageLink('bubuNavigationDepth') navigationDepth: number = 0;
 	
 	  aboutToAppear(): void {
 	    this.tabBarVisible = true;
-	    this.syncNavigationDepth();
+	    this.syncBackHandler();
 	    this.sortModeRaw = ServerConfig.shared.timelineSortModeRaw === 'recorded' ? 'recorded' : 'capture';
 	    this.reload();
 	    this.pageIn = false;
 	    this.getUIContext().animateTo(BubuMotion.gentle, () => { this.pageIn = true; });
 	  }
 
-  private onBackSignal(): void {
-    if (this.backSignal <= 0 || this.navigationDepth !== 1) return;
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('timeline'); }
+
+  private handleBack(): boolean {
     if (this.shareEntry !== null) {
       this.shareEntry = null;
-      return;
+      return true;
     }
     if (this.detailEntry !== null) {
       this.detailEntry = null;
       this.tabBarVisible = true;
       this.reload();
-      return;
+      return true;
     }
     if (this.showFamilyFeed) {
       this.showFamilyFeed = false;
       this.tabBarVisible = true;
       this.reload();
+      return true;
     }
+    return false;
   }
 
-  private syncNavigationDepth(): void {
-    this.navigationDepth = this.detailEntry !== null || this.showFamilyFeed || this.shareEntry !== null ? 1 : 0;
+  private syncBackHandler(): void {
+    if (this.detailEntry !== null || this.showFamilyFeed || this.shareEntry !== null) {
+      BackDispatcher.shared.register('timeline', 20, (): boolean => this.handleBack());
+    } else {
+      BackDispatcher.shared.unregister('timeline');
+    }
   }
 
   private theme(): string { return BubuColor.primary; }

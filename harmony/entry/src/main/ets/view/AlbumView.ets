@@ -7,6 +7,7 @@ import { BubuMascotBadge } from '../components/BubuMascotBadge';
 import { BubuExpression } from '../theme/BubuExpression';
 import { AlbumDetailView } from './AlbumDetailView';
 import { AlbumMediaItem, SystemAlbum, SystemAlbumFactory, albumCover, albumCount } from './SystemAlbum';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 // MARK: - 布布的相册（对照 iOS Features/Album/AlbumHomeView.swift）
 // 首页「张照片」入口的落地页：自动整理的系统相册（全部/最近/小视频/有地点/按月份/按月龄）。
@@ -21,10 +22,25 @@ export struct AlbumView {
   @State private birthdayMs: number | undefined = undefined;
 
   // 内部导航：选中相册 → 相册详情（对照 NavigationLink → AlbumDetailView）。
-  @State private detailAlbum: SystemAlbum | null = null;
+  @State @Watch('syncBackHandler') private detailAlbum: SystemAlbum | null = null;
 
   aboutToAppear(): void {
+    this.syncBackHandler();
     this.rebuildAlbums();
+  }
+
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('album'); }
+
+  private syncBackHandler(): void {
+    if (this.detailAlbum !== null) {
+      BackDispatcher.shared.register('album', 20, (): boolean => {
+        if (this.detailAlbum === null) return false;
+        this.detailAlbum = null;
+        return true;
+      });
+    } else {
+      BackDispatcher.shared.unregister('album');
+    }
   }
 
   // 对照 rebuildAlbums()：把所有记录里的照片/视频汇成 AlbumMediaItem 再分组。

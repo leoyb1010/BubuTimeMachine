@@ -10,21 +10,24 @@ const studio = await readFile(new URL('view/AIStudioView.ets', root), 'utf8');
 const milestones = await readFile(new URL('view/MilestonesView.ets', root), 'utf8');
 const settings = await readFile(new URL('view/SettingsView.ets', root), 'utf8');
 const detail = await readFile(new URL('view/EntryDetailView.ets', root), 'utf8');
+const album = await readFile(new URL('view/AlbumView.ets', root), 'utf8');
+const albumDetail = await readFile(new URL('view/AlbumDetailView.ets', root), 'utf8');
 
-test('系统侧滑先按导航深度返回上一界面，Root 不再越级切回首页', () => {
-  assert.ok(rootPage.includes("@StorageLink('bubuNavigationDepth')"));
-  assert.ok(rootPage.includes('if (this.navigationDepth > 0 || !this.tabBarVisible)'));
-  const nestedBlock = rootPage.slice(rootPage.indexOf('if (this.navigationDepth > 0'));
-  assert.ok(nestedBlock.indexOf('this.backSignal = this.backSignal + 1') < nestedBlock.indexOf('this.selection !== 0'));
-  assert.ok(!nestedBlock.slice(0, nestedBlock.indexOf('this.selection !== 0')).includes('this.tabBarVisible = true'));
+test('Root 每次先交给唯一最深层处理器，不再广播给多个页面', () => {
+  assert.ok(rootPage.includes('BackDispatcher.shared.handleBack()'));
+  assert.ok(!rootPage.includes('bubuBackSignal'));
+  assert.ok(!rootPage.includes('bubuNavigationDepth'));
 });
 
-test('各主 Tab、设置二级页和详情弹层统一声明并消费导航深度', () => {
-  for (const source of [home, timeline, studio, milestones, settings, detail]) {
-    assert.ok(source.includes("@StorageLink('bubuNavigationDepth')"));
-    assert.ok(source.includes('syncNavigationDepth'));
+test('各主 Tab、设置、相册与详情弹层注册并在销毁时注销返回处理器', () => {
+  for (const source of [home, timeline, studio, milestones, settings, detail, album, albumDetail]) {
+    assert.ok(source.includes('BackDispatcher.shared.register'));
+    assert.ok(source.includes('BackDispatcher.shared.unregister'));
+    assert.ok(source.includes('syncBackHandler'));
   }
-  assert.ok(settings.includes('this.navigationDepth !== 2'));
-  assert.ok(detail.includes('this.navigationDepth !== 2'));
   assert.ok(detail.includes('this.viewingMediaID = null'));
+  assert.ok(album.includes("register('album', 20"));
+  assert.ok(albumDetail.includes("register('album-detail', 30"));
+  assert.ok(timeline.includes("register('timeline', 20"));
+  assert.ok(home.includes("register('home', 10"));
 });

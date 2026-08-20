@@ -3,6 +3,7 @@ import { BubuColor } from '../theme/BubuTheme';
 import { MediaThumbnail } from '../components/MediaThumbnail';
 import { MediaGalleryViewer } from '../components/MediaViewer';
 import { AlbumMediaItem } from './SystemAlbum';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 // MARK: - 相册详情（对照 iOS Features/Album/AlbumDetailView.swift）
 // 三列网格，点图直接全屏查看器（与照片墙一致，不绕记录详情）。
@@ -16,7 +17,22 @@ export struct AlbumDetailView {
   // 分批渲染：大相册（上千张）首屏只挂 90 个缩略图，滚到底自动追加（对照 visibleCount）。
   @State private visibleCount: number = 90;
   // 全屏查看器路由（对照 fullScreenCover(item: viewerRoute)）。
-  @State private viewerInitialID: string | null = null;
+  @State @Watch('syncBackHandler') private viewerInitialID: string | null = null;
+
+  aboutToAppear(): void { this.syncBackHandler(); }
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('album-detail'); }
+
+  private syncBackHandler(): void {
+    if (this.viewerInitialID !== null) {
+      BackDispatcher.shared.register('album-detail', 30, (): boolean => {
+        if (this.viewerInitialID === null) return false;
+        this.viewerInitialID = null;
+        return true;
+      });
+    } else {
+      BackDispatcher.shared.unregister('album-detail');
+    }
+  }
 
   // 画廊媒体（对照 galleryMedia = items.map(\.media)）。
   private galleryMedia(): Media[] {
