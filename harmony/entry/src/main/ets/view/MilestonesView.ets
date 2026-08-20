@@ -234,7 +234,7 @@ export struct MilestonesView {
         badgeSize: 40,
         iconSize: 20,
         color: BubuColor.primary,
-        fill: '#F2FFFFFF',
+        fill: BubuColor.card,
         radius: 20,
         strokeWidth: 2.1,
         filled: !this.isConstellation
@@ -252,7 +252,7 @@ export struct MilestonesView {
         badgeSize: 40,
         iconSize: 22,
         color: BubuColor.primary,
-        fill: '#F2FFFFFF',
+        fill: BubuColor.card,
         radius: 20,
         strokeWidth: 2.8
       })

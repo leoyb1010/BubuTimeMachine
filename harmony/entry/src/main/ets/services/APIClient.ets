@@ -1,6 +1,6 @@
 import { http } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
-import { util, url } from '@kit.ArkTS';
+import { util, url, buffer } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { request } from '@kit.BasicServicesKit';
 import type { common } from '@kit.AbilityKit';
@@ -29,6 +29,8 @@ export class APIClient {
   private fileToken: string = '';
   private fileTokenExpiresAt: number = 0;
   private credentialIdentity: string = '';
+  private realtimeRequest: http.HttpRequest | null = null;
+  private realtimeGeneration: number = 0;
   private appContext: common.BaseContext | null = null;
 
   private constructor() {}
@@ -116,12 +118,99 @@ export class APIClient {
   }
 
   clearSession(): void {
+    this.stopRealtime();
     this.token = '';
     this.currentUserId = '';
     this.currentFamilyId = '';
     this.fileToken = '';
     this.fileTokenExpiresAt = 0;
     this.credentialIdentity = '';
+  }
+
+  startRealtime(onEvent: () => void): void {
+    this.stopRealtime();
+    const generation = ++this.realtimeGeneration;
+    this.realtimeLoop(generation, onEvent);
+  }
+
+  stopRealtime(): void {
+    this.realtimeGeneration += 1;
+    if (this.realtimeRequest) {
+      try { this.realtimeRequest.destroy(); } catch (e) {}
+      this.realtimeRequest = null;
+    }
+  }
+
+  private async realtimeLoop(generation: number, onEvent: () => void): Promise<void> {
+    let backoffMs = 2000;
+    while (generation === this.realtimeGeneration && ServerConfig.shared.isConfigured) {
+      try {
+        await this.realtimeOnce(generation, onEvent);
+        backoffMs = 2000;
+      } catch (e) {
+        // 连接错误由指数退避重连；既有轮询仍是兜底。
+      }
+      if (generation !== this.realtimeGeneration) return;
+      await new Promise<void>((resolve: () => void) => setTimeout(resolve, backoffMs));
+      backoffMs = Math.min(backoffMs * 2, 60000);
+    }
+  }
+
+  private async realtimeOnce(generation: number, onEvent: () => void): Promise<void> {
+    const req = http.createHttp();
+    this.realtimeRequest = req;
+    let pending = '';
+    req.on('dataReceive', (chunk: ArrayBuffer): void => {
+      if (generation !== this.realtimeGeneration) return;
+      pending += buffer.from(chunk).toString('utf-8').replace(/\r\n/g, '\n');
+      let boundary = pending.indexOf('\n\n');
+      while (boundary >= 0) {
+        const block = pending.substring(0, boundary);
+        pending = pending.substring(boundary + 2);
+        this.handleRealtimeBlock(block, onEvent);
+        boundary = pending.indexOf('\n\n');
+      }
+    });
+    try {
+      const code = await req.requestInStream(`${this.baseURL}/api/realtime`, {
+        method: http.RequestMethod.GET,
+        header: { 'Accept': 'text/event-stream' },
+        connectTimeout: 30000,
+        readTimeout: 3600000
+      });
+      if (code < 200 || code >= 300) throw new Error(`Realtime HTTP ${code}`);
+    } finally {
+      if (this.realtimeRequest === req) this.realtimeRequest = null;
+      try { req.destroy(); } catch (e) {}
+    }
+  }
+
+  private handleRealtimeBlock(block: string, onEvent: () => void): void {
+    let eventName = '';
+    let data = '';
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) eventName = line.substring(6).trim();
+      if (line.startsWith('data:')) data += line.substring(5).trim();
+    }
+    if (eventName === 'PB_CONNECT') {
+      try {
+        const parsed = JSON.parse(data) as Record<string, Object>;
+        const clientId = parsed['clientId'] as string | undefined;
+        if (clientId) this.subscribeRealtime(clientId);
+      } catch (e) {}
+    } else if (eventName.length > 0) {
+      onEvent();
+    }
+  }
+
+  private async subscribeRealtime(clientId: string): Promise<void> {
+    const body = JSON.stringify({
+      clientId: clientId,
+      subscriptions: ['entries', 'media', 'comments', 'milestones', 'firsttimes', 'members',
+        'childprofile', 'voicenotes', 'voicememos', 'healthrecords', 'vaccinerecords',
+        'growthmeasurements', 'timecapsules']
+    });
+    await this.request('POST', '/api/realtime', body, true);
   }
 
   private static identityCandidates(account: string): string[] {

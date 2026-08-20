@@ -90,6 +90,8 @@ export struct CommentComposeSheet {
                 .layoutWeight(1)
               Text('🗑')
                 .fontSize(26).fontColor(BubuColor.secondaryText)
+                .width(44).height(44).textAlign(TextAlign.Center)
+                .accessibilityText('删除语音评论')
                 .onClick(() => { this.voice = null; })
             }
             .width('100%')

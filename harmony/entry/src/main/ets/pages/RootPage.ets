@@ -194,6 +194,8 @@ struct RootPage {
           Text('这次更新了什么').fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
           Blank()
           Text('✕').fontSize(16).fontColor(BubuColor.secondaryText)
+            .width(44).height(44).textAlign(TextAlign.Center)
+            .accessibilityText('关闭更新说明')
             .onClick(() => { this.showWhatsNew = false; })
         }.width('100%').padding({ left: 18, right: 18, top: 16, bottom: 8 })
         WhatsNewView()

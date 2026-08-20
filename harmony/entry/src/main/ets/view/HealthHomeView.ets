@@ -92,7 +92,7 @@ export struct HealthHomeView {
   @Builder
   panelHeader(title: string, onBack: () => void) {
     Row({ space: 12 }) {
-      Button('返回').backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown).onClick(onBack)
+      Button('返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(onBack)
       Text(title).fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       Blank()
     }

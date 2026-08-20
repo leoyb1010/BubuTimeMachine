@@ -205,6 +205,7 @@ export class ThemeManager {
   private applyColorMode(): void {
     const forceDark = this.theme.isDark;
     BubuColor.setDarkMode(forceDark || this.systemDark);
+    BubuColor.setThemePrimary(this.semanticPrimary());
     const context = this.context;
     if (context) {
       try {
@@ -214,6 +215,19 @@ export class ThemeManager {
       } catch (e) {}
     }
     this.notifyThemeChanged();
+  }
+
+  private semanticPrimary(): string {
+    switch (this.currentThemeId) {
+      case 'sky': return '#2F648F';
+      case 'mint': return '#2F6B4B';
+      case 'lavender': return '#65519A';
+      case 'peach': return '#984C35';
+      case 'night': return '#8A6100';
+      case 'cream': return '#6A513C';
+      case 'dusk': return '#A63C61';
+      default: return '#B23A58';
+    }
   }
 
   private notifyThemeChanged(): void {

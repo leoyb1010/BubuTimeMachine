@@ -69,6 +69,7 @@ export struct BubuStoryReaderView {
         .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         .width(40).height(40).textAlign(TextAlign.Center)
         .backgroundColor('#B3FFFFFF').borderRadius(20)
+        .accessibilityText('返回')
         .onClick(() => { this.onBack(); })
       Blank()
       Row({ space: 5 }) {

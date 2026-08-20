@@ -19,6 +19,7 @@ import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { ShareCardSheet } from './ShareCardSheet';
 import { buildTimelineMediaSequence } from '../services/MediaGalleryModel';
 import { BackDispatcher } from '../services/BackDispatcher';
+import { VoiceTranscriptionService } from '../services/VoiceTranscriptionService';
 
 // MARK: - 记录详情（对照 iOS Features/Timeline/EntryDetailView.swift）
 // 已上传内容不再只读：可改文字/心情、追加语音、家人多视角补充、点亲亲。
@@ -235,6 +236,7 @@ export struct EntryDetailView {
                 .backgroundColor('#D9534F')
                 .borderRadius(14).width(28).height(28).textAlign(TextAlign.Center)
                 .margin(6)
+                .accessibilityText('删除这项媒体')
                 .onClick(() => { this.deleteMedia(m); })
             }
           }
@@ -387,6 +389,8 @@ export struct EntryDetailView {
               Text(voice.authorRole).fontSize(15).fontColor(BubuColor.secondaryText)
               if (this.editing) {
                 Text('🗑').fontSize(20).fontColor(BubuColor.secondaryText)
+                  .width(44).height(44).textAlign(TextAlign.Center)
+                  .accessibilityText('删除这段语音')
                   .onClick(() => { this.deleteVoice(voice); })
               }
             }
@@ -463,6 +467,8 @@ export struct EntryDetailView {
         }
         Blank()
         Text('⊕').fontSize(26).fontColor(this.theme())
+          .width(44).height(44).textAlign(TextAlign.Center)
+          .accessibilityText('添加家人评论')
           .onClick(() => { this.showCommentSheet = true; })
       }
       .width('100%')
@@ -652,6 +658,7 @@ export struct EntryDetailView {
       createdAt: now
     };
     await AppDatabase.shared.insertVoiceNote(voice);
+    VoiceTranscriptionService.transcribeVoiceNote(voice);
     const event: FeedEvent = {
       id: util.generateRandomUUID(true),
       kind: FeedEventKind.voiceAdded,

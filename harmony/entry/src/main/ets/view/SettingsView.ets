@@ -20,6 +20,7 @@ import { BubuMovedHint } from '../components/BubuMovedHint';
 import { BackDispatcher } from '../services/BackDispatcher';
 import { ReminderScheduler } from '../services/ReminderScheduler';
 import { BubuSound } from '../theme/BubuSound';
+import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 
 @Extend(Row)
 function settingRow() {
@@ -54,6 +55,7 @@ export struct SettingsView {
   @State dailyReminderEnabled: boolean = false;
   @State simpleModeEnabled: boolean = false;
   @State soundEnabled: boolean = false;
+  @State photoInboxBackgroundEnabled: boolean = false;
 
   aboutToAppear(): void {
     this.syncBackHandler();
@@ -69,6 +71,7 @@ export struct SettingsView {
     this.dailyReminderEnabled = c.dailyReminderEnabled;
     this.simpleModeEnabled = c.simpleModeEnabled;
     this.soundEnabled = BubuSound.isEnabled;
+    this.photoInboxBackgroundEnabled = c.photoInboxBackgroundEnabled;
   }
 
   aboutToDisappear(): void { BackDispatcher.shared.unregister('settings'); }
@@ -130,7 +133,7 @@ export struct SettingsView {
     Column() {
       Row({ space: 12 }) {
         Button('返回')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showMembers = false; })
         Text('家庭成员')
@@ -152,7 +155,7 @@ export struct SettingsView {
     Column() {
       Row({ space: 12 }) {
         Button('返回')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showAccount = false; })
         Text('家人登录')
@@ -180,7 +183,7 @@ export struct SettingsView {
     Column() {
       Row({ space: 12 }) {
         Button('返回')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showWhatsNew = false; })
         Text('更新记录')
@@ -202,7 +205,7 @@ export struct SettingsView {
     Column() {
       Row({ space: 12 }) {
         Button('返回')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showProfile = false; })
         Text('布布的档案')
@@ -226,7 +229,7 @@ export struct SettingsView {
         Row({ space: 12 }) {
           if (this.onClose) {
             Button('返回')
-              .backgroundColor('#F3F3F3')
+              .backgroundColor(BubuColor.softFill)
               .fontColor(BubuColor.warmBrown)
               .onClick(() => { this.onClose!(); })
           }
@@ -261,7 +264,7 @@ export struct SettingsView {
             .fontSize(12)
             .fontColor(BubuColor.secondaryText)
             .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-            .backgroundColor('#F3F3F3')
+            .backgroundColor(BubuColor.softFill)
             .borderRadius(14)
         }
         .width('100%')
@@ -309,7 +312,7 @@ export struct SettingsView {
     Column() {
       Row({ space: 12 }) {
         Button('返回')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showTheme = false; })
         Text('主题与外观')
@@ -475,6 +478,17 @@ export struct SettingsView {
       Column({ space: 0 }) {
         this.navRow('同步与备份', BubuIconName.checkCloud, '查看状态、立即同步或重新核对全部内容', () => { this.showSyncCenter = true; })
         this.navRow('照片收件箱', BubuIconName.photo, '扫描最近照片，按事件分组后确认收好', () => { this.showPhotoInbox = true; })
+        Row({ space: 14 }) {
+          BubuIconBadge({ name: BubuIconName.photo, badgeSize: 36, iconSize: 19,
+            color: BubuColor.primary, fill: BubuColor.softFill, radius: 10, strokeWidth: 2.1, filled: false })
+          Column({ space: 2 }) {
+            Text('后台发现新照片').fontSize(16).fontColor(BubuColor.warmBrown)
+            Text('默认关闭；开启后无需服务器也会定期更新候选').fontSize(11).fontColor(BubuColor.secondaryText)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Toggle({ type: ToggleType.Switch, isOn: this.photoInboxBackgroundEnabled })
+            .selectedColor(BubuColor.primary)
+            .onChange((value: boolean) => { this.updatePhotoInboxBackground(value); })
+        }.width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
         this.navRow('做一本 PDF 年册', BubuIconName.photo, '把布布的一年做成可打印的书', () => { this.showYearbook = true; })
         this.navRow('导出布布的全量档案', BubuIconName.send, '网页 + 全部媒体，永久离线可读', () => { this.showExport = true; })
       }
@@ -607,5 +621,12 @@ export struct SettingsView {
     this.simpleModeEnabled = value;
     await ServerConfig.shared.setSimpleModeEnabled(value);
     this.getUIContext().getPromptAction().showToast({ message: value ? '已开启简洁长辈模式' : '已退出简洁长辈模式' });
+  }
+
+  private async updatePhotoInboxBackground(value: boolean): Promise<void> {
+    this.photoInboxBackgroundEnabled = value;
+    await ServerConfig.shared.setPhotoInboxBackgroundEnabled(value);
+    BackgroundSyncScheduler.ensureScheduled();
+    this.getUIContext().getPromptAction().showToast({ message: value ? '已开启后台照片发现' : '已关闭后台照片发现' });
   }
 }

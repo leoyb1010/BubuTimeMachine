@@ -3,6 +3,7 @@ import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor } from '../theme/BubuTheme';
 import { BubuMascotBadge, BubuExpression } from './BubuMascotBadge';
 import { MediaStore } from '../services/MediaStore';
+import { HeroBackgroundMode, ThemeManager } from '../theme/ThemeManager';
 
 // MARK: - 布布个人身份卡（对照 iOS DesignSystem/Components/BubuIdentityCard.swift）
 // 「学生证/工作证」风格：头像 + 姓名 + 年龄/天数/生日 chip + 条码装饰；轻点翻面看背面（性别/血型/出生地/完整 ID）。
@@ -50,6 +51,13 @@ export struct BubuIdentityCard {
     return '';
   }
 
+  private heroSrc(): string {
+    const name = this.profile.heroBackgroundFileName;
+    if (ThemeManager.shared.heroMode === HeroBackgroundMode.photo
+      && name && MediaStore.shared.exists(name)) return `file://${MediaStore.shared.fullPath(name)}`;
+    return '';
+  }
+
   private valueOr(v: string | undefined): string {
     return v !== undefined && v.length > 0 ? v : '未填写';
   }
@@ -69,6 +77,9 @@ export struct BubuIdentityCard {
 
   build() {
     Stack() {
+      if (this.heroSrc().length > 0) {
+        Image(this.heroSrc()).width('100%').height('100%').objectFit(ImageFit.Cover).opacity(0.32)
+      }
       // 正/背面叠放（iOS ZStack + opacity 切换；背面预旋 180°）。
       Stack() {
         Column() {

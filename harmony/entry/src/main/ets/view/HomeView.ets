@@ -412,7 +412,7 @@ export struct HomeView {
         badgeSize: this.isCompact() ? 38 : 42,
         iconSize: this.isCompact() ? 18 : 20,
         color: BubuColor.primary,
-        fill: '#F2FFFFFF',
+        fill: BubuColor.card,
         radius: this.isCompact() ? 19 : 21,
         strokeWidth: 2.3
       })
@@ -544,7 +544,7 @@ export struct HomeView {
       .height(this.isCompact() ? 56 : 64)
       .layoutWeight(1)
       .padding({ left: this.isCompact() ? 10 : 12, right: this.isCompact() ? 8 : 10 })
-      .backgroundColor('#F2FFFFFF')
+      .backgroundColor(BubuColor.card)
       .borderRadius(this.isCompact() ? 20 : 24)
       .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.96 })
       .onClick(() => { this.startQuickCapture(); })
@@ -582,7 +582,7 @@ export struct HomeView {
     }
     .width(this.isCompact() ? 58 : 66).height(this.isCompact() ? 56 : 64)
     .justifyContent(FlexAlign.Center)
-    .backgroundColor('#F2FFFFFF')
+    .backgroundColor(BubuColor.card)
     .borderRadius(this.isCompact() ? 19 : 22)
     .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.96 })
     .onClick(action)
@@ -606,7 +606,7 @@ export struct HomeView {
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-    .backgroundColor('#F2FFFFFF').borderRadius(22)
+    .backgroundColor(BubuColor.card).borderRadius(22)
     .accessibilityText(`今日一问，${DailyQuestion.todays(this.profile ? this.profile!.birthday : undefined)}`)
     .onClick(() => {
       const birthday = this.profile ? this.profile!.birthday : undefined;
@@ -630,7 +630,7 @@ export struct HomeView {
     }
     .width('100%')
     .padding({ left: 18, right: 18, top: 34, bottom: 34 })
-    .backgroundColor('#F2FFFFFF').borderRadius(28)
+    .backgroundColor(BubuColor.card).borderRadius(28)
   }
 
   // MARK: 最近时光（行卡，对照 iOS recentMomentsSection）
@@ -902,7 +902,7 @@ export struct HomeView {
   panelHeader(title: string) {
     Row({ space: 12 }) {
       Button('返回')
-        .backgroundColor('#F3F3F3')
+        .backgroundColor(BubuColor.softFill)
         .fontColor(BubuColor.warmBrown)
         .onClick(() => { this.closePanel(); })
       Text(title)

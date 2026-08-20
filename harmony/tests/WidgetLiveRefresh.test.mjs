@@ -14,9 +14,11 @@ test('所有本地 RDB 写入通过数据变更观察器防抖刷新服务卡片
   assert.ok(widget.includes('WidgetRefresher.reload(context)'));
 });
 
-test('服务卡片照片只统计未归档记录且缩略图缺失时回退原图', () => {
+test('服务卡片使用未归档记录中最近的实际照片并持久化缩略图', () => {
   assert.ok(widget.includes('activeEntryIds.has(item.entryId)'));
   assert.ok(widget.includes("item.resourceRoleRaw === 'display'"));
-  assert.ok(widget.includes('MediaStore.shared.thumbnailExists(photo.thumbnailFileName)'));
-  assert.ok(widget.includes('MediaStore.shared.exists(photo.localFileName)'));
+  assert.ok(widget.includes('entries.map((entry) => photos.find'));
+  assert.ok(widget.includes('MediaDerivationService.prepare(recentPhoto)'));
+  assert.ok(widget.includes('AppDatabase.shared.updateMediaDerivedFields(recentPhoto.id'));
+  assert.ok(!widget.includes('MediaStore.shared.fullPath(photo.localFileName)'));
 });

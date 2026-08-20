@@ -30,6 +30,7 @@ export class ServerConfig {
   aiEnabled: boolean = false;
   semanticSearchEnabled: boolean = false;
   dailyReminderEnabled: boolean = false;
+  photoInboxBackgroundEnabled: boolean = false;
   simpleModeEnabled: boolean = false;
   roleBeforeElderRaw: string = '';
   sleepStartedAt: number = 0;
@@ -53,6 +54,7 @@ export class ServerConfig {
     this.aiEnabled = await this.getBool('aiEnabled', false);
     this.semanticSearchEnabled = await this.getBool('semanticSearchEnabled', false);
     this.dailyReminderEnabled = await this.getBool('dailyReminderEnabled', false);
+    this.photoInboxBackgroundEnabled = await this.getBool('photoInboxBackgroundEnabled', false);
     this.simpleModeEnabled = await this.getBool('simpleModeEnabled', isElderRole(this.currentRole));
     this.roleBeforeElderRaw = await this.getStr('roleBeforeElder', '');
     this.sleepStartedAt = await this.getNum('sleepStartedAt', 0);
@@ -173,6 +175,11 @@ export class ServerConfig {
   async setDailyReminderEnabled(value: boolean): Promise<void> {
     this.dailyReminderEnabled = value;
     await this.putBool('dailyReminderEnabled', value);
+  }
+
+  async setPhotoInboxBackgroundEnabled(value: boolean): Promise<void> {
+    this.photoInboxBackgroundEnabled = value;
+    await this.putBool('photoInboxBackgroundEnabled', value);
   }
 
   async logout(): Promise<void> {

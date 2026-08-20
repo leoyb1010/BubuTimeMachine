@@ -97,12 +97,14 @@ export class SyncEngine {
     }
     this.polling = true;
     this.consecutiveFailures = 0;
+    APIClient.shared.startRealtime((): void => { this.syncNow(false); });
     this.syncNow(false);
   }
 
   // 进后台：停轮询省电（对照 iOS stopPolling()）。
   stopPolling(): void {
     this.polling = false;
+    APIClient.shared.stopRealtime();
     if (this.pollTimerId !== -1) {
       clearTimeout(this.pollTimerId);
       this.pollTimerId = -1;

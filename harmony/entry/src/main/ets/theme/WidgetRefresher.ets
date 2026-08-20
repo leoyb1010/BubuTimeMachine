@@ -3,6 +3,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import { AppDatabase } from '../data/AppDatabase';
 import { MediaStore } from '../services/MediaStore';
+import { MediaDerivationService } from '../services/MediaDerivationService';
 
 export class WidgetRefresher {
   private static readonly snapshotStore: string = 'bubu_widget';
@@ -57,14 +58,17 @@ export class WidgetRefresher {
     const next = milestones.find((item): boolean => item.happenedAt === undefined);
     const latest = entries.length > 0 ? entries[0] : undefined;
     let recentPhotoUri = '';
-    if (latest) {
-      const media = await AppDatabase.shared.fetchMediaForEntry(latest.id);
-      const photo = media.find((item): boolean => item.typeRaw === 'photo'
-        && (item.resourceRoleRaw === undefined || item.resourceRoleRaw === 'display'));
-      if (photo?.thumbnailFileName && MediaStore.shared.thumbnailExists(photo.thumbnailFileName)) {
-        recentPhotoUri = `file://${MediaStore.shared.thumbnailPath(photo.thumbnailFileName)}`;
-      } else if (photo?.localFileName && MediaStore.shared.exists(photo.localFileName)) {
-        recentPhotoUri = `file://${MediaStore.shared.fullPath(photo.localFileName)}`;
+    const recentPhoto = entries.map((entry) => photos.find((photo): boolean => photo.entryId === entry.id))
+      .find((photo): boolean => photo !== undefined);
+    if (recentPhoto) {
+      if ((!recentPhoto.thumbnailFileName || !MediaStore.shared.thumbnailExists(recentPhoto.thumbnailFileName))
+        && recentPhoto.localFileName && MediaStore.shared.exists(recentPhoto.localFileName)) {
+        await MediaDerivationService.prepare(recentPhoto);
+        await AppDatabase.shared.updateMediaDerivedFields(recentPhoto.id, recentPhoto.thumbnailFileName,
+          recentPhoto.contentHash, recentPhoto.resourceRoleRaw, recentPhoto.assetGroupID);
+      }
+      if (recentPhoto.thumbnailFileName && MediaStore.shared.thumbnailExists(recentPhoto.thumbnailFileName)) {
+        recentPhotoUri = `file://${MediaStore.shared.thumbnailPath(recentPhoto.thumbnailFileName)}`;
       }
     }
     const measurement = growth.length > 0 ? growth[0] : undefined;

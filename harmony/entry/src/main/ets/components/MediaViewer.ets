@@ -85,6 +85,7 @@ export struct MediaGalleryViewer {
             Text('分享').fontSize(13).fontWeight(FontWeight.Bold).fontColor(Color.White)
               .padding({ left: 12, right: 12, top: 8, bottom: 8 })
               .backgroundColor('#73000000').borderRadius(18).margin({ left: 8 })
+              .accessibilityText('分享当前媒体')
               .onClick(() => { this.shareCurrent(); })
           }
           Blank()
@@ -97,6 +98,7 @@ export struct MediaGalleryViewer {
             .height(40)
             .backgroundColor('#73000000')
             .borderRadius(20)
+            .accessibilityText('关闭媒体查看器')
             .onClick(() => { if (this.onDismiss) this.onDismiss(); })
         }
         .width('100%')
@@ -378,6 +380,8 @@ struct ZoomableImage {
   @State private scaleValue: number = 1;
   @State private offsetX: number = 0;
   @State private offsetY: number = 0;
+  @State private viewportWidth: number = 0;
+  @State private viewportHeight: number = 0;
   private baseScale: number = 1;
   private baseOffsetX: number = 0;
   private baseOffsetY: number = 0;
@@ -392,6 +396,11 @@ struct ZoomableImage {
       .height('100%')
       .scale({ x: this.scaleValue, y: this.scaleValue })
       .translate({ x: this.offsetX, y: this.offsetY })
+      .onAreaChange((_old: Area, area: Area) => {
+        this.viewportWidth = area.width as number;
+        this.viewportHeight = area.height as number;
+        this.clampPosition();
+      })
       .gesture(
         // 捏合缩放（对照 iOS minimumZoomScale 1 / maximumZoomScale 5）。
         PinchGesture()
@@ -403,6 +412,7 @@ struct ZoomableImage {
           })
           .onActionEnd(() => {
             if (this.scaleValue <= 1.01) this.resetPosition();
+            else this.clampPosition();
           })
       )
       .gesture(
@@ -431,6 +441,7 @@ struct ZoomableImage {
             const pan = event as PanGestureEvent;
             this.offsetX = this.baseOffsetX + pan.offsetX;
             this.offsetY = this.baseOffsetY + pan.offsetY;
+            this.clampPosition();
           })
           .onActionEnd((event: GestureEvent) => {
             if (this.scaleValue <= 1.01) this.resetPosition();
@@ -447,5 +458,17 @@ struct ZoomableImage {
     this.offsetX = 0;
     this.offsetY = 0;
     this.onZoomChanged(false);
+  }
+
+  private clampPosition(): void {
+    if (this.scaleValue <= 1.01) {
+      this.offsetX = 0;
+      this.offsetY = 0;
+      return;
+    }
+    const maxX = Math.max(0, this.viewportWidth * (this.scaleValue - 1) / 2);
+    const maxY = Math.max(0, this.viewportHeight * (this.scaleValue - 1) / 2);
+    this.offsetX = Math.max(-maxX, Math.min(maxX, this.offsetX));
+    this.offsetY = Math.max(-maxY, Math.min(maxY, this.offsetY));
   }
 }

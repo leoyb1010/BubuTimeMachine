@@ -96,7 +96,7 @@ export struct CapsuleComposeView {
       // 顶栏：返回 + 标题 + 封存（对照 iOS toolbar cancellation/confirmation）。
       Row({ space: 12 }) {
         Button('取消')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.cancel(); })
         Text(this.editing === null ? '写给未来的布布' : '修改时间胶囊')

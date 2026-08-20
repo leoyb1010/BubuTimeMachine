@@ -140,7 +140,7 @@ export struct CapsuleRecoveryView {
       .alignItems(HorizontalAlign.Start)
       .width('100%')
       .padding(16)
-      .backgroundColor('#FFFDF8')
+      .backgroundColor(BubuColor.card)
       .borderRadius(BubuRadius.card)
       .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
     }

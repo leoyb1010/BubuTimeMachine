@@ -246,6 +246,8 @@ export struct NaturalCaptureReviewSheet {
           .fontSize(16)
           .fontColor(BubuColor.secondaryText)
           .opacity(0.5)
+          .width(44).height(44).textAlign(TextAlign.Center)
+          .accessibilityText('移除这项记录')
           .onClick(() => { this.removeItem(item.id); })
       }
       .width('100%')

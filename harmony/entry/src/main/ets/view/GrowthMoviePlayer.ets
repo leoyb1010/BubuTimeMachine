@@ -126,6 +126,7 @@ export struct GrowthMoviePlayer {
         .width(48)
         .height(48)
         .textAlign(TextAlign.Center)
+        .accessibilityText('关闭成长电影播放器')
         .onClick(() => { this.onClose(); })
       Column({ space: 2 }) {
         Text(this.draft.title)

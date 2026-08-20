@@ -96,7 +96,7 @@ export struct MembersView {
     Column({ space: 14 }) {
       Row({ space: 12 }) {
         Button('返回')
-          .backgroundColor('#F3F3F3')
+          .backgroundColor(BubuColor.softFill)
           .fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showAdd = false; })
         Text(this.editingMember === null ? '添加家庭成员' : '编辑家庭成员')
@@ -106,7 +106,7 @@ export struct MembersView {
         Blank()
       }.width('100%')
       TextInput({ text: $$this.newName, placeholder: '名字，如「王芳」或「妈妈」' })
-        .height(48).backgroundColor('#F3F3F3').borderRadius(10)
+        .height(48).backgroundColor(BubuColor.softFill).borderRadius(10)
       Row() {
         Text('关系').fontSize(15).fontColor(BubuColor.warmBrown)
         Blank()

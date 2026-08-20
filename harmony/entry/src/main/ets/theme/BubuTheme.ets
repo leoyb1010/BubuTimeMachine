@@ -9,12 +9,14 @@
 // MARK: 色板（柔和、温暖、低饱和）——对照 iOS BubuTheme.Color
 export class BubuColor {
   private static darkMode: boolean = false;
+  private static themePrimary: string = '#B23A58';
 
   static setDarkMode(enabled: boolean): void { BubuColor.darkMode = enabled; }
+  static setThemePrimary(value: string): void { BubuColor.themePrimary = value; }
   static get isDark(): boolean { return BubuColor.darkMode; }
 
   // —— 旧有导出（保持不变，勿删）——
-  static readonly primary = '#B23A58';        // 可读珊瑚玫瑰（白字对比 5.77:1）
+  static get primary(): string { return BubuColor.themePrimary; }
   static get warmBrown(): string { return BubuColor.darkMode ? '#F5F0E8' : '#5A3D34'; }
   static get cream(): string { return BubuColor.darkMode ? '#1E1D2B' : '#FFF7F1'; }
   static get card(): string { return BubuColor.darkMode ? '#33324A' : '#FFFFFF'; }

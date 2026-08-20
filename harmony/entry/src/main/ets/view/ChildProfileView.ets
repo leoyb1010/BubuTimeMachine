@@ -5,6 +5,8 @@ import { AppDatabase } from '../data/AppDatabase';
 import { SyncState } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
 import { promptAction } from '@kit.ArkUI';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { MediaStore } from '../services/MediaStore';
 
 // 共用字段行样式（@Extend 复用，ArkUI 正规做法，替代闭包传 UI）
 @Extend(Row)
@@ -22,6 +24,8 @@ export struct ChildProfileView {
   @State birthPlace: string = '';
   @State genderIndex: number = 0;   // 0 未填写 / 1 男 / 2 女 / 3 其他
   @State bloodIndex: number = 0;    // 0 未填写 / A / B / O / AB
+  @State avatarFileName: string | undefined = undefined;
+  @State heroFileName: string | undefined = undefined;
 
   private genderOptions: string[] = ['未填写', '男', '女', '其他'];
   private bloodOptions: string[] = ['未填写', 'A', 'B', 'O', 'AB'];
@@ -39,6 +43,8 @@ export struct ChildProfileView {
       this.birthPlace = p.birthPlace ?? '';
       this.genderIndex = Math.max(0, this.genderOptions.indexOf(p.gender ?? '未填写'));
       this.bloodIndex = Math.max(0, this.bloodOptions.indexOf(p.bloodType ?? '未填写'));
+      this.avatarFileName = p.avatarMediaFileName;
+      this.heroFileName = p.heroBackgroundFileName;
     }
   }
 
@@ -48,6 +54,34 @@ export struct ChildProfileView {
         Text('布布的档案')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
           .width('100%')
+
+        Row({ space: 12 }) {
+          if (this.avatarFileName && MediaStore.shared.exists(this.avatarFileName)) {
+            Image(`file://${MediaStore.shared.fullPath(this.avatarFileName)}`)
+              .width(68).height(68).objectFit(ImageFit.Cover).borderRadius(18)
+          } else {
+            Text('👧').fontSize(36).width(68).height(68).textAlign(TextAlign.Center)
+              .backgroundColor(BubuColor.softFill).borderRadius(18)
+          }
+          Column({ space: 6 }) {
+            Button('选择布布头像').onClick(() => { this.pickImage('avatar'); })
+            Text('头像只在本机做人脸基准，并随家庭档案同步').fontSize(11).fontColor(BubuColor.secondaryText)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        }.fieldRow()
+
+        Column({ space: 8 }) {
+          if (this.heroFileName && MediaStore.shared.exists(this.heroFileName)) {
+            Image(`file://${MediaStore.shared.fullPath(this.heroFileName)}`)
+              .width('100%').height(120).objectFit(ImageFit.Cover).borderRadius(14)
+          }
+          Row() {
+            Button('选择首页照片背景').onClick(() => { this.pickImage('hero'); })
+            Blank()
+            if (this.heroFileName) {
+              Button('恢复主题背景').fontColor(BubuColor.danger).onClick(() => { this.heroFileName = undefined; })
+            }
+          }.width('100%')
+        }.fieldRow()
 
         // 名字
         Row() {
@@ -120,13 +154,19 @@ export struct ChildProfileView {
       gender: gender,
       bloodType: blood,
       birthPlace: place,
-      avatarMediaFileName: this.profile?.avatarMediaFileName,
-      avatarRemoteURL: this.profile?.avatarRemoteURL,
-      heroBackgroundFileName: this.profile?.heroBackgroundFileName,
+      avatarMediaFileName: this.avatarFileName,
+      avatarRemoteURL: this.avatarFileName === this.profile?.avatarMediaFileName ? this.profile?.avatarRemoteURL : undefined,
+      heroBackgroundFileName: this.heroFileName,
       syncState: SyncState.local,
       createdAt: this.profile?.createdAt ?? now
     };
     await AppDatabase.shared.upsertChildProfile(p);
+    if (this.profile?.avatarMediaFileName && this.profile.avatarMediaFileName !== p.avatarMediaFileName) {
+      MediaStore.shared.deleteMedia(this.profile.avatarMediaFileName);
+    }
+    if (this.profile?.heroBackgroundFileName && this.profile.heroBackgroundFileName !== p.heroBackgroundFileName) {
+      MediaStore.shared.deleteMedia(this.profile.heroBackgroundFileName);
+    }
     this.profile = p;
     // 镜像给服务卡片：写生日/名字到 Preferences，卡片据此显示年龄。
     try {
@@ -137,6 +177,26 @@ export struct ChildProfileView {
       store.flush();
     } catch (e) {}
     this.getUIContext().getPromptAction().showToast({ message: '已保存档案 💛' });
+  }
+
+  private async pickImage(purpose: 'avatar' | 'hero'): Promise<void> {
+    try {
+      const picker = new photoAccessHelper.PhotoViewPicker();
+      const options = new photoAccessHelper.PhotoSelectOptions();
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      options.maxSelectNumber = 1;
+      const result = await picker.select(options);
+      const uri = result.photoUris?.[0];
+      if (!uri) return;
+      const name = MediaStore.shared.copyIntoStore(uri, 'jpg');
+      if (!name) throw new Error('照片读取失败');
+      const previous = purpose === 'avatar' ? this.avatarFileName : this.heroFileName;
+      if (previous && previous !== this.profile?.avatarMediaFileName
+        && previous !== this.profile?.heroBackgroundFileName) MediaStore.shared.deleteMedia(previous);
+      if (purpose === 'avatar') this.avatarFileName = name; else this.heroFileName = name;
+    } catch (e) {
+      this.getUIContext().getPromptAction().showToast({ message: '已取消或照片暂时无法读取' });
+    }
   }
 
   private dateText(ms: number): string {

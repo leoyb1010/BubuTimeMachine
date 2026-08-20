@@ -71,11 +71,11 @@ export struct AccountView {
           Column({ space: 12 }) {
           TextInput({ text: $$this.username, placeholder: '用户名（如 yuanbo）' })
             .height(48)
-            .backgroundColor('#F3F3F3')
+            .backgroundColor(BubuColor.softFill)
             .borderRadius(10)
           TextInput({ text: $$this.password, placeholder: '密码' })
             .height(48)
-            .backgroundColor('#F3F3F3')
+            .backgroundColor(BubuColor.softFill)
             .borderRadius(10)
             .type(InputType.Password)
           Row() {

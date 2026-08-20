@@ -20,6 +20,7 @@ import { MotionPreference } from '../theme/MotionPreference';
 import { BubuSound } from '../theme/BubuSound';
 import { CapsuleCrypto } from '../services/security/CapsuleCrypto';
 import { MediaDerivationService } from '../services/MediaDerivationService';
+import { VoiceTranscriptionService } from '../services/VoiceTranscriptionService';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -79,6 +80,8 @@ export default class EntryAbility extends UIAbility {
       APIClient.shared.initialize(this.context);
       AIService.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
+      VoiceTranscriptionService.initialize(this.context);
+      await VoiceTranscriptionService.backfillPending();
     });
     await this.runOptional('本地数据归一化', async (): Promise<void> => {
       await AppDatabase.shared.normalizeChildBirthday();

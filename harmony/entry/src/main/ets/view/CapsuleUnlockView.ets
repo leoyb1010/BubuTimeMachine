@@ -97,6 +97,7 @@ export struct CapsuleUnlockView {
             .width(40)
             .height(40)
             .textAlign(TextAlign.Center)
+            .accessibilityText('关闭胶囊')
             .onClick(() => { this.onBack(); })
         }
         .width('100%')
@@ -264,7 +265,7 @@ export struct CapsuleUnlockView {
         .alignItems(HorizontalAlign.Start)
         .padding(26)
         .margin({ left: 16, right: 16, top: 56, bottom: 16 })
-        .backgroundColor('#FFFDF8')
+        .backgroundColor(BubuColor.card)
         .borderRadius(BubuRadius.card)
       }
       .width('100%')

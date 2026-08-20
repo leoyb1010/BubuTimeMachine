@@ -47,7 +47,7 @@ export struct AdvancedSettingsView {
       if (this.onClose) {
         Row({ space: 12 }) {
           Button('返回')
-            .backgroundColor('#F3F3F3')
+            .backgroundColor(BubuColor.softFill)
             .fontColor(BubuColor.warmBrown)
             .onClick(() => { this.onClose!(); })
           Text('服务器与 AI 配置')

@@ -71,7 +71,7 @@ export struct VaccineQuickLogSheet {
   build() {
     Column() {
       Row({ space: 12 }) {
-        Button('取消').backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+        Button('取消').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
           .onClick(() => { this.onCancel(); })
         Text(this.isEditing() ? '修改接种记录' : '补录接种')
           .fontSize(18).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown).layoutWeight(1)

@@ -193,7 +193,7 @@ export struct AIStudioView {
     }
     .width('100%')
     .padding(14)
-    .backgroundColor('#F2FFFFFF')
+    .backgroundColor(BubuColor.card)
     .borderRadius(24)
     .border({ width: 1, color: '#99FFFFFF' })
     .shadow({ radius: 12, color: '#38DCC9FF', offsetY: 6 })
@@ -316,7 +316,7 @@ export struct AIStudioView {
     }
     .width('100%')
     .padding(14)
-    .backgroundColor('#F2FFFFFF')
+    .backgroundColor(BubuColor.card)
     .borderRadius(24)
     .border({ width: 1, color: '#99FFFFFF' })
     .shadow({ radius: 12, color: '#38DCC9FF', offsetY: 6 })

@@ -97,7 +97,7 @@ export struct QuickCaptureSheet {
             .fontColor(BubuColor.warmBrown)
         }
         .padding(28)
-        .backgroundColor('#F2FFFFFF')
+        .backgroundColor(BubuColor.card)
         .borderRadius(BubuRadius.card)
         .shadow({ radius: BubuShadow.cardRadius, color: BubuShadow.cardColor, offsetY: BubuShadow.cardOffsetY })
       }
@@ -204,7 +204,7 @@ export struct QuickCaptureSheet {
     }
     .width('100%')
     .padding(12)
-    .backgroundColor('#F2FFFFFF')
+    .backgroundColor(BubuColor.card)
     .backgroundBlurStyle(BlurStyle.Thin)
     .borderRadius(20)
     .border({ width: 1, color: '#99FFFFFF' })
@@ -390,6 +390,7 @@ export struct QuickCaptureSheet {
                 .width(24).height(24)
                 .textAlign(TextAlign.Center)
                 .backgroundColor('#73000000')
+                .accessibilityText('移除这张照片')
                 .borderRadius(12)
                 .margin(5)
                 .onClick(() => { this.model.removePickedItem(preview.index); })
@@ -488,6 +489,8 @@ export struct QuickCaptureSheet {
         })
         Text('🗑')
           .fontSize(24)
+          .width(44).height(44).textAlign(TextAlign.Center)
+          .accessibilityText('删除录音')
           .onClick(() => { this.model.clearPendingVoice(); })
       }
       .width('100%')

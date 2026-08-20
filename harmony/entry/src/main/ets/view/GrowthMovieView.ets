@@ -88,6 +88,7 @@ export struct GrowthMovieView {
         Video({ src: `file://${this.renderedMoviePath}` }).controls(true).width('100%').height('100%')
         Text('✕').fontSize(28).fontColor(Color.White).width(48).height(48).textAlign(TextAlign.Center)
           .position({ x: 12, y: 12 }).backgroundColor('#66000000').borderRadius(24)
+          .accessibilityText('关闭成长电影')
           .onClick(() => { this.showRenderedMovie = false; })
       }.width('100%').height('100%').backgroundColor(Color.Black)
     } else if (this.showPlayer && this.draft !== null) {

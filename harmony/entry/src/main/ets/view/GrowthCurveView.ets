@@ -327,7 +327,7 @@ export struct GrowthCurveView {
   addPanel() {
     Column({ space: 14 }) {
       Row({ space: 12 }) {
-        Button('返回').backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+        Button('返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
           .onClick(() => { this.showAdd = false; })
         Text('记一次身高体重').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         Blank()

@@ -75,7 +75,7 @@ export struct FamilyFeedView {
       Column() {
         Row({ space: 12 }) {
           Button('返回')
-            .backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+            .backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
             .onClick(() => { this.detailEntry = null; this.reload(); })
           Text('记录详情').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
           Blank()
@@ -100,7 +100,7 @@ export struct FamilyFeedView {
       Row({ space: 12 }) {
         if (this.onClose) {
           Button('关闭')
-            .backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+            .backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
             .onClick(() => { if (this.onClose) this.onClose(); })
         }
         Text('家庭动态').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)

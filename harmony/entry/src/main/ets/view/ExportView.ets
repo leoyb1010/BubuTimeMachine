@@ -98,7 +98,7 @@ export struct ExportView {
       if (this.onClose) {
         Row({ space: 12 }) {
           Button('返回')
-            .backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+            .backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
             .onClick(() => { this.onClose!(); })
           Text('全量导出').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
           Blank()

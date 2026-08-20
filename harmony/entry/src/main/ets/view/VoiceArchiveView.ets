@@ -12,6 +12,7 @@ import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { ThemeManager } from '../theme/ThemeManager';
 import { VoiceRecorderBar, VoicePlayerBubble } from '../components/VoiceComponents';
 import { promptAction } from '@kit.ArkUI';
+import { VoiceTranscriptionService } from '../services/VoiceTranscriptionService';
 
 // 按岁分组的一段（age 降序）。
 interface AgeGroup {
@@ -72,7 +73,7 @@ export struct VoiceArchiveView {
       Row({ space: 12 }) {
         if (this.onClose) {
           Button('返回')
-            .backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+            .backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
             .onClick(() => { this.onClose!(); })
         }
         Text('成长之声').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
@@ -178,7 +179,7 @@ export struct VoiceArchiveView {
     Column({ space: 24 }) {
       Row({ space: 12 }) {
         Button('取消')
-          .backgroundColor('#F3F3F3').fontColor(BubuColor.warmBrown)
+          .backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
           .onClick(() => { this.closeRecorder(); })
         Text('成长之声').fontSize(20).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
         Blank()
@@ -245,6 +246,7 @@ export struct VoiceArchiveView {
       createdAt: now
     };
     await AppDatabase.shared.insertVoiceMemo(memo);
+    VoiceTranscriptionService.transcribeVoiceMemo(memo);
     this.closeRecorder();
     await this.reload();
     this.getUIContext().getPromptAction().showToast({ message: '已收好 💛' });
