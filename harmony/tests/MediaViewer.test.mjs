@@ -12,20 +12,24 @@ test('照片查看器使用真正双击缩放而不是单击近似', () => {
 });
 
 test('时光详情的多媒体查看器可用单指左右翻页，放大后改为平移图片', () => {
-  assert.ok(viewer.includes('private swiperController: SwiperController = new SwiperController()'));
-  assert.ok(viewer.includes('Swiper(this.swiperController)'));
+  assert.ok(viewer.includes('Swiper()'));
   assert.ok(viewer.includes('.cachedCount(1)'));
-  assert.ok(viewer.includes('.disableSwipe(true)'));
-  assert.ok(viewer.includes('parallelGesture('));
-  assert.ok(viewer.includes('PanGesture({ fingers: 1, direction: PanDirection.Horizontal'));
-  assert.ok(viewer.includes('this.zoomedMediaIds.has(current.id)'));
+  assert.ok(viewer.includes('.disableSwipe(this.isCurrentZoomed())'));
+  const hudStart = viewer.indexOf('// 关闭按钮 + 底部页码/提示');
+  const hudEnd = viewer.indexOf('private isCurrentZoomed');
+  assert.ok(hudStart >= 0 && hudEnd > hudStart);
+  assert.ok(viewer.slice(hudStart, hudEnd).includes('.hitTestBehavior(HitTestMode.Transparent)'));
+  assert.ok(viewer.includes(".tag('zoom-pan')"));
+  assert.ok(viewer.includes('onGestureJudgeBegin'));
+  assert.ok(viewer.includes("info.tag === 'zoom-pan' && this.scaleValue <= 1.01"));
+  assert.ok(viewer.includes('GestureJudgeResult.REJECT'));
+  assert.ok(viewer.includes('isFingerCountLimited: true'));
+  assert.ok(viewer.includes("@Watch('syncInitialIndex')"));
   assert.ok(viewer.includes('onZoomChanged'));
-  assert.ok(viewer.includes('this.swiperController.showNext()'));
-  assert.ok(viewer.includes('this.swiperController.showPrevious()'));
   assert.ok(detail.includes('mediaItems: this.galleryItems()'), '详情页必须把整条时光轴的可视媒体传给分页查看器');
   assert.ok(detail.includes('AppDatabase.shared.fetchAllMedia()'));
-  assert.ok(detail.includes('entryTimes.has(item.entryId)'));
-  assert.ok(detail.includes('MediaType.photo || item.typeRaw === MediaType.video'));
+  assert.ok(detail.includes('buildTimelineMediaSequence(allMedia, timelineEntries)'));
+  assert.ok(detail.indexOf('this.galleryMedia = galleryMedia') < detail.indexOf('this.media = currentMedia'));
 });
 
 test('远端受保护照片和视频先带家庭登录态下载，失败可重试且退出后清理临时文件', () => {

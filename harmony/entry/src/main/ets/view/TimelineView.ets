@@ -16,6 +16,7 @@ import { promptAction } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 import { AIService } from '../services/AIService';
 import { ShareCardSheet } from './ShareCardSheet';
+import { SyncEngine } from '../sync/SyncEngine';
 
 // MARK: - 时光轴（对照 iOS Features/Timeline/TimelineView.swift）
 // 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；离线优先，只读本地数据库。
@@ -48,6 +49,8 @@ export struct TimelineView {
 	  @State @Watch('syncNavigationDepth') showFamilyFeed: boolean = false;
 	  @State @Watch('syncNavigationDepth') detailEntry: Entry | null = null;
 	  @State @Watch('syncNavigationDepth') shareEntry: Entry | null = null;
+	  @State private undoEntryId: string = '';
+	  private undoTimer: number = -1;
 	  @State private pageIn: boolean = false;
 	  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
 	  @StorageLink('bubuBackSignal') @Watch('onBackSignal') backSignal: number = 0;
@@ -187,6 +190,9 @@ export struct TimelineView {
 	      }
 	      if (this.shareEntry) {
 	        ShareCardSheet({ entry: this.shareEntry!, onClose: () => { this.shareEntry = null; } })
+	      }
+	      if (this.undoEntryId.length > 0) {
+	        this.undoToast()
 	      }
 	    }.width('100%').height('100%')
 	  }
@@ -379,8 +385,32 @@ export struct TimelineView {
 		    .alignItems(VerticalAlign.Top)
         .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.985 })
         .onClick(() => { this.openDetail(entry); })
-	      .gesture(LongPressGesture().onAction(() => { this.shareEntry = entry; BubuHaptics.selection(); }))
+	      .bindContextMenu(this.entryMenu(entry), ResponseType.LongPress)
 		  }
+
+  @Builder
+  entryMenu(entry: Entry) {
+    Menu() {
+      MenuItem({ content: '分享这一刻', startIcon: undefined })
+        .onClick(() => { this.shareEntry = entry; BubuHaptics.selection(); })
+      MenuItem({ content: '删除记录', startIcon: undefined })
+        .onClick(() => { this.confirmDelete(entry); })
+    }
+  }
+
+  @Builder
+  undoToast() {
+    Row({ space: 12 }) {
+      Text('已删除这条时光').fontSize(14).fontWeight(FontWeight.Bold).fontColor(Color.White)
+      Text('撤销').fontSize(14).fontWeight(FontWeight.Bolder).fontColor(BubuColor.butter)
+        .onClick(() => { this.restoreDeletedEntry(); })
+    }
+    .padding({ left: 18, right: 18, top: 12, bottom: 12 })
+    .backgroundColor('#E65C473D').borderRadius(22)
+    .shadow({ radius: 12, color: '#4D000000', offsetY: 5 })
+    .position({ x: '50%', y: '88%' })
+    .zIndex(20)
+  }
 
 	  private openDetail(entry: Entry): void {
 	    BubuHaptics.selection();
@@ -548,11 +578,40 @@ export struct TimelineView {
       summary: '删除了一条时光轴记录',
       targetLocalId: entry.id,
       happenedAt: now,
-      syncState: SyncState.synced,
+      syncState: SyncState.local,
       createdAt: now
     };
     await AppDatabase.shared.insertFeedEvent(event);
-    this.getUIContext().getPromptAction().showToast({ message: '已删除' });
-    this.reload();
+    this.undoEntryId = entry.id;
+    if (this.undoTimer >= 0) clearTimeout(this.undoTimer);
+    this.undoTimer = setTimeout(() => {
+      this.undoEntryId = '';
+      this.undoTimer = -1;
+    }, 3500);
+    await this.reload();
+    SyncEngine.shared.start();
+  }
+
+  private async restoreDeletedEntry(): Promise<void> {
+    const id = this.undoEntryId;
+    if (id.length === 0) return;
+    if (this.undoTimer >= 0) clearTimeout(this.undoTimer);
+    this.undoTimer = -1;
+    this.undoEntryId = '';
+    await AppDatabase.shared.restoreEntry(id);
+    const now = Date.now();
+    await AppDatabase.shared.insertFeedEvent({
+      id: util.generateRandomUUID(true),
+      kind: FeedEventKind.entryCreated,
+      actorRole: ServerConfig.shared.currentRole,
+      summary: '撤销了一条删除',
+      targetLocalId: id,
+      happenedAt: now,
+      syncState: SyncState.local,
+      createdAt: now
+    });
+    BubuHaptics.tapLight();
+    await this.reload();
+    SyncEngine.shared.start();
   }
 }

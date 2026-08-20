@@ -9,6 +9,7 @@ import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import { MediaLibraryService } from '../services/MediaLibraryService';
 import { ShareService } from '../services/ShareService';
+import { resolveInitialGalleryIndex } from '../services/MediaGalleryModel';
 
 // MARK: - 媒体相册查看器（对照 iOS DesignSystem/Components/MediaViewer.swift MediaGalleryViewer）
 // 全屏黑底；左右滑动切换媒体（iOS TabView .page → ArkUI Swiper）；
@@ -16,8 +17,8 @@ import { ShareService } from '../services/ShareService';
 // 视频用 Video 组件；音频复用 VoicePlayerBubble。右上角关闭。
 @Component
 export struct MediaGalleryViewer {
-  @Require @Prop mediaItems: Media[];
-  @Require @Prop initialMediaID: string;
+  @Require @Prop @Watch('syncInitialIndex') mediaItems: Media[];
+  @Require @Prop @Watch('syncInitialIndex') initialMediaID: string;
   // iOS: onDismiss
   onDismiss?: () => void;
 
@@ -25,11 +26,13 @@ export struct MediaGalleryViewer {
   @State private remotePaths: Map<string, string> = new Map();
   @State private zoomedMediaIds: Set<string> = new Set();
   @State private toastText: string = '';
-  private swiperController: SwiperController = new SwiperController();
 
   aboutToAppear(): void {
-    const idx = this.mediaItems.findIndex((m: Media) => m.id === this.initialMediaID);
-    this.selectedIndex = idx >= 0 ? idx : 0;
+    this.syncInitialIndex();
+  }
+
+  private syncInitialIndex(): void {
+    this.selectedIndex = resolveInitialGalleryIndex(this.mediaItems, this.initialMediaID);
   }
 
   build() {
@@ -43,7 +46,7 @@ export struct MediaGalleryViewer {
             Text('没有可查看的媒体').fontSize(16).fontColor(Color.White)
           }
         } else {
-          Swiper(this.swiperController) {
+          Swiper() {
             ForEach(this.mediaItems, (media: Media) => {
               MediaPageView({
                 media: media,
@@ -59,7 +62,7 @@ export struct MediaGalleryViewer {
           .loop(false)
           .indicator(false)
           .cachedCount(1)
-          .disableSwipe(true)
+          .disableSwipe(this.isCurrentZoomed())
           .width('100%')
           .height('100%')
           .onChange((index: number) => { this.selectedIndex = index; })
@@ -69,12 +72,6 @@ export struct MediaGalleryViewer {
       .width('100%')
       .height('100%')
       .backgroundColor(Color.Black)
-      // 实机上图片的缩放/双击手势会抢走 Swiper 内建横滑。父级并行识别单指横拖，
-      // 原始比例时由这里可靠翻页；图片放大后父级退出，让子图片独占平移。
-      .parallelGesture(
-        PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 8 })
-          .onActionEnd((event: GestureEvent) => { this.handlePagerPan(event as PanGestureEvent); })
-      )
 
       // 关闭按钮 + 底部页码/提示
       Column() {
@@ -135,25 +132,16 @@ export struct MediaGalleryViewer {
       }
       .width('100%')
       .height('100%')
+      .hitTestBehavior(HitTestMode.Transparent)
     }
     .alignContent(Alignment.TopEnd)
     .width('100%')
     .height('100%')
   }
 
-  private turnPage(direction: number): void {
-    if (direction > 0 && this.selectedIndex < this.mediaItems.length - 1) {
-      this.swiperController.showNext();
-    } else if (direction < 0 && this.selectedIndex > 0) {
-      this.swiperController.showPrevious();
-    }
-  }
-
-  private handlePagerPan(event: PanGestureEvent): void {
+  private isCurrentZoomed(): boolean {
     const current = this.currentMedia();
-    if (!current || this.zoomedMediaIds.has(current.id)) return;
-    if (event.offsetX <= -36) this.turnPage(1);
-    else if (event.offsetX >= 36) this.turnPage(-1);
+    return current !== undefined && this.zoomedMediaIds.has(current.id);
   }
 
   private currentMedia(): Media | undefined { return this.mediaItems[this.selectedIndex]; }
@@ -430,9 +418,10 @@ struct ZoomableImage {
             });
           })
       )
-      // 放大后图片自己接管单指平移；原始比例的横拖由父级查看器翻页。
-      .parallelGesture(
-        PanGesture({ fingers: 1, direction: PanDirection.All, distance: 8 })
+      // 放大后图片接管单指平移；1× 时在下方 judge 中拒绝，让原生 Swiper 独占横滑。
+      .gesture(
+        PanGesture({ fingers: 1, direction: PanDirection.All, distance: 8, isFingerCountLimited: true })
+          .tag('zoom-pan')
           .onActionStart(() => {
             this.baseOffsetX = this.offsetX;
             this.baseOffsetY = this.offsetY;
@@ -447,6 +436,10 @@ struct ZoomableImage {
             if (this.scaleValue <= 1.01) this.resetPosition();
           })
       )
+      .onGestureJudgeBegin((info: GestureInfo, _event: BaseGestureEvent): GestureJudgeResult => {
+        if (info.tag === 'zoom-pan' && this.scaleValue <= 1.01) return GestureJudgeResult.REJECT;
+        return GestureJudgeResult.CONTINUE;
+      })
   }
 
   private resetPosition(): void {

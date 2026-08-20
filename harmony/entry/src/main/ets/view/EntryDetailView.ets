@@ -17,6 +17,7 @@ import { util } from '@kit.ArkTS';
 import { relationalStore } from '@kit.ArkData';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { ShareCardSheet } from './ShareCardSheet';
+import { buildTimelineMediaSequence } from '../services/MediaGalleryModel';
 
 // MARK: - 记录详情（对照 iOS Features/Timeline/EntryDetailView.swift）
 // 已上传内容不再只读：可改文字/心情、追加语音、家人多视角补充、点亲亲。
@@ -69,21 +70,19 @@ export struct EntryDetailView {
   private myRole(): string { return ServerConfig.shared.currentRole; }
 
   private async load(): Promise<void> {
-    this.profile = await AppDatabase.shared.fetchChildProfile();
-    this.media = await AppDatabase.shared.fetchMediaForEntry(this.entry.id);
+    const profile = await AppDatabase.shared.fetchChildProfile();
+    const currentMedia = await AppDatabase.shared.fetchMediaForEntry(this.entry.id);
     const timelineEntries = await AppDatabase.shared.fetchEntries(false);
-    const entryTimes = new Map<string, number>();
-    for (const item of timelineEntries) entryTimes.set(item.id, item.happenedAt);
     const allMedia = await AppDatabase.shared.fetchAllMedia();
-    this.galleryMedia = allMedia
-      .filter((item: Media): boolean => entryTimes.has(item.entryId)
-        && (item.typeRaw === MediaType.photo || item.typeRaw === MediaType.video))
-      .sort((a: Media, b: Media): number => {
-        const timeDiff = (entryTimes.get(b.entryId) ?? 0) - (entryTimes.get(a.entryId) ?? 0);
-        return timeDiff !== 0 ? timeDiff : a.createdAt - b.createdAt;
-      });
-    this.comments = await AppDatabase.shared.fetchCommentsForEntry(this.entry.id);
-    this.voiceNotes = await AppDatabase.shared.fetchVoiceForEntry(this.entry.id);
+    const galleryMedia = buildTimelineMediaSequence(allMedia, timelineEntries);
+    const comments = await AppDatabase.shared.fetchCommentsForEntry(this.entry.id);
+    const voiceNotes = await AppDatabase.shared.fetchVoiceForEntry(this.entry.id);
+    // 最后一次性发布，避免用户在全局序列尚未准备好时先点进单页查看器。
+    this.profile = profile;
+    this.galleryMedia = galleryMedia;
+    this.media = currentMedia;
+    this.comments = comments;
+    this.voiceNotes = voiceNotes;
     if (!this.editing) {
       this.draftNote = this.entry.note ?? '';
       this.draftMood = this.entry.moodRaw as Mood | undefined;

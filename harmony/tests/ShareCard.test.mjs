@@ -21,5 +21,5 @@ test('卡面隐私字段受限并通过 Share Kit 分享图片', () => {
   assert.ok(!exporter.includes('latitude'));
   assert.ok(share.includes("'general.image'"));
   assert.ok(detail.includes("Button('分享这一刻')"));
-  assert.ok(timeline.includes('LongPressGesture'));
+  assert.ok(timeline.includes('bindContextMenu(this.entryMenu(entry), ResponseType.LongPress)'));
 });

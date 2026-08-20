@@ -549,7 +549,13 @@ export class AppDatabase {
   async archiveEntry(id: string): Promise<void> {
     const pred = new relationalStore.RdbPredicates('entry');
     pred.equalTo('id', id);
-    await this.store!.update({ isArchived: 1, syncState: SyncState.local }, pred);
+    await this.store!.update({ isArchived: 1, editedAt: Date.now(), syncState: SyncState.local }, pred);
+  }
+
+  async restoreEntry(id: string): Promise<void> {
+    const pred = new relationalStore.RdbPredicates('entry');
+    pred.equalTo('id', id);
+    await this.store!.update({ isArchived: 0, editedAt: Date.now(), syncState: SyncState.local }, pred);
   }
 
   // —— ChildProfile ——
