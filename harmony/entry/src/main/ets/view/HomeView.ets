@@ -29,6 +29,8 @@ import { BubuMovedHint } from '../components/BubuMovedHint';
 import { BackDispatcher } from '../services/BackDispatcher';
 import { SyncEngine, SyncStatusSnapshot } from '../sync/SyncEngine';
 import { SyncCenterView } from './SyncCenterView';
+import { PhotoInboxView } from './PhotoInboxView';
+import { PhotoIntakeService } from '../services/PhotoIntakeService';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS Features/Capture/CaptureHomeView.swift）
 // 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（里程碑/成长/故事/今日一问）
@@ -46,6 +48,8 @@ export struct HomeView {
   // 统计
   @State photoCount: number = 0;
   @State pendingSyncCount: number = 0;
+  @State pendingMediaCount: number = 0;
+  @State photoInboxCount: number = 0;
   @State ssdCandidateCount: number = 0;
   @State syncConnectionState: string = 'offline';
   @State syncFailureReason: string = '';
@@ -142,6 +146,7 @@ export struct HomeView {
       milestones.filter(m => m.syncState !== SyncState.synced).length +
       capsules.filter(c => c.syncState !== SyncState.synced).length;
     this.pendingSyncCount += allMedia.filter((media: Media): boolean => media.syncState !== SyncState.synced).length;
+    this.pendingMediaCount = allMedia.filter((media: Media): boolean => media.syncState !== SyncState.synced).length;
     // 首张照片缩略图映射（最近两条 + 那年今日）。
     const map = new Map<string, string>();
     const orderedPhotos = photos.slice().sort((a, b): number => a.createdAt - b.createdAt);
@@ -155,6 +160,7 @@ export struct HomeView {
       media.syncState === SyncState.failed && (media.syncFailureReason?.length ?? 0) > 0);
     if (mediaFailure?.syncFailureReason) this.syncFailureReason = mediaFailure.syncFailureReason;
     this.refreshSSDIntake();
+    this.refreshPhotoInbox();
   }
 
   private refreshSyncSnapshot(): void {
@@ -172,6 +178,15 @@ export struct HomeView {
       this.ssdCandidateCount = (await AIService.shared.intakeCandidates()).length;
     } catch (e) {
       // 首页不因家庭 mini 离线而失败；进入同步/候选页时再显示具体错误。
+    }
+  }
+
+  private async refreshPhotoInbox(): Promise<void> {
+    try {
+      const groups = await PhotoIntakeService.shared.cachedGroups();
+      this.photoInboxCount = groups.reduce((count: number, group): number => count + group.assetUris.length, 0);
+    } catch (e) {
+      this.photoInboxCount = 0;
     }
   }
 
@@ -324,6 +339,10 @@ export struct HomeView {
       SSDIntakeView({
         onClose: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); }
       })
+    } else if (this.route === HomeRoute.photoInbox) {
+      PhotoInboxView({
+        onClose: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); }
+      })
     } else {
       this.homePage()
     }
@@ -337,6 +356,7 @@ export struct HomeView {
           this.greetingRow()
           this.identityCardTop()
           this.ssdCandidateCard()
+          this.backgroundQueueCards()
           this.primaryActionDock()
           BubuMovedHint({
             storageKey: 'bubu.moved.home.v2110',
@@ -440,6 +460,40 @@ export struct HomeView {
       }
       .width('100%').padding(14).backgroundColor(BubuColor.card).borderRadius(20)
       .onClick(() => { this.navigate(HomeRoute.ssdIntake); })
+    }
+  }
+
+  @Builder
+  backgroundQueueCards() {
+    if (this.photoInboxCount > 0 || this.pendingMediaCount > 0) {
+      Row({ space: 10 }) {
+        if (this.photoInboxCount > 0) {
+          Row({ space: 8 }) {
+            BubuIcon({ name: BubuIconName.photo, iconSize: 18, color: BubuColor.primary, strokeWidth: 2.2 })
+            Column({ space: 2 }) {
+              Text(`${this.photoInboxCount} 张待收照片`)
+                .fontSize(13).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+              Text('点开确认后才会收录').fontSize(10).fontColor(BubuColor.secondaryText)
+            }.alignItems(HorizontalAlign.Start)
+          }
+          .layoutWeight(1).padding(12).backgroundColor(BubuColor.card).borderRadius(18)
+          .accessibilityText(`${this.photoInboxCount} 张待收照片，点开确认`)
+          .onClick(() => { this.navigate(HomeRoute.photoInbox); })
+        }
+        if (this.pendingMediaCount > 0) {
+          Row({ space: 8 }) {
+            BubuIcon({ name: BubuIconName.checkCloud, iconSize: 18, color: BubuColor.primary, strokeWidth: 2.2 })
+            Column({ space: 2 }) {
+              Text(`${this.pendingMediaCount} 项原片待回家`)
+                .fontSize(13).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
+              Text('联网后自动继续').fontSize(10).fontColor(BubuColor.secondaryText)
+            }.alignItems(HorizontalAlign.Start)
+          }
+          .layoutWeight(1).padding(12).backgroundColor(BubuColor.card).borderRadius(18)
+          .accessibilityText(`${this.pendingMediaCount} 项原片待同步`)
+          .onClick(() => { this.navigate(HomeRoute.syncCenter); })
+        }
+      }.width('100%')
     }
   }
 

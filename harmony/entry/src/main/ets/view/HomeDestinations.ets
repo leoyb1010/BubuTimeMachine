@@ -13,6 +13,7 @@ export enum HomeRoute {
   album,           // 相册 / 照片墙
   timeline,        // 时光轴
   ssdIntake,       // 家庭 mini / 移动硬盘待确认候选
+  photoInbox,      // 系统相册待收照片
   onThisDay,       // 那年今日
   naturalCapture,  // 一句话智能记录
   entryDetail      // 单条记录详情
