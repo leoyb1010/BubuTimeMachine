@@ -3,6 +3,7 @@
 // 动画一律 reduceMotion 兜底；迸发只在一次性事件用。
 
 import { BubuColor } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
 
 // MARK: 药丸标签（对照设计稿 MTag / iOS BubuTag）
 @Component
@@ -40,7 +41,7 @@ export struct BubuCountUp {
 
   // value 变化时重跑（ArkUI 用 @Watch；这里在 build 内不便监听，靠父组件重建近似）。
   private animate(): void {
-    if (this.reduceMotion || this.value <= 0) { this.shown = this.value; return; }
+    if (this.reduceMotion || BubuMotion.reduced || this.value <= 0) { this.shown = this.value; return; }
     this.shown = 0;
     const steps: number = Math.min(this.value, 60);
     if (steps <= 0) { this.shown = this.value; return; }
@@ -73,7 +74,7 @@ export struct BubuBurst {
   @State private fired: boolean = false;
 
   aboutToAppear(): void {
-    if (this.reduceMotion) return;
+    if (this.reduceMotion || BubuMotion.reduced) return;
     this.getUIContext().animateTo({ duration: 1000, curve: Curve.EaseOut }, () => { this.fired = true; });
   }
 

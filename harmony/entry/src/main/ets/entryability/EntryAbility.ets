@@ -16,6 +16,7 @@ import { ThemeManager } from '../theme/ThemeManager';
 import { ReminderScheduler } from '../services/ReminderScheduler';
 import { WidgetRefresher } from '../theme/WidgetRefresher';
 import { WeeklyReportNotifier } from '../services/WeeklyReportNotifier';
+import { MotionPreference } from '../theme/MotionPreference';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -49,6 +50,7 @@ export default class EntryAbility extends UIAbility {
     // 其余服务失败可降级，不影响已安全打开的本地数据库。
     try {
       WidgetRefresher.initialize(this.context);
+      MotionPreference.initialize(this.context);
       AppDatabase.shared.setDataChangeListener((): void => { WidgetRefresher.requestRefresh(); });
       WidgetRefresher.requestRefresh();
       MediaStore.shared.initialize(this.context);

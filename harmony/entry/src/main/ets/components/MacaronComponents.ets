@@ -3,6 +3,7 @@
 // 性能纪律：背景动效低频，绝不在滚动区跑持续重绘。
 
 import { BubuColor, BubuRadius, BubuShadow } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
 
 // MARK: 柔光大色块（背景氛围）——对照 iOS BubuBlob
 @Component
@@ -65,7 +66,7 @@ export struct BubuSparkle {
   @State private on: boolean = false;
 
   aboutToAppear(): void {
-    if (!this.animated || this.reduceMotion) return;
+    if (!this.animated || this.reduceMotion || BubuMotion.reduced) return;
     // 循环呼吸：easeInOut 1.3s 往返。delay 用 setTimeout 错峰。
     setTimeout(() => {
       this.getUIContext().animateTo({
@@ -89,10 +90,10 @@ export struct BubuSparkle {
         [0, this.starSize * 0.5]
       ])
       .fill(this.color)
-      .opacity(this.animated && !this.reduceMotion ? (this.on ? 1 : 0.35) : 0.9)
-      .scale({ x: this.animated && !this.reduceMotion ? (this.on ? 1.1 : 0.7) : 1,
-               y: this.animated && !this.reduceMotion ? (this.on ? 1.1 : 0.7) : 1 })
-      .rotate({ angle: this.animated && !this.reduceMotion ? (this.on ? 20 : 0) : 0 })
+      .opacity(this.animated && !this.reduceMotion && !BubuMotion.reduced ? (this.on ? 1 : 0.35) : 0.9)
+      .scale({ x: this.animated && !this.reduceMotion && !BubuMotion.reduced ? (this.on ? 1.1 : 0.7) : 1,
+               y: this.animated && !this.reduceMotion && !BubuMotion.reduced ? (this.on ? 1.1 : 0.7) : 1 })
+      .rotate({ angle: this.animated && !this.reduceMotion && !BubuMotion.reduced ? (this.on ? 20 : 0) : 0 })
       .hitTestBehavior(HitTestMode.None)
   }
 }

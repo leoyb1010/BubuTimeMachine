@@ -14,12 +14,13 @@ export struct CeremonyAnimation {
   subtitle: string = '';
   onDismiss: () => void = () => {};
   reduceMotion: boolean = false;
+  @StorageLink('bubuReduceMotion') private systemReduceMotion: boolean = false;
   @State private appear: boolean = false;
   @State private sparkle: boolean = false;
 
   aboutToAppear(): void {
     BubuHaptics.success();
-    if (this.reduceMotion) { this.appear = true; return; }
+    if (this.reduceMotion || this.systemReduceMotion) { this.appear = true; return; }
     // 卡片弹入（对照 spring(0.48,0.72)）。
     this.getUIContext().animateTo({ duration: 480, curve: Curve.Friction }, () => { this.appear = true; });
     // 星点放射淡出（对照 easeOut 1.1s，delay 0.18）。
@@ -37,7 +38,7 @@ export struct CeremonyAnimation {
       Column({ space: 18 }) {
         // 吉祥物 + 星环
         Stack() {
-          if (!this.reduceMotion) {
+          if (!this.reduceMotion && !this.systemReduceMotion) {
             this.sparkleRing()
           }
           Text('🎉')

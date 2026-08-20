@@ -26,6 +26,7 @@ export struct PhotoFrameView {
   @State private clockText: string = '';
   @State private zoomed: boolean = false;
   @State private dwell: number = 8;
+  @StorageLink('bubuReduceMotion') private reduceMotion: boolean = false;
   private clockTimer: number = -1;
   private slideTimer: number = -1;
 
@@ -88,8 +89,9 @@ export struct PhotoFrameView {
       Column().width('100%').height('100%').backgroundColor(Color.Black)
       if (this.current()) {
         Image(this.current()!.uri).width('100%').height('100%').objectFit(ImageFit.Cover)
-          .scale({ x: this.zoomed ? 1.10 : 1.01, y: this.zoomed ? 1.10 : 1.01 })
-          .animation({ duration: this.dwell * 1000, curve: Curve.EaseInOut })
+          .scale({ x: this.reduceMotion ? 1 : (this.zoomed ? 1.10 : 1.01),
+            y: this.reduceMotion ? 1 : (this.zoomed ? 1.10 : 1.01) })
+          .animation({ duration: this.reduceMotion ? 0 : this.dwell * 1000, curve: Curve.EaseInOut })
         Column().width('100%').height('100%').linearGradient({
           angle: 180, colors: [['#80000000', 0], ['#00000000', 0.35], ['#A6000000', 1]]
         })
@@ -158,6 +160,7 @@ export struct PhotoFrameView {
   }
 
   private animateCurrent(): void {
+    if (this.reduceMotion) { this.zoomed = false; return; }
     this.zoomed = false;
     setTimeout(() => { this.zoomed = true; }, 30);
   }

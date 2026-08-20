@@ -10,41 +10,37 @@ import { curves } from '@kit.ArkUI';
 
 // AnimateParam 由 @ohos.arkui 全局提供（动画参数）。
 export class BubuMotion {
+  static reduced: boolean = false;
+
+  static setReducedMotion(value: boolean): void { BubuMotion.reduced = value; }
+
   /// 日常反馈：按压、选中、chip 切换（≤0.3s 内完成感知）。spring(0.25,0.85)。
-  static readonly quick: AnimateParam = {
-    duration: 250,
-    curve: curves.springMotion(0.25, 0.85)
-  };
+  static get quick(): AnimateParam {
+    return { duration: BubuMotion.reduced ? 0 : 250, curve: curves.springMotion(0.25, 0.85) };
+  }
   /// 页面内元素入场 / 布局变化。spring(0.4,0.8)。
-  static readonly gentle: AnimateParam = {
-    duration: 400,
-    curve: curves.springMotion(0.4, 0.8)
-  };
+  static get gentle(): AnimateParam {
+    return { duration: BubuMotion.reduced ? 0 : 400, curve: curves.springMotion(0.4, 0.8) };
+  }
   /// 主题切换、模式切换等全局变化。smooth(0.4)。
-  static readonly smooth: AnimateParam = {
-    duration: 400,
-    curve: Curve.Smooth
-  };
+  static get smooth(): AnimateParam {
+    return { duration: BubuMotion.reduced ? 0 : 400, curve: Curve.Smooth };
+  }
   /// 典礼感：胶囊开启、里程碑点亮（允许 0.8–2.5s）。spring(0.6,0.75)。
-  static readonly ceremony: AnimateParam = {
-    duration: 600,
-    curve: curves.springMotion(0.6, 0.75)
-  };
+  static get ceremony(): AnimateParam {
+    return { duration: BubuMotion.reduced ? 0 : 600, curve: curves.springMotion(0.6, 0.75) };
+  }
   /// 循环呼吸：等待、即将解锁的胶囊。easeInOut 3s 往返。
   /// 注意：reduceMotion 时调用方必须整段移除（不要 playMode 往返）。
-  static readonly breathe: AnimateParam = {
-    duration: 3000,
-    curve: Curve.EaseInOut,
-    iterations: -1,
-    playMode: PlayMode.Alternate
-  };
+  static get breathe(): AnimateParam {
+    return { duration: BubuMotion.reduced ? 0 : 3000, curve: Curve.EaseInOut,
+      iterations: BubuMotion.reduced ? 1 : -1, playMode: PlayMode.Alternate };
+  }
   /// 等待浮动（±4pt，2s 循环往返）。对照 iOS bubuFloating。
-  static readonly floating: AnimateParam = {
-    duration: 2000,
-    curve: Curve.EaseInOut,
-    iterations: -1,
-    playMode: PlayMode.Alternate
-  };
+  static get floating(): AnimateParam {
+    return { duration: BubuMotion.reduced ? 0 : 2000, curve: Curve.EaseInOut,
+      iterations: BubuMotion.reduced ? 1 : -1, playMode: PlayMode.Alternate };
+  }
 
   // MARK: 关键标量（供组件直接引用）
   /// 统一按压缩放比例（对照 BubuPressableStyle）。
