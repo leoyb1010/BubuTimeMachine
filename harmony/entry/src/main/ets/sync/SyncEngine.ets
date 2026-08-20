@@ -927,7 +927,7 @@ export class SyncEngine {
         throw new Error(SyncEngine.errorText(e));
       }
       // 瞬时拉取失败不报红：游标不推进，下轮自动补拉（对照 iOS pull 的 catch 软失败）。
-      hilog.warn(DOMAIN, 'Bubu', `拉取 ${collection} 失败，下轮补拉: ${JSON.stringify(e)}`);
+      hilog.warn(DOMAIN, 'Bubu', `拉取 ${collection} 失败，下轮补拉: ${SyncEngine.errorText(e)}`);
     }
   }
 
@@ -1322,25 +1322,29 @@ export class SyncEngine {
 
   // —— Media 合并（对照 iOS mergeRemoteMedia：需对应 Entry 存在）——
   private async pullMedia(): Promise<void> {
+    // 家庭库可能有数千个媒体；先批量建索引，避免每条媒体再查 Entry + Media 的 N+1 风暴。
+    const localMedia = await AppDatabase.shared.fetchAllMedia();
+    const mediaById = new Map<string, Media>();
+    for (const item of localMedia) mediaById.set(item.id, item);
+    const localEntries = await AppDatabase.shared.fetchEntries(true);
+    const entryIds = new Set<string>();
+    for (const entry of localEntries) entryIds.add(entry.id);
     await this.pullCollection('media', async (r: Record<string, Object>): Promise<boolean | void> => {
       const mediaId = SyncEngine.recordLocalId(r);
       const entryLocalId = SyncEngine.rStr(r, 'entryLocalId');
       if (mediaId === undefined || entryLocalId === undefined) return;
       if (await this.isPendingDeletion('media', SyncEngine.rStr(r, 'id'))) return true;
-      const existingList = await AppDatabase.shared.fetchMediaForEntry(entryLocalId);
-      for (const ex of existingList) {
-        if (ex.id === mediaId) {
-          if (ex.syncState === SyncState.synced || this.serverMirrorMode) {
-            SyncEngine.applyMedia(r, ex);
-            await this.updateMediaFields(ex.id, SyncEngine.mediaToFields(ex));
-          } else {
-            return false;
-          }
-          return;
+      const existing = mediaById.get(mediaId);
+      if (existing) {
+        if (existing.syncState === SyncState.synced || this.serverMirrorMode) {
+          SyncEngine.applyMedia(r, existing);
+          await this.updateMediaFields(existing.id, SyncEngine.mediaToFields(existing));
+        } else {
+          return false;
         }
+        return;
       }
-      const entry = await this.findEntry(entryLocalId);
-      if (!entry) return false;
+      if (!entryIds.has(entryLocalId)) return false;
       const m: Media = {
         id: mediaId,
         entryId: entryLocalId,
@@ -1352,6 +1356,7 @@ export class SyncEngine {
       };
       SyncEngine.applyMedia(r, m);
       await AppDatabase.shared.insertMedia(m);
+      mediaById.set(mediaId, m);
     });
   }
 
