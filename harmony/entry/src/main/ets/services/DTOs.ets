@@ -220,6 +220,7 @@ export interface UploadedFileResult {
   recordId: string;
   storedFileName: string;
   storedExtraFileName?: string;
+  skippedRemoteNewer?: boolean;
 }
 
 // MARK: - Realtime 远端变更事件（对照 iOS RealtimeEvent）

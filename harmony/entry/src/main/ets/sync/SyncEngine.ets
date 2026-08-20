@@ -325,6 +325,7 @@ export class SyncEngine {
         'inStorybook': e.inStorybook === true,
         'createdAt': new Date(e.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(e.editedAt ?? e.createdAt));
       if (e.title !== undefined) body['title'] = e.title;
       if (e.note !== undefined) body['note'] = e.note;
       if (e.firstPersonNote !== undefined) body['firstPersonNote'] = e.firstPersonNote;
@@ -353,6 +354,7 @@ export class SyncEngine {
       'birthday': new Date(p.birthday).toISOString(),
       'createdAt': new Date(p.createdAt).toISOString()
     };
+    body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(p.createdAt));
     if (p.gender !== undefined) body['gender'] = p.gender;
     if (p.bloodType !== undefined) body['bloodType'] = p.bloodType; // 含血型同步（与 iOS 一致）
     if (p.birthPlace !== undefined) body['birthPlace'] = p.birthPlace;
@@ -365,6 +367,7 @@ export class SyncEngine {
         if (MediaStore.shared.exists(fileName)) {
           const filePath = MediaStore.shared.fullPath(fileName);
           const fields: Record<string, string> = { 'createdAt': new Date(p.createdAt).toISOString() };
+          fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(p.createdAt));
           const res: UploadedFileResult = await APIClient.shared.uploadFile(
             'childprofile', p.id, fields, 'avatar', filePath, fileName);
           p.remoteId = res.recordId;
@@ -393,6 +396,7 @@ export class SyncEngine {
         'title': m.title, 'category': m.category, 'emoji': m.emoji, 'isCustom': m.isCustom,
         'createdAt': new Date(m.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(m.createdAt));
       if (m.detail !== undefined) body['detail'] = m.detail;
       if (m.happenedAt !== undefined) body['happenedAt'] = new Date(m.happenedAt).toISOString();
       if (m.ageDescription !== undefined) body['ageDescription'] = m.ageDescription;
@@ -418,6 +422,7 @@ export class SyncEngine {
         'detectedByAI': f.detectedByAI, 'confirmedByParent': f.confirmedByParent,
         'createdAt': new Date(f.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(f.createdAt));
       if (f.entryId !== undefined) body['entryLocalId'] = f.entryId;
       try {
         const saved = await APIClient.shared.upsert('firsttimes', f.id, body);
@@ -441,6 +446,7 @@ export class SyncEngine {
         'themeColorHex': m.themeColorHex, 'isPrimary': m.isPrimary,
         'createdAt': new Date(m.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(m.createdAt));
       try {
         const saved = await APIClient.shared.upsert('members', m.id, body);
         m.remoteId = saved['id'] as string;
@@ -462,6 +468,7 @@ export class SyncEngine {
         'kind': h.kind, 'title': h.title, 'recordedAt': new Date(h.recordedAt).toISOString(),
         'tags': h.tags, 'createdAt': new Date(h.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(h.createdAt));
       if (h.detail !== undefined) body['detail'] = h.detail;
       if (h.amountText !== undefined) body['amountText'] = h.amountText;
       if (h.reaction !== undefined) body['reaction'] = h.reaction;
@@ -492,6 +499,7 @@ export class SyncEngine {
         'vaccineName': v.vaccineName, 'injectedAt': new Date(v.injectedAt).toISOString(),
         'sourceRaw': v.source, 'createdAt': new Date(v.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(v.updatedAt || v.createdAt));
       if (v.doseId !== undefined) body['doseId'] = v.doseId;
       if (v.doseLabel !== undefined) body['doseLabel'] = v.doseLabel;
       if (v.hospital !== undefined) body['hospital'] = v.hospital;
@@ -532,6 +540,7 @@ export class SyncEngine {
         'measuredAt': new Date(g.measuredAt).toISOString(),
         'sourceRaw': g.source, 'createdAt': new Date(g.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(g.updatedAt || g.createdAt));
       if (g.heightCm !== undefined) body['heightCm'] = g.heightCm;
       if (g.weightKg !== undefined) body['weightKg'] = g.weightKg;
       if (g.headCircumferenceCm !== undefined) body['headCircumferenceCm'] = g.headCircumferenceCm;
@@ -574,6 +583,7 @@ export class SyncEngine {
           'voiceDuration': c.voiceDuration, 'voiceWaveform': c.voiceWaveform,
           'createdAt': new Date(c.createdAt).toISOString()
         };
+        body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
         if (c.text !== undefined) body['text'] = c.text;
         try {
           const saved = await APIClient.shared.upsert('comments', c.id, body);
@@ -585,6 +595,7 @@ export class SyncEngine {
               'entryLocalId': c.entryId, 'authorRole': c.authorRole,
               'createdAt': new Date(c.createdAt).toISOString()
             };
+            fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
             const res: UploadedFileResult = await APIClient.shared.uploadFile(
               'comments', c.id, fields, 'voiceFile', filePath, c.voiceFileName);
             c.remoteId = res.recordId;
@@ -612,6 +623,7 @@ export class SyncEngine {
           'durationSeconds': n.durationSeconds, 'waveform': n.waveformSamples,
           'createdAt': new Date(n.createdAt).toISOString()
         };
+        body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(n.createdAt));
         if (n.transcript !== undefined) body['transcript'] = n.transcript;
         try {
           const saved = await APIClient.shared.upsert('voicenotes', n.id, body);
@@ -623,6 +635,7 @@ export class SyncEngine {
               'entryLocalId': n.entryId, 'authorRole': n.authorRole,
               'createdAt': new Date(n.createdAt).toISOString()
             };
+            fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(n.createdAt));
             const res: UploadedFileResult = await APIClient.shared.uploadFile(
               'voicenotes', n.id, fields, 'file', filePath, n.localFileName);
             n.remoteId = res.recordId;
@@ -652,6 +665,7 @@ export class SyncEngine {
         'recordedAt': new Date(memo.recordedAt).toISOString(),
         'createdAt': new Date(memo.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(memo.createdAt));
       if (memo.transcript !== undefined) body['transcript'] = memo.transcript;
       if (memo.ageYears !== undefined) body['ageYears'] = memo.ageYears;
       if (memo.durationSeconds !== undefined) body['durationSeconds'] = memo.durationSeconds;
@@ -665,6 +679,7 @@ export class SyncEngine {
             'recordedAt': new Date(memo.recordedAt).toISOString(),
             'createdAt': new Date(memo.createdAt).toISOString()
           };
+          fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(memo.createdAt));
           const res = await APIClient.shared.uploadFile(
             'voicememos', memo.id, fields, 'file', filePath, memo.localFileName);
           memo.remoteId = res.recordId;
@@ -704,6 +719,7 @@ export class SyncEngine {
       'entryLocalId': m.entryId, 'mediaType': m.typeRaw,
       'aiTags': JSON.stringify(m.aiTags), 'createdAt': new Date(m.createdAt).toISOString()
     };
+    fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(m.createdAt));
     if (m.durationSeconds !== undefined) fields['durationSeconds'] = `${m.durationSeconds}`;
     if (m.width !== undefined) fields['width'] = `${m.width}`;
     if (m.height !== undefined) fields['height'] = `${m.height}`;
@@ -753,6 +769,7 @@ export class SyncEngine {
         'title': c.title, 'fromRole': c.fromRole, 'unlockAt': new Date(c.unlockAt).toISOString(),
         'isLocked': c.isLocked, 'createdAt': new Date(c.createdAt).toISOString()
       };
+      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
       if (c.coverEmoji !== undefined) body['coverEmoji'] = c.coverEmoji;
       try {
         const saved = await APIClient.shared.upsert('timecapsules', c.id, body);
@@ -765,6 +782,7 @@ export class SyncEngine {
             'unlockAt': new Date(c.unlockAt).toISOString(),
             'createdAt': new Date(c.createdAt).toISOString()
           };
+          fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
           const res: UploadedFileResult = await APIClient.shared.uploadFile(
             'timecapsules', c.id, fields, 'encryptedBlob', filePath, c.encryptedBlobFileName);
           c.remoteId = res.recordId;
@@ -1550,6 +1568,7 @@ export class SyncEngine {
     if (parts.length > 0) body['detail'] = parts.join(' · ');
     if (v.doseLabel !== undefined) body['amountText'] = v.doseLabel;
     if (v.reaction !== undefined) body['reaction'] = v.reaction;
+    body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(v.updatedAt || v.createdAt));
     return body;
   }
 
@@ -1567,6 +1586,7 @@ export class SyncEngine {
       'createdAt': new Date(g.createdAt).toISOString()
     };
     if (g.note !== undefined) body['detail'] = g.note;
+    body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(g.updatedAt || g.createdAt));
     return body;
   }
 

@@ -5,6 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { request } from '@kit.BasicServicesKit';
 import type { common } from '@kit.AbilityKit';
 import { ServerConfig } from './ServerConfig';
+import { remoteVersionIsNewer } from './SyncVersionModel';
 import { AuthResponse, UploadedFileResult } from './DTOs';
 
 const DOMAIN = 0x0000;
@@ -155,9 +156,13 @@ export class APIClient {
   async upsert(collection: string, localId: string, body: Record<string, Object>): Promise<Record<string, Object>> {
     const existing = await this.findByLocalId(collection, localId);
     body['localId'] = localId;
-    body['clientUpdatedAt'] = APIClient.syncTimestampString();
+    if (typeof body['clientUpdatedAt'] !== 'string') body['clientUpdatedAt'] = APIClient.syncTimestampString();
     body = this.activeRecordBody(body, existing === null);
     if (existing) {
+      if (remoteVersionIsNewer(existing['clientUpdatedAt'], body['clientUpdatedAt'])) {
+        existing['_bubuRemoteNewer'] = true;
+        return existing;
+      }
       const id = existing['id'] as string;
       const resp = await this.request('PATCH', `/api/collections/${collection}/records/${id}`, JSON.stringify(body), true);
       return JSON.parse(resp) as Record<string, Object>;
@@ -264,8 +269,17 @@ export class APIClient {
 
     // 组装普通字段：补 localId + clientUpdatedAt（对照 iOS addSyncTimestamp）。
     fields['localId'] = localId;
-    fields['clientUpdatedAt'] = APIClient.syncTimestampString();
+    if (typeof fields['clientUpdatedAt'] !== 'string') fields['clientUpdatedAt'] = APIClient.syncTimestampString();
     fields = this.activeRecordFields(fields, !isPatch);
+    if (existing && remoteVersionIsNewer(existing['clientUpdatedAt'], fields['clientUpdatedAt'])) {
+      return {
+        recordId: recordId,
+        storedFileName: APIClient.storedFileName(existing, fileField, fileName),
+        storedExtraFileName: extraFileField && extraFileName
+          ? APIClient.storedFileName(existing, extraFileField, extraFileName) : undefined,
+        skippedRemoteNewer: true
+      };
+    }
     const formData: Array<FormField> = [];
     const keys = Object.keys(fields).sort();
     for (const k of keys) {
