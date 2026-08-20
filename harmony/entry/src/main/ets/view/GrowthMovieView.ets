@@ -11,6 +11,8 @@ import { BubuExpression } from '../theme/BubuExpression';
 import { MediaThumbnail } from '../components/MediaThumbnail';
 import { GrowthMoviePlayer, MovieDraft } from './GrowthMoviePlayer';
 import { MovieRenderPhoto, MovieRenderStatus } from '../models/AIArtifacts';
+import { preferences } from '@kit.ArkData';
+import { common } from '@kit.AbilityKit';
 
 // MARK: - 年度成长电影（对照 iOS Features/AIStudio/GrowthMovieView.swift）
 // 端侧生成「电影草稿」：按年龄/地点/时间筛选真实照片，套用模板播放（GrowthMoviePlayer）。
@@ -54,11 +56,18 @@ export struct GrowthMovieView {
   @State private renderedMoviePath: string = '';
   @State private showRenderedMovie: boolean = false;
   @State private renderError: string = '';
+  private pollGeneration: number = 0;
+  private activeRenderYear: number = 0;
 
   private theme: string = BubuColor.primary;
   private readonly stages: string[] = ['筛选照片素材…', '整理时间和地点…', '套用电影模板…', '生成片头和字幕…'];
 
-  aboutToAppear(): void { this.reload(); }
+  aboutToAppear(): void {
+    this.reload();
+    this.resumePendingRender();
+  }
+
+  aboutToDisappear(): void { this.pollGeneration += 1; }
 
   private async reload(): Promise<void> {
     this.profile = await AppDatabase.shared.fetchChildProfile();
@@ -548,9 +557,11 @@ export struct GrowthMovieView {
     this.renderError = '';
     try {
       const year = this.selectedYear !== -1 ? this.selectedYear : new Date().getFullYear();
+      this.activeRenderYear = year;
       this.renderStatus = await AIService.shared.startMovieRender(
         ServerConfig.shared.childName, year, this.selectedTemplate,
         this.remoteMoviePhotos(), this.draft.narration ?? '');
+      await this.savePendingJob(year, this.renderStatus.jobId);
       await this.pollServerRender();
     } catch (e) {
       this.renderError = e instanceof Error ? e.message : '服务端合成没有启动';
@@ -560,16 +571,74 @@ export struct GrowthMovieView {
   private async pollServerRender(): Promise<void> {
     const jobId = this.renderStatus?.jobId ?? '';
     if (jobId.length === 0) return;
-    for (let attempt = 0; attempt < 30; attempt += 1) {
+    const generation = ++this.pollGeneration;
+    let consecutiveFailures = 0;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      if (generation !== this.pollGeneration) return;
       if (this.renderStatus?.ready === true || this.renderStatus?.status === 'failed') break;
       await new Promise<void>((resolve: () => void) => setTimeout(resolve, 2000));
-      this.renderStatus = await AIService.shared.movieRenderStatus(jobId);
+      try {
+        this.renderStatus = await AIService.shared.movieRenderStatus(jobId);
+        consecutiveFailures = 0;
+      } catch (e) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 3) {
+          this.renderError = '网络暂时不稳定，任务仍在服务端合成；下次回来会继续获取。';
+          return;
+        }
+      }
     }
     if (this.renderStatus?.ready === true) {
       this.renderedMoviePath = await AIService.shared.downloadRenderedMovie(jobId);
+      await this.clearPendingJob(this.activeRenderYear || this.renderYear());
+      this.activeRenderYear = 0;
     } else if (this.renderStatus?.status === 'failed') {
+      await this.clearPendingJob(this.activeRenderYear || this.renderYear());
+      this.activeRenderYear = 0;
       this.renderError = this.renderStatus.error.length > 0 ? this.renderStatus.error : '服务端合成失败，可以重试';
+    } else {
+      this.renderError = '任务仍在服务端合成；稍后回到这里会继续获取。';
     }
+  }
+
+  private async resumePendingRender(): Promise<void> {
+    if (!ServerConfig.shared.isAIConfigured || this.renderStatus?.status === 'rendering') return;
+    const year = this.renderYear();
+    const jobId = await this.pendingJob(year);
+    if (jobId.length === 0) return;
+    this.activeRenderYear = year;
+    this.renderError = '';
+    try {
+      this.renderStatus = await AIService.shared.movieRenderStatus(jobId);
+      await this.pollServerRender();
+    } catch (e) {
+      this.renderError = '上次任务暂时无法连接，jobId 已保留，下次回来继续。';
+    }
+  }
+
+  private renderYear(): number {
+    return this.selectedYear !== -1 ? this.selectedYear : new Date().getFullYear();
+  }
+
+  private async pendingJob(year: number): Promise<string> {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    const store = await preferences.getPreferences(context, 'bubu_growth_movie_jobs');
+    const value = await store.get(`job_${year}`, '');
+    return typeof value === 'string' ? value : '';
+  }
+
+  private async savePendingJob(year: number, jobId: string): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    const store = await preferences.getPreferences(context, 'bubu_growth_movie_jobs');
+    await store.put(`job_${year}`, jobId);
+    await store.flush();
+  }
+
+  private async clearPendingJob(year: number): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.Context;
+    const store = await preferences.getPreferences(context, 'bubu_growth_movie_jobs');
+    await store.delete(`job_${year}`);
+    await store.flush();
   }
 
   // 草稿标题（对照 iOS draftTitle）。
