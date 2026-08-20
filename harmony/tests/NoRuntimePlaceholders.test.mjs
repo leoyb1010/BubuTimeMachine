@@ -35,3 +35,12 @@ test('魔法屋的绘本和胶囊卡片都进入真实功能页', async () => {
   assert.ok(studio.includes('BubuStoryView'));
   assert.ok(studio.includes('CapsuleView'));
 });
+
+test('成长电影不保留伪 jobId 的旧占位 API', async () => {
+  const ai = await readFile(new URL('services/AIService.ets', etsRoot), 'utf8');
+  assert.ok(!ai.includes('async generateGrowthMovie('));
+  assert.ok(!ai.includes('jobId: `ai-${year}`'));
+  assert.ok(ai.includes('startMovieRender'));
+  assert.ok(ai.includes('movieRenderStatus'));
+  assert.ok(ai.includes('downloadRenderedMovie'));
+});

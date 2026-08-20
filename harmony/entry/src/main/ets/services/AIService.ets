@@ -44,13 +44,6 @@ export interface FirstTimeSuggestion {
   confidence: number;          // 0...1
 }
 
-// 年度成长电影生成任务句柄（对照 DTOs.swift GrowthMovieJob）。
-export interface GrowthMovieJob {
-  jobId: string;
-  year: number;
-  status: string;              // pending / generating / ready / failed
-}
-
 // 简化版自然语言解析结果（保留原有公共接口：HomeView 直接取 note/mood/domain）。
 // 与 NaturalCaptureDTO.ets 的结构化 NaturalCaptureParseResult 区分使用。
 export interface NaturalCaptureResult {
@@ -256,18 +249,6 @@ export class AIService {
     } finally {
       req.destroy();
     }
-  }
-
-  // 成长电影生成（对照 generateGrowthMovie）。旁白生成；成片在服务端拼接，前端流程占位。
-  async generateGrowthMovie(year: number): Promise<GrowthMovieJob> {
-    const body: Record<string, Object> = { 'year': year, 'child_name': '布布' };
-    const obj = await this.post('movie-narration', body);
-    const narration = (obj['narration'] as string | undefined) ?? '';
-    return {
-      jobId: `ai-${year}`,
-      year: year,
-      status: narration.length === 0 ? 'failed' : 'ready'
-    };
   }
 
   // 旁白文本（对照 movieNarration，供成长电影视图直接取用）。

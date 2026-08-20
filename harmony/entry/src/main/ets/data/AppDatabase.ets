@@ -136,6 +136,9 @@ export class AppDatabase {
   private async runSchemaMigrations(): Promise<void> {
     // Fresh installs already have these columns through CREATE TABLE. Existing testers may
     // carry older local tables, so keep every migration idempotent.
+    const store = this.store!;
+    store.beginTransaction();
+    try {
     await this.addColumnIfMissing('entry', 'remoteId', 'TEXT');
     await this.addColumnIfMissing('entry', 'firstPersonNote', 'TEXT');
     await this.addColumnIfMissing('entry', 'locationName', 'TEXT');
@@ -269,13 +272,49 @@ export class AppDatabase {
     await this.addColumnIfMissing('first_time', 'entryId', 'TEXT');
     await this.addColumnIfMissing('first_time', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
     await this.addColumnIfMissing('first_time', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+      await this.assertRequiredColumns();
+      store.commit();
+    } catch (error) {
+      try { store.rollBack(); } catch (rollbackError) {}
+      throw error instanceof Error ? error : new Error(JSON.stringify(error));
+    }
   }
 
   private async addColumnIfMissing(table: string, column: string, type: string): Promise<void> {
+    if (await this.hasColumn(table, column)) return;
+    await this.store!.executeSql(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    if (!(await this.hasColumn(table, column))) {
+      throw new Error(`数据库迁移失败：${table}.${column} 未创建`);
+    }
+  }
+
+  private async hasColumn(table: string, column: string): Promise<boolean> {
+    if (!/^[a-z_]+$/.test(table) || !/^[A-Za-z][A-Za-z0-9_]*$/.test(column)) {
+      throw new Error('数据库迁移标识非法');
+    }
+    const result = await this.store!.querySql(`PRAGMA table_info(${table})`);
     try {
-      await this.store!.executeSql(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    } catch (e) {
-      // Column already exists on fresh installs or after a previous migration.
+      const nameIndex = result.getColumnIndex('name');
+      while (result.goToNextRow()) {
+        if (result.getString(nameIndex) === column) return true;
+      }
+      return false;
+    } finally {
+      result.close();
+    }
+  }
+
+  private async assertRequiredColumns(): Promise<void> {
+    const required: Array<[string, string]> = [
+      ['entry', 'editedAt'], ['media', 'remoteThumbURL'], ['media', 'contentHash'],
+      ['media', 'resourceRoleRaw'], ['media', 'syncFailureReason'],
+      ['time_capsule', 'encryptedBlobFileName'], ['growth_measurement', 'updatedAt'],
+      ['vaccine_record', 'updatedAt'], ['comment', 'syncState'], ['voice_note', 'syncState']
+    ];
+    for (const pair of required) {
+      if (!(await this.hasColumn(pair[0], pair[1]))) {
+        throw new Error(`数据库结构不完整：缺少 ${pair[0]}.${pair[1]}`);
+      }
     }
   }
 

@@ -245,10 +245,3 @@ export interface FirstTimeSuggestion {
   what: string;             // "第一次吃西瓜"
   confidence: number;       // 0...1
 }
-
-// 年度成长电影生成任务句柄。
-export interface GrowthMovieJob {
-  jobId: string;
-  year: number;
-  status: string;           // pending / generating / ready / failed
-}

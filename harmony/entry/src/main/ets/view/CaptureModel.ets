@@ -10,8 +10,7 @@ import { BubuSound, SoundEffect } from '../theme/BubuSound';
 // MARK: - 记录此刻 业务模型（对照 iOS Features/Capture/CaptureModel.swift）
 // iOS 是 @Observable @MainActor class：把选中的媒体落本地并自动分析，写入 SwiftData（Entry + Media）。
 // ArkUI 用 @Observed class + @ObjectLink 在面板里双向观察；写入走 EntryWriter（与意图/小组件同一写入层）。
-// NOTE: iOS 端的端侧分析（EXIF/地理/Vision）与多媒体数组在本切片简化为「单张照片 + 一段语音 + 文字 + 心情」，
-//       对齐 Harmony EntryWriter.entryWithPhoto 的写入契约；多媒体批量管线后续可扩展。
+// 支持批量照片/视频、语音、地点、文字与心情，提交时由 EntryWriter 原子写入聚合记录。
 
 // 已选媒体预览（对照 iOS SelectedMediaPreview）。
 export interface SelectedMediaPreview {
