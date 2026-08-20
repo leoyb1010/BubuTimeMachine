@@ -891,10 +891,11 @@ export class SyncEngine {
   // mergeFn 抛错由本方法吞掉外层 try；游标只在整批成功后推进。
   private async pullCollection(
     collection: string,
-    merge: (r: Record<string, Object>) => Promise<boolean | void>
+    merge: (r: Record<string, Object>) => Promise<boolean | void>,
+    ignoreCursor: boolean = false
   ): Promise<boolean> {
     try {
-      const cursor = await this.getCursor(collection);
+      const cursor = ignoreCursor ? undefined : await this.getCursor(collection);
       const activeRequest = APIClient.shared.fetchRecords(collection, cursor);
       const tombstoneRequest = APIClient.shared.fetchDeletedTombstones(collection, cursor);
       const records = await activeRequest;
@@ -1544,7 +1545,7 @@ export class SyncEngine {
       if (localId === undefined) return;
       if (await this.isPendingDeletion('childprofile', SyncEngine.rStr(r, 'id'))) return true;
       if (bestRemote === null || SyncEngine.isBetterProfile(r, bestRemote)) bestRemote = r;
-    });
+    }, true);
     if (!loaded || bestRemote === null) return;
     const remote = bestRemote as Record<string, Object>;
     const localId = SyncEngine.recordLocalId(remote);

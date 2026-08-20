@@ -8,6 +8,7 @@ const db = await readFile(new URL('../entry/src/main/ets/data/AppDatabase.ets', 
 test('服务器存在历史重复档案时选完整度最高且更新的 iOS 档案', () => {
   assert.ok(sync.includes('private static profileRecordScore'));
   assert.ok(sync.includes('private static isBetterProfile'));
+  assert.ok(sync.includes("}, true);"), '儿童档案数量很小，每轮全量核对以自愈历史重复数据');
   assert.ok(sync.includes("name !== '布布'"));
   assert.ok(sync.includes("rStr(r, 'bloodType')"));
   assert.ok(sync.includes("rFileName(r, 'avatar')"));
