@@ -2,6 +2,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { MediaStore } from '../MediaStore';
 import { zlib } from '@kit.BasicServicesKit';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 
 const DOMAIN = 0x0000;
 
@@ -13,6 +14,7 @@ const DOMAIN = 0x0000;
 export interface MediaSnapshot {
   fileName: string;
   type: string;
+  resourceRole?: string;
 }
 
 export interface VoiceSnapshot {
@@ -76,11 +78,32 @@ export interface FirstTimeSnapshot {
 }
 
 export interface TimeCapsuleSnapshot {
+  id: string;
   title: string;
   fromRole: string;
   unlockAt: number;
   isLocked: boolean;
   coverEmoji?: string;
+  encryptedBlobFileName?: string;
+}
+
+export interface GrowthSnapshot {
+  measuredAt: number;
+  heightCm?: number;
+  weightKg?: number;
+  headCircumferenceCm?: number;
+  note?: string;
+  source: string;
+}
+
+export interface VaccineSnapshot {
+  vaccineName: string;
+  doseLabel?: string;
+  injectedAt: number;
+  hospital?: string;
+  injectionSite?: string;
+  reaction?: string;
+  note?: string;
 }
 
 export interface ExportInput {
@@ -90,8 +113,11 @@ export interface ExportInput {
   milestones: MilestoneSnapshot[];
   voiceMemos: VoiceMemoSnapshot[];
   healthRecords: HealthRecordSnapshot[];
+  growthMeasurements: GrowthSnapshot[];
+  vaccines: VaccineSnapshot[];
   firstTimes: FirstTimeSnapshot[];
   timeCapsules: TimeCapsuleSnapshot[];
+  unavailableReferences: string[];
 }
 
 export class ArchiveExporter {
@@ -121,20 +147,32 @@ export class ArchiveExporter {
     for (const memo of input.voiceMemos) {
       if (memo.fileName) names.add(memo.fileName);
     }
+    for (const capsule of input.timeCapsules) {
+      if (capsule.encryptedBlobFileName) names.add(capsule.encryptedBlobFileName);
+    }
+    const missing: string[] = input.unavailableReferences.slice();
     for (const name of names) {
       const src = this.mediaStore.fullPath(name);
       const dest = `${mediaDir}/${name}`;
       try {
         if (fileIo.accessSync(src) && !fileIo.accessSync(dest)) {
           fileIo.copyFileSync(src, dest);
+        } else if (!fileIo.accessSync(src)) {
+          missing.push(name);
         }
       } catch (e) {
-        // 单个文件拷贝失败不阻塞整体导出。
+        missing.push(name);
       }
     }
 
-    ArchiveExporter.writeText(`${root}/data.json`, ArchiveExporter.buildJSON(input));
+    const incomplete = Array.from(new Set<string>(missing)).sort();
+    ArchiveExporter.writeText(`${root}/data.json`, ArchiveExporter.buildJSON(input, incomplete));
     ArchiveExporter.writeText(`${root}/index.html`, ArchiveExporter.buildHTML(input));
+    ArchiveExporter.writeText(`${root}/incomplete.json`, JSON.stringify(incomplete, null, 2));
+    await ArchiveExporter.buildManifest(root, names);
+    if (incomplete.length > 0) {
+      throw new Error(`档案不完整：${incomplete.length} 个文件或引用尚未回到本机，请先完成全量同步再导出`);
+    }
     return root;
   }
 
@@ -186,6 +224,18 @@ export class ArchiveExporter {
         return `<li>${esc(emoji)} ${esc(item.title)} · ${esc(item.fromRole)} <em>${longDate(item.unlockAt)} · ${state}</em></li>`;
       }).join('');
 
+    const growth = input.growthMeasurements.slice()
+      .sort((a: GrowthSnapshot, b: GrowthSnapshot): number => b.measuredAt - a.measuredAt)
+      .map((item: GrowthSnapshot): string =>
+        `<li><b>${longDate(item.measuredAt)}</b> · ${item.heightCm ?? '-'} cm · ${item.weightKg ?? '-'} kg</li>`)
+      .join('');
+
+    const vaccines = input.vaccines.slice()
+      .sort((a: VaccineSnapshot, b: VaccineSnapshot): number => b.injectedAt - a.injectedAt)
+      .map((item: VaccineSnapshot): string =>
+        `<li><b>${esc(item.vaccineName)} ${esc(item.doseLabel ?? '')}</b> · ${longDate(item.injectedAt)}</li>`)
+      .join('');
+
     const cards = input.entries.slice()
       .sort((a: EntrySnapshot, b: EntrySnapshot): number => b.happenedAt - a.happenedAt)
       .map((entry: EntrySnapshot): string => {
@@ -226,6 +276,8 @@ export class ArchiveExporter {
 ${section(milestones.length > 0, `<div class="milestones"><h2>🌟 成长里程碑</h2><ul>${milestones}</ul></div>`)}
 ${section(firstTimes.length > 0, `<div class="milestones"><h2>✨ 人生第一次</h2><ul>${firstTimes}</ul></div>`)}
 ${section(health.length > 0, `<div class="voice-memos"><h2>🩺 健康照护</h2><ul>${health}</ul></div>`)}
+${section(growth.length > 0, `<div class="voice-memos"><h2>📏 成长测量</h2><ul>${growth}</ul></div>`)}
+${section(vaccines.length > 0, `<div class="voice-memos"><h2>💉 疫苗记录</h2><ul>${vaccines}</ul></div>`)}
 ${section(capsules.length > 0, `<div class="milestones"><h2>💌 时间胶囊</h2><ul>${capsules}</ul></div>`)}
 ${section(voiceMemos.length > 0, `<div class="voice-memos"><h2>🎙️ 成长之声</h2>${voiceMemos}</div>`)}
 ${cards}</div><footer>这是布布的时光机 · 永久离线可读</footer></body></html>`;
@@ -233,24 +285,42 @@ ${cards}</div><footer>这是布布的时光机 · 永久离线可读</footer></b
 
   // MARK: JSON
 
-  private static buildJSON(input: ExportInput): string {
-    const entries = input.entries.map((entry: EntrySnapshot): string => {
-      const media = entry.media.map((m: MediaSnapshot): string =>
-        `{"type":"${jsonEsc(m.type)}","file":"media/${jsonEsc(m.fileName)}"}`).join(',');
-      const voices = entry.voiceNotes.map((v: VoiceSnapshot): string =>
-        `{"author":"${jsonEsc(v.authorRole)}","file":"media/${jsonEsc(v.fileName)}","duration":${v.duration}}`).join(',');
-      const comments = entry.comments.map((c: CommentSnapshot): string => {
-        const textVal = c.text !== undefined ? `"${jsonEsc(c.text)}"` : 'null';
-        const voiceVal = c.voiceFileName !== undefined ? `"media/${jsonEsc(c.voiceFileName)}"` : 'null';
-        return `{"author":"${jsonEsc(c.authorRole)}","text":${textVal},"voice":${voiceVal}}`;
-      }).join(',');
-      const tags = entry.tags.map((t: string): string => `"${jsonEsc(t)}"`).join(',');
-      const noteVal = entry.note !== undefined ? `"${jsonEsc(entry.note)}"` : 'null';
-      const fpVal = entry.firstPersonNote !== undefined ? `"${jsonEsc(entry.firstPersonNote)}"` : 'null';
-      const locVal = entry.locationName !== undefined ? `"${jsonEsc(entry.locationName)}"` : 'null';
-      return `{"happenedAt":"${iso(entry.happenedAt)}","author":"${jsonEsc(entry.authorRole)}","age":"${jsonEsc(entry.ageDescription)}","note":${noteVal},"firstPerson":${fpVal},"location":${locVal},"media":[${media}],"voiceNotes":[${voices}],"comments":[${comments}],"tags":[${tags}]}`;
-    }).join(',');
-    return `{"childName":"${jsonEsc(input.childName)}","birthday":"${iso(input.birthday)}","entries":[${entries}]}`;
+  private static buildJSON(input: ExportInput, incomplete: string[]): string {
+    return JSON.stringify({ archiveVersion: 2, incompleteReferences: incomplete, data: input }, null, 2);
+  }
+
+  private static async buildManifest(root: string, mediaNames: Set<string>): Promise<void> {
+    const relativePaths: string[] = ['data.json', 'index.html', 'incomplete.json'];
+    for (const name of mediaNames) {
+      const path = `${root}/media/${name}`;
+      try { if (fileIo.accessSync(path)) relativePaths.push(`media/${name}`); } catch (e) {}
+    }
+    relativePaths.sort();
+    const lines: string[] = [];
+    for (const relative of relativePaths) {
+      lines.push(`${await ArchiveExporter.sha256File(`${root}/${relative}`)}  ${relative}`);
+    }
+    ArchiveExporter.writeText(`${root}/manifest.sha256`, lines.join('\n') + '\n');
+  }
+
+  private static async sha256File(path: string): Promise<string> {
+    const md = cryptoFramework.createMd('SHA256');
+    const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+    try {
+      const size = fileIo.statSync(path).size;
+      let readTotal = 0;
+      while (readTotal < size) {
+        const chunk = new ArrayBuffer(Math.min(1048576, size - readTotal));
+        const count = fileIo.readSync(file.fd, chunk);
+        if (count <= 0) break;
+        await md.update({ data: new Uint8Array(chunk.slice(0, count)) });
+        readTotal += count;
+      }
+      const digest = await md.digest();
+      return Array.from(digest.data).map((value: number): string => value.toString(16).padStart(2, '0')).join('');
+    } finally {
+      fileIo.closeSync(file);
+    }
   }
 
   // MARK: 文件工具

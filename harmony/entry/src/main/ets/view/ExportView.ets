@@ -5,7 +5,7 @@
 
 import { preferences } from '@kit.ArkData';
 import { AppDatabase } from '../data/AppDatabase';
-import { Entry, Media, Milestone, VoiceMemo, HealthRecord, FirstTime, TimeCapsule, ChildProfile, Comment, VoiceNote } from '../models/Models';
+import { Entry, Media, Milestone, VoiceMemo, HealthRecord, FirstTime, TimeCapsule, ChildProfile, Comment, VoiceNote, GrowthMeasurement, VaccineRecord } from '../models/Models';
 import { MediaType, Mood, moodEmoji } from '../models/Enums';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { healthKindMeta } from '../models/Enums';
@@ -13,7 +13,7 @@ import { HealthRecordKind } from '../models/Enums';
 import {
   ArchiveExporter, ExportInput, EntrySnapshot, MediaSnapshot, VoiceSnapshot,
   CommentSnapshot, MilestoneSnapshot, VoiceMemoSnapshot, HealthRecordSnapshot,
-  FirstTimeSnapshot, TimeCapsuleSnapshot
+  FirstTimeSnapshot, TimeCapsuleSnapshot, GrowthSnapshot, VaccineSnapshot
 } from '../services/media/ArchiveExporter';
 import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
 import { common } from '@kit.AbilityKit';
@@ -33,6 +33,8 @@ export struct ExportView {
   @State private healthRecords: HealthRecord[] = [];
   @State private firstTimes: FirstTime[] = [];
   @State private timeCapsules: TimeCapsule[] = [];
+  @State private growthMeasurements: GrowthMeasurement[] = [];
+  @State private vaccines: VaccineRecord[] = [];
   // entryId → media / comments / voiceNotes（导出快照用）
   @State private mediaByEntry: Map<string, Media[]> = new Map();
   @State private commentsByEntry: Map<string, Comment[]> = new Map();
@@ -57,6 +59,8 @@ export struct ExportView {
     this.healthRecords = (await db.fetchHealth()) ?? [];
     this.firstTimes = (await db.fetchFirstTimes()) ?? [];
     this.timeCapsules = (await db.fetchCapsules()) ?? [];
+    this.growthMeasurements = (await db.fetchGrowth()) ?? [];
+    this.vaccines = (await db.fetchVaccines()) ?? [];
 
     let media = 0;
     let voices = 0;
@@ -85,7 +89,7 @@ export struct ExportView {
       { key: '照片视频', value: `${this.mediaCount} 个` },
       { key: '声音', value: `${this.voiceCount} 段` },
       { key: '里程碑', value: `${this.achievedMilestones().length} 个` },
-      { key: '健康/第一次/胶囊', value: `${this.healthRecords.length + this.firstTimes.length + this.timeCapsules.length} 项` }
+      { key: '健康/成长/疫苗/第一次/胶囊', value: `${this.healthRecords.length + this.growthMeasurements.length + this.vaccines.length + this.firstTimes.length + this.timeCapsules.length} 项` }
     ];
   }
 
@@ -177,7 +181,7 @@ export struct ExportView {
           ? moodEmoji(e.moodRaw as Mood) : undefined;
         const mediaSnaps: MediaSnapshot[] = [];
         for (const m of media) {
-          if (m.localFileName) mediaSnaps.push({ fileName: m.localFileName, type: m.typeRaw });
+          if (m.localFileName) mediaSnaps.push({ fileName: m.localFileName, type: m.typeRaw, resourceRole: m.resourceRoleRaw });
         }
         const voiceSnaps: VoiceSnapshot[] = [];
         for (const v of voices) {
@@ -215,13 +219,38 @@ export struct ExportView {
         what: f.what, happenedAt: f.happenedAt, confirmed: f.confirmedByParent
       }));
       const capsuleSnaps: TimeCapsuleSnapshot[] = this.timeCapsules.map((c: TimeCapsule): TimeCapsuleSnapshot => ({
-        title: c.title, fromRole: c.fromRole, unlockAt: c.unlockAt, isLocked: c.isLocked, coverEmoji: c.coverEmoji
+        id: c.id, title: c.title, fromRole: c.fromRole, unlockAt: c.unlockAt,
+        isLocked: c.isLocked, coverEmoji: c.coverEmoji, encryptedBlobFileName: c.encryptedBlobFileName
       }));
+      const growthSnaps: GrowthSnapshot[] = this.growthMeasurements.map((item: GrowthMeasurement): GrowthSnapshot => ({
+        measuredAt: item.measuredAt, heightCm: item.heightCm, weightKg: item.weightKg,
+        headCircumferenceCm: item.headCircumferenceCm, note: item.note, source: item.source
+      }));
+      const vaccineSnaps: VaccineSnapshot[] = this.vaccines.map((item: VaccineRecord): VaccineSnapshot => ({
+        vaccineName: item.vaccineName, doseLabel: item.doseLabel, injectedAt: item.injectedAt,
+        hospital: item.hospital, injectionSite: item.injectionSite, reaction: item.reaction, note: item.note
+      }));
+      const unavailable: string[] = [];
+      for (const entry of this.entries) {
+        for (const media of (this.mediaByEntry.get(entry.id) ?? [])) {
+          if (!media.localFileName && media.remoteURL) unavailable.push(`media:${media.id}`);
+        }
+        for (const voice of (this.voicesByEntry.get(entry.id) ?? [])) {
+          if (!voice.localFileName && voice.remoteURL) unavailable.push(`voice:${voice.id}`);
+        }
+      }
+      for (const memo of this.voiceMemos) {
+        if (!memo.localFileName && memo.remoteURL) unavailable.push(`voiceMemo:${memo.id}`);
+      }
+      for (const capsule of this.timeCapsules) {
+        if (!capsule.encryptedBlobFileName) unavailable.push(`capsule:${capsule.id}:encryptedBlob`);
+      }
 
       const input: ExportInput = {
         childName: profile.name, birthday: profile.birthday,
         entries: snapshots, milestones: ms, voiceMemos: memoSnaps,
-        healthRecords: healthSnaps, firstTimes: firstTimeSnaps, timeCapsules: capsuleSnaps
+        healthRecords: healthSnaps, growthMeasurements: growthSnaps, vaccines: vaccineSnaps,
+        firstTimes: firstTimeSnaps, timeCapsules: capsuleSnaps, unavailableReferences: unavailable
       };
 
       const archive = await ArchiveExporter.shared.exportZip(input);
