@@ -638,14 +638,7 @@ export class SyncEngine {
     }
   }
 
-  // VoiceNote 无 upsert 方法：先删旧行再插入（id 主键）实现回写（对照 iOS context.save）。
   private async replaceVoiceNote(n: VoiceNote): Promise<void> {
-    const store = AppDatabase.shared.raw;
-    if (store) {
-      try {
-        await store.executeSql(`DELETE FROM voice_note WHERE id = '${n.id}'`);
-      } catch (e) {}
-    }
     await AppDatabase.shared.insertVoiceNote(n);
   }
 
@@ -785,9 +778,7 @@ export class SyncEngine {
     }
   }
 
-  // TimeCapsule 无 upsert：删旧再插（id 主键）回写。
   private async replaceCapsule(c: TimeCapsule): Promise<void> {
-    await AppDatabase.shared.deleteCapsule(c.id);
     await AppDatabase.shared.insertCapsule(c);
   }
 
@@ -1171,7 +1162,9 @@ export class SyncEngine {
   }
 
   private static recordLocalId(r: Record<string, Object>): string | undefined {
-    return SyncEngine.rStr(r, 'localId') ?? SyncEngine.rStr(r, 'id');
+    const candidate = SyncEngine.rStr(r, 'localId') ?? SyncEngine.rStr(r, 'id');
+    if (candidate === undefined || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(candidate)) return undefined;
+    return candidate;
   }
 
   // —— Entry 合并（对照 iOS mergeRemoteEntry：synced 才覆盖，避免踩本地草稿）——
@@ -1537,7 +1530,6 @@ export class SyncEngine {
   }
 
   private async replaceHealth(h: HealthRecord): Promise<void> {
-    await AppDatabase.shared.deleteHealth(h.id);
     await AppDatabase.shared.insertHealth(h);
   }
 
@@ -1817,8 +1809,6 @@ export class SyncEngine {
   }
 
   private async replaceComment(c: Comment): Promise<void> {
-    const store = AppDatabase.shared.raw;
-    if (store) { try { await store.executeSql(`DELETE FROM comment WHERE id = '${c.id}'`); } catch (e) {} }
     await AppDatabase.shared.insertComment(c);
   }
 

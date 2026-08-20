@@ -217,15 +217,11 @@ export class APIClient {
 
   // 按 localId 查 remoteId（对照 iOS findRecord）。供 SyncEngine 上传前定位记录。
   async findByLocalId(collection: string, localId: string): Promise<Record<string, Object> | null> {
-    try {
-      const filter = encodeURIComponent(`(localId='${APIClient.filterEscape(localId)}')`);
-      const resp = await this.request('GET', `/api/collections/${collection}/records?filter=${filter}&perPage=1`, undefined, true);
-      const parsed = JSON.parse(resp) as Record<string, Object>;
-      const items = parsed['items'] as Record<string, Object>[] | undefined;
-      return (items && items.length > 0) ? items[0] : null;
-    } catch (e) {
-      return null;
-    }
+    const filter = encodeURIComponent(`(localId='${APIClient.filterEscape(localId)}')`);
+    const resp = await this.request('GET', `/api/collections/${collection}/records?filter=${filter}&perPage=1`, undefined, true);
+    const parsed = JSON.parse(resp) as Record<string, Object>;
+    const items = parsed['items'] as Record<string, Object>[] | undefined;
+    return (items && items.length > 0) ? items[0] : null;
   }
 
   // MARK: 文件 URL 构造（对照 iOS remoteFileURL）-----------------------------

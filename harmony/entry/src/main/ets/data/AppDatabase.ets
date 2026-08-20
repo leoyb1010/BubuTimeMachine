@@ -371,7 +371,7 @@ export class AppDatabase {
       authorRole: v.authorRole, waveformSamples: JSON.stringify(v.waveformSamples),
       syncState: v.syncState, createdAt: v.createdAt
     };
-    await this.store!.insert('voice_note', bucket);
+    await this.store!.insert('voice_note', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchVoiceForEntry(entryId: string): Promise<VoiceNote[]> {
@@ -646,7 +646,7 @@ export class AppDatabase {
       temperatureCelsius: h.temperatureCelsius ?? null, tags: JSON.stringify(h.tags),
       syncState: h.syncState, createdAt: h.createdAt
     };
-    await this.store!.insert('health_record', v);
+    await this.store!.insert('health_record', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchHealth(): Promise<HealthRecord[]> {
@@ -801,7 +801,7 @@ export class AppDatabase {
       voiceDuration: c.voiceDuration, voiceWaveform: JSON.stringify(c.voiceWaveform),
       syncState: c.syncState, createdAt: c.createdAt
     };
-    await this.store!.insert('comment', v);
+    await this.store!.insert('comment', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchCommentsForEntry(entryId: string): Promise<Comment[]> {
