@@ -62,7 +62,7 @@ export struct SettingsView {
     const c = ServerConfig.shared;
     this.baseURL = c.baseURLString;
     this.email = c.accountEmail;
-    this.password = c.accountPassword;
+    this.password = '';
     this.aiBaseURL = c.aiBaseURLString;
     this.aiAPIKey = c.aiAPIKey;
     this.aiEnabled = c.aiEnabled;
@@ -598,7 +598,7 @@ export struct SettingsView {
     const c = ServerConfig.shared;
     c.baseURLString = this.baseURL.trim().length === 0 ? ServerConfig.defaultBaseURL : this.baseURL.trim();
     c.accountEmail = this.email.trim();
-    c.accountPassword = this.password;
+    if (this.password.length > 0) c.accountPassword = this.password;
     c.aiBaseURLString = this.aiBaseURL.trim().length === 0 ? ServerConfig.defaultAIBaseURL : this.aiBaseURL.trim();
     c.aiAPIKey = this.aiAPIKey.trim();
     c.aiEnabled = this.aiEnabled;

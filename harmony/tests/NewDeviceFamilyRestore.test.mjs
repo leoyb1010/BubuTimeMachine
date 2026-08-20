@@ -26,6 +26,13 @@ test('高级配置保存前必须真实验证账号，不再误报正在同步',
   assert.ok(!advanced.includes("this.statusText = '已保存，正在同步'"));
 });
 
+test('安全存储的家庭密码不回填 UI，留空时沿用 Asset Store 旧值', () => {
+  assert.ok(advanced.includes("this.password = ''"));
+  assert.ok(advanced.includes('this.password.length > 0 ? this.password : c.accountPassword'));
+  assert.ok(advanced.includes('留空则沿用已保存密码'));
+  assert.ok(!advanced.includes('this.password = c.accountPassword'));
+});
+
 test('首轮同步先保留本机内容再拉家庭服务器，绝不清空本机', () => {
   const connect = sync.slice(sync.indexOf('private async connectAndSync'), sync.indexOf('// MARK: - 推'));
   assert.ok(connect.indexOf('await this.pushLocal()') < connect.indexOf('await this.pullRemote()'));

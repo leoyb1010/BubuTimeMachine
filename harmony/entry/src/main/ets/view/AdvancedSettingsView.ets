@@ -33,7 +33,8 @@ export struct AdvancedSettingsView {
     const c = ServerConfig.shared;
     this.baseURL = c.baseURLString;
     this.email = c.accountEmail;
-    this.password = c.accountPassword;
+    // 已存密码只留在 Asset Store，绝不回填 UI/无障碍树。
+    this.password = '';
     this.aiBaseURL = c.aiBaseURLString;
     this.aiAPIKey = c.aiAPIKey;
     this.aiEnabled = c.aiEnabled;
@@ -92,7 +93,7 @@ export struct AdvancedSettingsView {
           Row() {
             Text('账户密码').fontSize(15).fontColor(BubuColor.warmBrown)
             Blank()
-            TextInput({ text: $$this.password, placeholder: '密码' })
+              TextInput({ text: $$this.password, placeholder: '留空则沿用已保存密码' })
               .type(InputType.Password).layoutWeight(1).textAlign(TextAlign.End)
           }.advRow()
           Row() {
@@ -173,7 +174,9 @@ export struct AdvancedSettingsView {
     c.semanticSearchEnabled = this.semanticSearchEnabled;
     this.statusText = '正在验证家庭账号…';
     try {
-      await new AccountService().login(this.email, this.password, ALL_FAMILY_ROLES[this.roleIndex]);
+      const password = this.password.length > 0 ? this.password : c.accountPassword;
+      await new AccountService().login(this.email, password, ALL_FAMILY_ROLES[this.roleIndex]);
+      this.password = '';
       await c.setChildName(this.childName.trim().length === 0 ? '布布' : this.childName.trim());
       await c.persistServer();
       await SyncEngine.shared.syncNow(true);
