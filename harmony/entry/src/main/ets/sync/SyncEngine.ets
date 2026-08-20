@@ -13,6 +13,7 @@ import { UploadedFileResult } from '../services/DTOs';
 import { MILESTONE_PRESETS } from '../models/MilestoneTemplates';
 import { syncBackoffIntervalMs } from './SyncBackoff';
 import { laterServerTimestamp, overlappedServerCursor } from './SyncCursor';
+import { PreparedVideoUpload, VideoUploadPreparer } from '../services/VideoUploadPreparer';
 
 const DOMAIN = 0x0000;
 
@@ -705,16 +706,28 @@ export class SyncEngine {
 
   private async pushMediaItem(m: Media): Promise<void> {
     if (m.localFileName === undefined) {
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed });
+      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: '本机媒体文件名缺失' });
       return;
     }
     const fileName = m.localFileName;
     if (!MediaStore.shared.exists(fileName)) {
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed });
+      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: '本机媒体文件不存在' });
       return;
     }
-    await this.updateMediaFields(m.id, { syncState: SyncState.uploading });
-    const filePath = MediaStore.shared.fullPath(fileName);
+    await this.updateMediaFields(m.id, { syncState: SyncState.uploading, syncFailureReason: '' });
+    let prepared: PreparedVideoUpload | null = null;
+    if (m.typeRaw === MediaType.video) {
+      prepared = await VideoUploadPreparer.prepare(fileName, m.width, m.height);
+      if (prepared === null) {
+        await this.updateMediaFields(m.id, {
+          syncState: SyncState.failed,
+          syncFailureReason: '视频超过 96MB，系统压缩后仍过大或格式不受支持'
+        });
+        return;
+      }
+    }
+    const filePath = prepared?.path ?? MediaStore.shared.fullPath(fileName);
+    const uploadFileName = prepared?.fileName ?? fileName;
     const fields: Record<string, string> = {
       'entryLocalId': m.entryId, 'mediaType': m.typeRaw,
       'aiTags': JSON.stringify(m.aiTags), 'createdAt': new Date(m.createdAt).toISOString()
@@ -731,7 +744,7 @@ export class SyncEngine {
     const hasThumb = thumbName !== undefined && MediaStore.shared.thumbnailExists(thumbName);
     try {
       const res: UploadedFileResult = await APIClient.shared.uploadFile(
-        'media', m.id, fields, 'file', filePath, fileName,
+        'media', m.id, fields, 'file', filePath, uploadFileName,
         (fraction: number): void => { this.updateMediaFields(m.id, { uploadProgress: fraction }); },
         hasThumb ? 'thumbnail' : undefined,
         hasThumb ? thumbPath : undefined,
@@ -740,12 +753,15 @@ export class SyncEngine {
       const remoteThumbURL = res.storedExtraFileName
         ? APIClient.shared.fileURL('media', res.recordId, res.storedExtraFileName) : undefined;
       const completed: relationalStore.ValuesBucket = {
-        remoteId: res.recordId, remoteURL: remoteURL, uploadProgress: 1, syncState: SyncState.synced
+        remoteId: res.recordId, remoteURL: remoteURL, uploadProgress: 1,
+        syncState: SyncState.synced, syncFailureReason: ''
       };
       if (remoteThumbURL !== undefined) completed['remoteThumbURL'] = remoteThumbURL;
       await this.updateMediaFields(m.id, completed);
     } catch (e) {
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed });
+      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: SyncEngine.errorText(e) });
+    } finally {
+      if (prepared !== null) VideoUploadPreparer.cleanup(prepared);
     }
   }
 

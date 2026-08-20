@@ -42,6 +42,7 @@ export interface Media {
   height?: number;
   uploadProgress: number;     // 0...1
   syncState: SyncState;
+  syncFailureReason?: string;
   aiTags: string[];
   createdAt: number;
 }

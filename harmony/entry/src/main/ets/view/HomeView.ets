@@ -1,5 +1,5 @@
-import { ChildProfile, Entry } from '../models/Models';
-import { Mood, SyncState, moodEmoji, FamilyRole } from '../models/Enums';
+import { ChildProfile, Entry, Media } from '../models/Models';
+import { Mood, SyncState, moodEmoji, FamilyRole, MediaType } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
 import { ServerConfig } from '../services/ServerConfig';
 import { AgeCalculator } from '../models/AgeCalculator';
@@ -123,7 +123,11 @@ export struct HomeView {
     this.profile = await AppDatabase.shared.fetchChildProfile();
     const entries = await AppDatabase.shared.fetchEntries(false) ?? [];
     this.entries = entries;
-    const photos = await AppDatabase.shared.fetchAllPhotos() ?? [];
+    const allMedia = await AppDatabase.shared.fetchAllMedia() ?? [];
+    const activeEntryIds = new Set<string>(entries.map((entry: Entry): string => entry.id));
+    const photos = allMedia.filter((media: Media): boolean => media.typeRaw === MediaType.photo
+      && activeEntryIds.has(media.entryId)
+      && (media.resourceRoleRaw === undefined || media.resourceRoleRaw === 'display'));
     const health = await AppDatabase.shared.fetchHealth() ?? [];
     const growth = await AppDatabase.shared.fetchGrowth() ?? [];
     const milestones = await AppDatabase.shared.fetchMilestones() ?? [];
@@ -135,9 +139,9 @@ export struct HomeView {
       growth.filter(g => g.syncState !== SyncState.synced).length +
       milestones.filter(m => m.syncState !== SyncState.synced).length +
       capsules.filter(c => c.syncState !== SyncState.synced).length;
+    this.pendingSyncCount += allMedia.filter((media: Media): boolean => media.syncState !== SyncState.synced).length;
     // 首张照片缩略图映射（最近两条 + 那年今日）。
     const map = new Map<string, string>();
-    const activeEntryIds = new Set<string>(entries.map((entry: Entry): string => entry.id));
     const orderedPhotos = photos.slice().sort((a, b): number => a.createdAt - b.createdAt);
     for (const photo of orderedPhotos) {
       if (!activeEntryIds.has(photo.entryId) || map.has(photo.entryId) || !photo.localFileName) continue;
@@ -145,6 +149,9 @@ export struct HomeView {
     }
     this.photoMap = map;
     this.refreshSyncSnapshot();
+    const mediaFailure = allMedia.find((media: Media): boolean =>
+      media.syncState === SyncState.failed && (media.syncFailureReason?.length ?? 0) > 0);
+    if (mediaFailure?.syncFailureReason) this.syncFailureReason = mediaFailure.syncFailureReason;
     this.refreshSSDIntake();
   }
 

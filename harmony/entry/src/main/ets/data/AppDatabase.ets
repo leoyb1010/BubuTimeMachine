@@ -53,7 +53,7 @@ export class AppDatabase {
       localFileName TEXT, remoteURL TEXT, thumbnailFileName TEXT, remoteThumbURL TEXT,
       contentHash TEXT, resourceRoleRaw TEXT, assetGroupID TEXT,
       durationSeconds REAL, width INTEGER, height INTEGER, uploadProgress REAL NOT NULL DEFAULT 0,
-      syncState TEXT NOT NULL DEFAULT 'local', aiTags TEXT, createdAt INTEGER NOT NULL)`);
+      syncState TEXT NOT NULL DEFAULT 'local', syncFailureReason TEXT, aiTags TEXT, createdAt INTEGER NOT NULL)`);
     // ChildProfile
     await s.executeSql(`CREATE TABLE IF NOT EXISTS child_profile (
       id TEXT PRIMARY KEY, remoteId TEXT, name TEXT NOT NULL, birthday INTEGER NOT NULL,
@@ -161,6 +161,7 @@ export class AppDatabase {
     await this.addColumnIfMissing('media', 'height', 'INTEGER');
     await this.addColumnIfMissing('media', 'uploadProgress', 'REAL NOT NULL DEFAULT 0');
     await this.addColumnIfMissing('media', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
+    await this.addColumnIfMissing('media', 'syncFailureReason', 'TEXT');
     await this.addColumnIfMissing('media', 'aiTags', 'TEXT');
     await this.addColumnIfMissing('media', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
     await this.addColumnIfMissing('photo_intake_asset', 'isLikelyChild', 'INTEGER NOT NULL DEFAULT 0');
@@ -474,7 +475,8 @@ export class AppDatabase {
           contentHash: media.contentHash ?? null, resourceRoleRaw: media.resourceRoleRaw ?? null,
           assetGroupID: media.assetGroupID ?? null, durationSeconds: media.durationSeconds ?? null,
           width: media.width ?? null, height: media.height ?? null, uploadProgress: media.uploadProgress,
-          syncState: media.syncState, aiTags: JSON.stringify(media.aiTags), createdAt: media.createdAt
+          syncState: media.syncState, syncFailureReason: media.syncFailureReason ?? null,
+          aiTags: JSON.stringify(media.aiTags), createdAt: media.createdAt
         };
         await transaction.insert('media', mediaBucket);
       }
@@ -553,7 +555,8 @@ export class AppDatabase {
       remoteThumbURL: m.remoteThumbURL ?? null, contentHash: m.contentHash ?? null,
       resourceRoleRaw: m.resourceRoleRaw ?? null, assetGroupID: m.assetGroupID ?? null,
       width: m.width ?? null, height: m.height ?? null, uploadProgress: m.uploadProgress,
-      syncState: m.syncState, aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
+      syncState: m.syncState, syncFailureReason: m.syncFailureReason ?? null,
+      aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
     };
     await this.store!.insert('media', v);
   }
@@ -577,6 +580,7 @@ export class AppDatabase {
       height: AppDatabase.optNum(rs, 'height'),
       uploadProgress: AppDatabase.optNum(rs, 'uploadProgress') ?? 0,
       syncState: (AppDatabase.optStr(rs, 'syncState') ?? SyncState.local) as SyncState,
+      syncFailureReason: AppDatabase.optStr(rs, 'syncFailureReason'),
       aiTags: tagsStr ? JSON.parse(tagsStr) as string[] : [],
       createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
     };
