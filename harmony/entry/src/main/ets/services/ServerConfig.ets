@@ -10,8 +10,10 @@ export class ServerConfig {
   static readonly shared = new ServerConfig();
   static readonly versionName: string = '2.11.0';
   static readonly versionCode: string = '2026081901';
-  static readonly defaultBaseURL: string = '';
-  static readonly defaultAIBaseURL: string = '';
+  // 与 iOS 正式包使用同一家庭服务入口；新机只需登录，不再手填服务器。
+  // 密码仍只进 Asset Store，服务器会根据 familyId 限制数据边界。
+  static readonly defaultBaseURL: string = 'https://bubu-api.leoyuan.top';
+  static readonly defaultAIBaseURL: string = 'https://bubu-ai.leoyuan.top';
   static readonly baseURLPlaceholder: string = 'https://你的服务器地址:8090';
   static readonly aiBaseURLPlaceholder: string = 'https://你的AI服务地址:8000';
   private store: preferences.Preferences | null = null;

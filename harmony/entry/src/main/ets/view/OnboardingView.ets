@@ -6,6 +6,8 @@ import { ServerConfig } from '../services/ServerConfig';
 import { AgeCalculator } from '../models/AgeCalculator';
 import { BubuColor, BubuRadius, BubuFont, BubuShadow } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
+import { AccountView } from './AccountView';
+import { SyncEngine } from '../sync/SyncEngine';
 
 // MARK: - 首次启动引导（对照 iOS Features/Onboarding/OnboardingView.swift）
 // 温暖的开场：欢迎 → 设置布布生日 → 创建第一个家庭成员（你是谁）。
@@ -21,9 +23,33 @@ export struct OnboardingView {
   @State private birthdayMs: number = Date.now() - 6 * 30 * 86400000;
   @State private selectedRelation: Relation = Relation.mama;
   @State private memberName: string = '';
+  @State private showFamilyRestore: boolean = false;
+  @State private restoring: boolean = false;
+  @State private restoreStatus: string = '';
 
   build() {
-    Stack() {
+    if (this.showFamilyRestore) {
+      Column({ space: 8 }) {
+        Row() {
+          Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
+            .onClick(() => { if (!this.restoring) this.showFamilyRestore = false; })
+          Blank()
+          Text('恢复家庭档案').fontSize(BubuFont.headline).fontWeight(FontWeight.Bold)
+            .fontColor(BubuColor.warmBrown)
+          Blank().width(88)
+        }.width('100%').padding({ left: 12, right: 12, top: 10 })
+        if (this.restoring) {
+          Column({ space: 16 }) {
+            LoadingProgress().width(48).height(48).color(BubuColor.primary)
+            Text(this.restoreStatus.length > 0 ? this.restoreStatus : '正在从家庭服务器拉取档案…')
+              .fontSize(BubuFont.body).fontColor(BubuColor.secondaryText).textAlign(TextAlign.Center)
+          }.layoutWeight(1).width('100%').justifyContent(FlexAlign.Center)
+        } else {
+          AccountView({ onDone: () => { this.restoreExistingFamily(); } }).layoutWeight(1)
+        }
+      }.width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else {
+      Stack() {
       // 背景渐变（对照 backgroundGradient：primary 0.18 → secondary 0.12）。
       Column()
         .width('100%').height('100%')
@@ -32,7 +58,7 @@ export struct OnboardingView {
           colors: [['#2EF28C9E', 0.0], ['#1FFFC2D6', 1.0]]
         })
 
-      Column() {
+        Column() {
         this.progressDots()
         Blank()
         // 步骤内容（对照 switch step）。
@@ -44,14 +70,21 @@ export struct OnboardingView {
           this.memberStep()
         }
         Blank()
-        this.primaryButton()
+          this.primaryButton()
+          if (this.step === 0) {
+            Button('已有 iOS 家庭档案？登录后全部恢复')
+              .fontSize(14).fontColor(BubuColor.primary).backgroundColor(Color.Transparent)
+              .margin({ top: 10 })
+              .onClick(() => { this.showFamilyRestore = true; })
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .padding(28)
       }
       .width('100%')
       .height('100%')
-      .padding(28)
     }
-    .width('100%')
-    .height('100%')
   }
 
   // 对照 progressDots
@@ -260,5 +293,20 @@ export struct OnboardingView {
     await ServerConfig.shared.setRole(this.selectedRelation as string as FamilyRole);
 
     if (this.onComplete) this.onComplete();
+  }
+
+  private async restoreExistingFamily(): Promise<void> {
+    this.restoring = true;
+    this.restoreStatus = '正在核对家庭账号并拉取全部记录…';
+    const result = await SyncEngine.shared.pullServerToLocalNow();
+    const profile = await AppDatabase.shared.fetchChildProfile();
+    if (profile) {
+      await ServerConfig.shared.setChildName(profile.name);
+      this.restoreStatus = '家庭档案已恢复';
+      if (this.onComplete) this.onComplete();
+      return;
+    }
+    this.restoreStatus = result;
+    this.restoring = false;
   }
 }

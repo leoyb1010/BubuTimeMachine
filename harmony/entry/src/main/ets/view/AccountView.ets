@@ -161,6 +161,7 @@ export struct AccountView {
     try {
       await this.service.login(this.username, this.password, role);
       this.password = '';
+      SyncEngine.shared.start();
       this.getUIContext().getPromptAction().showToast({ message: '已登录，开始同步' });
       if (this.onDone) this.onDone();
     } catch (e) {
