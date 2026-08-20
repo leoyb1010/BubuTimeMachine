@@ -69,6 +69,7 @@ export class CaptureModel {
 
   // 进入快速记录：清空草稿、可预填一句（对照 iOS startQuickCapture）。
   startQuickCapture(prefillNote: string = ''): void {
+    this.discardDraft();
     this.note = prefillNote;
     this.mood = undefined;
     this.includeLocation = false;
@@ -76,12 +77,6 @@ export class CaptureModel {
     this.currentLatitude = null;
     this.currentLongitude = null;
     this.locationError = null;
-    this.selectedPreviews = [];
-    this.pickedPhotoNames = [];
-    this.pickedPhotoName = null;
-    this.pendingVoiceFileName = null;
-    this.pendingVoiceDuration = 0;
-    this.pendingVoiceWaveform = [];
     this.analyzingHint = null;
     this.saveError = null;
     this.lastSavedSummary = null;
@@ -153,6 +148,7 @@ export class CaptureModel {
   // 移除已选媒体（对照 iOS removePickedItem）。
   removePickedItem(index: number): void {
     const removed = this.selectedPreviews.find(p => p.index === index);
+    if (removed?.fileName) MediaStore.shared.deleteMedia(removed.fileName);
     if (removed && !removed.isVideo) {
       this.pickedPhotoNames = this.pickedPhotoNames.filter((name: string) => name !== removed.fileName);
       this.pickedPhotoName = this.pickedPhotoNames.length > 0 ? this.pickedPhotoNames[0] : null;
@@ -178,6 +174,25 @@ export class CaptureModel {
   }
 
   clearPendingVoice(): void {
+    if (this.pendingVoiceFileName) MediaStore.shared.deleteMedia(this.pendingVoiceFileName);
+    this.pendingVoiceFileName = null;
+    this.pendingVoiceDuration = 0;
+    this.pendingVoiceWaveform = [];
+  }
+
+  // 用户关闭/开启新草稿时，清理尚未提交所有权的沙盒媒体。
+  discardDraft(): void {
+    const names = new Set<string>();
+    for (const preview of this.selectedPreviews) {
+      if (preview.fileName) names.add(preview.fileName);
+    }
+    for (const name of this.pickedPhotoNames) names.add(name);
+    if (this.pickedPhotoName) names.add(this.pickedPhotoName);
+    if (this.pendingVoiceFileName) names.add(this.pendingVoiceFileName);
+    for (const name of names) MediaStore.shared.deleteMedia(name);
+    this.selectedPreviews = [];
+    this.pickedPhotoNames = [];
+    this.pickedPhotoName = null;
     this.pendingVoiceFileName = null;
     this.pendingVoiceDuration = 0;
     this.pendingVoiceWaveform = [];
@@ -224,7 +239,10 @@ export class CaptureModel {
       this.selectedPreviews = [];
       this.pickedPhotoNames = [];
       this.pickedPhotoName = null;
-      this.clearPendingVoice();
+      // 事务成功后媒体所有权已转给 Entry，重置引用但绝不删除正式文件。
+      this.pendingVoiceFileName = null;
+      this.pendingVoiceDuration = 0;
+      this.pendingVoiceWaveform = [];
       this.showQuickCapture = false;
       this.flashSaved();
       this.isSaving = false;
@@ -232,6 +250,13 @@ export class CaptureModel {
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `记录保存失败: ${JSON.stringify(e)}`);
       this.saveError = `保存失败：${JSON.stringify(e)}`;
+      // EntryWriter 已清理失败事务的文件，移除失效预览但保留文字方便重试。
+      this.selectedPreviews = [];
+      this.pickedPhotoNames = [];
+      this.pickedPhotoName = null;
+      this.pendingVoiceFileName = null;
+      this.pendingVoiceDuration = 0;
+      this.pendingVoiceWaveform = [];
       this.isSaving = false;
       return false;
     }

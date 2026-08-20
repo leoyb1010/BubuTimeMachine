@@ -114,6 +114,7 @@ export struct QuickCaptureSheet {
         .backgroundColor(Color.Transparent)
         .fontColor(BubuColor.secondaryText)
         .onClick(() => {
+          this.model.discardDraft();
           this.model.showQuickCapture = false;
           this.onClose?.();
         })
