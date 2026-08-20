@@ -892,7 +892,7 @@ export class SyncEngine {
   private async pullCollection(
     collection: string,
     merge: (r: Record<string, Object>) => Promise<boolean | void>
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const cursor = await this.getCursor(collection);
       const activeRequest = APIClient.shared.fetchRecords(collection, cursor);
@@ -918,16 +918,18 @@ export class SyncEngine {
         maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(tombstone, 'updated'));
       }
       if (maxUpdated !== undefined) await this.setCursor(collection, maxUpdated);
+      return true;
     } catch (e) {
       if (SyncEngine.isMissingOptionalCollectionError(e, collection)) {
         hilog.warn(DOMAIN, 'Bubu', `服务器暂缺可选集合 ${collection}，已走兼容同步`);
-        return;
+        return false;
       }
       if (this.strictPullFailures) {
         throw new Error(SyncEngine.errorText(e));
       }
       // 瞬时拉取失败不报红：游标不推进，下轮自动补拉（对照 iOS pull 的 catch 软失败）。
       hilog.warn(DOMAIN, 'Bubu', `拉取 ${collection} 失败，下轮补拉: ${SyncEngine.errorText(e)}`);
+      return false;
     }
   }
 
@@ -1536,27 +1538,63 @@ export class SyncEngine {
 
   // —— ChildProfile 合并（远端头像变更：更新 URL 并清本地名，下轮 downloadMissingFiles 重新落地）——
   private async pullChildProfile(): Promise<void> {
-    await this.pullCollection('childprofile', async (r: Record<string, Object>): Promise<boolean | void> => {
+    let bestRemote: Record<string, Object> | null = null;
+    const loaded = await this.pullCollection('childprofile', async (r: Record<string, Object>): Promise<boolean | void> => {
       const localId = SyncEngine.recordLocalId(r);
       if (localId === undefined) return;
       if (await this.isPendingDeletion('childprofile', SyncEngine.rStr(r, 'id'))) return true;
-      const ex = await AppDatabase.shared.fetchChildProfile();
-      if (ex && ex.id === localId) {
-        if (ex.syncState !== SyncState.synced && !this.serverMirrorMode) return false;
-        SyncEngine.applyChildProfile(r, ex); ex.remoteId = SyncEngine.rStr(r, 'id');
-        await AppDatabase.shared.upsertChildProfile(ex);
-      } else if (!ex) {
-        const p: ChildProfile = {
-          id: localId,
-          name: SyncEngine.rStr(r, 'name') ?? '',
-          birthday: SyncEngine.rDate(r, 'birthday', Date.now()),
-          syncState: SyncState.synced,
-          createdAt: SyncEngine.rDate(r, 'createdAt', Date.now())
-        };
-        SyncEngine.applyChildProfile(r, p); p.remoteId = SyncEngine.rStr(r, 'id');
-        await AppDatabase.shared.upsertChildProfile(p);
-      }
+      if (bestRemote === null || SyncEngine.isBetterProfile(r, bestRemote)) bestRemote = r;
     });
+    if (!loaded || bestRemote === null) return;
+    const remote = bestRemote as Record<string, Object>;
+    const localId = SyncEngine.recordLocalId(remote);
+    if (localId === undefined) return;
+    const existing = await AppDatabase.shared.fetchChildProfile();
+    const remoteScore = SyncEngine.profileRecordScore(remote);
+    const localScore = existing ? SyncEngine.profileScore(existing) : -1;
+    // 新机的默认“布布+生日”不得压过 iOS 已维护的完整档案。
+    if (existing && existing.syncState !== SyncState.synced && !this.serverMirrorMode && remoteScore <= localScore) return;
+    const profile: ChildProfile = existing ?? {
+      id: localId,
+      name: SyncEngine.rStr(remote, 'name') ?? '',
+      birthday: SyncEngine.rDate(remote, 'birthday', Date.now()),
+      syncState: SyncState.synced,
+      createdAt: SyncEngine.rDate(remote, 'createdAt', Date.now())
+    };
+    profile.id = localId;
+    SyncEngine.applyChildProfile(remote, profile);
+    profile.remoteId = SyncEngine.rStr(remote, 'id');
+    profile.syncState = SyncState.synced;
+    await AppDatabase.shared.replaceChildProfile(profile);
+  }
+
+  private static profileRecordScore(r: Record<string, Object>): number {
+    let score = 0;
+    const name = SyncEngine.rStr(r, 'name') ?? '';
+    if (name.length > 0 && name !== '布布') score += 3;
+    if (SyncEngine.rStr(r, 'gender') !== undefined) score += 2;
+    if (SyncEngine.rStr(r, 'bloodType') !== undefined) score += 2;
+    if (SyncEngine.rStr(r, 'birthPlace') !== undefined) score += 2;
+    if (SyncEngine.rFileName(r, 'avatar') !== undefined || SyncEngine.rStr(r, 'avatarRemoteURL') !== undefined) score += 3;
+    if (r['birthday'] !== undefined) score += 1;
+    return score;
+  }
+
+  private static profileScore(p: ChildProfile): number {
+    let score = p.name.length > 0 && p.name !== '布布' ? 3 : 0;
+    if (p.gender !== undefined) score += 2;
+    if (p.bloodType !== undefined) score += 2;
+    if (p.birthPlace !== undefined) score += 2;
+    if (p.avatarMediaFileName !== undefined || p.avatarRemoteURL !== undefined) score += 3;
+    if (p.birthday > 0) score += 1;
+    return score;
+  }
+
+  private static isBetterProfile(candidate: Record<string, Object>, current: Record<string, Object>): boolean {
+    const candidateScore = SyncEngine.profileRecordScore(candidate);
+    const currentScore = SyncEngine.profileRecordScore(current);
+    if (candidateScore !== currentScore) return candidateScore > currentScore;
+    return (SyncEngine.rStr(candidate, 'updated') ?? '') > (SyncEngine.rStr(current, 'updated') ?? '');
   }
 
   private static applyChildProfile(r: Record<string, Object>, p: ChildProfile): void {

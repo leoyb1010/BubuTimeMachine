@@ -705,6 +705,24 @@ export class AppDatabase {
     await this.store!.insert('child_profile', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
+  // ChildProfile 在端上是单例；恢复家庭档案时原子替换，不保留新机占位行。
+  async replaceChildProfile(p: ChildProfile): Promise<void> {
+    const transaction = await this.store!.createTransaction();
+    try {
+      await transaction.delete(new relationalStore.RdbPredicates('child_profile'));
+      await transaction.insert('child_profile', {
+        id: p.id, remoteId: p.remoteId ?? null, name: p.name, birthday: p.birthday,
+        gender: p.gender ?? null, bloodType: p.bloodType ?? null, birthPlace: p.birthPlace ?? null,
+        avatarMediaFileName: p.avatarMediaFileName ?? null, avatarRemoteURL: p.avatarRemoteURL ?? null,
+        heroBackgroundFileName: p.heroBackgroundFileName ?? null, syncState: p.syncState, createdAt: p.createdAt
+      });
+      await transaction.commit();
+    } catch (e) {
+      try { await transaction.rollback(); } catch (rollbackError) {}
+      throw e instanceof Error ? e : new Error(JSON.stringify(e));
+    }
+  }
+
   async fetchChildProfile(): Promise<ChildProfile | null> {
     const pred = new relationalStore.RdbPredicates('child_profile');
     const rs = await this.store!.query(pred);
