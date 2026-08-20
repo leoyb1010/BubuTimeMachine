@@ -19,6 +19,7 @@ import { promptAction } from '@kit.ArkUI';
 import { BubuMovedHint } from '../components/BubuMovedHint';
 import { BackDispatcher } from '../services/BackDispatcher';
 import { ReminderScheduler } from '../services/ReminderScheduler';
+import { BubuSound } from '../theme/BubuSound';
 
 @Extend(Row)
 function settingRow() {
@@ -52,6 +53,7 @@ export struct SettingsView {
   @State statusText: string = '';
   @State dailyReminderEnabled: boolean = false;
   @State simpleModeEnabled: boolean = false;
+  @State soundEnabled: boolean = false;
 
   aboutToAppear(): void {
     this.syncBackHandler();
@@ -66,6 +68,7 @@ export struct SettingsView {
     this.roleIndex = Math.max(0, ALL_FAMILY_ROLES.indexOf(c.currentRole));
     this.dailyReminderEnabled = c.dailyReminderEnabled;
     this.simpleModeEnabled = c.simpleModeEnabled;
+    this.soundEnabled = BubuSound.isEnabled;
   }
 
   aboutToDisappear(): void { BackDispatcher.shared.unregister('settings'); }
@@ -409,6 +412,17 @@ export struct SettingsView {
           Toggle({ type: ToggleType.Switch, isOn: this.simpleModeEnabled })
             .selectedColor(BubuColor.primary)
             .onChange((value: boolean) => { this.updateSimpleMode(value); })
+        }.width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
+        Row({ space: 14 }) {
+          BubuIconBadge({ name: BubuIconName.mic, badgeSize: 36, iconSize: 19,
+            color: BubuColor.primary, fill: '#FFF0F4', radius: 10, strokeWidth: 2.1, filled: false })
+          Column({ space: 2 }) {
+            Text('温柔提示音').fontSize(16).fontColor(BubuColor.warmBrown)
+            Text('保存、封存、解锁和里程碑完成时播放').fontSize(11).fontColor(BubuColor.secondaryText)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Toggle({ type: ToggleType.Switch, isOn: this.soundEnabled })
+            .selectedColor(BubuColor.primary)
+            .onChange((value: boolean) => { this.soundEnabled = value; BubuSound.isEnabled = value; })
         }.width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
       }
       .width('100%')

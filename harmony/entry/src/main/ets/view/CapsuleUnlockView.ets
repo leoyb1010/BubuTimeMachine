@@ -8,6 +8,7 @@ import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
 import { VoicePlayerBubble } from '../components/VoiceComponents';
+import { BubuSound, SoundEffect } from '../theme/BubuSound';
 
 // MARK: - 时间胶囊 · 庄重开启（三幕制）（对照 iOS Features/Capsule/CapsuleUnlockView.swift）
 // 第一幕「破封」：封蜡碎裂粒子；第二幕「时光回溯」：字幕告诉等了多久；
@@ -289,6 +290,7 @@ export struct CapsuleUnlockView {
   }
 
   private finishReveal(): void {
+    BubuSound.play(SoundEffect.unlock);
     this.getUIContext().animateTo({ duration: 500, curve: Curve.Smooth }, () => { this.phase = 'revealed'; });
   }
 

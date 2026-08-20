@@ -12,6 +12,7 @@ import { BubuColor, BubuFont, BubuRadius, BubuSpacing, BubuShadow } from '../the
 import { BubuDateFormat } from '../theme/BubuDateFormat';
 import { VoicePlayerBubble, VoiceRecorderBar } from '../components/VoiceComponents';
 import { MediaStore } from '../services/MediaStore';
+import { BubuSound, SoundEffect } from '../theme/BubuSound';
 
 // MARK: - 时间胶囊 · 写信（对照 iOS Features/Capsule/CapsuleComposeView.swift）
 // 写文字 + 选解锁时间（提供「明年今天」「N岁生日」等快捷项）。
@@ -367,6 +368,7 @@ export struct CapsuleComposeView {
       BubuActivityController.shared.startCapsuleCountdown(
         capsule.title, capsule.unlockAt, ServerConfig.shared.childName);
       this.getUIContext().getPromptAction().showToast({ message: '已经封存啦 💌' });
+      BubuSound.play(SoundEffect.seal);
       this.onSaved();
       this.onBack();
     } catch (err) {

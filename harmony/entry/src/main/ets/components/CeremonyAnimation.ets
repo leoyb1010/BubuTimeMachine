@@ -7,6 +7,7 @@
 import { BubuColor, BubuFont, BubuShadow } from '../theme/BubuTheme';
 import { BubuHaptics } from '../theme/BubuHaptics';
 import { rangeArray } from './MacaronComponents2';
+import { BubuSound, SoundEffect } from '../theme/BubuSound';
 
 @Component
 export struct CeremonyAnimation {
@@ -20,6 +21,7 @@ export struct CeremonyAnimation {
 
   aboutToAppear(): void {
     BubuHaptics.success();
+    BubuSound.play(SoundEffect.milestone);
     if (this.reduceMotion || this.systemReduceMotion) { this.appear = true; return; }
     // 卡片弹入（对照 spring(0.48,0.72)）。
     this.getUIContext().animateTo({ duration: 480, curve: Curve.Friction }, () => { this.appear = true; });

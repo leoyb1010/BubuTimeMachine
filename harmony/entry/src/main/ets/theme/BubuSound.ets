@@ -23,9 +23,11 @@ export class BubuSound {
 
   private static store: preferences.Preferences | null = null;
   private static enabled: boolean = false;
+  private static context: common.Context | null = null;
 
   // 在 Ability 启动时调用一次，回读全局开关。
-  static initialize(context: common.UIAbilityContext): void {
+  static initialize(context: common.Context): void {
+    BubuSound.context = context;
     if (BubuSound.store) return;
     try {
       BubuSound.store = preferences.getPreferencesSync(context, { name: BubuSound.storeName });
@@ -53,13 +55,16 @@ export class BubuSound {
   /// 播放某个声音时刻（默认关时直接返回）。对照 iOS play(_:)。
   static play(effect: SoundEffect): void {
     if (!BubuSound.enabled) return;
-    BubuSound.playRawfile(effect as string + '.ogg');
+    BubuSound.playRawfile(effect as string + '.caf');
   }
 
   // NOTE: 以 AVPlayer 播放一次性短音效；用毕释放，避免泄漏。
   // ambient（不打断他人音乐、跟随静音）语义需配合 AudioSession，环境限制下从简。
   private static playRawfile(name: string): void {
+    const context = BubuSound.context;
+    if (!context) return;
     try {
+      const descriptor = context.resourceManager.getRawFdSync(name);
       media.createAVPlayer().then((player: media.AVPlayer) => {
         player.on('stateChange', (state: string) => {
           if (state === 'initialized') {
@@ -67,11 +72,13 @@ export class BubuSound {
           } else if (state === 'prepared') {
             player.play();
           } else if (state === 'completed') {
-            player.release();
+            player.release().finally(() => { try { context.resourceManager.closeRawFdSync(name); } catch (e) {} });
           }
         });
-        // fdSrc / url 需指向 rawfile；具体资源加载方式视工程而定。
-        player.url = 'rawfile://' + name;
+        player.on('error', () => {
+          player.release().finally(() => { try { context.resourceManager.closeRawFdSync(name); } catch (e) {} });
+        });
+        player.fdSrc = { fd: descriptor.fd, offset: descriptor.offset, length: descriptor.length };
       }).catch(() => {});
     } catch (e) {
       // 播放失败静默

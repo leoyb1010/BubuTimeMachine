@@ -5,6 +5,7 @@ import { EntryWriter } from '../services/EntryWriter';
 import { AIService, NaturalCaptureResult } from '../services/AIService';
 import { MediaStore } from '../services/MediaStore';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { BubuSound, SoundEffect } from '../theme/BubuSound';
 
 // MARK: - 记录此刻 业务模型（对照 iOS Features/Capture/CaptureModel.swift）
 // iOS 是 @Observable @MainActor class：把选中的媒体落本地并自动分析，写入 SwiftData（Entry + Media）。
@@ -301,6 +302,7 @@ export class CaptureModel {
 
   // 保存成功闪现（对照 iOS flashSaved，触觉/音效在 UI 层处理）。
   private flashSaved(): void {
+    BubuSound.play(SoundEffect.save);
     this.savedFlash = true;
     setTimeout(() => {
       this.savedFlash = false;
