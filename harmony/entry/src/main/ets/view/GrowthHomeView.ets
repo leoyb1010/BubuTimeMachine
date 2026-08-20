@@ -61,12 +61,12 @@ export struct GrowthHomeView {
             }.width('100%').padding(18).backgroundColor('#18F28C9E').borderRadius(BubuRadius.card)
 
             Row({ space: 10 }) {
-              this.linkCard(BubuIconName.sync, '成长数据', this.measurementSubtitle(), () => { this.route = 'curve'; })
-              this.linkCard(BubuIconName.star, '里程碑', `已点亮 ${this.achieved().length} 个`, () => { this.route = 'milestones'; })
+              this.linkCard(BubuIconName.sync, '成长数据', (): string => this.measurementSubtitle(), () => { this.route = 'curve'; })
+              this.linkCard(BubuIconName.star, '里程碑', (): string => `已点亮 ${this.achieved().length} 个`, () => { this.route = 'milestones'; })
             }.width('100%')
             Row({ space: 10 }) {
-              this.linkCard(BubuIconName.health, '健康', `共 ${this.health.length} 条记录`, () => { this.route = 'health'; })
-              this.linkCard(BubuIconName.plus, '疫苗接种', `已记录 ${this.vaccines.length} 剂`, () => { this.route = 'vaccine'; })
+              this.linkCard(BubuIconName.health, '健康', (): string => `共 ${this.health.length} 条记录`, () => { this.route = 'health'; })
+              this.linkCard(BubuIconName.plus, '疫苗接种', (): string => `已记录 ${this.vaccines.length} 剂`, () => { this.route = 'vaccine'; })
             }.width('100%')
 
             Column({ space: 10 }) {
@@ -122,22 +122,28 @@ export struct GrowthHomeView {
   }
 
   @Builder
-  private linkCard(icon: string, title: string, subtitle: string, action: () => void) {
+  private linkCard(icon: string, title: string, subtitle: () => string, action: () => void) {
     Column({ space: 9 }) {
       BubuIconBadge({ name: icon, badgeSize: 42, iconSize: 21, color: BubuColor.primary,
         fill: '#1FF28C9E', radius: 21, strokeWidth: 2.2 })
       Text(title).fontSize(16).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
-      Text(subtitle).fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2).textAlign(TextAlign.Center)
+      Text(subtitle()).fontSize(12).fontColor(BubuColor.secondaryText).maxLines(2).textAlign(TextAlign.Center)
     }.layoutWeight(1).height(130).justifyContent(FlexAlign.Center)
     .backgroundColor(BubuColor.card).borderRadius(BubuRadius.card).onClick(action)
   }
 
   private async reload(): Promise<void> {
-    this.milestones = await AppDatabase.shared.fetchMilestones();
-    this.measurements = await AppDatabase.shared.fetchGrowth();
-    this.health = await AppDatabase.shared.fetchHealth();
-    this.vaccines = await AppDatabase.shared.fetchVaccines();
-    this.firstTimes = await AppDatabase.shared.fetchFirstTimes();
+    // 先全部读完再发布，避免 ArkUI 将 Builder 参数锁在中间态（概览有数、卡片仍为 0）。
+    const milestones = await AppDatabase.shared.fetchMilestones();
+    const measurements = await AppDatabase.shared.fetchGrowth();
+    const health = await AppDatabase.shared.fetchHealth();
+    const vaccines = await AppDatabase.shared.fetchVaccines();
+    const firstTimes = await AppDatabase.shared.fetchFirstTimes();
+    this.milestones = milestones;
+    this.measurements = measurements;
+    this.health = health;
+    this.vaccines = vaccines;
+    this.firstTimes = firstTimes;
   }
 
   private achieved(): Milestone[] {
