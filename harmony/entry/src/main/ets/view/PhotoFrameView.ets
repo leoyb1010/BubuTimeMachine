@@ -47,12 +47,19 @@ export struct PhotoFrameView {
   private async load(): Promise<void> {
     const profile = await AppDatabase.shared.fetchChildProfile();
     const entries = await AppDatabase.shared.fetchEntries(false);
+    const allMedia = await AppDatabase.shared.fetchMediaForEntries(entries.map((entry: Entry): string => entry.id));
+    const mediaByEntry = new Map<string, Media[]>();
+    for (const media of allMedia) {
+      if (!mediaByEntry.has(media.entryId)) mediaByEntry.set(media.entryId, []);
+      mediaByEntry.get(media.entryId)!.push(media);
+    }
     const today = new Date();
     const priority: PhotoFrameSlide[] = [];
     const rest: PhotoFrameSlide[] = [];
     for (const entry of entries) {
-      const media = await AppDatabase.shared.fetchMediaForEntry(entry.id);
-      const photo = media.find((item: Media): boolean => item.typeRaw === 'photo');
+      const media = mediaByEntry.get(entry.id) ?? [];
+      const photo = media.find((item: Media): boolean => item.typeRaw === 'photo'
+        && (item.resourceRoleRaw === undefined || item.resourceRoleRaw === 'display'));
       const uri = this.photoUri(photo);
       if (uri.length === 0 || !photo) continue;
       const happened = new Date(entry.happenedAt);
@@ -78,7 +85,9 @@ export struct PhotoFrameView {
     if (photo.localFileName && MediaStore.shared.exists(photo.localFileName)) {
       return `file://${MediaStore.shared.fullPath(photo.localFileName)}`;
     }
-    if (photo.thumbnailFileName) return `file://${MediaStore.shared.thumbnailPath(photo.thumbnailFileName)}`;
+    if (photo.thumbnailFileName && MediaStore.shared.thumbnailExists(photo.thumbnailFileName)) {
+      return `file://${MediaStore.shared.thumbnailPath(photo.thumbnailFileName)}`;
+    }
     return '';
   }
 

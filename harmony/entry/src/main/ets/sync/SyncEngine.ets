@@ -188,42 +188,18 @@ export class SyncEngine {
     }
   }
 
-  private async repairServerFilesWithoutClearingNow(): Promise<string> {
+  async forceUploadAllLocalData(): Promise<string> {
+    if (!ServerConfig.shared.isConfigured) return '还没有登录服务器';
     if (this.syncing) {
       const idle = await this.waitForIdle(15000);
-      if (!idle) {
-        this.needsAnotherSync = true;
-        return '后台同步还在进行，请稍后再点一次';
-      }
+      if (!idle) return '后台同步还在进行，请稍后再试';
     }
-    this.syncing = true;
     try {
-      const ok = await APIClient.shared.ping();
-      if (!ok) return '服务器连接失败，请检查网络和服务器地址';
-      const authed = await APIClient.shared.authenticate();
-      if (!authed) return '账号或密码验证失败，请重新登录服务器账号';
-
-      // 保护触发时不能清本机数据；重新拉全量记录只用于补齐 remoteURL，
-      // 再把远端文件下载进本机沙盒。
-      await this.resetCursors();
-      this.strictPullFailures = true;
-      this.serverMirrorMode = true;
-      this.serverSeen.clear();
-      await this.pullRemote();
-      await AppDatabase.shared.normalizeMilestonesByTitle();
-      await this.downloadMissingFiles(true);
-      await this.markServerBaselineReady();
-      hilog.info(DOMAIN, 'Bubu', '已在保护模式下补齐服务器媒体文件');
-      return '已保护本机旧数据：未清理旧数据，已补拉服务器记录并补下载图片/语音';
+      await AppDatabase.shared.markAllServerBackedDataDirty();
+      await this.syncNow(true);
+      return '本机内容已全部重新排队，并按远端较新优先规则安全上传';
     } catch (e) {
-      const text = SyncEngine.errorText(e);
-      hilog.error(DOMAIN, 'Bubu', `保护模式补下载失败: ${text}`);
-      return `同步失败：${text}`;
-    } finally {
-      this.strictPullFailures = false;
-      this.serverMirrorMode = false;
-      this.serverSeen.clear();
-      this.syncing = false;
+      return `重传失败：${SyncEngine.errorText(e)}`;
     }
   }
 
@@ -2215,27 +2191,6 @@ export class SyncEngine {
     if (!this.cursorStore) return;
     await this.cursorStore.put('server_baseline_identity_v4', this.serverBaselineIdentity());
     await this.cursorStore.flush();
-  }
-
-  private async shouldProtectIosBaselineFromServerPull(): Promise<boolean> {
-    await this.ensureCursorStore();
-    if (!this.cursorStore) return false;
-    const protect = await this.cursorStore.get('ios_baseline_protect_from_server_pull', false) as boolean;
-    if (!protect) return false;
-
-    const entries = await AppDatabase.shared.fetchEntries(false);
-    const milestones = await AppDatabase.shared.fetchMilestones();
-    const growth = await AppDatabase.shared.fetchGrowth();
-    const achieved = milestones.filter((item: Milestone): boolean => item.happenedAt !== undefined).length;
-    const hasGrowth = growth.some((item: GrowthMeasurement): boolean => {
-      return item.heightCm !== undefined && item.weightKg !== undefined;
-    });
-
-    return entries.length >= 2
-      && milestones.length >= 118
-      && milestones.length <= 160
-      && achieved >= 18
-      && hasGrowth;
   }
 
   private serverBaselineIdentity(): string {

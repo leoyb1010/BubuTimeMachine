@@ -1193,28 +1193,18 @@ export class AppDatabase {
     await this.store!.update({ state }, pred);
   }
 
-  async clearServerBackedData(): Promise<void> {
+  // 安全全量重传：只重置同步状态，不删数据、不改业务时间；服务端较新版本仍由 LWW 保护。
+  async markAllServerBackedDataDirty(): Promise<void> {
     const tables: string[] = [
-      'pending_deletion',
-      'feed_event',
-      'voice_memo',
-      'voice_note',
-      'comment',
-      'media',
-      'entry',
-      'first_time',
-      'milestone',
-      'time_capsule',
-      'health_record',
-      'growth_measurement',
-      'vaccine_record',
-      'family_member',
-      'child_profile',
-      'growth_movie'
+      'entry', 'milestone', 'first_time', 'family_member', 'child_profile', 'health_record',
+      'vaccine_record', 'growth_measurement', 'comment', 'voice_note', 'voice_memo', 'time_capsule'
     ];
     for (const table of tables) {
-      await this.store!.executeSql(`DELETE FROM ${table}`);
+      await this.store!.update({ syncState: SyncState.local }, new relationalStore.RdbPredicates(table));
     }
+    await this.store!.update(
+      { syncState: SyncState.local, uploadProgress: 0, syncFailureReason: '' },
+      new relationalStore.RdbPredicates('media'));
   }
 
   private async deleteRowsByColumn(table: string, column: string, value: string): Promise<void> {

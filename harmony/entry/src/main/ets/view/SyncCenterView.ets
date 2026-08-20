@@ -98,6 +98,14 @@ export struct SyncCenterView {
             .enabled(!this.running && ServerConfig.shared.isConfigured)
             .onClick(() => { this.pullAll(); })
 
+          Button('本机内容全部重新上传')
+            .width('100%').height(50)
+            .backgroundColor(BubuColor.card)
+            .fontColor(BubuColor.warmBrown)
+            .borderRadius(BubuRadius.button)
+            .enabled(!this.running && ServerConfig.shared.isConfigured)
+            .onClick(() => { this.confirmFullPush(); })
+
           Text('所有记录先安全保存在本机；断网不会丢，恢复网络后会自动重试。同步只在你自己的服务器和家人设备之间进行。')
             .fontSize(12)
             .fontColor(BubuColor.secondaryText)
@@ -189,6 +197,24 @@ export struct SyncCenterView {
       this.lastSyncedAt = Date.now();
       this.failureReason = '';
     }
+  }
+
+  private confirmFullPush(): void {
+    this.getUIContext().showAlertDialog({
+      title: '重新上传本机全部内容？',
+      message: '不会删除本机或服务器内容。所有本机记录会重新排队，远端更新版本仍优先保留。',
+      primaryButton: { value: '开始重传', action: () => { this.fullPush(); } },
+      secondaryButton: { value: '取消', action: () => {} }
+    });
+  }
+
+  private async fullPush(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    const message = await SyncEngine.shared.forceUploadAllLocalData();
+    this.running = false;
+    this.failureReason = message.indexOf('失败') >= 0 ? message : '';
+    this.refresh();
   }
 
   private statusTitle(): string {
