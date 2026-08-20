@@ -131,16 +131,6 @@ export class SyncEngine {
       this.needsAnotherSync = true;
       return;
     }
-    if (!(await this.isServerBaselineReady())) {
-      this.connectionState = 'connecting';
-      const result = await this.pullServerToLocalNow();
-      const succeeded = result.indexOf('失败') < 0 && result.indexOf('需要') < 0;
-      this.connectionState = succeeded ? 'online' : 'offline';
-      this.lastFailureReason = succeeded ? '' : result;
-      if (succeeded) this.lastSyncedAt = Date.now();
-      this.updateBackoff(succeeded);
-      return;
-    }
     this.syncing = true;
     this.connectionState = 'connecting';
     this.lastFailureReason = '';
@@ -161,14 +151,11 @@ export class SyncEngine {
     }
   }
 
-  // 手动从服务器补齐本机：清空增量游标后只拉远端，不先推本地。
-  // 用于新设备/重装/端间数量不一致时，把 iOS 已上传的数据完整拉回鸿蒙。
+  // 手动从服务器补齐本机：清空增量游标后幂等合并远端，不先推本地，也绝不清空本机。
+  // 本地未上传草稿继续保留，后续正常同步再上传。
   async pullServerToLocalNow(): Promise<string> {
     const cfg = ServerConfig.shared;
     if (!cfg.isConfigured) return '还没有登录服务器';
-    if (await this.shouldProtectIosBaselineFromServerPull()) {
-      return await this.repairServerFilesWithoutClearingNow();
-    }
     if (this.syncing) {
       const idle = await this.waitForIdle(15000);
       if (!idle) {
@@ -182,26 +169,20 @@ export class SyncEngine {
       if (!ok) return '服务器连接失败，请检查网络和服务器地址';
       const authed = await APIClient.shared.authenticate();
       if (!authed) return '账号或密码验证失败，请重新登录服务器账号';
-      await AppDatabase.shared.clearServerBackedData();
       await this.resetCursors();
       this.strictPullFailures = true;
-      this.serverMirrorMode = true;
-      this.serverSeen.clear();
       await this.pullRemote();
-      await this.pruneLocalToServerMirror();
       await AppDatabase.shared.normalizeMilestonesByTitle();
       await this.downloadMissingFiles(true);
       await this.markServerBaselineReady();
       hilog.info(DOMAIN, 'Bubu', '服务器数据已补齐到本机');
-      return '服务器数据已同步到本机，本机旧数据已清理';
+      return '服务器内容已重新核对并补齐，本机未上传内容保持不变';
     } catch (e) {
       const text = SyncEngine.errorText(e);
       hilog.error(DOMAIN, 'Bubu', `从服务器拉取失败: ${text}`);
       return `同步失败：${text}`;
     } finally {
       this.strictPullFailures = false;
-      this.serverMirrorMode = false;
-      this.serverSeen.clear();
       this.syncing = false;
     }
   }
@@ -280,6 +261,7 @@ export class SyncEngine {
     await this.pushLocal();
     await this.pullRemote();
     await this.downloadMissingFiles();
+    await this.markServerBaselineReady();
     this.connectionState = 'online';
     this.lastFailureReason = '';
     this.lastSyncedAt = Date.now();

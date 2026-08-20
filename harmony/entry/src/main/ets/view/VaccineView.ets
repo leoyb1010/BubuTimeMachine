@@ -6,6 +6,8 @@ import { BubuColor } from '../theme/BubuTheme';
 import { promptAction } from '@kit.ArkUI';
 import { VaccineDose, VACCINE_SCHEDULE, vaccineDueDate } from './VaccineSchedule';
 import { VaccineQuickLogSheet } from './VaccineQuickLogSheet';
+import { ReminderScheduler } from '../services/ReminderScheduler';
+import { ServerConfig } from '../services/ServerConfig';
 
 // MARK: - 疫苗接种表（对照 iOS Features/Health/VaccineView.swift）
 // 数据源：结构化 VaccineRecord（可同步、可被 AI 归档）。
@@ -256,6 +258,7 @@ export struct VaccineView {
       updatedAt: now
     };
     await AppDatabase.shared.insertVaccine(record);
+    await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     await this.reload();
     this.getUIContext().getPromptAction().showToast({ message: '打卡完成 ✅' });
   }
@@ -263,6 +266,7 @@ export struct VaccineView {
   private async deleteRecord(record: VaccineRecord): Promise<void> {
     await AppDatabase.shared.enqueueRemoteDeletion(record.source === 'health-fallback' ? 'healthrecords' : 'vaccinerecords', record.remoteId);
     await AppDatabase.shared.deleteVaccine(record.id);
+    await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     await this.reload();
   }
 

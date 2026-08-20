@@ -5,6 +5,8 @@ import { SyncState } from '../models/Enums';
 import { BubuColor } from '../theme/BubuTheme';
 import { promptAction } from '@kit.ArkUI';
 import { VaccineDose, vaccineDueDate } from './VaccineSchedule';
+import { ReminderScheduler } from '../services/ReminderScheduler';
+import { ServerConfig } from '../services/ServerConfig';
 
 // MARK: - 疫苗快速补录 / 编辑（对照 iOS Features/Health/VaccineQuickLogSheet.swift）
 // 点剂次弹出：接种日期、医院、反应、备注；编辑模式可取消打卡（删除记录）。
@@ -180,6 +182,7 @@ export struct VaccineQuickLogSheet {
       await AppDatabase.shared.insertVaccine(newRecord);
     }
     this.getUIContext().getPromptAction().showToast({ message: '已记录 💉' });
+    await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     this.onDone();
   }
 
@@ -188,6 +191,7 @@ export struct VaccineQuickLogSheet {
     if (!r) return;
     await AppDatabase.shared.enqueueRemoteDeletion(r.source === 'health-fallback' ? 'healthrecords' : 'vaccinerecords', r.remoteId);
     await AppDatabase.shared.deleteVaccine(r.id);
+    await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     this.onDone();
   }
 

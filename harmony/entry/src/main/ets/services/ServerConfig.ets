@@ -2,6 +2,7 @@ import { preferences } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { ALL_FAMILY_ROLES, FamilyRole, isElderRole } from '../models/Enums';
 import { KeychainStore } from './security/KeychainStore';
+import { url } from '@kit.ArkTS';
 
 // MARK: - 服务器配置（对照 iOS ServerConfig）
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
@@ -25,6 +26,8 @@ export class ServerConfig {
   aiBaseURLString: string = ServerConfig.defaultAIBaseURL;
   aiAPIKey: string = '';
   aiEnabled: boolean = false;
+  semanticSearchEnabled: boolean = false;
+  dailyReminderEnabled: boolean = false;
   simpleModeEnabled: boolean = false;
   roleBeforeElderRaw: string = '';
   sleepStartedAt: number = 0;
@@ -44,6 +47,8 @@ export class ServerConfig {
     this.aiBaseURLString = await this.getStr('aiBaseURL', ServerConfig.defaultAIBaseURL);
     const legacyAIKey = await this.getStr('aiAPIKey', '');
     this.aiEnabled = await this.getBool('aiEnabled', false);
+    this.semanticSearchEnabled = await this.getBool('semanticSearchEnabled', false);
+    this.dailyReminderEnabled = await this.getBool('dailyReminderEnabled', false);
     this.simpleModeEnabled = await this.getBool('simpleModeEnabled', isElderRole(this.currentRole));
     this.roleBeforeElderRaw = await this.getStr('roleBeforeElder', '');
     this.sleepStartedAt = await this.getNum('sleepStartedAt', 0);
@@ -66,7 +71,30 @@ export class ServerConfig {
   }
 
   get isAIConfigured(): boolean {
-    return this.aiEnabled && this.cleanString(this.aiBaseURLString).length > 0;
+    return this.aiEnabled && this.isConfigured && this.trustedAIBaseURL.length > 0;
+  }
+
+  get trustedAIBaseURL(): string {
+    const candidate = this.cleanString(this.aiBaseURLString).replace(/\/+$/, '');
+    if (candidate.length === 0) return '';
+    return ServerConfig.isTrustedAIURL(candidate, this.cleanString(this.baseURLString), ServerConfig.defaultAIBaseURL)
+      ? candidate : '';
+  }
+
+  // AI 请求可能携带家庭服务器 Bearer，只允许 HTTPS 且与家庭服务器或构建内置 AI 同源。
+  static isTrustedAIURL(candidateRaw: string, serverRaw: string, packagedRaw: string): boolean {
+    try {
+      const candidate = new url.URL(candidateRaw);
+      if (candidate.protocol.toLowerCase() !== 'https:' || candidate.username.length > 0 || candidate.password.length > 0) {
+        return false;
+      }
+      const origins: string[] = [];
+      if (serverRaw.trim().length > 0) origins.push(new url.URL(serverRaw).origin.toLowerCase());
+      if (packagedRaw.trim().length > 0) origins.push(new url.URL(packagedRaw).origin.toLowerCase());
+      return origins.includes(candidate.origin.toLowerCase());
+    } catch (e) {
+      return false;
+    }
   }
 
   async setRole(role: FamilyRole): Promise<void> {
@@ -127,6 +155,12 @@ export class ServerConfig {
     await this.put('email', this.accountEmail);
     await this.put('aiBaseURL', this.aiBaseURLString);
     await this.putBool('aiEnabled', this.aiEnabled);
+    await this.putBool('semanticSearchEnabled', this.semanticSearchEnabled);
+  }
+
+  async setDailyReminderEnabled(value: boolean): Promise<void> {
+    this.dailyReminderEnabled = value;
+    await this.putBool('dailyReminderEnabled', value);
   }
 
   async logout(): Promise<void> {

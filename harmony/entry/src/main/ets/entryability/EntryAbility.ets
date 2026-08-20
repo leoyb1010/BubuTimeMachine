@@ -7,13 +7,13 @@ import { VaccineLegacyMigrator } from '../sync/VaccineLegacyMigrator';
 import { MediaStore } from '../services/MediaStore';
 import { ServerConfig } from '../services/ServerConfig';
 import { APIClient } from '../services/APIClient';
-import { IosBaselineImporter } from '../bootstrap/IosBaselineImporter';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
 import { AIService } from '../services/AIService';
 import '../intent/OpenBubuIntent';
 import '../intent/RecordMomentIntent';
 import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 import { ThemeManager } from '../theme/ThemeManager';
+import { ReminderScheduler } from '../services/ReminderScheduler';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -41,9 +41,9 @@ export default class EntryAbility extends UIAbility {
       APIClient.shared.initialize(this.context);
       AIService.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
-      await IosBaselineImporter.runIfNeeded(this.context);
       await AppDatabase.shared.normalizeChildBirthday();
       await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences
+      await ReminderScheduler.shared.refreshIfEnabled(ServerConfig.shared.dailyReminderEnabled);
       BackgroundSyncScheduler.ensureScheduled();
       await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移
     } catch (e) {
@@ -62,6 +62,9 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // 回前台补一轮同步（对应 iOS scenePhase .active → syncEngine.start）。
     SyncEngine.shared.start();
+    ReminderScheduler.shared.refreshIfEnabled(ServerConfig.shared.dailyReminderEnabled).catch((error: Error) => {
+      hilog.error(DOMAIN, 'Bubu', `刷新提醒失败: ${error.message}`);
+    });
   }
 
   onBackground(): void {

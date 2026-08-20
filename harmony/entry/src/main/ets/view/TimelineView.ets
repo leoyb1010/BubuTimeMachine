@@ -164,7 +164,7 @@ export struct TimelineView {
 
   private async runSemanticSearch(raw: string): Promise<void> {
     const query = raw.trim();
-    if (query.length === 0 || !AIService.shared.isConfigured) return;
+    if (query.length === 0 || !ServerConfig.shared.semanticSearchEnabled || !AIService.shared.isConfigured) return;
     this.semanticSearchState = 'searching';
     try {
       const response = await AIService.shared.semanticSearch(query, 30);

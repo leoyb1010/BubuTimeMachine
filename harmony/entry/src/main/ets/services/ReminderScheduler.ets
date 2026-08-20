@@ -4,28 +4,29 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppDatabase } from '../data/AppDatabase';
 import { AgeCalculator } from '../models/AgeCalculator';
 import type { Entry, ChildProfile } from '../models/Models';
+import { VACCINE_SCHEDULE, VaccineDose, vaccineDueDate } from '../view/VaccineSchedule';
 
 const DOMAIN = 0x0000;
 
+interface UpcomingVaccineReminder {
+  dose: VaccineDose;
+  due: number;
+  index: number;
+}
+
 // MARK: - 那年今日 · 提醒调度（对照 iOS Services/ReminderScheduler.swift）
-// 每天上午 9:00 提醒一次：往年的今天，布布在做什么。
-// 旧实现是「单条 repeats=true 通知」——文案在 App 打开那天算好后每天重复，
-// 第二天起内容必然过期/错误。现改为预排未来 7 天，每天各自取对应日期的回忆；
-// App 每次活跃时滚动刷新这 7 天。
+// 每天上午 9:00 提醒一次：往年的今天，布布在做什么；同时安排最近疫苗的提前 3 天和到期提醒。
 //
 // iOS 用 UserNotifications(UNUserNotificationCenter + UNCalendarNotificationTrigger)；
 // HarmonyOS 用 @ohos.reminderAgentManager(reminderAgentManager) 发布日历型定时提醒（CALENDAR），
 // 授权用 @kit.NotificationKit notificationManager.requestEnableNotification。
-// iOS 用字符串 identifier 去重/撤销；HarmonyOS publishReminder 返回数字 reminderId，
-// 我们把「offset(0..<7) → reminderId」的映射持久化在内存，刷新时先批量 cancel 旧的再重排。
+// Reminder Agent 的 reminderId 不是跨进程稳定标识，因此每次刷新先撤销本应用全部提醒，再统一重排，
+// 避免重启后旧提醒无法撤销或重复发布。
 export class ReminderScheduler {
   static readonly shared = new ReminderScheduler();
 
   // iOS: private let identifierPrefix / daysAhead
-  private readonly daysAhead: number = 7;
-
-  // offset → 已发布的 reminderId（对应 iOS 的 "bubu.onThisDay.<offset>" 标识集合）。
-  private publishedReminderIds: number[] = [];
+  private readonly daysAhead: number = 30;
 
   private constructor() {}
 
@@ -35,17 +36,21 @@ export class ReminderScheduler {
     if (enabled) {
       const granted = await this.requestAuthorization();
       if (!granted) return;
-      await this.scheduleWeekAhead();
-    } else {
-      await this.cancelAll();
     }
+    await this.refreshAll(enabled);
   }
 
   // iOS: func refreshIfEnabled(enabled:context:)
   // App 启动时按开关状态刷新（滚动重排未来 7 天）。
   async refreshIfEnabled(enabled: boolean): Promise<void> {
-    if (!enabled) return;
-    await this.scheduleWeekAhead();
+    await this.refreshAll(enabled);
+  }
+
+  async refreshAll(dailyEnabled: boolean): Promise<void> {
+    await reminderAgentManager.cancelAllReminders();
+    if (!(await notificationManager.isNotificationEnabled())) return;
+    if (dailyEnabled) await this.scheduleDailyMemories();
+    await this.scheduleVaccineReminders();
   }
 
   // iOS: center.requestAuthorization(options: [.alert, .sound, .badge])
@@ -61,9 +66,7 @@ export class ReminderScheduler {
 
   // iOS: private func scheduleWeekAhead(center:context:)
   // 先清掉旧的（连旧版单条重复一并撤销），再为未来 7 天各排一条 9:00 的日历提醒。
-  private async scheduleWeekAhead(): Promise<void> {
-    await this.cancelAll();
-
+  private async scheduleDailyMemories(): Promise<void> {
     const profile = await AppDatabase.shared.fetchChildProfile();
     const entries = await AppDatabase.shared.fetchEntries(false); // 已按 happenedAt 倒序、排除归档
     const now = Date.now();
@@ -99,24 +102,83 @@ export class ReminderScheduler {
       };
 
       try {
-        const id: number = await reminderAgentManager.publishReminder(reminder);
-        this.publishedReminderIds.push(id);
+        await reminderAgentManager.publishReminder(reminder);
       } catch (e) {
         hilog.error(DOMAIN, 'Bubu', `发布提醒失败 offset=${offset}: ${JSON.stringify(e)}`);
       }
     }
   }
 
-  // iOS: center.removePendingNotificationRequests(withIdentifiers: ...)
-  private async cancelAll(): Promise<void> {
-    for (const id of this.publishedReminderIds) {
-      try {
-        await reminderAgentManager.cancelReminder(id);
-      } catch (e) {
-        // 已触发 / 已撤销：忽略。
+  private async scheduleVaccineReminders(): Promise<void> {
+    const profile = await AppDatabase.shared.fetchChildProfile();
+    if (!profile) return;
+    const records = await AppDatabase.shared.fetchVaccines();
+    const completed = new Set<string>();
+    for (const record of records) {
+      if (record.doseId) completed.add(record.doseId);
+    }
+
+    const now = Date.now();
+    const startToday = ReminderScheduler.startOfDay(now);
+    const upcoming: UpcomingVaccineReminder[] = [];
+    for (let index = 0; index < VACCINE_SCHEDULE.length; index++) {
+      const dose = VACCINE_SCHEDULE[index];
+      if (completed.has(dose.id)) continue;
+      const due = vaccineDueDate(dose, profile.birthday);
+      const days = Math.round((ReminderScheduler.startOfDay(due) - startToday) / 86400000);
+      if (days >= -14 && days <= 60) {
+        const item: UpcomingVaccineReminder = { dose: dose, due: due, index: index };
+        upcoming.push(item);
       }
     }
-    this.publishedReminderIds = [];
+    upcoming.sort((a, b) => a.due - b.due);
+
+    for (const item of upcoming.slice(0, 3)) {
+      const name = `${item.dose.vaccine}·${item.dose.doseLabel}`;
+      const dueText = ReminderScheduler.dateText(item.due);
+      const pre = new Date(item.due);
+      pre.setDate(pre.getDate() - 3);
+      pre.setHours(9, 31, 0, 0);
+      if (pre.getTime() > now) {
+        await this.publishCalendar(pre, 9200 + item.index * 2,
+          '疫苗预告 💉', `「${name}」预计 ${dueText} 到期（${item.dose.prevents}）。可以先约接种点啦～`);
+      }
+      const due = new Date(item.due);
+      due.setHours(9, 31, 0, 0);
+      if (due.getTime() > now) {
+        await this.publishCalendar(due, 9201 + item.index * 2,
+          '今天该打疫苗啦 💉', `「${name}」今天到期（${item.dose.prevents}）。打完回到布布时光机记上～`);
+      }
+    }
+  }
+
+  private async publishCalendar(fire: Date, notificationId: number, title: string, content: string): Promise<void> {
+    const reminder: reminderAgentManager.ReminderRequestCalendar = {
+      reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_CALENDAR,
+      dateTime: {
+        year: fire.getFullYear(), month: fire.getMonth() + 1, day: fire.getDate(),
+        hour: fire.getHours(), minute: fire.getMinutes(), second: 0
+      },
+      title: title,
+      content: content,
+      notificationId: notificationId,
+      slotType: notificationManager.SlotType.SOCIAL_COMMUNICATION
+    };
+    try {
+      await reminderAgentManager.publishReminder(reminder);
+    } catch (e) {
+      hilog.error(DOMAIN, 'Bubu', `发布提醒失败 notificationId=${notificationId}: ${JSON.stringify(e)}`);
+    }
+  }
+
+  private static startOfDay(ms: number): number {
+    const date = new Date(ms);
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  }
+
+  private static dateText(ms: number): string {
+    const date = new Date(ms);
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
   }
 
   // iOS: private func onThisDayMemory(context:for:) -> String

@@ -18,6 +18,7 @@ import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { promptAction } from '@kit.ArkUI';
 import { BubuMovedHint } from '../components/BubuMovedHint';
 import { BackDispatcher } from '../services/BackDispatcher';
+import { ReminderScheduler } from '../services/ReminderScheduler';
 
 @Extend(Row)
 function settingRow() {
@@ -49,6 +50,7 @@ export struct SettingsView {
   @State @Watch('syncBackHandler') showPhotoInbox: boolean = false;
   @State @Watch('syncBackHandler') showPhotoFrame: boolean = false;
   @State statusText: string = '';
+  @State dailyReminderEnabled: boolean = false;
 
   aboutToAppear(): void {
     this.syncBackHandler();
@@ -61,6 +63,7 @@ export struct SettingsView {
     this.aiEnabled = c.aiEnabled;
     this.childName = c.childName;
     this.roleIndex = Math.max(0, ALL_FAMILY_ROLES.indexOf(c.currentRole));
+    this.dailyReminderEnabled = c.dailyReminderEnabled;
   }
 
   aboutToDisappear(): void { BackDispatcher.shared.unregister('settings'); }
@@ -270,6 +273,7 @@ export struct SettingsView {
         this.bubuGroup()
         this.familyGroup()
         this.appearanceGroup()
+        this.reminderGroup()
         this.dataGroup()
         this.advancedGroup()
         this.aboutGroup()
@@ -393,6 +397,36 @@ export struct SettingsView {
       }
       .width('100%')
       .padding({ top: 4, bottom: 4 })
+      .backgroundColor(BubuColor.card)
+      .borderRadius(20)
+    }
+    .width('100%')
+  }
+
+  @Builder
+  reminderGroup() {
+    Column({ space: 10 }) {
+      Text('提醒')
+        .fontSize(13)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(BubuColor.secondaryText)
+        .width('100%')
+        .padding({ left: 6 })
+      Row({ space: 14 }) {
+        BubuIconBadge({
+          name: BubuIconName.sparkles, badgeSize: 36, iconSize: 19,
+          color: BubuColor.primary, fill: '#FFF0F4', radius: 10, strokeWidth: 2.1, filled: true
+        })
+        Column({ space: 2 }) {
+          Text('那年今日 · 每日回忆').fontSize(16).fontColor(BubuColor.warmBrown)
+          Text('每天上午 9 点提醒；疫苗到期提醒自动安排').fontSize(11).fontColor(BubuColor.secondaryText)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.dailyReminderEnabled })
+          .selectedColor(BubuColor.primary)
+          .onChange((value: boolean) => { this.updateDailyReminder(value); })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .backgroundColor(BubuColor.card)
       .borderRadius(20)
     }
@@ -530,5 +564,12 @@ export struct SettingsView {
     SyncEngine.shared.start();
     this.statusText = '已保存，正在同步';
     this.getUIContext().getPromptAction().showToast({ message: '已保存，正在同步…' });
+  }
+
+  private async updateDailyReminder(value: boolean): Promise<void> {
+    this.dailyReminderEnabled = value;
+    await ServerConfig.shared.setDailyReminderEnabled(value);
+    await ReminderScheduler.shared.update(value);
+    this.getUIContext().getPromptAction().showToast({ message: value ? '每日回忆提醒已开启' : '每日回忆提醒已关闭' });
   }
 }

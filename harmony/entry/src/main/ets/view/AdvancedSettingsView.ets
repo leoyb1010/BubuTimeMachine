@@ -24,6 +24,7 @@ export struct AdvancedSettingsView {
   @State aiBaseURL: string = '';
   @State aiAPIKey: string = '';
   @State aiEnabled: boolean = true;
+  @State semanticSearchEnabled: boolean = false;
   @State childName: string = '布布';
   @State roleIndex: number = 1; // 默认妈妈
   @State statusText: string = '';
@@ -36,6 +37,7 @@ export struct AdvancedSettingsView {
     this.aiBaseURL = c.aiBaseURLString;
     this.aiAPIKey = c.aiAPIKey;
     this.aiEnabled = c.aiEnabled;
+    this.semanticSearchEnabled = c.semanticSearchEnabled;
     this.childName = c.childName;
     this.roleIndex = Math.max(0, ALL_FAMILY_ROLES.indexOf(c.currentRole));
   }
@@ -120,6 +122,16 @@ export struct AdvancedSettingsView {
           }.advRow()
           if (this.aiEnabled) {
             Row() {
+              Column({ space: 2 }) {
+                Text('搜索照片里的画面').fontSize(15).fontColor(BubuColor.warmBrown)
+                Text('默认关闭；开启后只把搜索词发给家中 AI').fontSize(10).fontColor(BubuColor.secondaryText)
+              }.alignItems(HorizontalAlign.Start)
+              Blank()
+              Toggle({ type: ToggleType.Switch, isOn: this.semanticSearchEnabled })
+                .selectedColor(BubuColor.primary)
+                .onChange((v: boolean) => { this.semanticSearchEnabled = v; })
+            }.advRow()
+            Row() {
               Text('AI 地址').fontSize(15).fontColor(BubuColor.warmBrown)
               Blank()
               TextInput({ text: $$this.aiBaseURL, placeholder: ServerConfig.aiBaseURLPlaceholder })
@@ -160,6 +172,7 @@ export struct AdvancedSettingsView {
     c.aiBaseURLString = this.aiBaseURL.trim().length === 0 ? ServerConfig.defaultAIBaseURL : this.aiBaseURL.trim();
     c.aiAPIKey = this.aiAPIKey.trim();
     c.aiEnabled = this.aiEnabled;
+    c.semanticSearchEnabled = this.semanticSearchEnabled;
     await c.setRole(ALL_FAMILY_ROLES[this.roleIndex]);
     await c.setChildName(this.childName.trim().length === 0 ? '布布' : this.childName.trim());
     await c.persistServer();

@@ -93,7 +93,9 @@ export class AIService {
   initialize(context: common.BaseContext): void { this.appContext = context; }
 
   private get baseURL(): string {
-    return ServerConfig.shared.aiBaseURLString.replace(/\/+$/, '');
+    const trusted = ServerConfig.shared.trustedAIBaseURL;
+    if (trusted.length === 0) throw new Error('AI 地址不受信任：仅允许与家庭服务器同源的 HTTPS 地址');
+    return trusted;
   }
 
   private get apiKey(): string {

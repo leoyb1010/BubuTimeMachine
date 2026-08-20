@@ -8,6 +8,8 @@ import {
   NaturalCaptureItem, NaturalCaptureDomain,
   fieldString, fieldDouble, fieldStringArray, fieldISODate
 } from '../services/NaturalCaptureDTO';
+import { ReminderScheduler } from '../services/ReminderScheduler';
+import { ServerConfig } from '../services/ServerConfig';
 
 // MARK: - 自然语言记录 → 各模块落库路由（对照 iOS Features/NaturalCapture/NaturalCaptureRouter.swift）
 // LLM 解析结果经用户确认后，由这里写入对应模型并产生 FeedEvent。
@@ -183,6 +185,7 @@ export class NaturalCaptureRouter {
       updatedAt: now
     };
     await AppDatabase.shared.insertVaccine(record);
+    await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     await this.addFeed(FeedEventKind.healthRecorded, `智能记录了疫苗接种：${name}`);
   }
 
