@@ -1,6 +1,7 @@
 import { preferences } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { ALL_FAMILY_ROLES, FamilyRole, isElderRole } from '../models/Enums';
+import { KeychainStore } from './security/KeychainStore';
 
 // MARK: - 服务器配置（对照 iOS ServerConfig）
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
@@ -13,6 +14,8 @@ export class ServerConfig {
   static readonly baseURLPlaceholder: string = 'https://你的服务器地址:8090';
   static readonly aiBaseURLPlaceholder: string = 'https://你的AI服务地址:8000';
   private store: preferences.Preferences | null = null;
+  private static readonly passwordAssetKey: string = 'server.accountPassword';
+  private static readonly aiKeyAssetKey: string = 'server.aiAPIKey';
 
   baseURLString: string = ServerConfig.defaultBaseURL;
   accountEmail: string = '';
@@ -31,20 +34,24 @@ export class ServerConfig {
   private constructor() {}
 
   async load(context: common.Context): Promise<void> {
+    await KeychainStore.migrateLegacyPreferences(context);
     this.store = await preferences.getPreferences(context, 'bubu_server_config');
     this.baseURLString = await this.getStr('baseURL', ServerConfig.defaultBaseURL);
     this.accountEmail = await this.getStr('email', '');
-    this.accountPassword = await this.getStr('password', '');
+    const legacyPassword = await this.getStr('password', '');
     this.currentRoleRaw = await this.getStr('role', FamilyRole.mama);
     this.childName = await this.getStr('childName', '布布');
     this.aiBaseURLString = await this.getStr('aiBaseURL', ServerConfig.defaultAIBaseURL);
-    this.aiAPIKey = await this.getStr('aiAPIKey', '');
+    const legacyAIKey = await this.getStr('aiAPIKey', '');
     this.aiEnabled = await this.getBool('aiEnabled', false);
     this.simpleModeEnabled = await this.getBool('simpleModeEnabled', isElderRole(this.currentRole));
     this.roleBeforeElderRaw = await this.getStr('roleBeforeElder', '');
     this.sleepStartedAt = await this.getNum('sleepStartedAt', 0);
     this.timelineSortModeRaw = await this.getStr('timelineSortMode', 'capture');
     this.photoFrameDwellSeconds = await this.getNum('photoFrameDwellSeconds', 8);
+    this.accountPassword = this.secureValue(ServerConfig.passwordAssetKey, legacyPassword);
+    this.aiAPIKey = this.secureValue(ServerConfig.aiKeyAssetKey, legacyAIKey);
+    await this.clearLegacySecrets();
     AppStorage.setOrCreate('bubuSimpleMode', this.simpleModeEnabled);
   }
 
@@ -113,11 +120,12 @@ export class ServerConfig {
 
   // 持久化服务器配置（地址/账号/密码）。
   async persistServer(): Promise<void> {
+    this.persistSecret(ServerConfig.passwordAssetKey, this.accountPassword);
+    this.persistSecret(ServerConfig.aiKeyAssetKey, this.aiAPIKey);
+    await this.clearLegacySecrets();
     await this.put('baseURL', this.baseURLString);
     await this.put('email', this.accountEmail);
-    await this.put('password', this.accountPassword);
     await this.put('aiBaseURL', this.aiBaseURLString);
-    await this.put('aiAPIKey', this.aiAPIKey);
     await this.putBool('aiEnabled', this.aiEnabled);
   }
 
@@ -154,6 +162,30 @@ export class ServerConfig {
   private async putBool(key: string, value: boolean): Promise<void> {
     if (!this.store) return;
     await this.store.put(key, value);
+    await this.store.flush();
+  }
+
+  private secureValue(assetKey: string, legacyValue: string): string {
+    const current = KeychainStore.string(assetKey);
+    if (current !== null) return current;
+    const migrated = this.cleanString(legacyValue);
+    if (migrated.length > 0) KeychainStore.set(migrated, assetKey);
+    return migrated;
+  }
+
+  private persistSecret(assetKey: string, value: string): void {
+    const cleaned = this.cleanString(value);
+    if (cleaned.length > 0) {
+      KeychainStore.set(cleaned, assetKey);
+    } else {
+      KeychainStore.delete(assetKey);
+    }
+  }
+
+  private async clearLegacySecrets(): Promise<void> {
+    if (!this.store) return;
+    await this.store.delete('password');
+    await this.store.delete('aiAPIKey');
     await this.store.flush();
   }
 

@@ -7,7 +7,7 @@ iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketB
 ## 当前结论
 
 - API 26 代码能力已完成追平；逐项状态和真机验收边界见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
-- 本地 `74` 个逻辑/契约测试通过，API 26 unsigned HAP 构建通过。
+- 本地 `78` 个逻辑/契约测试通过，API 26 unsigned HAP 构建通过。
 - 2026-08-19 已在 HUAWEI Pura X Max（HarmonyOS 7.0.0 / API 26）完成一次签名安装、前台启动和无崩溃日志验证；当前新增横滑与 2.11 信息架构仍待下次真机交互回归。
 - Live View 使用 TIMER 原生实况窗；未获华为场景权益时自动降级为持续通知。
 
@@ -20,6 +20,7 @@ iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketB
 - 成长：健康、持久哄睡计时、WHO 插值、成长曲线、疫苗、里程碑、第一次和旧数据迁移。
 - 创作：第一人称日记、用户收录式成长绘本、家人合奏、成长报告、周报、问答、声音年轮和服务端成长电影成片。
 - 传承：v3 E2E 时间胶囊（文字+语音）、24 词恢复码、开放档案 ZIP、真实 PDF 年册、三版式分享卡。
+- 安全：服务器密码、AI 密钥和胶囊恢复码使用系统 Asset Store；旧版 Preferences 明文只做一次性迁移并在安全写入后擦除。
 - 鸿蒙原生：2×2/2×4 服务卡片、最近照片封面、Share Kit、PDF Kit、InsightIntent 参数记录、Live View、系统备用图标。
 - 体验：姥姥三动作模式、系统/星夜深色、核心屏幕朗读语义、旧手机全屏相框模式。
 
@@ -78,7 +79,7 @@ hdc list targets -v
 |---|---|
 | SwiftUI | ArkUI |
 | SwiftData | RelationalStore |
-| UserDefaults / AppStorage | Preferences / AppStorage |
+| UserDefaults / AppStorage / Keychain | Preferences / AppStorage / Asset Store |
 | WidgetKit | Form Kit |
 | App Intents | InsightIntent |
 | Live Activity | Live View TIMER |
