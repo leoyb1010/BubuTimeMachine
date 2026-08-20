@@ -100,6 +100,23 @@ export class CapsuleVault {
     return this.saveBlob(cipher);
   }
 
+  isV3Blob(fileName: string): boolean {
+    const cipher = this.readBlob(fileName);
+    return cipher !== null && CapsuleCrypto.isV3(cipher);
+  }
+
+  // 恢复码落盘前，用现有 v3 胶囊做无副作用试解；校验时只绕过软件时间锁，不返回正文。
+  async canDecryptV3(fileName: string, salt: string, recoveryCode: string, unlockAtMs: number): Promise<boolean> {
+    const cipher = this.readBlob(fileName);
+    if (!cipher || !CapsuleCrypto.isV3(cipher)) return false;
+    try {
+      await this.crypto.decryptV3(cipher, recoveryCode, salt, unlockAtMs, Math.max(Date.now(), unlockAtMs + 1000));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // 把语音原文件字节内嵌进载荷（对照 iOS：若有 voiceFileName 且未内嵌则读盘内嵌）。
   private embedVoiceIfNeeded(payload: CapsulePayload): CapsulePayload {
     const out: CapsulePayload = {
@@ -142,18 +159,14 @@ export class CapsuleVault {
       plainBytes = await this.crypto.decrypt(cipher, unlockAtMs, salt, nowMs);
     }
     const payload = JSON.parse(CapsuleCrypto.utf8Decode(plainBytes)) as CapsulePayload;
-    // 若内嵌了语音字节且本地没有对应文件，则落盘还原成可播放文件。
+    // 内嵌语音只解到 cache/CapsuleScratch，按胶囊 id 固定命名；不进入 Media、同步或归档。
     const embedded = payload.embeddedVoiceData;
     if (embedded && embedded.length > 0) {
-      const existingName = payload.voiceFileName;
-      const hasExistingFile = existingName !== undefined && existingName.length > 0
-        ? this.mediaStore.exists(existingName)
-        : false;
-      if (!hasExistingFile) {
-        const ext = payload.embeddedVoiceFileExtension ?? 'm4a';
-        const bytes = new Uint8Array(buffer.from(embedded, 'base64').buffer);
-        payload.voiceFileName = this.saveBlob(bytes, ext);
-      }
+      const ext = payload.embeddedVoiceFileExtension ?? 'm4a';
+      const decoded = buffer.from(embedded, 'base64');
+      const data = decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.length);
+      const scratchName = this.mediaStore.materializeCapsuleVoice(data, salt, ext);
+      if (scratchName !== null) payload.voiceFileName = scratchName;
     }
     return payload;
   }

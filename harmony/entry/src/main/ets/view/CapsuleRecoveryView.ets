@@ -1,6 +1,9 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 import { CapsuleRecovery } from '../services/security/CapsuleRecovery';
+import { CapsuleCrypto } from '../services/security/CapsuleCrypto';
+import { CapsuleVault } from '../services/security/CapsuleVault';
+import { AppDatabase } from '../data/AppDatabase';
 import { BubuColor, BubuFont, BubuRadius, BubuSpacing, BubuShadow } from '../theme/BubuTheme';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
 
@@ -23,6 +26,7 @@ export struct CapsuleRecoveryView {
   @State private restoring: boolean = false;
   @State private restoreInput: string = '';
   @State private copied: boolean = false;
+  @State private restoreError: string = '';
 
   aboutToAppear(): void {
     this.code = CapsuleRecovery.current() ?? '';
@@ -185,12 +189,14 @@ export struct CapsuleRecoveryView {
           .borderRadius(24)
           .onClick(() => {
             if (!this.canRestore()) return;
-            CapsuleRecovery.restore(this.restoreInput);
-            this.code = CapsuleRecovery.current() ?? '';
-            this.restoreInput = '';
-            this.restoring = false;
-            this.getUIContext().getPromptAction().showToast({ message: '恢复码已更新 🔑' });
+            this.attemptRestore();
           })
+        if (this.restoreError.length > 0) {
+          Text(this.restoreError)
+            .fontSize(12)
+            .fontColor(BubuColor.danger)
+            .width('100%')
+        }
       }
     }
     .alignItems(HorizontalAlign.Start)
@@ -205,9 +211,63 @@ export struct CapsuleRecoveryView {
       .width('100%')
   }
 
-  // 至少 12 个词才允许恢复（对照 iOS disabled < 12）。
+  // 只有完整 24 词才允许进入密码学校验。
   private canRestore(): boolean {
-    return this.restoreInput.split(/[\s]+/).filter((w: string): boolean => w.length > 0).length >= 12;
+    return this.normalizedWords().length === 24;
+  }
+
+  private normalizedWords(): string[] {
+    return CapsuleCrypto.normalizeRecoveryCode(this.restoreInput)
+      .split(' ')
+      .filter((word: string): boolean => word.length > 0);
+  }
+
+  private async attemptRestore(): Promise<void> {
+    this.restoreError = '';
+    const words = this.normalizedWords();
+    if (words.length !== 24) {
+      this.restoreError = `恢复码应是 24 个词，现在有 ${words.length} 个。`;
+      return;
+    }
+    const badWords = words.filter((word: string): boolean => !CapsuleRecovery.wordList.includes(word));
+    if (badWords.length > 0) {
+      this.restoreError = `词表里没有：${badWords.slice(0, 3).join('、')}。请对照纸条检查拼写。`;
+      return;
+    }
+    const candidate = words.join(' ');
+    const capsules = await AppDatabase.shared.fetchCapsules();
+    for (const capsule of capsules) {
+      const blob = capsule.encryptedBlobFileName;
+      if (!blob || !CapsuleVault.shared.isV3Blob(blob)) continue;
+      const valid = await CapsuleVault.shared.canDecryptV3(blob, capsule.id, candidate, capsule.unlockAt);
+      if (!valid) {
+        this.restoreError = '这串词解不开家里现有的胶囊，很可能抄错了。正确前不会覆盖原恢复码。';
+        return;
+      }
+      this.commitRestore(candidate);
+      return;
+    }
+
+    const current = CapsuleRecovery.current();
+    if (current !== null && current.length > 0 && current !== candidate) {
+      this.getUIContext().showAlertDialog({
+        title: '覆盖现有恢复码？',
+        message: '当前没有可校验的 v3 胶囊。覆盖后若词抄错，之前封存的信会解不开。',
+        primaryButton: { value: '覆盖', fontColor: BubuColor.danger, action: () => { this.commitRestore(candidate); } },
+        secondaryButton: { value: '取消', action: () => {} }
+      });
+      return;
+    }
+    this.commitRestore(candidate);
+  }
+
+  private commitRestore(candidate: string): void {
+    CapsuleRecovery.restore(candidate);
+    this.code = CapsuleRecovery.current() ?? '';
+    this.restoreInput = '';
+    this.restoring = false;
+    this.restoreError = '';
+    this.getUIContext().getPromptAction().showToast({ message: '恢复码已校验并更新 🔑' });
   }
 
   private numberedWords(): NumberedWord[] {

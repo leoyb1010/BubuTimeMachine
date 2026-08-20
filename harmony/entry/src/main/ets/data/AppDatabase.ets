@@ -746,7 +746,7 @@ export class AppDatabase {
       unlockAt: c.unlockAt, isLocked: c.isLocked ? 1 : 0, encryptedBlobFileName: c.encryptedBlobFileName ?? null,
       coverEmoji: c.coverEmoji ?? null, syncState: c.syncState, createdAt: c.createdAt
     };
-    await this.store!.insert('time_capsule', v);
+    await this.store!.insert('time_capsule', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
   }
 
   async fetchCapsules(): Promise<TimeCapsule[]> {

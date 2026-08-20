@@ -202,7 +202,7 @@ export struct VoicePlayerBubble {
   @State private progress: number = 0;
 
   private path(): string {
-    return MediaStore.shared.fullPath(this.fileName);
+    return MediaStore.shared.playbackPath(this.fileName);
   }
 
   aboutToAppear(): void {

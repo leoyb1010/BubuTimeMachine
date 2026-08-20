@@ -14,6 +14,7 @@ export class MediaStore {
   private baseDir: string = '';
   private thumbDir: string = '';
   private cacheBase: string = '';
+  private capsuleScratchDir: string = '';
 
   private constructor() {}
 
@@ -21,8 +22,10 @@ export class MediaStore {
     this.baseDir = context.filesDir + '/Media';
     this.thumbDir = context.filesDir + '/Thumbnails';
     this.cacheBase = context.cacheDir;
+    this.capsuleScratchDir = context.cacheDir + '/CapsuleScratch';
     MediaStore.ensureDir(this.baseDir);
     MediaStore.ensureDir(this.thumbDir);
+    MediaStore.ensureDir(this.capsuleScratchDir);
   }
 
   private static ensureDir(dir: string): void {
@@ -54,6 +57,25 @@ export class MediaStore {
 
   fullPath(fileName: string): string {
     return `${this.baseDir}/${fileName}`;
+  }
+
+  playbackPath(fileName: string): string {
+    if (fileName.startsWith('capsule-voice-')) {
+      const scratch = `${this.capsuleScratchDir}/${fileName}`;
+      try { if (fileIo.accessSync(scratch)) return scratch; } catch (e) {}
+    }
+    return this.fullPath(fileName);
+  }
+
+  materializeCapsuleVoice(data: ArrayBuffer, salt: string, extension: string): string | null {
+    const safeSalt = salt.replace(/[^A-Za-z0-9-]/g, '');
+    const safeExtension = extension.toLowerCase().replace(/[^a-z0-9]/g, '') || 'm4a';
+    const name = `capsule-voice-${safeSalt}.${safeExtension}`;
+    const path = `${this.capsuleScratchDir}/${name}`;
+    try {
+      if (fileIo.accessSync(path)) return name;
+    } catch (e) {}
+    return this.writeData(path, data) ? name : null;
   }
 
   exists(fileName: string): boolean {
