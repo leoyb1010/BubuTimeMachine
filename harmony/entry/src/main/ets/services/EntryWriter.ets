@@ -2,7 +2,7 @@ import { util } from '@kit.ArkTS';
 import { AppDatabase } from '../data/AppDatabase';
 import { Entry, FeedEvent, Media, VoiceNote } from '../models/Models';
 import { SyncState, FamilyRole, Mood, MediaType } from '../models/Enums';
-import { relationalStore } from '@kit.ArkData';
+import { MediaStore } from './MediaStore';
 
 // MARK: - 无 UI 记录写入层（对照 iOS Services/EntryWriter.swift）
 // 供首页、意图、服务卡片复用：写一条文字瞬间 → Entry + FeedEvent，离线优先落本地。
@@ -24,21 +24,12 @@ export class EntryWriter {
       isArchived: false,
       createdAt: now
     };
-    await AppDatabase.shared.insertEntry(entry);
-
-    // 家庭动态（对齐 iOS：记录后写一条 FeedEvent）
-    const store = AppDatabase.shared.raw;
-    if (store) {
-      const ev: relationalStore.ValuesBucket = {
-        id: util.generateRandomUUID(true),
-        kind: 'entryCreated',
-        actorRole: role,
-        summary: `记录了：${trimmed}`,
-        targetLocalId: id,
-        happenedAt: now
-      };
-      await store.insert('feed_event', ev);
-    }
+    const feed: FeedEvent = {
+      id: util.generateRandomUUID(true), kind: 'entryCreated', actorRole: role,
+      summary: `记录了：${trimmed}`, targetLocalId: id, happenedAt: now,
+      syncState: SyncState.local, createdAt: now
+    };
+    await AppDatabase.shared.insertEntryAggregate(entry, [], null, feed);
     return id;
   }
 
@@ -63,11 +54,10 @@ export class EntryWriter {
       isArchived: false,
       createdAt: now
     };
-    await AppDatabase.shared.insertEntry(entry);
-
     const photoFileNames: string[] = Array.isArray(photoFileName)
       ? photoFileName
       : (photoFileName ? [photoFileName] : []);
+    const mediaItems: Media[] = [];
     for (const name of photoFileNames) {
       const media: Media = {
         id: util.generateRandomUUID(true),
@@ -79,7 +69,7 @@ export class EntryWriter {
         aiTags: [],
         createdAt: now
       };
-      await AppDatabase.shared.insertMedia(media);
+      mediaItems.push(media);
     }
 
     for (const videoFileName of videoFileNames) {
@@ -93,11 +83,12 @@ export class EntryWriter {
         aiTags: [],
         createdAt: now
       };
-      await AppDatabase.shared.insertMedia(media);
+      mediaItems.push(media);
     }
 
+    let voice: VoiceNote | null = null;
     if (voiceFileName) {
-      const voice: VoiceNote = {
+      voice = {
         id: util.generateRandomUUID(true),
         entryId: id,
         localFileName: voiceFileName,
@@ -107,20 +98,19 @@ export class EntryWriter {
         syncState: SyncState.local,
         createdAt: now
       };
-      await AppDatabase.shared.insertVoiceNote(voice);
     }
-
-    const store = AppDatabase.shared.raw;
-    if (store) {
-      const ev: relationalStore.ValuesBucket = {
-        id: util.generateRandomUUID(true),
-        kind: 'entryCreated',
-        actorRole: role,
-        summary: trimmed.length > 0 ? `记录了：${trimmed}` : '记录了布布的一个新瞬间',
-        targetLocalId: id,
-        happenedAt: now
-      };
-      await store.insert('feed_event', ev);
+    const feed: FeedEvent = {
+      id: util.generateRandomUUID(true), kind: 'entryCreated', actorRole: role,
+      summary: trimmed.length > 0 ? `记录了：${trimmed}` : '记录了布布的一个新瞬间',
+      targetLocalId: id, happenedAt: now, syncState: SyncState.local, createdAt: now
+    };
+    try {
+      await AppDatabase.shared.insertEntryAggregate(entry, mediaItems, voice, feed);
+    } catch (error) {
+      for (const name of photoFileNames) MediaStore.shared.deleteMedia(name);
+      for (const name of videoFileNames) MediaStore.shared.deleteMedia(name);
+      if (voiceFileName) MediaStore.shared.deleteMedia(voiceFileName);
+      throw error instanceof Error ? error : new Error(JSON.stringify(error));
     }
     return id;
   }

@@ -10,7 +10,7 @@
 ## Evidence
 
 - Screenshots / visual diffs: 已核对真机里程碑页面和首次仪式弹窗；截图含家庭隐私，仅留本机证据，不提交仓库
-- Storybook stories and tests: 不适用 ArkUI；当前 117 个 Node 契约/逻辑测试通过，新增每日回忆/疫苗 wantAgent、冷启动与 onNewWant 预填确认门禁
+- Storybook stories and tests: 不适用 ArkUI；当前 119 个 Node 契约/逻辑测试通过，新增 Entry/Media/Voice/Feed 单事务提交、失败 rollback 和本轮文件清理门禁
 - End-to-end interactions: 安装、启动、前台 Ability 和首屏渲染已通过；分层返回第二版已安装；全时光轴媒体序列第三版 signed HAP 已生成但设备转为 Offline，待重连安装
 - Accessibility checks: 设计契约已记录，运行验证待补
 - Console / network checks: API 26 unsigned HAP 构建成功；已获取一次真机启动日志且无崩溃
@@ -28,4 +28,4 @@
 - Deferred work: 多角色审计已确认旧版全屏 HUD 阻断 Swiper；根因版已修复命中与手势仲裁，并以 BackDispatcher 替换多页面返回广播；需下一次真机页码和逐层返回断言
 - Visual verification outstanding: 是（当前最新代码尚未重新安装）
 
-**当前状态：HOLD** — 当前版本通过 117 项测试与 API 26 signed 构建；提醒点击可进入预填确认页且不会直接写档案；设备当前 `[Empty]`，35MB HAP SHA-256 `7484c3f534508efc83f43d882ea209cd5b29592018c201d08fd362b220360604`，必须重连安装后执行媒体页码、缩略图、提醒落地与逐层返回断言才能转 PASS。
+**当前状态：HOLD** — 当前版本通过 119 项测试与 API 26 signed 构建；核心记录聚合写入失败不会留下半条记录或孤儿文件；设备当前 `[Empty]`，35MB HAP SHA-256 `2b6e03f372b337b0f7fdfd4c2158ff3c5b5181aed8198b26530bf1ab2bbb1b79`，必须重连安装后执行媒体页码、缩略图、提醒落地与逐层返回断言才能转 PASS。

@@ -450,6 +450,55 @@ export class AppDatabase {
     await this.store!.insert('entry', v);
   }
 
+  // 核心记录聚合原子写入：Entry + Media + Voice + Feed 任一步失败则全部回滚。
+  async insertEntryAggregate(entry: Entry, mediaItems: Media[], voice: VoiceNote | null,
+                             feed: FeedEvent): Promise<void> {
+    const store = this.store!;
+    const transaction = await store.createTransaction();
+    try {
+      const entryBucket: relationalStore.ValuesBucket = {
+        id: entry.id, remoteId: entry.remoteId ?? null, title: entry.title ?? null,
+        note: entry.note ?? null, firstPersonNote: entry.firstPersonNote ?? null,
+        happenedAt: entry.happenedAt, locationName: entry.locationName ?? null,
+        latitude: entry.latitude ?? null, longitude: entry.longitude ?? null,
+        authorRole: entry.authorRole, moodRaw: entry.moodRaw ?? null, syncState: entry.syncState,
+        isArchived: entry.isArchived ? 1 : 0, inStorybook: entry.inStorybook ? 1 : 0,
+        editedAt: entry.editedAt ?? null, createdAt: entry.createdAt
+      };
+      await transaction.insert('entry', entryBucket);
+      for (const media of mediaItems) {
+        const mediaBucket: relationalStore.ValuesBucket = {
+          id: media.id, remoteId: media.remoteId ?? null, entryId: media.entryId, typeRaw: media.typeRaw,
+          localFileName: media.localFileName ?? null, remoteURL: media.remoteURL ?? null,
+          thumbnailFileName: media.thumbnailFileName ?? null, remoteThumbURL: media.remoteThumbURL ?? null,
+          contentHash: media.contentHash ?? null, resourceRoleRaw: media.resourceRoleRaw ?? null,
+          assetGroupID: media.assetGroupID ?? null, durationSeconds: media.durationSeconds ?? null,
+          width: media.width ?? null, height: media.height ?? null, uploadProgress: media.uploadProgress,
+          syncState: media.syncState, aiTags: JSON.stringify(media.aiTags), createdAt: media.createdAt
+        };
+        await transaction.insert('media', mediaBucket);
+      }
+      if (voice !== null) {
+        const voiceBucket: relationalStore.ValuesBucket = {
+          id: voice.id, remoteId: voice.remoteId ?? null, entryId: voice.entryId,
+          localFileName: voice.localFileName ?? null, remoteURL: voice.remoteURL ?? null,
+          durationSeconds: voice.durationSeconds, transcript: voice.transcript ?? null,
+          authorRole: voice.authorRole, waveformSamples: JSON.stringify(voice.waveformSamples),
+          syncState: voice.syncState, createdAt: voice.createdAt
+        };
+        await transaction.insert('voice_note', voiceBucket);
+      }
+      await transaction.insert('feed_event', {
+        id: feed.id, kind: feed.kind, actorRole: feed.actorRole, summary: feed.summary,
+        targetLocalId: feed.targetLocalId ?? null, happenedAt: feed.happenedAt
+      });
+      await transaction.commit();
+    } catch (error) {
+      try { await transaction.rollback(); } catch (rollbackError) {}
+      throw error instanceof Error ? error : new Error(JSON.stringify(error));
+    }
+  }
+
   async fetchEntries(includeArchived: boolean = false): Promise<Entry[]> {
     const pred = new relationalStore.RdbPredicates('entry');
     if (!includeArchived) pred.equalTo('isArchived', 0);
