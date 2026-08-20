@@ -4,8 +4,7 @@
 // 纯常量（plain class static），可在任意上下文引用。
 //
 // 兼容性：保留旧有 BubuColor / BubuRadius / bubuCardCol 导出（大量 view 直接 import）。
-// 旧值 primary='#F28C9E' 沿用主题 coral 主色，与 iOS BubuTheme.Color.primary(#F2789F) 略有出入，
-// 为不破坏既有 view 的视觉一致性，此处保持 #F28C9E（与 ThemeManager 默认 coral 主题一致）。
+// 装饰粉保留在 pink/peach；承载白字按钮与正文强调的语义色使用 AA 深色版本。
 
 // MARK: 色板（柔和、温暖、低饱和）——对照 iOS BubuTheme.Color
 export class BubuColor {
@@ -15,16 +14,16 @@ export class BubuColor {
   static get isDark(): boolean { return BubuColor.darkMode; }
 
   // —— 旧有导出（保持不变，勿删）——
-  static readonly primary = '#F28C9E';        // 珊瑚粉（主色）
+  static readonly primary = '#B23A58';        // 可读珊瑚玫瑰（白字对比 5.77:1）
   static get warmBrown(): string { return BubuColor.darkMode ? '#F5F0E8' : '#5A3D34'; }
   static get cream(): string { return BubuColor.darkMode ? '#1E1D2B' : '#FFF7F1'; }
   static get card(): string { return BubuColor.darkMode ? '#33324A' : '#FFFFFF'; }
-  static get secondaryText(): string { return BubuColor.darkMode ? '#B8B2C8' : '#A98D82'; }
-  static readonly success = '#8CB894';        // 柔绿
+  static get secondaryText(): string { return BubuColor.darkMode ? '#CFC9DC' : '#6E5A52'; }
+  static readonly success = '#43734D';
 
   // —— 新增完整 token（对照 iOS）——
   /// 强调深色端 deeprose：主按钮渐变尾色 / 凸起记录键。
-  static readonly deepRose = '#E15C86';
+  static readonly deepRose = '#9F2F54';
   /// 次奶油底 cream2：选中态 / 嵌套层底。
   static get cream2(): string { return BubuColor.darkMode ? '#29283B' : '#FCEDE4'; }
   /// 页面背景（奶油基底，略带粉调）。
@@ -37,9 +36,9 @@ export class BubuColor {
   static get hairline(): string { return BubuColor.darkMode ? '#5A5870' : '#DBCCC2'; }
   static readonly danger = '#DB3B47';
   /// 暖橙（同步重试中 / 需要注意）。禁止页面裸写 orange。
-  static readonly warning = '#ED9E3B';
+  static readonly warning = '#9A5B00';
   /// 柔蓝（AI 处理中 / 信息提示）。禁止页面裸写 blue。
-  static readonly info = '#5C8CCC';
+  static readonly info = '#3B69A4';
 
   // MARK: 马卡龙副色板（记忆色相 / 渐变 / 星座盘星点）
   static readonly peach  = '#FFD3BE';
