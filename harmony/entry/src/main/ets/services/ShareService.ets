@@ -21,6 +21,26 @@ export class ShareService {
       isVideo ? '布布时光机视频' : '布布时光机照片');
   }
 
+  static async shareText(context: common.UIAbilityContext, title: string, text: string): Promise<void> {
+    const record: systemShare.SharedRecord = {
+      utd: 'general.plain-text', content: text, title: title, label: 'TEXT', description: '布布时光机文字'
+    };
+    await ShareService.show(context, new systemShare.SharedData(record));
+  }
+
+  static async shareEntryLink(context: common.UIAbilityContext, entryId: string,
+                              title: string, text: string): Promise<void> {
+    const plain: systemShare.SharedRecord = {
+      utd: 'general.plain-text', content: text, title: title, label: 'TEXT', description: '布布时光'
+    };
+    const data = new systemShare.SharedData(plain);
+    data.addRecord({
+      utd: 'general.hyperlink', content: `bubutime://entry/${encodeURIComponent(entryId)}`,
+      title: '在布布时光机中打开', label: 'HYPERLINK', description: '直达这条时光'
+    });
+    await ShareService.show(context, data);
+  }
+
   private static async share(context: common.UIAbilityContext, path: string, title: string,
                              utd: string, description: string): Promise<void> {
     const record: systemShare.SharedRecord = {
@@ -30,7 +50,11 @@ export class ShareService {
       label: 'FILE',
       description
     };
-    const controller = new systemShare.ShareController(new systemShare.SharedData(record));
+    await ShareService.show(context, new systemShare.SharedData(record));
+  }
+
+  private static async show(context: common.UIAbilityContext, data: systemShare.SharedData): Promise<void> {
+    const controller = new systemShare.ShareController(data);
     await controller.show(context, {
       selectionMode: systemShare.SelectionMode.SINGLE,
       previewMode: systemShare.SharePreviewMode.DEFAULT

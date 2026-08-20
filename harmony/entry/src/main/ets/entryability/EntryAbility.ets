@@ -27,10 +27,12 @@ export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'Bubu', 'EntryAbility onCreate');
     this.handleReminderWant(want);
+    this.handleEntryLink(want);
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     this.handleReminderWant(want);
+    this.handleEntryLink(want);
   }
 
   onDestroy(): void {
@@ -106,5 +108,14 @@ export default class EntryAbility extends UIAbility {
     if (typeof value !== 'string' || value.trim().length === 0) return;
     // 仅预填并打开确认页，绝不从通知点击直接写家庭档案。
     AppStorage.setOrCreate('bubuIntentDraft', value.trim());
+  }
+
+  private handleEntryLink(want: Want): void {
+    const raw = want.uri ?? '';
+    const prefix = 'bubutime://entry/';
+    if (!raw.startsWith(prefix)) return;
+    const entryId = decodeURIComponent(raw.substring(prefix.length));
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(entryId)) return;
+    AppStorage.setOrCreate('bubuOpenEntryId', entryId);
   }
 }

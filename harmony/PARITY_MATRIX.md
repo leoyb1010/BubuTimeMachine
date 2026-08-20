@@ -42,7 +42,7 @@
 | Alternate App Icons | Bundle Manager alternateIcons | 🟡 已复用 7 套主题/生日素材并接 API 26 系统切换和生日月优先 | 桌面实际刷新待真机验收 |
 | Live Activity | Live View | ⏳ 已实现 TIMER 原生实况窗并接录音、持久哄睡、临近胶囊倒计时；无权益自动降级通知 | TIMER 场景权益、锁屏样式与真机启停待验收 |
 | Photos Extension | Media Library + Background Tasks | 🟡 已接持久候选；WorkScheduler 在已授权时后台扫描，拒绝权限时不弹窗不崩溃 | 后台恢复、权限拒绝、大图库验证 |
-| Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🟡 开放档案已接系统分享 | 图片、视频、文本和目标页直达 |
+| Share Sheet/AirDrop | Share Kit/碰一碰/隔空传送 | 🟡 已接图片、视频、PDF、ZIP、纯文本与 bubutime Entry 直达深链，待真机目标应用/跨设备验收 | 图片、视频、文本和目标页直达 |
 
 > 用户已明确：平板、折叠屏、鸿蒙电脑和穿戴端不在本次范围；工程仅声明 `phone`，版本已与 iOS 对齐为 2.11.0。
 

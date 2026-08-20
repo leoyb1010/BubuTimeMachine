@@ -7,7 +7,7 @@ iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketB
 ## 当前结论
 
 - API 26 手机端核心能力已实现，当前仍处于追平与真机验收阶段；逐项状态见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
-- 本地 `132` 个逻辑/契约测试通过，API 26 unsigned/signed HAP 构建通过。
+- 本地 `135` 个逻辑/契约测试通过，API 26 unsigned/signed HAP 构建通过。
 - 2026-08-19 已在 HUAWEI Pura X Max（HarmonyOS 7.0.0 / API 26）完成一次签名安装、前台启动和无崩溃日志验证；当前新增横滑与 2.11 信息架构仍待下次真机交互回归。
 - Live View 使用 TIMER 原生实况窗；未获华为场景权益时自动降级为持续通知。
 
@@ -27,7 +27,7 @@ iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketB
 - 隐私：照片画面搜索默认关闭；AI 地址必须是与家庭服务器或构建配置同源的 HTTPS 地址，避免家庭登录态外泄。
 - 提醒：设置页可开关 30 天“那年今日”滚动提醒，自动安排最近三针疫苗；通知点击用 wantAgent 进入预填但未保存的快速记录确认页。
 - 后台发现：WorkScheduler 在权限已授权时扫描新照片候选，并在前台恢复/后台同步后主动检查新周报通知。
-- 鸿蒙原生：2×2/2×4 服务卡片、RDB 写后实时刷新与最近照片回退、Share Kit、PDF Kit、InsightIntent 参数记录、Live View、系统备用图标。
+- 鸿蒙原生：2×2/2×4 服务卡片、RDB 写后刷新、Share Kit 文件/文本/Entry 深链、PDF Kit、InsightIntent 参数记录、Live View、系统备用图标。
 - 体验：长辈模式、家庭成员管理、系统/星夜深色、减少动态、可关闭提示音、WCAG AA 语义色、核心朗读语义、旧手机相框模式。
 
 ## 构建与检查

@@ -18,6 +18,8 @@ import { AIService } from '../services/AIService';
 import { ShareCardSheet } from './ShareCardSheet';
 import { SyncEngine } from '../sync/SyncEngine';
 import { BackDispatcher } from '../services/BackDispatcher';
+import { ShareService } from '../services/ShareService';
+import { common } from '@kit.AbilityKit';
 
 // MARK: - 时光轴（对照 iOS Features/Timeline/TimelineView.swift）
 // 按 happenedAt 倒序读取本地 Entry，按「年-月」分段展示；离线优先，只读本地数据库。
@@ -402,9 +404,18 @@ export struct TimelineView {
     Menu() {
       MenuItem({ content: '分享这一刻', startIcon: undefined })
         .onClick(() => { this.shareEntry = entry; BubuHaptics.selection(); })
+      MenuItem({ content: '分享文字和直达链接', startIcon: undefined })
+        .onClick(() => { this.shareEntryLink(entry); })
       MenuItem({ content: '删除记录', startIcon: undefined })
         .onClick(() => { this.confirmDelete(entry); })
     }
+  }
+
+  private async shareEntryLink(entry: Entry): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const title = entry.title ?? '布布的一段时光';
+    const text = entry.note ?? entry.firstPersonNote ?? title;
+    await ShareService.shareEntryLink(context, entry.id, title, text);
   }
 
   @Builder

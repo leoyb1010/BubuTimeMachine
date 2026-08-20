@@ -63,6 +63,7 @@ export struct HomeView {
   @State private viewportW: number = 0;
   @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
   @StorageLink('bubuHandledCaptureSignal') handledCaptureSignal: number = 0;
+  @StorageLink('bubuOpenEntryId') @Watch('onOpenEntryId') openEntryId: string = '';
 
   private onCaptureSignal(): void {
     if (this.captureSignal > this.handledCaptureSignal) {
@@ -99,6 +100,7 @@ export struct HomeView {
     this.tabBarVisible = true;
     this.syncBackHandler();
     this.reload();
+    this.onOpenEntryId();
     this.startHomeMotion();
     if (this.captureSignal > this.handledCaptureSignal) {
       this.handledCaptureSignal = this.captureSignal;
@@ -192,6 +194,22 @@ export struct HomeView {
     const draft = value?.trim() ?? '';
     if (draft.length > 0) AppStorage.setOrCreate('bubuIntentDraft', '');
     return draft;
+  }
+
+  private async onOpenEntryId(): Promise<void> {
+    const id = this.openEntryId.trim();
+    if (id.length === 0) return;
+    const entries = await AppDatabase.shared.fetchEntries(false);
+    const entry = entries.find((item: Entry): boolean => item.id === id);
+    AppStorage.setOrCreate('bubuOpenEntryId', '');
+    if (!entry) {
+      this.getUIContext().getPromptAction().showToast({ message: '这条时光还没同步到本机' });
+      return;
+    }
+    this.route = HomeRoute.home;
+    this.selectedEntry = entry;
+    this.tabBarVisible = false;
+    this.syncBackHandler();
   }
 
   private navigate(route: HomeRoute): void {

@@ -2,6 +2,7 @@ import { Media } from '../models/Models';
 import { MediaType } from '../models/Enums';
 import { MediaStore } from '../services/MediaStore';
 import { BubuColor, BubuRadius } from '../theme/BubuTheme';
+import { BubuMotion } from '../theme/BubuMotion';
 
 // MARK: - 媒体缩略图（对照 iOS DesignSystem/Components/MediaThumbnail.swift）
 // iOS 经 ThumbnailProvider 统一加载（内存缓存 / 降采样 / 后台补齐）；
@@ -29,8 +30,7 @@ export struct MediaThumbnail {
   private imageSrc(): string {
     const store = MediaStore.shared;
     const thumb = this.media.thumbnailFileName;
-    if (thumb !== undefined && thumb.length > 0) {
-      // NOTE: MediaStore 未暴露缩略图 exists 校验；直接拼路径，缺失时由 Image .alt() 兜底显示占位。
+    if (thumb !== undefined && thumb.length > 0 && store.thumbnailExists(thumb)) {
       return `file://${store.thumbnailPath(thumb)}`;
     }
     const local = this.media.localFileName;
@@ -64,6 +64,7 @@ export struct MediaThumbnail {
   }
 
   private startPulse(): void {
+    if (BubuMotion.reduced) return;
     // iOS: .easeInOut(0.9).repeatForever(autoreverses: true)
     this.getUIContext().animateTo({
       duration: 900,
