@@ -34,9 +34,19 @@ export default class EntryAbility extends UIAbility {
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    // 初始化本地数据库（RelationalStore 建表），相当于 iOS 装配 ModelContainer。
+    // 数据库是硬门槛：失败时保留原文件并进入保护页，绝不挂载正常写入/同步/新人引导。
     try {
       await AppDatabase.shared.initialize(this.context);
+    } catch (e) {
+      hilog.error(DOMAIN, 'Bubu', `数据库初始化失败，进入数据保护页: ${JSON.stringify(e)}`);
+      windowStage.loadContent('pages/DataProtectionPage', (err) => {
+        if (err.code) hilog.error(DOMAIN, 'Bubu', `数据保护页加载失败: ${JSON.stringify(err)}`);
+      });
+      return;
+    }
+
+    // 其余服务失败可降级，不影响已安全打开的本地数据库。
+    try {
       WidgetRefresher.initialize(this.context);
       AppDatabase.shared.setDataChangeListener((): void => { WidgetRefresher.requestRefresh(); });
       WidgetRefresher.requestRefresh();
@@ -51,7 +61,7 @@ export default class EntryAbility extends UIAbility {
       BackgroundSyncScheduler.ensureScheduled();
       await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移
     } catch (e) {
-      hilog.error(DOMAIN, 'Bubu', `初始化失败: ${JSON.stringify(e)}`);
+      hilog.error(DOMAIN, 'Bubu', `可选服务初始化失败，保持离线可用: ${JSON.stringify(e)}`);
     }
 
     windowStage.loadContent('pages/RootPage', (err) => {
