@@ -25,6 +25,11 @@ const DOMAIN = 0x0000;
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, 'Bubu', 'EntryAbility onCreate');
+    this.handleReminderWant(want);
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.handleReminderWant(want);
   }
 
   onDestroy(): void {
@@ -92,5 +97,12 @@ export default class EntryAbility extends UIAbility {
     // 进后台停轮询省电（对应 iOS .background → stopPolling）。
     SyncEngine.shared.stopPolling();
     BackgroundSyncScheduler.ensureScheduled();
+  }
+
+  private handleReminderWant(want: Want): void {
+    const value = want.parameters?.['bubuReminderDraft'];
+    if (typeof value !== 'string' || value.trim().length === 0) return;
+    // 仅预填并打开确认页，绝不从通知点击直接写家庭档案。
+    AppStorage.setOrCreate('bubuIntentDraft', value.trim());
   }
 }

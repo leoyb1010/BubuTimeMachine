@@ -97,6 +97,11 @@ export class ReminderScheduler {
         },
         title: '那年今日 · 布布时光机',
         content: body,
+        wantAgent: {
+          pkgName: 'com.bubu.timemachine',
+          abilityName: 'EntryAbility',
+          parameters: { 'bubuReminderDraft': '今天的布布……' }
+        },
         notificationId: 9100 + offset,
         slotType: notificationManager.SlotType.SOCIAL_COMMUNICATION
       };
@@ -141,18 +146,21 @@ export class ReminderScheduler {
       pre.setHours(9, 31, 0, 0);
       if (pre.getTime() > now) {
         await this.publishCalendar(pre, 9200 + item.index * 2,
-          '疫苗预告 💉', `「${name}」预计 ${dueText} 到期（${item.dose.prevents}）。可以先约接种点啦～`);
+          '疫苗预告 💉', `「${name}」预计 ${dueText} 到期（${item.dose.prevents}）。可以先约接种点啦～`,
+          `准备给布布接种${name}，`);
       }
       const due = new Date(item.due);
       due.setHours(9, 31, 0, 0);
       if (due.getTime() > now) {
         await this.publishCalendar(due, 9201 + item.index * 2,
-          '今天该打疫苗啦 💉', `「${name}」今天到期（${item.dose.prevents}）。打完回到布布时光机记上～`);
+          '今天该打疫苗啦 💉', `「${name}」今天到期（${item.dose.prevents}）。打完回到布布时光机记上～`,
+          `今天布布接种了${name}，`);
       }
     }
   }
 
-  private async publishCalendar(fire: Date, notificationId: number, title: string, content: string): Promise<void> {
+  private async publishCalendar(fire: Date, notificationId: number, title: string, content: string,
+                                draft: string): Promise<void> {
     const reminder: reminderAgentManager.ReminderRequestCalendar = {
       reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_CALENDAR,
       dateTime: {
@@ -161,6 +169,10 @@ export class ReminderScheduler {
       },
       title: title,
       content: content,
+      wantAgent: {
+        pkgName: 'com.bubu.timemachine', abilityName: 'EntryAbility',
+        parameters: { 'bubuReminderDraft': draft }
+      },
       notificationId: notificationId,
       slotType: notificationManager.SlotType.SOCIAL_COMMUNICATION
     };
