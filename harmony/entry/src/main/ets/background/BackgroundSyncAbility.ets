@@ -5,6 +5,9 @@ import { APIClient } from '../services/APIClient';
 import { MediaStore } from '../services/MediaStore';
 import { ServerConfig } from '../services/ServerConfig';
 import { SyncEngine } from '../sync/SyncEngine';
+import { PhotoIntakeService } from '../services/PhotoIntakeService';
+import { WeeklyReportNotifier } from '../services/WeeklyReportNotifier';
+import { AIService } from '../services/AIService';
 
 const DOMAIN = 0x0000;
 
@@ -13,10 +16,14 @@ export default class BackgroundSyncAbility extends WorkSchedulerExtensionAbility
     try {
       await AppDatabase.shared.initialize(this.context);
       MediaStore.shared.initialize(this.context);
+      PhotoIntakeService.shared.initialize(this.context);
       APIClient.shared.initialize(this.context);
+      AIService.shared.initialize(this.context);
       await ServerConfig.shared.load(this.context);
       await SyncEngine.shared.initialize(this.context);
       await SyncEngine.shared.syncNow(false);
+      await PhotoIntakeService.shared.scanRecent(14, false);
+      await WeeklyReportNotifier.checkLatest(this.context);
       hilog.info(DOMAIN, 'Bubu', `后台同步完成 workId=${work.workId}`);
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `后台同步失败: ${e instanceof Error ? e.message : JSON.stringify(e)}`);

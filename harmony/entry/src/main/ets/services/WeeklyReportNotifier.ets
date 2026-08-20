@@ -2,10 +2,17 @@ import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { notificationManager } from '@kit.NotificationKit';
 import { WeeklyReport } from '../models/AIArtifacts';
+import { AIService } from './AIService';
 
 // 新周报只发不含家庭正文的本地通知；发布成功后才记录去重 id。
 export class WeeklyReportNotifier {
-  static async notifyIfNew(context: common.UIAbilityContext, report: WeeklyReport): Promise<void> {
+  static async checkLatest(context: common.Context): Promise<void> {
+    if (!AIService.shared.isConfigured) return;
+    const report = await AIService.shared.latestWeeklyReport();
+    if (report) await WeeklyReportNotifier.notifyIfNew(context, report);
+  }
+
+  static async notifyIfNew(context: common.Context, report: WeeklyReport): Promise<void> {
     if (report.status !== 'ready' || !(await notificationManager.isNotificationEnabled())) return;
     const store = await preferences.getPreferences(context, 'bubu_weekly_report_notice');
     if ((await store.get('latestId', '') as string) === report.id) return;

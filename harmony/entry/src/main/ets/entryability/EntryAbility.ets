@@ -15,6 +15,7 @@ import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 import { ThemeManager } from '../theme/ThemeManager';
 import { ReminderScheduler } from '../services/ReminderScheduler';
 import { WidgetRefresher } from '../theme/WidgetRefresher';
+import { WeeklyReportNotifier } from '../services/WeeklyReportNotifier';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -58,6 +59,7 @@ export default class EntryAbility extends UIAbility {
       await AppDatabase.shared.normalizeChildBirthday();
       await SyncEngine.shared.initialize(this.context); // 打开游标用 Preferences
       await ReminderScheduler.shared.refreshIfEnabled(ServerConfig.shared.dailyReminderEnabled);
+      await WeeklyReportNotifier.checkLatest(this.context);
       BackgroundSyncScheduler.ensureScheduled();
       await VaccineLegacyMigrator.migrateIfNeeded(this.context); // 旧版疫苗打卡一次性迁移
     } catch (e) {
@@ -78,6 +80,9 @@ export default class EntryAbility extends UIAbility {
     SyncEngine.shared.start();
     ReminderScheduler.shared.refreshIfEnabled(ServerConfig.shared.dailyReminderEnabled).catch((error: Error) => {
       hilog.error(DOMAIN, 'Bubu', `刷新提醒失败: ${error.message}`);
+    });
+    WeeklyReportNotifier.checkLatest(this.context).catch((error: Error) => {
+      hilog.warn(DOMAIN, 'Bubu', `检查周报失败: ${error.message}`);
     });
   }
 

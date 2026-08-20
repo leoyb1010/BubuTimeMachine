@@ -24,11 +24,11 @@ export interface PhotoIntakeResult {
 export class PhotoIntakeService {
   static readonly shared = new PhotoIntakeService();
 
-  private context: common.UIAbilityContext | null = null;
+  private context: common.Context | null = null;
 
   private constructor() {}
 
-  initialize(context: common.UIAbilityContext): void {
+  initialize(context: common.Context): void {
     this.context = context;
     ChildIdentityRecognizer.shared.initialize(context);
   }
@@ -41,10 +41,14 @@ export class PhotoIntakeService {
     return clusterPhotoCandidates(await AppDatabase.shared.fetchPhotoIntakePending());
   }
 
-  async scanRecent(days: number = 14): Promise<PhotoEventGroup[]> {
+  async scanRecent(days: number = 14, requestPermission: boolean = true): Promise<PhotoEventGroup[]> {
     const context = this.context;
     if (!context) throw new Error('照片收件箱还没有初始化');
-    if (!(await PermissionService.request(context, 'ohos.permission.READ_IMAGEVIDEO'))) {
+    const granted = requestPermission
+      ? await PermissionService.request(context as common.UIAbilityContext, 'ohos.permission.READ_IMAGEVIDEO')
+      : await PermissionService.isGranted('ohos.permission.READ_IMAGEVIDEO');
+    if (!granted) {
+      if (!requestPermission) return await this.cachedGroups();
       throw new Error('需要允许读取照片，才能扫描最近新增内容');
     }
 
