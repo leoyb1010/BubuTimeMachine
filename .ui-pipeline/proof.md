@@ -10,7 +10,7 @@
 ## Evidence
 
 - Screenshots / visual diffs: 已核对真机里程碑页面和首次仪式弹窗；截图含家庭隐私，仅留本机证据，不提交仓库
-- Storybook stories and tests: 不适用 ArkUI；当前 71 个 Node 契约/逻辑测试通过，覆盖媒体排序/初始索引、单一返回调度和首页同步失败重试
+- Storybook stories and tests: 不适用 ArkUI；当前 73 个 Node 契约/逻辑测试通过，覆盖媒体排序/初始索引、单一返回调度、首页同步重试和时光卡文案/封面比例
 - End-to-end interactions: 安装、启动、前台 Ability 和首屏渲染已通过；分层返回第二版已安装；全时光轴媒体序列第三版 signed HAP 已生成但设备转为 Offline，待重连安装
 - Accessibility checks: 设计契约已记录，运行验证待补
 - Console / network checks: API 26 unsigned HAP 构建成功；已获取一次真机启动日志且无崩溃
@@ -28,4 +28,4 @@
 - Deferred work: 多角色审计已确认旧版全屏 HUD 阻断 Swiper；根因版已修复命中与手势仲裁，并以 BackDispatcher 替换多页面返回广播；需下一次真机页码和逐层返回断言
 - Visual verification outstanding: 是（当前最新代码尚未重新安装）
 
-**当前状态：HOLD** — 当前版本通过 71 项测试、API 26 signed 构建和仓库卫生检查；设备当前 `[Empty]`，HAP SHA-256 `8e1cb3a277d26dd2f41451a7fbc03c427e7c35dcd714a18aafef575d896837a2`，必须重连后执行媒体页码与逐层返回断言才能转 PASS。
+**当前状态：HOLD** — 当前版本通过 73 项测试、API 26 signed 构建和仓库卫生检查；设备当前 `[Empty]`，HAP SHA-256 `cb96d852ffc49aecb86ab9671bcfb8c08739379786e36482699f6ea0eb208e52`，必须重连后执行媒体页码与逐层返回断言才能转 PASS。

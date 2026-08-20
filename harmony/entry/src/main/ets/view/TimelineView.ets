@@ -37,6 +37,7 @@ export struct TimelineView {
   @State profile: ChildProfile | null = null;
   // entryId → 首张照片沙盒绝对 file:// 路径（卡片大图占位）。
   @State photoMap: Map<string, string> = new Map();
+  @State photoAspectMap: Map<string, number> = new Map();
   // entryId → 首张媒体 mood emoji 占位用（无图时）。
   @State sections: TimelineSection[] = [];
   @State searchText: string = '';
@@ -109,14 +110,19 @@ export struct TimelineView {
 
   private async loadPhotoMap(entries: Entry[], base: Map<string, string>): Promise<Map<string, string>> {
     const map = new Map<string, string>(base);
+    const aspects = new Map<string, number>(this.photoAspectMap);
     for (const e of entries) {
       if (map.has(e.id)) continue;
       const media = await AppDatabase.shared.fetchMediaForEntry(e.id);
       const photo = media.find((m: Media) => m.typeRaw === 'photo' && m.localFileName !== undefined && m.localFileName.length > 0);
       if (photo && photo.localFileName) {
         map.set(e.id, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
+        if ((photo.width ?? 0) > 0 && (photo.height ?? 0) > 0) {
+          aspects.set(e.id, Math.max(0.8, Math.min(1.9, photo.width! / photo.height!)));
+        }
       }
     }
+    this.photoAspectMap = aspects;
     return map;
   }
 
@@ -432,7 +438,7 @@ export struct TimelineView {
       Stack() {
         if (this.photoMap.has(entry.id)) {
           Image(this.photoMap.get(entry.id))
-            .width('100%').height(178).objectFit(ImageFit.Cover)
+            .width('100%').aspectRatio(this.coverAspect(entry)).objectFit(ImageFit.Cover)
         } else {
           // 无图占位：hue 渐变 + 心情/默认 motif（对照 iOS BubuDreamPhoto）。
           Stack() {
@@ -440,7 +446,7 @@ export struct TimelineView {
               .fontSize(40)
           }
           .alignContent(Alignment.Center)
-          .width('100%').height(178)
+          .width('100%').aspectRatio(this.coverAspect(entry))
           .linearGradient({
             angle: 135,
             colors: [
@@ -456,7 +462,7 @@ export struct TimelineView {
           .padding({ left: 14, right: 14, bottom: 10 })
       }
       .alignContent(Alignment.BottomStart)
-      .width('100%').height(178).clip(true)
+      .width('100%').aspectRatio(this.coverAspect(entry)).clip(true)
 
       // 标题 + 备注 + tag 行。
       Column({ space: 4 }) {
@@ -464,8 +470,8 @@ export struct TimelineView {
           .fontSize(15.5).fontWeight(FontWeight.Bolder).fontColor(BubuColor.warmBrown)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
-        if (entry.note && entry.note.length > 0) {
-          Text(entry.note)
+        if (this.cardSubtitle(entry) !== undefined) {
+          Text(this.cardSubtitle(entry)!)
             .fontSize(12.5).fontColor(BubuColor.secondaryText)
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
@@ -546,6 +552,17 @@ export struct TimelineView {
     if (entry.title && entry.title.length > 0) return entry.title;
     if (entry.note && entry.note.length > 0) return entry.note;
     return '记录此刻';
+  }
+
+  private cardSubtitle(entry: Entry): string | undefined {
+    const note = entry.note?.trim() ?? '';
+    const title = entry.title?.trim() ?? '';
+    if (note.length === 0 || title.length === 0 || note === title) return undefined;
+    return note;
+  }
+
+  private coverAspect(entry: Entry): number {
+    return this.photoAspectMap.get(entry.id) ?? 1.5;
   }
 
   // 由 entry.id 派生稳定 hue（对照 iOS abs(id.hashValue) % 360）。
