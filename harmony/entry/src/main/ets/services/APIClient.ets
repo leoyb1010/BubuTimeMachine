@@ -1,6 +1,6 @@
 import { http } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
-import { util } from '@kit.ArkTS';
+import { util, url } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { request } from '@kit.BasicServicesKit';
 import type { common } from '@kit.AbilityKit';
@@ -28,6 +28,7 @@ export class APIClient {
   private currentFamilyId: string = '';
   private fileToken: string = '';
   private fileTokenExpiresAt: number = 0;
+  private credentialIdentity: string = '';
   private appContext: common.BaseContext | null = null;
 
   private constructor() {}
@@ -74,6 +75,8 @@ export class APIClient {
   async authenticate(): Promise<boolean> {
     const cfg = ServerConfig.shared;
     if (!cfg.isConfigured) return false;
+    const expectedCredential = this.configCredentialIdentity();
+    if (this.credentialIdentity.length > 0 && this.credentialIdentity !== expectedCredential) this.clearSession();
     const identities = APIClient.identityCandidates(cfg.accountEmail);
     let lastError: Object | null = null;
     for (const identity of identities) {
@@ -87,6 +90,16 @@ export class APIClient {
         this.fileToken = '';
         this.fileTokenExpiresAt = 0;
         if (this.token.length > 0) {
+          const owner = this.ownerIdentity(this.currentFamilyId, this.currentUserId);
+          if (cfg.dataOwnerIdentity.length > 0 && cfg.dataOwnerIdentity !== owner) {
+            this.clearSession();
+            throw new Error('这台设备已绑定另一家庭档案，请先导出完整档案后再切换家庭');
+          }
+          if (cfg.dataOwnerIdentity.length === 0) {
+            cfg.dataOwnerIdentity = owner;
+            await cfg.persistServer();
+          }
+          this.credentialIdentity = expectedCredential;
           if (cfg.accountEmail !== identity) {
             cfg.accountEmail = identity;
             await cfg.persistServer();
@@ -98,12 +111,17 @@ export class APIClient {
       }
     }
     hilog.error(DOMAIN, 'Bubu', `登录失败: ${JSON.stringify(lastError)}`);
+    this.clearSession();
+    return false;
+  }
+
+  clearSession(): void {
     this.token = '';
     this.currentUserId = '';
     this.currentFamilyId = '';
     this.fileToken = '';
     this.fileTokenExpiresAt = 0;
-    return false;
+    this.credentialIdentity = '';
   }
 
   private static identityCandidates(account: string): string[] {
@@ -140,7 +158,8 @@ export class APIClient {
 
   // token 过期（401）时清掉缓存、重新登录一次。对照 iOS withAuthRetry 的鉴权重试部分。
   private async ensureToken(): Promise<string> {
-    if (this.token.length > 0) return this.token;
+    if (this.token.length > 0 && this.credentialIdentity === this.configCredentialIdentity()) return this.token;
+    this.clearSession();
     await this.authenticate();
     return this.token;
   }
@@ -170,6 +189,10 @@ export class APIClient {
       const resp = await this.request('POST', `/api/collections/${collection}/records`, JSON.stringify(body), true);
       return JSON.parse(resp) as Record<string, Object>;
     }
+  }
+
+  static remoteWasNewer(record: Record<string, Object>): boolean {
+    return record['_bubuRemoteNewer'] === true;
   }
 
   // 增量拉取统一使用 PocketBase 服务器字段 updated，避免设备时钟偏移造成永久漏拉。
@@ -365,8 +388,9 @@ export class APIClient {
   // 只走系统下载任务直接落盘；失败由 SyncEngine 保留本地状态并在下一轮重试。
   async downloadFile(remoteURL: string, destPath: string): Promise<string> {
     if (remoteURL.length === 0) throw new Error('文件地址不正确');
+    const trustedURL = this.trustedFileURL(remoteURL);
     const tokenStr = await this.ensureToken();
-    const accessURL = await this.fileAccessURL(remoteURL);
+    const accessURL = await this.fileAccessURL(trustedURL);
     const header: Record<string, string> = {};
     if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
     return await this.downloadFileViaTask(accessURL, destPath, header);
@@ -429,6 +453,31 @@ export class APIClient {
     if (token.length === 0) return remoteURL;
     const sep = remoteURL.indexOf('?') >= 0 ? '&' : '?';
     return `${remoteURL}${sep}token=${encodeURIComponent(token)}`;
+  }
+
+  private trustedFileURL(remoteURL: string): string {
+    try {
+      const server = new url.URL(this.baseURL);
+      const candidate = new url.URL(remoteURL, server);
+      if (candidate.username.length > 0 || candidate.password.length > 0
+        || candidate.origin.toLowerCase() !== server.origin.toLowerCase()
+        || !candidate.pathname.startsWith('/api/files/')) {
+        throw new Error('受保护文件地址不属于当前家庭服务器');
+      }
+      return `${server.origin}${candidate.pathname}${candidate.search}`;
+    } catch (error) {
+      if (error instanceof Error && error.message.indexOf('不属于') >= 0) throw error;
+      throw new Error('受保护文件地址不正确');
+    }
+  }
+
+  private configCredentialIdentity(): string {
+    return `${this.baseURL.toLowerCase()}|${ServerConfig.shared.accountEmail.trim().toLowerCase()}`;
+  }
+
+  private ownerIdentity(familyId: string, userId: string): string {
+    const owner = familyId.length > 0 ? `family:${familyId}` : `user:${userId}`;
+    return `${new url.URL(this.baseURL).origin.toLowerCase()}|${owner}`;
   }
 
   private async ensureFileToken(): Promise<string> {

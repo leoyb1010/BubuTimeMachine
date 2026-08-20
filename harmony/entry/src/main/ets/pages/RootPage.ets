@@ -1,6 +1,6 @@
 import { HomeView } from '../view/HomeView';
 import { TimelineView } from '../view/TimelineView';
-import { MilestonesView } from '../view/MilestonesView';
+import { GrowthHomeView } from '../view/GrowthHomeView';
 import { AIStudioView } from '../view/AIStudioView';
 import { OnboardingView } from '../view/OnboardingView';
 import { WhatsNewView } from '../view/WhatsNewView';
@@ -100,12 +100,8 @@ struct RootPage {
       return true;
     }
     if (BackDispatcher.shared.handleBack()) return true;
-    if (!this.tabBarVisible) { this.tabBarVisible = true; return true; }
-    if (this.selection !== 0) {
-      this.getUIContext().animateTo(BubuMotion.quick, () => { this.selection = 0; });
-      return true;
-    }
-    return true;
+    // 根 Tab 没有更深页面时交还系统：按返回退出/回桌面，不强制跳首页也不永久吞键。
+    return false;
   }
 
   build() {
@@ -142,6 +138,9 @@ struct RootPage {
         if (this.selection === 0) {
           HomeView({
             captureSignal: this.captureSignal,
+            onOpenTimeline: () => {
+              this.getUIContext().animateTo(BubuMotion.gentle, () => { this.selection = 1; });
+            },
             onOpenMilestones: () => {
               this.getUIContext().animateTo(BubuMotion.gentle, () => { this.selection = 2; });
             }
@@ -151,7 +150,7 @@ struct RootPage {
           TimelineView()
             .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
         } else if (this.selection === 2) {
-          MilestonesView()
+          GrowthHomeView({ showBack: false })
             .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 })))
         } else {
           AIStudioView()

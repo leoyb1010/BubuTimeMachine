@@ -15,6 +15,7 @@ export struct SyncCenterView {
   @State nextRetrySeconds: number = 30;
   @State running: boolean = false;
   @State lastExportAtSec: number = 0;
+  @State pendingCount: number = 0;
 
   async aboutToAppear(): Promise<void> {
     this.refresh();
@@ -173,6 +174,7 @@ export struct SyncCenterView {
     this.lastSyncedAt = snapshot.lastSyncedAt;
     this.failureReason = snapshot.lastFailureReason;
     this.nextRetrySeconds = snapshot.nextRetrySeconds;
+    this.pendingCount = snapshot.pendingCount;
   }
 
   private async syncNow(): Promise<void> {
@@ -219,13 +221,15 @@ export struct SyncCenterView {
 
   private statusTitle(): string {
     if (this.running || this.state === 'connecting') return '正在同步';
-    if (this.state === 'online') return '已经同步好了';
+    if (this.state === 'online') return this.pendingCount === 0 ? '已经同步好了' : `仍有 ${this.pendingCount} 项等待`;
     return ServerConfig.shared.isConfigured ? '暂时离线' : '还没有登录服务器';
   }
 
   private statusDescription(): string {
     if (this.running || this.state === 'connecting') return '正在和家里的服务器核对记录…';
-    if (this.state === 'online') return '这台设备已经和家里的服务器对齐。';
+    if (this.state === 'online') return this.pendingCount === 0
+      ? '这台设备已经和家里的服务器对齐。'
+      : '服务器已连接，但部分内容尚未传完，App 会继续自动重试。';
     return ServerConfig.shared.isConfigured
       ? '连不上也能继续记录，恢复网络后会自动补传。'
       : '不登录也能离线使用；登录后才会同步到其他家人设备。';

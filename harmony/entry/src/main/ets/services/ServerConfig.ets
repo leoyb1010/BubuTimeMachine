@@ -22,6 +22,7 @@ export class ServerConfig {
   accountEmail: string = '';
   accountPassword: string = '';
   accountRecordId: string = '';
+  dataOwnerIdentity: string = '';
   currentRoleRaw: string = FamilyRole.mama;
   childName: string = '布布';
   aiBaseURLString: string = ServerConfig.defaultAIBaseURL;
@@ -44,6 +45,7 @@ export class ServerConfig {
     this.accountEmail = await this.getStr('email', '');
     const legacyPassword = await this.getStr('password', '');
     this.accountRecordId = await this.getStr('accountRecordId', '');
+    this.dataOwnerIdentity = await this.getStr('dataOwnerIdentity', '');
     this.currentRoleRaw = await this.getStr('role', FamilyRole.mama);
     this.childName = await this.getStr('childName', '布布');
     this.aiBaseURLString = await this.getStr('aiBaseURL', ServerConfig.defaultAIBaseURL);
@@ -162,6 +164,7 @@ export class ServerConfig {
     await this.put('baseURL', this.baseURLString);
     await this.put('email', this.accountEmail);
     await this.put('accountRecordId', this.accountRecordId);
+    await this.put('dataOwnerIdentity', this.dataOwnerIdentity);
     await this.put('aiBaseURL', this.aiBaseURLString);
     await this.putBool('aiEnabled', this.aiEnabled);
     await this.putBool('semanticSearchEnabled', this.semanticSearchEnabled);

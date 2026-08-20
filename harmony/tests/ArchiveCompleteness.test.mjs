@@ -20,6 +20,10 @@ test('缺失引用或复制失败会标记不完整并阻止假成功', () => {
   assert.ok(exporter.includes('missing.push(name)'));
   assert.ok(exporter.includes("ArchiveExporter.writeText(`${root}/incomplete.json`"));
   assert.ok(exporter.includes('throw new Error(`档案不完整'));
+  assert.ok(view.includes('if (!media.localFileName)'));
+  assert.ok(view.includes('if (!voice.localFileName)'));
+  assert.ok(view.includes('comment-voice:${comment.id}'));
+  assert.ok(view.includes('if (!memo.localFileName)'));
 });
 
 test('档案逐文件生成真实 SHA-256 manifest', () => {

@@ -1,10 +1,13 @@
 import { http } from '@kit.NetworkKit';
 import { FamilyRole } from '../models/Enums';
 import { ServerConfig } from './ServerConfig';
+import { APIClient } from './APIClient';
+import { url } from '@kit.ArkTS';
 
 interface AccountAuthResult {
   token: string;
   recordId: string;
+  familyId: string;
 }
 
 export class AccountService {
@@ -41,7 +44,9 @@ export class AccountService {
     for (const identity of AccountService.identityCandidates(u)) {
       try {
         const auth = await this.authWithPassword(identity, password);
+        this.assertDataOwner(auth);
         await this.persist(identity, password, role, auth.recordId);
+        APIClient.shared.clearSession();
         return;
       } catch (e) {
         lastError = e instanceof Error ? e : new Error('登录失败，请稍后再试');
@@ -55,6 +60,7 @@ export class AccountService {
   }
 
   async logout(): Promise<void> {
+    APIClient.shared.clearSession();
     await ServerConfig.shared.logout();
   }
 
@@ -95,7 +101,19 @@ export class AccountService {
     const record = obj['record'] as Record<string, Object> | undefined;
     const recordId = record?.['id'] as string | undefined;
     if (!recordId || recordId.length === 0) throw new Error('登录响应缺少账号标识');
-    return { token: token, recordId: recordId };
+    const familyId = record?.['familyId'] as string | undefined ?? '';
+    return { token: token, recordId: recordId, familyId: familyId };
+  }
+
+  private assertDataOwner(auth: AccountAuthResult): void {
+    const cfg = ServerConfig.shared;
+    const origin = new url.URL(cfg.baseURLString).origin.toLowerCase();
+    const owner = auth.familyId.length > 0 ? `family:${auth.familyId}` : `user:${auth.recordId}`;
+    const candidate = `${origin}|${owner}`;
+    if (cfg.dataOwnerIdentity.length > 0 && cfg.dataOwnerIdentity !== candidate) {
+      throw new Error('这台设备已有另一家庭档案。请先导出完整档案，不能直接混入新家庭。');
+    }
+    cfg.dataOwnerIdentity = candidate;
   }
 
   private async firstWorkingIdentity(username: string, password: string): Promise<string> {

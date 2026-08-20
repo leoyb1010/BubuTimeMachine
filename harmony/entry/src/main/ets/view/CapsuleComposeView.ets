@@ -153,6 +153,7 @@ export struct CapsuleComposeView {
           VoiceRecorderBar({
             tint: BubuColor.primary,
             onFinished: (fileName: string, duration: number, waveform: number[]) => {
+              this.clearEmbeddedVoice();
               this.voiceFileName = fileName;
               this.voiceDuration = duration;
               this.voiceWaveform = waveform;
@@ -388,6 +389,13 @@ export struct CapsuleComposeView {
     this.voiceFileName = undefined;
     this.voiceDuration = 0;
     this.voiceWaveform = [];
+    this.clearEmbeddedVoice();
+  }
+
+  private clearEmbeddedVoice(): void {
+    if (this.loadedPayload === null) return;
+    this.loadedPayload.embeddedVoiceData = undefined;
+    this.loadedPayload.embeddedVoiceFileExtension = undefined;
   }
 
   private cancel(): void {

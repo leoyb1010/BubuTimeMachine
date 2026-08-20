@@ -41,17 +41,22 @@ export class MediaStore {
   // 把一个临时/源文件拷进沙盒，返回相对文件名
   copyIntoStore(srcUri: string, ext: string): string | null {
     if (this.baseDir.length === 0) return null;
-    const name = `${util.generateRandomUUID(true)}.${ext}`;
+    const realExtension = MediaStore.sniffFileExtension(srcUri) ?? MediaStore.cleanExtension(ext);
+    const name = `${util.generateRandomUUID(true)}.${realExtension}`;
     const dst = `${this.baseDir}/${name}`;
+    let src: fileIo.File | null = null;
+    let out: fileIo.File | null = null;
     try {
-      const src = fileIo.openSync(srcUri, fileIo.OpenMode.READ_ONLY);
-      const out = fileIo.openSync(dst, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE);
+      src = fileIo.openSync(srcUri, fileIo.OpenMode.READ_ONLY);
+      out = fileIo.openSync(dst, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       fileIo.copyFileSync(src.fd, out.fd);
-      fileIo.closeSync(src);
-      fileIo.closeSync(out);
       return name;
     } catch (e) {
+      try { fileIo.unlinkSync(dst); } catch (cleanupError) {}
       return null;
+    } finally {
+      if (src) try { fileIo.closeSync(src); } catch (closeError) {}
+      if (out) try { fileIo.closeSync(out); } catch (closeError) {}
     }
   }
 
@@ -148,29 +153,36 @@ export class MediaStore {
   }
 
   private writeData(path: string, data: ArrayBuffer): boolean {
+    let file: fileIo.File | null = null;
     try {
-      const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       fileIo.writeSync(file.fd, data);
-      fileIo.closeSync(file);
       return true;
     } catch (e) {
+      try { fileIo.unlinkSync(path); } catch (cleanupError) {}
       return false;
+    } finally {
+      if (file) try { fileIo.closeSync(file); } catch (closeError) {}
     }
   }
 
   private copyFile(srcUri: string, dst: string): boolean {
+    let src: fileIo.File | null = null;
+    let out: fileIo.File | null = null;
     try {
       if (fileIo.accessSync(dst)) {
         fileIo.unlinkSync(dst);
       }
-      const src = fileIo.openSync(srcUri, fileIo.OpenMode.READ_ONLY);
-      const out = fileIo.openSync(dst, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE);
+      src = fileIo.openSync(srcUri, fileIo.OpenMode.READ_ONLY);
+      out = fileIo.openSync(dst, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       fileIo.copyFileSync(src.fd, out.fd);
-      fileIo.closeSync(src);
-      fileIo.closeSync(out);
       return true;
     } catch (e) {
+      try { fileIo.unlinkSync(dst); } catch (cleanupError) {}
       return false;
+    } finally {
+      if (src) try { fileIo.closeSync(src); } catch (closeError) {}
+      if (out) try { fileIo.closeSync(out); } catch (closeError) {}
     }
   }
 
@@ -188,6 +200,35 @@ export class MediaStore {
       if (brand.startsWith('avif')) return 'avif';
     }
     return null;
+  }
+
+  static sniffFileExtension(path: string): string | null {
+    let file: fileIo.File | null = null;
+    try {
+      file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      const header = new ArrayBuffer(32);
+      const count = fileIo.readSync(file.fd, header);
+      if (count < 12) return null;
+      const imageExtension = MediaStore.sniffImageExtension(header.slice(0, count));
+      if (imageExtension !== null) return imageExtension;
+      const bytes = new Uint8Array(header);
+      if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+        const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]).toLowerCase();
+        if (brand === 'qt  ') return 'mov';
+        if (['isom', 'iso2', 'mp41', 'mp42', 'avc1', 'mmp4'].includes(brand)) return 'mp4';
+      }
+      return null;
+    } catch (e) {
+      return null;
+    } finally {
+      if (file) try { fileIo.closeSync(file); } catch (closeError) {}
+    }
+  }
+
+  private static cleanExtension(value: string): string {
+    const clean = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const allowed = ['jpg', 'jpeg', 'png', 'gif', 'heic', 'avif', 'mp4', 'mov', 'm4a', 'aac', 'wav'];
+    return allowed.includes(clean) ? (clean === 'jpeg' ? 'jpg' : clean) : 'bin';
   }
 
   // MARK: 读取（对照 iOS data(forMedia:) / blob(named:)）

@@ -79,7 +79,7 @@ export struct CapsuleRecoveryView {
         .fontSize(BubuFont.headline)
         .fontWeight(FontWeight.Bold)
         .fontColor(this.theme())
-      Text('时间胶囊用这串恢复码真正加密——服务器即使被攻破，没有它也打不开。它会随你的钥匙串同步到全家的设备。')
+      Text('时间胶囊用这串恢复码真正加密——服务器即使被攻破，没有它也打不开。系统只可能在同账号可信设备迁移时带过去；不同华为账号的家人仍需用纸条手动录入。')
         .fontSize(BubuFont.caption)
         .fontColor(BubuColor.secondaryText)
     }

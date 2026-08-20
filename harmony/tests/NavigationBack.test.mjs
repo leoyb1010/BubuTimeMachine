@@ -17,6 +17,9 @@ test('Root 每次先交给唯一最深层处理器，不再广播给多个页面
   assert.ok(rootPage.includes('BackDispatcher.shared.handleBack()'));
   assert.ok(!rootPage.includes('bubuBackSignal'));
   assert.ok(!rootPage.includes('bubuNavigationDepth'));
+  const back = rootPage.slice(rootPage.indexOf('onBackPress()'), rootPage.indexOf('build()', rootPage.indexOf('onBackPress()')));
+  assert.ok(back.includes('return false'));
+  assert.ok(!back.includes('this.selection = 0'));
 });
 
 test('各主 Tab、设置、相册与详情弹层注册并在销毁时注销返回处理器', () => {

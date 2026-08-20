@@ -41,7 +41,7 @@ export struct BubuGlassTabBar {
     new BubuTabItem(1, '时光', BubuIconName.clock),
   ];
   private readonly right: BubuTabItem[] = [
-    new BubuTabItem(2, '里程碑', BubuIconName.star),
+    new BubuTabItem(2, '成长', BubuIconName.health),
     new BubuTabItem(3, '魔法屋', BubuIconName.magic),
   ];
 

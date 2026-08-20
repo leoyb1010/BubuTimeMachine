@@ -8,6 +8,7 @@ import { SyncEngine } from '../sync/SyncEngine';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
 import { WeeklyReportNotifier } from '../services/WeeklyReportNotifier';
 import { AIService } from '../services/AIService';
+import { MediaDerivationService } from '../services/MediaDerivationService';
 
 const DOMAIN = 0x0000;
 
@@ -16,6 +17,8 @@ export default class BackgroundSyncAbility extends WorkSchedulerExtensionAbility
     try {
       await AppDatabase.shared.initialize(this.context);
       MediaStore.shared.initialize(this.context);
+      MediaDerivationService.initialize();
+      await MediaDerivationService.backfillPending(12);
       PhotoIntakeService.shared.initialize(this.context);
       APIClient.shared.initialize(this.context);
       AIService.shared.initialize(this.context);

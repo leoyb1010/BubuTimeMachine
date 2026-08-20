@@ -14,7 +14,6 @@ import { HealthHomeView } from './HealthHomeView';
 import { GrowthHomeView } from './GrowthHomeView';
 import { SettingsView } from './SettingsView';
 import { AlbumView } from './AlbumView';
-import { TimelineView } from './TimelineView';
 import { EntryDetailView } from './EntryDetailView';
 import { MediaStore } from '../services/MediaStore';
 import { BubuMascotBadge, BubuExpression } from '../components/BubuMascotBadge';
@@ -56,6 +55,7 @@ export struct HomeView {
   @Link @Watch('onCaptureSignal') captureSignal: number;
   // RootPage 注入：首页里程碑卡直接切到「里程碑」Tab，避免误进健康。
   onOpenMilestones?: () => void;
+  onOpenTimeline?: () => void;
 
   @State private pageIn: boolean = false;
   @State private floatLoop: boolean = false;
@@ -278,8 +278,7 @@ export struct HomeView {
       .width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.route === HomeRoute.growth) {
       GrowthHomeView({
-        onBack: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); },
-        onOpenMilestones: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.openMilestones(); }
+        onBack: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); }
       }).width('100%').height('100%')
     } else if (this.route === HomeRoute.settings) {
       SettingsView({
@@ -294,13 +293,6 @@ export struct HomeView {
       SyncCenterView({
         onClose: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); }
       })
-    } else if (this.route === HomeRoute.timeline) {
-      Column() {
-        this.panelHeader('时光')
-        TimelineView()
-          .layoutWeight(1)
-      }
-      .width('100%').height('100%').backgroundColor(BubuColor.cream)
     } else if (this.route === HomeRoute.album) {
       Column() {
         this.panelHeader('照片墙')
@@ -658,7 +650,8 @@ export struct HomeView {
             .fontWeight(FontWeight.Medium)
             .fontColor(BubuColor.primary)
             .onClick(() => {
-              this.navigate(HomeRoute.timeline);
+              this.tabBarVisible = true;
+              if (this.onOpenTimeline) this.onOpenTimeline();
             })
         }
         .width('100%')

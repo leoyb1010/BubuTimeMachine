@@ -5,11 +5,12 @@ import { BubuIconBadge, BubuIconName } from '../components/BubuIcon';
 import { GrowthCurveView } from './GrowthCurveView';
 import { HealthHomeView } from './HealthHomeView';
 import { VaccineView } from './VaccineView';
+import { MilestonesView } from './MilestonesView';
 
 @Component
 export struct GrowthHomeView {
   onBack: () => void = () => {};
-  onOpenMilestones: () => void = () => {};
+  showBack: boolean = true;
 
   @State route: string = '';
   @State milestones: Milestone[] = [];
@@ -30,9 +31,12 @@ export struct GrowthHomeView {
     } else if (this.route === 'vaccine') {
       Column() { this.header('疫苗接种', () => { this.route = ''; }); VaccineView().layoutWeight(1) }
         .width('100%').height('100%').backgroundColor(BubuColor.background)
+    } else if (this.route === 'milestones') {
+      Column() { this.header('里程碑', () => { this.route = ''; }, true); MilestonesView().layoutWeight(1) }
+        .width('100%').height('100%').backgroundColor(BubuColor.background)
     } else {
       Column() {
-        this.header('成长', this.onBack)
+        this.header('成长', this.onBack, this.showBack)
         Scroll() {
           Column({ space: 16 }) {
             Column({ space: 7 }) {
@@ -43,7 +47,7 @@ export struct GrowthHomeView {
 
             Row({ space: 10 }) {
               this.linkCard(BubuIconName.sync, '成长数据', this.measurementSubtitle(), () => { this.route = 'curve'; })
-              this.linkCard(BubuIconName.star, '里程碑', `已点亮 ${this.achieved().length} 个`, this.onOpenMilestones)
+              this.linkCard(BubuIconName.star, '里程碑', `已点亮 ${this.achieved().length} 个`, () => { this.route = 'milestones'; })
             }.width('100%')
             Row({ space: 10 }) {
               this.linkCard(BubuIconName.health, '健康', `共 ${this.health.length} 条记录`, () => { this.route = 'health'; })
@@ -79,7 +83,7 @@ export struct GrowthHomeView {
                 }.alignItems(HorizontalAlign.Start).layoutWeight(1)
                 Text('›').fontSize(20).fontColor(BubuColor.secondaryText)
               }.width('100%').padding(16).backgroundColor('#14F28C9E').borderRadius(BubuRadius.card)
-              .onClick(this.onOpenMilestones)
+              .onClick(() => { this.route = 'milestones'; })
             }
           }.width('100%').padding(16)
         }.layoutWeight(1)
@@ -88,9 +92,13 @@ export struct GrowthHomeView {
   }
 
   @Builder
-  private header(title: string, action: () => void) {
+  private header(title: string, action: () => void, showBack: boolean = true) {
     Row({ space: 8 }) {
-      Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(action)
+      if (showBack) {
+        Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(action)
+      } else {
+        Blank().width(72)
+      }
       Blank()
       Text(title).fontSize(BubuFont.body).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
       Blank()

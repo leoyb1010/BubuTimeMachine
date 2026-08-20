@@ -19,4 +19,8 @@ test('JSON 和 multipart upsert 都执行 LWW，调用方传真实业务编辑�
   assert.ok(sync.includes('new Date(v.updatedAt || v.createdAt)'));
   assert.ok(sync.includes('new Date(g.updatedAt || g.createdAt)'));
   assert.ok(sync.includes('new Date(e.editedAt ?? e.createdAt)'));
+  assert.ok(sync.match(/APIClient\.remoteWasNewer\(saved\)/g)?.length >= 10);
+  assert.ok(sync.includes('SyncEngine.applyEntry(saved, e)'));
+  assert.ok(sync.includes('SyncEngine.applyChildProfile(saved, p)'));
+  assert.ok(sync.includes('SyncEngine.applyCapsule(saved, c)'));
 });

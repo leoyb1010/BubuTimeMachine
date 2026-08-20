@@ -3,6 +3,7 @@ import { AppDatabase } from '../data/AppDatabase';
 import { Entry, FeedEvent, Media, VoiceNote } from '../models/Models';
 import { SyncState, FamilyRole, Mood, MediaType } from '../models/Enums';
 import { MediaStore } from './MediaStore';
+import { MediaDerivationService } from './MediaDerivationService';
 
 // MARK: - 无 UI 记录写入层（对照 iOS Services/EntryWriter.swift）
 // 供首页、意图、服务卡片复用：写一条文字瞬间 → Entry + FeedEvent，离线优先落本地。
@@ -69,6 +70,7 @@ export class EntryWriter {
         aiTags: [],
         createdAt: now
       };
+      await MediaDerivationService.prepare(media);
       mediaItems.push(media);
     }
 
@@ -83,6 +85,7 @@ export class EntryWriter {
         aiTags: [],
         createdAt: now
       };
+      await MediaDerivationService.prepare(media);
       mediaItems.push(media);
     }
 
@@ -109,6 +112,9 @@ export class EntryWriter {
     } catch (error) {
       for (const name of photoFileNames) MediaStore.shared.deleteMedia(name);
       for (const name of videoFileNames) MediaStore.shared.deleteMedia(name);
+      for (const media of mediaItems) {
+        if (media.thumbnailFileName) MediaStore.shared.deleteThumbnail(media.thumbnailFileName);
+      }
       if (voiceFileName) MediaStore.shared.deleteMedia(voiceFileName);
       throw error instanceof Error ? error : new Error(JSON.stringify(error));
     }

@@ -233,14 +233,19 @@ export struct ExportView {
       const unavailable: string[] = [];
       for (const entry of this.entries) {
         for (const media of (this.mediaByEntry.get(entry.id) ?? [])) {
-          if (!media.localFileName && media.remoteURL) unavailable.push(`media:${media.id}`);
+          if (!media.localFileName) unavailable.push(`media:${media.id}`);
         }
         for (const voice of (this.voicesByEntry.get(entry.id) ?? [])) {
-          if (!voice.localFileName && voice.remoteURL) unavailable.push(`voice:${voice.id}`);
+          if (!voice.localFileName) unavailable.push(`voice:${voice.id}`);
+        }
+        for (const comment of (this.commentsByEntry.get(entry.id) ?? [])) {
+          if (comment.voiceDuration > 0 && !comment.voiceFileName) {
+            unavailable.push(`comment-voice:${comment.id}`);
+          }
         }
       }
       for (const memo of this.voiceMemos) {
-        if (!memo.localFileName && memo.remoteURL) unavailable.push(`voiceMemo:${memo.id}`);
+        if (!memo.localFileName) unavailable.push(`voiceMemo:${memo.id}`);
       }
       for (const capsule of this.timeCapsules) {
         if (!capsule.encryptedBlobFileName) unavailable.push(`capsule:${capsule.id}:encryptedBlob`);

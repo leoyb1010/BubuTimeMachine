@@ -13,7 +13,8 @@ import { UploadedFileResult } from '../services/DTOs';
 import { MILESTONE_PRESETS } from '../models/MilestoneTemplates';
 import { syncBackoffIntervalMs } from './SyncBackoff';
 import { laterServerTimestamp, overlappedServerCursor } from './SyncCursor';
-import { PreparedVideoUpload, VideoUploadPreparer } from '../services/VideoUploadPreparer';
+import { fileIo } from '@kit.CoreFileKit';
+import { MediaDerivationService } from '../services/MediaDerivationService';
 
 const DOMAIN = 0x0000;
 
@@ -29,6 +30,7 @@ export interface SyncStatusSnapshot {
   lastSyncedAt: number;
   lastFailureReason: string;
   nextRetrySeconds: number;
+  pendingCount: number;
 }
 
 // MARK: - 同步引擎（对照 iOS Services/Sync/SyncEngine.swift）
@@ -61,6 +63,7 @@ export class SyncEngine {
   private serverSeen: Map<string, Set<string>> = new Map<string, Set<string>>();
   private cursorStore: preferences.Preferences | null = null;
   private appContext: common.Context | null = null;
+  private pendingCount: number = 0;
 
   private constructor() {}
 
@@ -70,6 +73,7 @@ export class SyncEngine {
       syncing: this.syncing,
       lastSyncedAt: this.lastSyncedAt,
       lastFailureReason: this.lastFailureReason,
+      pendingCount: this.pendingCount,
       nextRetrySeconds: Math.round(syncBackoffIntervalMs(this.consecutiveFailures) / 1000)
     };
   }
@@ -82,6 +86,7 @@ export class SyncEngine {
     }
     await this.migrateCursorsIfNeeded();
     await this.migrateLegacyHealthIfNeeded();
+    await this.refreshPendingCount();
   }
 
   // 回前台：立刻补一轮；之后按结果在 30s–8min 之间退避轮询。
@@ -138,6 +143,13 @@ export class SyncEngine {
     let succeeded: boolean = false;
     try {
       succeeded = await this.connectAndSync();
+      await this.refreshPendingCount();
+      if (succeeded && this.pendingCount > 0) {
+        succeeded = false;
+        this.lastFailureReason = `仍有 ${this.pendingCount} 项等待同步，App 会继续自动重试`;
+      } else if (succeeded) {
+        this.lastSyncedAt = Date.now();
+      }
     } catch (e) {
       this.connectionState = 'offline';
       this.lastFailureReason = SyncEngine.errorText(e);
@@ -150,6 +162,10 @@ export class SyncEngine {
       this.needsAnotherSync = false;
       await this.syncNow(false);
     }
+  }
+
+  private async refreshPendingCount(): Promise<void> {
+    this.pendingCount = await AppDatabase.shared.countPendingSync();
   }
 
   // 手动从服务器补齐本机：清空增量游标后幂等合并远端，不先推本地，也绝不清空本机。
@@ -241,7 +257,6 @@ export class SyncEngine {
     await this.markServerBaselineReady();
     this.connectionState = 'online';
     this.lastFailureReason = '';
-    this.lastSyncedAt = Date.now();
     hilog.info(DOMAIN, 'Bubu', '同步完成');
     return true;
   }
@@ -313,6 +328,13 @@ export class SyncEngine {
       if (e.editedAt !== undefined) body['editedAt'] = new Date(e.editedAt).toISOString();
       try {
         const saved = await APIClient.shared.upsert('entries', e.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyEntry(saved, e);
+          e.remoteId = SyncEngine.rStr(saved, 'id');
+          e.syncState = SyncState.synced;
+          await AppDatabase.shared.updateEntryFields(e.id, SyncEngine.entryToFields(e));
+          continue;
+        }
         const remoteId = saved['id'] as string;
         await AppDatabase.shared.updateEntryFields(e.id, { remoteId: remoteId, syncState: SyncState.synced });
       } catch (err) {
@@ -331,12 +353,18 @@ export class SyncEngine {
       'birthday': new Date(p.birthday).toISOString(),
       'createdAt': new Date(p.createdAt).toISOString()
     };
-    body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(p.createdAt));
     if (p.gender !== undefined) body['gender'] = p.gender;
     if (p.bloodType !== undefined) body['bloodType'] = p.bloodType; // 含血型同步（与 iOS 一致）
     if (p.birthPlace !== undefined) body['birthPlace'] = p.birthPlace;
     try {
       const saved = await APIClient.shared.upsert('childprofile', p.id, body);
+      if (APIClient.remoteWasNewer(saved)) {
+        SyncEngine.applyChildProfile(saved, p);
+        p.remoteId = SyncEngine.rStr(saved, 'id');
+        p.syncState = SyncState.synced;
+        await AppDatabase.shared.upsertChildProfile(p);
+        return;
+      }
       p.remoteId = saved['id'] as string;
       // 头像变更后 avatarRemoteURL 为空 → 补传到 childprofile.avatar（对照 iOS uploadChildAvatar）。
       if (p.avatarMediaFileName !== undefined && p.avatarRemoteURL === undefined) {
@@ -344,7 +372,6 @@ export class SyncEngine {
         if (MediaStore.shared.exists(fileName)) {
           const filePath = MediaStore.shared.fullPath(fileName);
           const fields: Record<string, string> = { 'createdAt': new Date(p.createdAt).toISOString() };
-          fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(p.createdAt));
           const res: UploadedFileResult = await APIClient.shared.uploadFile(
             'childprofile', p.id, fields, 'avatar', filePath, fileName);
           p.remoteId = res.recordId;
@@ -373,12 +400,18 @@ export class SyncEngine {
         'title': m.title, 'category': m.category, 'emoji': m.emoji, 'isCustom': m.isCustom,
         'createdAt': new Date(m.createdAt).toISOString()
       };
-      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(m.createdAt));
       if (m.detail !== undefined) body['detail'] = m.detail;
       if (m.happenedAt !== undefined) body['happenedAt'] = new Date(m.happenedAt).toISOString();
       if (m.ageDescription !== undefined) body['ageDescription'] = m.ageDescription;
       try {
         const saved = await APIClient.shared.upsert('milestones', m.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyMilestone(saved, m);
+          m.remoteId = SyncEngine.rStr(saved, 'id');
+          m.syncState = SyncState.synced;
+          await AppDatabase.shared.upsertMilestone(m);
+          continue;
+        }
         m.remoteId = saved['id'] as string;
         m.syncState = SyncState.synced;
         await AppDatabase.shared.upsertMilestone(m);
@@ -399,10 +432,16 @@ export class SyncEngine {
         'detectedByAI': f.detectedByAI, 'confirmedByParent': f.confirmedByParent,
         'createdAt': new Date(f.createdAt).toISOString()
       };
-      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(f.createdAt));
       if (f.entryId !== undefined) body['entryLocalId'] = f.entryId;
       try {
         const saved = await APIClient.shared.upsert('firsttimes', f.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyFirstTime(saved, f);
+          f.remoteId = SyncEngine.rStr(saved, 'id');
+          f.syncState = SyncState.synced;
+          await AppDatabase.shared.insertFirstTime(f);
+          continue;
+        }
         f.remoteId = saved['id'] as string;
         f.syncState = SyncState.synced;
         await AppDatabase.shared.insertFirstTime(f);
@@ -423,9 +462,15 @@ export class SyncEngine {
         'themeColorHex': m.themeColorHex, 'isPrimary': m.isPrimary,
         'createdAt': new Date(m.createdAt).toISOString()
       };
-      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(m.createdAt));
       try {
         const saved = await APIClient.shared.upsert('members', m.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyMember(saved, m);
+          m.remoteId = SyncEngine.rStr(saved, 'id');
+          m.syncState = SyncState.synced;
+          await AppDatabase.shared.upsertMember(m);
+          continue;
+        }
         m.remoteId = saved['id'] as string;
         m.syncState = SyncState.synced;
         await AppDatabase.shared.upsertMember(m);
@@ -445,7 +490,6 @@ export class SyncEngine {
         'kind': h.kind, 'title': h.title, 'recordedAt': new Date(h.recordedAt).toISOString(),
         'tags': h.tags, 'createdAt': new Date(h.createdAt).toISOString()
       };
-      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(h.createdAt));
       if (h.detail !== undefined) body['detail'] = h.detail;
       if (h.amountText !== undefined) body['amountText'] = h.amountText;
       if (h.reaction !== undefined) body['reaction'] = h.reaction;
@@ -457,6 +501,13 @@ export class SyncEngine {
       if (h.temperatureCelsius !== undefined) body['temperatureCelsius'] = h.temperatureCelsius;
       try {
         const saved = await APIClient.shared.upsert('healthrecords', h.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyHealth(saved, h);
+          h.remoteId = SyncEngine.rStr(saved, 'id');
+          h.syncState = SyncState.synced;
+          await AppDatabase.shared.insertHealth(h);
+          continue;
+        }
         h.remoteId = saved['id'] as string;
         h.syncState = SyncState.synced;
         await AppDatabase.shared.insertHealth(h);
@@ -485,6 +536,13 @@ export class SyncEngine {
       if (v.note !== undefined) body['note'] = v.note;
       try {
         const saved = await APIClient.shared.upsert('vaccinerecords', v.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyVaccine(saved, v);
+          v.remoteId = SyncEngine.rStr(saved, 'id');
+          v.syncState = SyncState.synced;
+          await AppDatabase.shared.insertVaccine(v);
+          continue;
+        }
         v.remoteId = saved['id'] as string;
         v.syncState = SyncState.synced;
         await AppDatabase.shared.insertVaccine(v);
@@ -524,6 +582,13 @@ export class SyncEngine {
       if (g.note !== undefined) body['note'] = g.note;
       try {
         const saved = await APIClient.shared.upsert('growthmeasurements', g.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyGrowth(saved, g);
+          g.remoteId = SyncEngine.rStr(saved, 'id');
+          g.syncState = SyncState.synced;
+          await AppDatabase.shared.insertGrowth(g);
+          continue;
+        }
         g.remoteId = saved['id'] as string;
         g.syncState = SyncState.synced;
         await AppDatabase.shared.insertGrowth(g);
@@ -560,10 +625,16 @@ export class SyncEngine {
           'voiceDuration': c.voiceDuration, 'voiceWaveform': c.voiceWaveform,
           'createdAt': new Date(c.createdAt).toISOString()
         };
-        body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
         if (c.text !== undefined) body['text'] = c.text;
         try {
           const saved = await APIClient.shared.upsert('comments', c.id, body);
+          if (APIClient.remoteWasNewer(saved)) {
+            SyncEngine.applyComment(saved, c);
+            c.remoteId = SyncEngine.rStr(saved, 'id');
+            c.syncState = SyncState.synced;
+            await AppDatabase.shared.insertComment(c);
+            continue;
+          }
           c.remoteId = saved['id'] as string;
           // 语音补充上传（对照 iOS uploadCommentVoice）。
           if (c.voiceFileName !== undefined && MediaStore.shared.exists(c.voiceFileName)) {
@@ -572,7 +643,6 @@ export class SyncEngine {
               'entryLocalId': c.entryId, 'authorRole': c.authorRole,
               'createdAt': new Date(c.createdAt).toISOString()
             };
-            fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
             const res: UploadedFileResult = await APIClient.shared.uploadFile(
               'comments', c.id, fields, 'voiceFile', filePath, c.voiceFileName);
             c.remoteId = res.recordId;
@@ -600,10 +670,16 @@ export class SyncEngine {
           'durationSeconds': n.durationSeconds, 'waveform': n.waveformSamples,
           'createdAt': new Date(n.createdAt).toISOString()
         };
-        body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(n.createdAt));
         if (n.transcript !== undefined) body['transcript'] = n.transcript;
         try {
           const saved = await APIClient.shared.upsert('voicenotes', n.id, body);
+          if (APIClient.remoteWasNewer(saved)) {
+            SyncEngine.applyVoiceNote(saved, n);
+            n.remoteId = SyncEngine.rStr(saved, 'id');
+            n.syncState = SyncState.synced;
+            await AppDatabase.shared.insertVoiceNote(n);
+            continue;
+          }
           n.remoteId = saved['id'] as string;
           // 语音文件上传（对照 iOS uploadVoiceNote）。
           if (n.localFileName !== undefined && MediaStore.shared.exists(n.localFileName)) {
@@ -612,7 +688,6 @@ export class SyncEngine {
               'entryLocalId': n.entryId, 'authorRole': n.authorRole,
               'createdAt': new Date(n.createdAt).toISOString()
             };
-            fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(n.createdAt));
             const res: UploadedFileResult = await APIClient.shared.uploadFile(
               'voicenotes', n.id, fields, 'file', filePath, n.localFileName);
             n.remoteId = res.recordId;
@@ -642,12 +717,18 @@ export class SyncEngine {
         'recordedAt': new Date(memo.recordedAt).toISOString(),
         'createdAt': new Date(memo.createdAt).toISOString()
       };
-      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(memo.createdAt));
       if (memo.transcript !== undefined) body['transcript'] = memo.transcript;
       if (memo.ageYears !== undefined) body['ageYears'] = memo.ageYears;
       if (memo.durationSeconds !== undefined) body['durationSeconds'] = memo.durationSeconds;
       try {
         const saved = await APIClient.shared.upsert('voicememos', memo.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyVoiceMemo(saved, memo);
+          memo.remoteId = SyncEngine.rStr(saved, 'id');
+          memo.syncState = SyncState.synced;
+          await AppDatabase.shared.insertVoiceMemo(memo);
+          continue;
+        }
         memo.remoteId = saved['id'] as string;
         if (memo.localFileName !== undefined && MediaStore.shared.exists(memo.localFileName)) {
           const filePath = MediaStore.shared.fullPath(memo.localFileName);
@@ -656,7 +737,6 @@ export class SyncEngine {
             'recordedAt': new Date(memo.recordedAt).toISOString(),
             'createdAt': new Date(memo.createdAt).toISOString()
           };
-          fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(memo.createdAt));
           const res = await APIClient.shared.uploadFile(
             'voicememos', memo.id, fields, 'file', filePath, memo.localFileName);
           memo.remoteId = res.recordId;
@@ -691,24 +771,11 @@ export class SyncEngine {
       return;
     }
     await this.updateMediaFields(m.id, { syncState: SyncState.uploading, syncFailureReason: '' });
-    let prepared: PreparedVideoUpload | null = null;
-    if (m.typeRaw === MediaType.video) {
-      prepared = await VideoUploadPreparer.prepare(fileName, m.width, m.height);
-      if (prepared === null) {
-        await this.updateMediaFields(m.id, {
-          syncState: SyncState.failed,
-          syncFailureReason: '视频超过 96MB，系统压缩后仍过大或格式不受支持'
-        });
-        return;
-      }
-    }
-    const filePath = prepared?.path ?? MediaStore.shared.fullPath(fileName);
-    const uploadFileName = prepared?.fileName ?? fileName;
+    const filePath = MediaStore.shared.fullPath(fileName);
     const fields: Record<string, string> = {
       'entryLocalId': m.entryId, 'mediaType': m.typeRaw,
       'aiTags': JSON.stringify(m.aiTags), 'createdAt': new Date(m.createdAt).toISOString()
     };
-    fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(m.createdAt));
     if (m.durationSeconds !== undefined) fields['durationSeconds'] = `${m.durationSeconds}`;
     if (m.width !== undefined) fields['width'] = `${m.width}`;
     if (m.height !== undefined) fields['height'] = `${m.height}`;
@@ -720,7 +787,7 @@ export class SyncEngine {
     const hasThumb = thumbName !== undefined && MediaStore.shared.thumbnailExists(thumbName);
     try {
       const res: UploadedFileResult = await APIClient.shared.uploadFile(
-        'media', m.id, fields, 'file', filePath, uploadFileName,
+        'media', m.id, fields, 'file', filePath, fileName,
         (fraction: number): void => { this.updateMediaFields(m.id, { uploadProgress: fraction }); },
         hasThumb ? 'thumbnail' : undefined,
         hasThumb ? thumbPath : undefined,
@@ -735,9 +802,11 @@ export class SyncEngine {
       if (remoteThumbURL !== undefined) completed['remoteThumbURL'] = remoteThumbURL;
       await this.updateMediaFields(m.id, completed);
     } catch (e) {
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: SyncEngine.errorText(e) });
-    } finally {
-      if (prepared !== null) VideoUploadPreparer.cleanup(prepared);
+      const size = MediaStore.shared.fileSizeForMedia(fileName) ?? 0;
+      const reason = size > MediaStore.publicUploadSoftLimitBytes
+        ? '大视频原片尚未上传成功，原片已保留并会继续重试，绝不以压缩代理冒充完整同步'
+        : SyncEngine.errorText(e);
+      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: reason });
     }
   }
 
@@ -761,10 +830,16 @@ export class SyncEngine {
         'title': c.title, 'fromRole': c.fromRole, 'unlockAt': new Date(c.unlockAt).toISOString(),
         'isLocked': c.isLocked, 'createdAt': new Date(c.createdAt).toISOString()
       };
-      body['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
       if (c.coverEmoji !== undefined) body['coverEmoji'] = c.coverEmoji;
       try {
         const saved = await APIClient.shared.upsert('timecapsules', c.id, body);
+        if (APIClient.remoteWasNewer(saved)) {
+          SyncEngine.applyCapsule(saved, c);
+          c.remoteId = SyncEngine.rStr(saved, 'id');
+          c.syncState = SyncState.synced;
+          await AppDatabase.shared.insertCapsule(c);
+          continue;
+        }
         c.remoteId = saved['id'] as string;
         // 加密载荷上传（对照 iOS uploadTimeCapsuleBlob）。
         if (c.encryptedBlobFileName !== undefined && MediaStore.shared.exists(c.encryptedBlobFileName)) {
@@ -774,7 +849,6 @@ export class SyncEngine {
             'unlockAt': new Date(c.unlockAt).toISOString(),
             'createdAt': new Date(c.createdAt).toISOString()
           };
-          fields['clientUpdatedAt'] = APIClient.syncTimestampString(new Date(c.createdAt));
           const res: UploadedFileResult = await APIClient.shared.uploadFile(
             'timecapsules', c.id, fields, 'encryptedBlob', filePath, c.encryptedBlobFileName);
           c.remoteId = res.recordId;
@@ -1993,7 +2067,17 @@ export class SyncEngine {
         const ext = SyncEngine.extFromURL(m.remoteURL) ?? (m.typeRaw === MediaType.video ? 'mp4' : 'jpg');
         const fileName = (existingName !== undefined && existingName.length > 0) ? existingName : `${m.id}.${ext}`;
         const destPath = MediaStore.shared.fullPath(fileName);
-        await APIClient.shared.downloadFile(m.remoteURL, destPath);
+        const tempPath = `${destPath}.download`;
+        await APIClient.shared.downloadFile(m.remoteURL, tempPath);
+        if (m.contentHash !== undefined) {
+          const actualHash = await MediaDerivationService.sha256File(tempPath);
+          if (actualHash !== m.contentHash) {
+            try { fileIo.unlinkSync(tempPath); } catch (cleanupError) {}
+            throw new Error('下载媒体 SHA-256 校验失败');
+          }
+        }
+        try { if (fileIo.accessSync(destPath)) fileIo.unlinkSync(destPath); } catch (cleanupError) {}
+        fileIo.renameSync(tempPath, destPath);
         await this.updateMediaFields(m.id, { localFileName: fileName });
         mediaDone += 1;
       } catch (e) {

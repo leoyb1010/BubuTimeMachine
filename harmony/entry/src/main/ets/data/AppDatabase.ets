@@ -600,6 +600,18 @@ export class AppDatabase {
     await this.store!.insert('media', v);
   }
 
+  async updateMediaDerivedFields(id: string, thumbnailFileName?: string, contentHash?: string,
+                                 resourceRoleRaw?: string, assetGroupID?: string): Promise<void> {
+    const values: relationalStore.ValuesBucket = { syncState: SyncState.local };
+    if (thumbnailFileName !== undefined) values['thumbnailFileName'] = thumbnailFileName;
+    if (contentHash !== undefined) values['contentHash'] = contentHash;
+    if (resourceRoleRaw !== undefined) values['resourceRoleRaw'] = resourceRoleRaw;
+    if (assetGroupID !== undefined) values['assetGroupID'] = assetGroupID;
+    const predicates = new relationalStore.RdbPredicates('media');
+    predicates.equalTo('id', id);
+    await this.store!.update(values, predicates);
+  }
+
   private static rowToMedia(rs: relationalStore.ResultSet): Media {
     const tagsStr = AppDatabase.optStr(rs, 'aiTags');
     return {
@@ -1244,6 +1256,26 @@ export class AppDatabase {
     await this.store!.update(
       { syncState: SyncState.local, uploadProgress: 0, syncFailureReason: '' },
       new relationalStore.RdbPredicates('media'));
+  }
+
+  async countPendingSync(): Promise<number> {
+    const tables: string[] = [
+      'entry', 'media', 'milestone', 'first_time', 'family_member', 'child_profile',
+      'health_record', 'vaccine_record', 'growth_measurement', 'comment', 'voice_note',
+      'voice_memo', 'time_capsule'
+    ];
+    let total = 0;
+    for (const table of tables) {
+      const predicates = new relationalStore.RdbPredicates(table);
+      predicates.in('syncState', [SyncState.local, SyncState.failed, SyncState.uploading]);
+      const result = await this.store!.query(predicates, ['id']);
+      total += result.rowCount;
+      result.close();
+    }
+    const deletions = await this.store!.query(new relationalStore.RdbPredicates('pending_deletion'), ['id']);
+    total += deletions.rowCount;
+    deletions.close();
+    return total;
   }
 
   private async deleteRowsByColumn(table: string, column: string, value: string): Promise<void> {
