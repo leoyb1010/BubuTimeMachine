@@ -28,6 +28,8 @@ import { AIService } from '../services/AIService';
 import { SSDIntakeView } from './SSDIntakeView';
 import { BubuMovedHint } from '../components/BubuMovedHint';
 import { BackDispatcher } from '../services/BackDispatcher';
+import { SyncEngine, SyncStatusSnapshot } from '../sync/SyncEngine';
+import { SyncCenterView } from './SyncCenterView';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS Features/Capture/CaptureHomeView.swift）
 // 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（里程碑/成长/故事/今日一问）
@@ -46,6 +48,8 @@ export struct HomeView {
   @State photoCount: number = 0;
   @State pendingSyncCount: number = 0;
   @State ssdCandidateCount: number = 0;
+  @State syncConnectionState: string = 'offline';
+  @State syncFailureReason: string = '';
   // 快速记录业务模型（对照 iOS @State model: CaptureModel?）。
   @State model: CaptureModel = new CaptureModel(ServerConfig.shared.currentRole);
   // 底栏中央「记录」键触发计数（对照 iOS quickCaptureTrigger）。RootPage 自增 → 打开快速记录。
@@ -141,7 +145,14 @@ export struct HomeView {
       }
     }
     this.photoMap = map;
+    this.refreshSyncSnapshot();
     this.refreshSSDIntake();
+  }
+
+  private refreshSyncSnapshot(): void {
+    const snapshot: SyncStatusSnapshot = SyncEngine.shared.statusSnapshot();
+    this.syncConnectionState = snapshot.syncing ? 'connecting' : snapshot.state;
+    this.syncFailureReason = snapshot.lastFailureReason;
   }
 
   private async refreshSSDIntake(): Promise<void> {
@@ -255,6 +266,10 @@ export struct HomeView {
         }
       })
         .width('100%').height('100%').backgroundColor(BubuColor.cream)
+    } else if (this.route === HomeRoute.syncCenter) {
+      SyncCenterView({
+        onClose: () => { this.route = HomeRoute.home; this.tabBarVisible = true; this.reload(); }
+      })
     } else if (this.route === HomeRoute.timeline) {
       Column() {
         this.panelHeader('时光')
@@ -760,33 +775,47 @@ export struct HomeView {
   saveHealthStrip() {
     Row({ space: 10 }) {
       BubuIcon({
-        name: this.pendingSyncCount === 0 ? BubuIconName.checkCloud : BubuIconName.sync,
+        name: this.syncFailureReason.length > 0 ? BubuIconName.sync
+          : (this.pendingSyncCount === 0 ? BubuIconName.checkCloud : BubuIconName.sync),
         iconSize: 22,
-        color: this.pendingSyncCount === 0 ? BubuColor.success : BubuColor.primary,
+        color: this.syncFailureReason.length > 0 ? BubuColor.danger
+          : (this.pendingSyncCount === 0 ? BubuColor.success : BubuColor.primary),
         strokeWidth: 2.2
       })
       Column({ space: 2 }) {
-        Text('本地已保存')
+        Text(this.syncFailureReason.length > 0 ? '同步遇到问题' : '本地已保存')
           .fontSize(13)
           .fontWeight(FontWeight.Bold)
-          .fontColor(BubuColor.warmBrown)
-        Text(this.syncSummary())
+          .fontColor(this.syncFailureReason.length > 0 ? BubuColor.danger : BubuColor.warmBrown)
+        Text(this.syncFailureReason.length > 0 ? this.syncFailureReason : this.syncSummary())
           .fontSize(11)
-          .fontColor(BubuColor.secondaryText)
+          .fontColor(this.syncFailureReason.length > 0 ? BubuColor.danger : BubuColor.secondaryText)
+          .maxLines(2)
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
-      Text('查看')
+      Text(this.syncFailureReason.length > 0 ? '重试' : '查看')
         .fontSize(12)
         .fontWeight(FontWeight.Bold)
         .fontColor(BubuColor.primary)
+        .onClick(() => {
+          if (this.syncFailureReason.length > 0) this.retrySync();
+          else this.navigate(HomeRoute.syncCenter);
+        })
     }
     .width('100%')
 	    .padding(12)
 	    .backgroundColor('#CCFFFFFF')
 	    .borderRadius(BubuRadius.small)
-	    .onClick(() => { this.navigate(HomeRoute.settings); })
 	  }
+
+  private async retrySync(): Promise<void> {
+    BubuHaptics.tapLight();
+    this.syncConnectionState = 'connecting';
+    await SyncEngine.shared.syncNow(true);
+    this.refreshSyncSnapshot();
+    await this.reload();
+  }
 
   // MARK: 浮动按钮 / 保存贴纸（对照 iOS naturalCaptureFloatingButton / savedToast）
 
@@ -923,6 +952,10 @@ export struct HomeView {
   private syncSummary(): string {
     if (!ServerConfig.shared.isConfigured) {
       return this.pendingSyncCount === 0 ? '离线也可用，暂无待同步' : `离线可用，${this.pendingSyncCount} 项等服务器`;
+    }
+    if (this.syncConnectionState === 'connecting') return '正在和家里的服务器核对…';
+    if (this.syncConnectionState === 'offline') {
+      return this.pendingSyncCount === 0 ? '服务器暂时离线，记录仍在本机' : `暂时离线，${this.pendingSyncCount} 项等待同步`;
     }
     return this.pendingSyncCount === 0 ? '已和家里服务器同步' : `${this.pendingSyncCount} 项正在等待同步`;
   }

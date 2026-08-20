@@ -9,6 +9,7 @@ export enum HomeRoute {
   health,          // 布布健康
   growth,          // 成长曲线
   settings,        // 设置
+  syncCenter,      // 同步与备份状态
   album,           // 相册 / 照片墙
   timeline,        // 时光轴
   ssdIntake,       // 家庭 mini / 移动硬盘待确认候选
