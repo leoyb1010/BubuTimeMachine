@@ -167,18 +167,25 @@ export struct AdvancedSettingsView {
   private async saveAndSync(): Promise<void> {
     const c = ServerConfig.shared;
     c.baseURLString = this.baseURL.trim().length === 0 ? ServerConfig.defaultBaseURL : this.baseURL.trim();
-    c.accountEmail = this.email.trim();
-    c.accountPassword = this.password;
     c.aiBaseURLString = this.aiBaseURL.trim().length === 0 ? ServerConfig.defaultAIBaseURL : this.aiBaseURL.trim();
     c.aiAPIKey = this.aiAPIKey.trim();
     c.aiEnabled = this.aiEnabled;
     c.semanticSearchEnabled = this.semanticSearchEnabled;
-    await c.setRole(ALL_FAMILY_ROLES[this.roleIndex]);
-    await c.setChildName(this.childName.trim().length === 0 ? '布布' : this.childName.trim());
-    await c.persistServer();
-    SyncEngine.shared.start();
-    this.statusText = '已保存，正在同步';
-    this.getUIContext().getPromptAction().showToast({ message: '已保存，正在同步…' });
+    this.statusText = '正在验证家庭账号…';
+    try {
+      await new AccountService().login(this.email, this.password, ALL_FAMILY_ROLES[this.roleIndex]);
+      await c.setChildName(this.childName.trim().length === 0 ? '布布' : this.childName.trim());
+      await c.persistServer();
+      await SyncEngine.shared.syncNow(true);
+      SyncEngine.shared.start();
+      const snapshot = SyncEngine.shared.statusSnapshot();
+      this.statusText = snapshot.state === 'online'
+        ? (snapshot.pendingCount > 0 ? `已连接，${snapshot.pendingCount} 项继续后台同步` : '已连接并同步完成')
+        : (snapshot.lastFailureReason.length > 0 ? snapshot.lastFailureReason : '账号或服务器验证失败');
+    } catch (e) {
+      this.statusText = e instanceof Error ? e.message : '账号或密码不对';
+    }
+    this.getUIContext().getPromptAction().showToast({ message: this.statusText });
   }
 }
 
