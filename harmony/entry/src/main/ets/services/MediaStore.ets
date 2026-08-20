@@ -99,6 +99,10 @@ export class MediaStore {
     return `${this.thumbDir}/${fileName}`;
   }
 
+  thumbnailExists(fileName: string): boolean {
+    try { return fileIo.accessSync(this.thumbnailPath(fileName)); } catch (e) { return false; }
+  }
+
   writeImportedMedia(fileName: string, data: ArrayBuffer): boolean {
     if (this.baseDir.length === 0 || fileName.length === 0) return false;
     return this.writeData(`${this.baseDir}/${fileName}`, data);

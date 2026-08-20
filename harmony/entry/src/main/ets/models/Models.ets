@@ -33,6 +33,10 @@ export interface Media {
   localFileName?: string;
   remoteURL?: string;
   thumbnailFileName?: string;
+  remoteThumbURL?: string;
+  contentHash?: string;
+  resourceRoleRaw?: string;   // display / original / live-paired
+  assetGroupID?: string;
   durationSeconds?: number;   // 视频/音频时长
   width?: number;
   height?: number;

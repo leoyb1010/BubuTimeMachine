@@ -7,6 +7,7 @@ export interface GalleryMediaLike {
   id: string;
   entryId: string;
   createdAt: number;
+  resourceRoleRaw?: string;
 }
 
 export function buildTimelineMediaSequence<T extends GalleryMediaLike>(
@@ -14,7 +15,8 @@ export function buildTimelineMediaSequence<T extends GalleryMediaLike>(
   const entryTimes = new Map<string, number>();
   for (const entry of entries) entryTimes.set(entry.id, entry.happenedAt);
   return allMedia
-    .filter((item: T): boolean => entryTimes.has(item.entryId))
+    .filter((item: T): boolean => entryTimes.has(item.entryId)
+      && (item.resourceRoleRaw === undefined || item.resourceRoleRaw === 'display'))
     .slice()
     .sort((a: T, b: T): number => {
       const timeDiff = (entryTimes.get(b.entryId) ?? 0) - (entryTimes.get(a.entryId) ?? 0);

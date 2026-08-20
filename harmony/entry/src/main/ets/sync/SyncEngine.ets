@@ -714,13 +714,27 @@ export class SyncEngine {
     if (m.durationSeconds !== undefined) fields['durationSeconds'] = `${m.durationSeconds}`;
     if (m.width !== undefined) fields['width'] = `${m.width}`;
     if (m.height !== undefined) fields['height'] = `${m.height}`;
+    if (m.contentHash !== undefined) fields['contentHash'] = m.contentHash;
+    if (m.resourceRoleRaw !== undefined) fields['resourceRole'] = m.resourceRoleRaw;
+    if (m.assetGroupID !== undefined) fields['assetGroupId'] = m.assetGroupID;
+    const thumbName = m.thumbnailFileName;
+    const thumbPath = thumbName !== undefined ? MediaStore.shared.thumbnailPath(thumbName) : undefined;
+    const hasThumb = thumbName !== undefined && MediaStore.shared.thumbnailExists(thumbName);
     try {
       const res: UploadedFileResult = await APIClient.shared.uploadFile(
-        'media', m.id, fields, 'file', filePath, fileName);
+        'media', m.id, fields, 'file', filePath, fileName,
+        (fraction: number): void => { this.updateMediaFields(m.id, { uploadProgress: fraction }); },
+        hasThumb ? 'thumbnail' : undefined,
+        hasThumb ? thumbPath : undefined,
+        hasThumb ? thumbName : undefined);
       const remoteURL = APIClient.shared.fileURL('media', res.recordId, res.storedFileName);
-      await this.updateMediaFields(m.id, {
+      const remoteThumbURL = res.storedExtraFileName
+        ? APIClient.shared.fileURL('media', res.recordId, res.storedExtraFileName) : undefined;
+      const completed: relationalStore.ValuesBucket = {
         remoteId: res.recordId, remoteURL: remoteURL, uploadProgress: 1, syncState: SyncState.synced
-      });
+      };
+      if (remoteThumbURL !== undefined) completed['remoteThumbURL'] = remoteThumbURL;
+      await this.updateMediaFields(m.id, completed);
     } catch (e) {
       await this.updateMediaFields(m.id, { syncState: SyncState.failed });
     }
@@ -1266,6 +1280,10 @@ export class SyncEngine {
     m.remoteId = SyncEngine.rStr(r, 'id');
     m.typeRaw = SyncEngine.rStr(r, 'mediaType') ?? m.typeRaw;
     m.remoteURL = SyncEngine.remoteFileURL(r, 'media', 'file');
+    m.remoteThumbURL = SyncEngine.remoteFileURL(r, 'media', 'thumbnail', 'remoteThumbURL');
+    m.contentHash = SyncEngine.rStr(r, 'contentHash');
+    m.resourceRoleRaw = SyncEngine.rStr(r, 'resourceRole');
+    m.assetGroupID = SyncEngine.rStr(r, 'assetGroupId');
     m.durationSeconds = SyncEngine.rNum(r, 'durationSeconds');
     m.width = SyncEngine.rNum(r, 'width');
     m.height = SyncEngine.rNum(r, 'height');
@@ -1276,6 +1294,10 @@ export class SyncEngine {
     const f: relationalStore.ValuesBucket = { typeRaw: m.typeRaw, aiTags: JSON.stringify(m.aiTags) };
     if (m.remoteId !== undefined) f['remoteId'] = m.remoteId;
     if (m.remoteURL !== undefined) f['remoteURL'] = m.remoteURL;
+    if (m.remoteThumbURL !== undefined) f['remoteThumbURL'] = m.remoteThumbURL;
+    if (m.contentHash !== undefined) f['contentHash'] = m.contentHash;
+    if (m.resourceRoleRaw !== undefined) f['resourceRoleRaw'] = m.resourceRoleRaw;
+    if (m.assetGroupID !== undefined) f['assetGroupID'] = m.assetGroupID;
     if (m.durationSeconds !== undefined) f['durationSeconds'] = m.durationSeconds;
     if (m.width !== undefined) f['width'] = m.width;
     if (m.height !== undefined) f['height'] = m.height;
@@ -1934,8 +1956,27 @@ export class SyncEngine {
   // 每轮最多下载若干个缺失文件，避免长时间占用；下一轮继续。
 
   private async downloadMissingFiles(downloadAll: boolean = false): Promise<void> {
-    // Media：缺本地文件但有 remoteURL。自动同步小批量；手动全量拉取时补完整机文件。
+    // 先补远端缩略图，小文件优先让时光轴和服务卡片快速出预览，再后台拉原片。
     const allMedia = await AppDatabase.shared.fetchAllMedia();
+    let thumbCount = 0;
+    const thumbLimit = downloadAll ? 1000000 : 16;
+    for (const m of allMedia) {
+      if (thumbCount >= thumbLimit) break;
+      const existingThumb = m.thumbnailFileName;
+      if (existingThumb !== undefined && MediaStore.shared.thumbnailExists(existingThumb)) continue;
+      if (m.remoteThumbURL === undefined) continue;
+      thumbCount += 1;
+      try {
+        const ext = SyncEngine.extFromURL(m.remoteThumbURL) ?? 'jpg';
+        const thumbName = existingThumb ?? `thumb_${m.id}.${ext}`;
+        await APIClient.shared.downloadFile(m.remoteThumbURL, MediaStore.shared.thumbnailPath(thumbName));
+        await this.updateMediaFields(m.id, { thumbnailFileName: thumbName });
+      } catch (e) {
+        hilog.warn(DOMAIN, 'Bubu', `下载缩略图失败 ${m.id}: ${SyncEngine.errorText(e)}`);
+      }
+    }
+
+    // Media：缺本地文件但有 remoteURL。自动同步小批量；手动全量拉取时补完整机文件。
     let mediaCount = 0;
     let mediaDone = 0;
     let mediaFailed = 0;

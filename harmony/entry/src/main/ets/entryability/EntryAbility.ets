@@ -14,6 +14,7 @@ import '../intent/RecordMomentIntent';
 import { BackgroundSyncScheduler } from '../services/BackgroundSyncScheduler';
 import { ThemeManager } from '../theme/ThemeManager';
 import { ReminderScheduler } from '../services/ReminderScheduler';
+import { WidgetRefresher } from '../theme/WidgetRefresher';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -36,6 +37,9 @@ export default class EntryAbility extends UIAbility {
     // 初始化本地数据库（RelationalStore 建表），相当于 iOS 装配 ModelContainer。
     try {
       await AppDatabase.shared.initialize(this.context);
+      WidgetRefresher.initialize(this.context);
+      AppDatabase.shared.setDataChangeListener((): void => { WidgetRefresher.requestRefresh(); });
+      WidgetRefresher.requestRefresh();
       MediaStore.shared.initialize(this.context);
       PhotoIntakeService.shared.initialize(this.context);
       APIClient.shared.initialize(this.context);

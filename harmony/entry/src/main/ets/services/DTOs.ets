@@ -219,6 +219,7 @@ export interface UploadEvent {
 export interface UploadedFileResult {
   recordId: string;
   storedFileName: string;
+  storedExtraFileName?: string;
 }
 
 // MARK: - Realtime 远端变更事件（对照 iOS RealtimeEvent）

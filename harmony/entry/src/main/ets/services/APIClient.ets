@@ -253,7 +253,10 @@ export class APIClient {
     fileField: string,
     filePath: string,
     fileName: string,
-    onProgress?: (fraction: number) => void
+    onProgress?: (fraction: number) => void,
+    extraFileField?: string,
+    extraFilePath?: string,
+    extraFileName?: string
   ): Promise<UploadedFileResult> {
     const tokenStr = await this.ensureToken();
     const existing = await this.findByLocalId(collection, localId);
@@ -277,7 +280,8 @@ export class APIClient {
     if (tokenStr.length > 0) header['Authorization'] = this.authHeader(tokenStr);
     if (onProgress) onProgress(0);
     return await this.multipartViaHttp(
-      isPatch ? 'PATCH' : 'POST', url, formData, fileField, filePath, fileName, header, onProgress);
+      isPatch ? 'PATCH' : 'POST', url, formData, fileField, filePath, fileName, header, onProgress,
+      extraFileField, extraFilePath, extraFileName);
   }
 
   // 系统 multipart 直接从 filePath 流式读取，避免把大视频整段装进内存。
@@ -289,7 +293,10 @@ export class APIClient {
     filePath: string,
     fileName: string,
     header: Record<string, string>,
-    onProgress?: (fraction: number) => void
+    onProgress?: (fraction: number) => void,
+    extraFileField?: string,
+    extraFilePath?: string,
+    extraFileName?: string
   ): Promise<UploadedFileResult> {
     const path = filePath.replace(/^file:\/\//, '');
     const parts: http.MultiFormData[] = [];
@@ -302,6 +309,14 @@ export class APIClient {
       remoteFileName: fileName,
       filePath: path
     });
+    if (extraFileField && extraFilePath && extraFileName) {
+      parts.push({
+        name: extraFileField,
+        contentType: 'application/octet-stream',
+        remoteFileName: extraFileName,
+        filePath: extraFilePath.replace(/^file:\/\//, '')
+      });
+    }
 
     const req = http.createHttp();
     try {
@@ -323,7 +338,12 @@ export class APIClient {
       const id = obj['id'] as string | undefined;
       if (!id) throw new Error('上传响应异常');
       if (onProgress) onProgress(1);
-      return { recordId: id, storedFileName: APIClient.storedFileName(obj, fileField, fileName) };
+      return {
+        recordId: id,
+        storedFileName: APIClient.storedFileName(obj, fileField, fileName),
+        storedExtraFileName: extraFileField && extraFileName
+          ? APIClient.storedFileName(obj, extraFileField, extraFileName) : undefined
+      };
     } finally {
       req.destroy();
     }

@@ -7,6 +7,23 @@ import { MediaStore } from '../services/MediaStore';
 export class WidgetRefresher {
   private static readonly snapshotStore: string = 'bubu_widget';
   private static readonly formStore: string = 'bubu_widget_forms';
+  private static appContext: common.Context | null = null;
+  private static refreshTimer: number = -1;
+
+  static initialize(context: common.Context): void {
+    WidgetRefresher.appContext = context;
+  }
+
+  static requestRefresh(): void {
+    if (WidgetRefresher.refreshTimer >= 0) clearTimeout(WidgetRefresher.refreshTimer);
+    WidgetRefresher.refreshTimer = setTimeout(async (): Promise<void> => {
+      WidgetRefresher.refreshTimer = -1;
+      const context = WidgetRefresher.appContext;
+      if (!context) return;
+      await WidgetRefresher.publishCurrentSnapshot(context);
+      WidgetRefresher.reload(context);
+    }, 350);
+  }
 
   static register(context: common.Context, formId: string): void {
     if (formId.length === 0) return;
@@ -29,7 +46,11 @@ export class WidgetRefresher {
   static async publishCurrentSnapshot(context: common.Context): Promise<void> {
     const profile = await AppDatabase.shared.fetchChildProfile();
     const entries = await AppDatabase.shared.fetchEntries(false);
-    const photos = await AppDatabase.shared.fetchAllPhotos();
+    const activeEntryIds = new Set<string>(entries.map((entry): string => entry.id));
+    const photos = (await AppDatabase.shared.fetchAllMedia()).filter((item): boolean => {
+      return item.typeRaw === 'photo' && activeEntryIds.has(item.entryId)
+        && (item.resourceRoleRaw === undefined || item.resourceRoleRaw === 'display');
+    });
     const milestones = await AppDatabase.shared.fetchMilestones();
     const growth = await AppDatabase.shared.fetchGrowth();
     const achieved = milestones.filter((item): boolean => item.happenedAt !== undefined);
@@ -38,8 +59,9 @@ export class WidgetRefresher {
     let recentPhotoUri = '';
     if (latest) {
       const media = await AppDatabase.shared.fetchMediaForEntry(latest.id);
-      const photo = media.find((item): boolean => item.typeRaw === 'photo');
-      if (photo?.thumbnailFileName) {
+      const photo = media.find((item): boolean => item.typeRaw === 'photo'
+        && (item.resourceRoleRaw === undefined || item.resourceRoleRaw === 'display'));
+      if (photo?.thumbnailFileName && MediaStore.shared.thumbnailExists(photo.thumbnailFileName)) {
         recentPhotoUri = `file://${MediaStore.shared.thumbnailPath(photo.thumbnailFileName)}`;
       } else if (photo?.localFileName && MediaStore.shared.exists(photo.localFileName)) {
         recentPhotoUri = `file://${MediaStore.shared.fullPath(photo.localFileName)}`;

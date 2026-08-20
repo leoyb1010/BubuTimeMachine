@@ -15,6 +15,7 @@ const DOMAIN = 0x0000;
 export class AppDatabase {
   static readonly shared = new AppDatabase();
   private store: relationalStore.RdbStore | null = null;
+  private dataChangeListener: (() => void) | null = null;
 
   private constructor() {}
 
@@ -26,7 +27,15 @@ export class AppDatabase {
     };
     this.store = await relationalStore.getRdbStore(context, config);
     await this.createTables();
+    this.store.on('dataChange', relationalStore.SubscribeType.SUBSCRIBE_TYPE_LOCAL_DETAILS,
+      (_changes: relationalStore.ChangeInfo[]): void => {
+        if (this.dataChangeListener) this.dataChangeListener();
+      });
     hilog.info(DOMAIN, 'Bubu', '数据库初始化完成');
+  }
+
+  setDataChangeListener(listener: (() => void) | null): void {
+    this.dataChangeListener = listener;
   }
 
   private async createTables(): Promise<void> {
@@ -41,7 +50,8 @@ export class AppDatabase {
     // Media（对照 iOS Media：含时长/尺寸/上传进度/syncState）
     await s.executeSql(`CREATE TABLE IF NOT EXISTS media (
       id TEXT PRIMARY KEY, remoteId TEXT, entryId TEXT NOT NULL, typeRaw TEXT NOT NULL,
-      localFileName TEXT, remoteURL TEXT, thumbnailFileName TEXT,
+      localFileName TEXT, remoteURL TEXT, thumbnailFileName TEXT, remoteThumbURL TEXT,
+      contentHash TEXT, resourceRoleRaw TEXT, assetGroupID TEXT,
       durationSeconds REAL, width INTEGER, height INTEGER, uploadProgress REAL NOT NULL DEFAULT 0,
       syncState TEXT NOT NULL DEFAULT 'local', aiTags TEXT, createdAt INTEGER NOT NULL)`);
     // ChildProfile
@@ -142,6 +152,10 @@ export class AppDatabase {
     await this.addColumnIfMissing('media', 'localFileName', 'TEXT');
     await this.addColumnIfMissing('media', 'remoteURL', 'TEXT');
     await this.addColumnIfMissing('media', 'thumbnailFileName', 'TEXT');
+    await this.addColumnIfMissing('media', 'remoteThumbURL', 'TEXT');
+    await this.addColumnIfMissing('media', 'contentHash', 'TEXT');
+    await this.addColumnIfMissing('media', 'resourceRoleRaw', 'TEXT');
+    await this.addColumnIfMissing('media', 'assetGroupID', 'TEXT');
     await this.addColumnIfMissing('media', 'durationSeconds', 'REAL');
     await this.addColumnIfMissing('media', 'width', 'INTEGER');
     await this.addColumnIfMissing('media', 'height', 'INTEGER');
@@ -487,6 +501,8 @@ export class AppDatabase {
       id: m.id, remoteId: m.remoteId ?? null, entryId: m.entryId, typeRaw: m.typeRaw,
       localFileName: m.localFileName ?? null, remoteURL: m.remoteURL ?? null,
       thumbnailFileName: m.thumbnailFileName ?? null, durationSeconds: m.durationSeconds ?? null,
+      remoteThumbURL: m.remoteThumbURL ?? null, contentHash: m.contentHash ?? null,
+      resourceRoleRaw: m.resourceRoleRaw ?? null, assetGroupID: m.assetGroupID ?? null,
       width: m.width ?? null, height: m.height ?? null, uploadProgress: m.uploadProgress,
       syncState: m.syncState, aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
     };
@@ -503,6 +519,10 @@ export class AppDatabase {
       localFileName: AppDatabase.optStr(rs, 'localFileName'),
       remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
       thumbnailFileName: AppDatabase.optStr(rs, 'thumbnailFileName'),
+      remoteThumbURL: AppDatabase.optStr(rs, 'remoteThumbURL'),
+      contentHash: AppDatabase.optStr(rs, 'contentHash'),
+      resourceRoleRaw: AppDatabase.optStr(rs, 'resourceRoleRaw'),
+      assetGroupID: AppDatabase.optStr(rs, 'assetGroupID'),
       durationSeconds: AppDatabase.optNum(rs, 'durationSeconds'),
       width: AppDatabase.optNum(rs, 'width'),
       height: AppDatabase.optNum(rs, 'height'),
