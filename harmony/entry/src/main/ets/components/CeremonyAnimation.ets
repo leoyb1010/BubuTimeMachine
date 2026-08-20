@@ -1,13 +1,12 @@
 // MARK: - 仪式动画（对照 iOS DesignSystem/CeremonyAnimation.swift）
 // 里程碑 / 人生第一次完成时的温暖仪式感。轻量、温柔，不喧宾夺主。
 // SwiftUI ZStack + spring 入场 + sparkleRing → ArkUI Stack + animateTo + 放射星点。
-// NOTE: iOS 用 BubuMascotBadge（吉祥物徽章）；该组件由另一组维护（Components/），
-//       此处用 emoji 占位，接入后可替换为真正的吉祥物组件。
 
 import { BubuColor, BubuFont, BubuShadow } from '../theme/BubuTheme';
 import { BubuHaptics } from '../theme/BubuHaptics';
 import { rangeArray } from './MacaronComponents2';
 import { BubuSound, SoundEffect } from '../theme/BubuSound';
+import { BubuMascotBadge, BubuExpression } from './BubuMascotBadge';
 
 @Component
 export struct CeremonyAnimation {
@@ -43,8 +42,7 @@ export struct CeremonyAnimation {
           if (!this.reduceMotion && !this.systemReduceMotion) {
             this.sparkleRing()
           }
-          Text('🎉')
-            .fontSize(72)
+          BubuMascotBadge({ badgeSize: 88, expression: BubuExpression.cheer })
             .scale({ x: this.appear ? 1 : 0.64, y: this.appear ? 1 : 0.64 })
         }
         .width(120)
