@@ -1,5 +1,9 @@
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util, buffer } from '@kit.ArkTS';
+import {
+  CAPSULE_GOLDEN_PLAIN, CAPSULE_GOLDEN_RECOVERY, CAPSULE_GOLDEN_SALT,
+  CAPSULE_GOLDEN_UNLOCK_MS, CAPSULE_GOLDEN_V2_BASE64, CAPSULE_GOLDEN_V3_BASE64
+} from '../CapsuleGoldenVectors';
 
 // MARK: - CapsuleCrypto（对照 iOS Services/Security/CapsuleCrypto.swift）
 // AES-GCM 加密。密钥派生绑定解锁时间——到期前 UI 不可解。
@@ -43,6 +47,24 @@ export class CapsuleCrypto {
   static readonly shared = new CapsuleCrypto();
 
   private constructor() {}
+
+  static async verifyGoldenVectors(): Promise<void> {
+    const v3 = CapsuleCrypto.base64Bytes(CAPSULE_GOLDEN_V3_BASE64);
+    const v2 = CapsuleCrypto.base64Bytes(CAPSULE_GOLDEN_V2_BASE64);
+    const now = CAPSULE_GOLDEN_UNLOCK_MS + 1000;
+    const plainV3 = await CapsuleCrypto.shared.decryptV3(
+      v3, CAPSULE_GOLDEN_RECOVERY, CAPSULE_GOLDEN_SALT, CAPSULE_GOLDEN_UNLOCK_MS, now);
+    const plainV2 = await CapsuleCrypto.shared.decrypt(v2, CAPSULE_GOLDEN_UNLOCK_MS, CAPSULE_GOLDEN_SALT, now);
+    if (CapsuleCrypto.utf8Decode(plainV3) !== CAPSULE_GOLDEN_PLAIN
+      || CapsuleCrypto.utf8Decode(plainV2) !== CAPSULE_GOLDEN_PLAIN) {
+      throw new Error('BTC2/BTC3 golden vector mismatch');
+    }
+  }
+
+  private static base64Bytes(value: string): Uint8Array {
+    const decoded = buffer.from(value, 'base64');
+    return new Uint8Array(decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.length));
+  }
 
   // v2 / v3 魔数前缀（"BTC2" / "BTC3" 的 UTF-8 字节）。
   private static readonly v2Magic: Uint8Array = new Uint8Array([0x42, 0x54, 0x43, 0x32]);

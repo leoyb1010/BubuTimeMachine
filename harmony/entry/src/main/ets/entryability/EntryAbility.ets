@@ -18,6 +18,7 @@ import { WidgetRefresher } from '../theme/WidgetRefresher';
 import { WeeklyReportNotifier } from '../services/WeeklyReportNotifier';
 import { MotionPreference } from '../theme/MotionPreference';
 import { BubuSound } from '../theme/BubuSound';
+import { CapsuleCrypto } from '../services/security/CapsuleCrypto';
 
 // MARK: - 应用入口 Ability
 // 对应 iOS BubuTimeMachineApp：启动时初始化数据库（建表/迁移）并拉起首页。
@@ -60,6 +61,13 @@ export default class EntryAbility extends UIAbility {
       WidgetRefresher.initialize(this.context);
       MotionPreference.initialize(this.context);
       BubuSound.initialize(this.context);
+      try {
+        await CapsuleCrypto.verifyGoldenVectors();
+        AppStorage.setOrCreate('bubuCryptoSelfTest', true);
+      } catch (cryptoError) {
+        AppStorage.setOrCreate('bubuCryptoSelfTest', false);
+        hilog.error(DOMAIN, 'Bubu', `胶囊跨端密文自检失败: ${JSON.stringify(cryptoError)}`);
+      }
       AppDatabase.shared.setDataChangeListener((): void => { WidgetRefresher.requestRefresh(); });
       WidgetRefresher.requestRefresh();
       MediaStore.shared.initialize(this.context);

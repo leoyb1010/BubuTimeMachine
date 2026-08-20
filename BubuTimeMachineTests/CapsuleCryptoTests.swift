@@ -72,6 +72,16 @@ struct CapsuleCryptoTests {
         }
     }
 
+    @Test("BTC2 跨端固定向量可由 CryptoKit 解密")
+    func crossPlatformGoldenV2() throws {
+        let blob = try #require(Data(base64Encoded: "QlRDMgABAgMEBQYHCAkKC8RVRItZqZOoongcxle+rusTmdOElhZRH2jtuCyln9qOMI4YPnaKfoAu27FbGkfstjdApP6OX6JwPmzp+Ew3jSmX06FB86vY3C4LeiKmNWySHzmCh5GiP07mMpWw/4KDTX2v"))
+        let salt = "123e4567-e89b-12d3-a456-426614174000"
+        let unlock = try #require(ISO8601DateFormatter().date(from: "2030-01-02T03:04:05Z"))
+        let plain = try crypto.decrypt(blob, unlockAt: unlock, salt: salt,
+                                       now: unlock.addingTimeInterval(1))
+        #expect(String(data: plain, encoding: .utf8) == "{\"letter\":\"跨端胶囊\",\"voiceDuration\":0,\"voiceWaveform\":[],\"photoFileNames\":[]}")
+    }
+
     /// 复刻 v1 历史实现,生成旧格式 blob(无魔数前缀,timeIntervalSince1970 派生)。
     private static func legacyEncrypt(_ plaintext: Data, unlockAt: Date, salt: String) throws -> Data {
         let material = "\(unlockAt.timeIntervalSince1970)|\(salt)|bubu-time-capsule"

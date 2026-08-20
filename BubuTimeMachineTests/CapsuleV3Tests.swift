@@ -80,6 +80,17 @@ struct CapsuleV3Tests {
         #expect(words.allSatisfy { CapsuleRecovery.wordList.contains($0) })
     }
 
+    @Test("BTC3 跨端固定向量可由 CryptoKit 解密")
+    func crossPlatformGoldenV3() throws {
+        let blob = try #require(Data(base64Encoded: "QlRDMwABAgMEBQYHCAkKC0kMpJR9rObGRNCFXwzvqGDhCAFAEy2oc+hJ1rEQvFnVpqIRiQ9HCNp7XEAKLbDAJ91InDjqNUMaD42gq0zTOZVe117eAJfjmTv5KBnntvvJxkrSBLS/W470KBicXRqpF6dt"))
+        let recovery = "apple baby bear bird blue boat book brave bread bright brook calm candle cat cloud clover coral cozy cream daisy dawn deer dream drift"
+        let salt = "123e4567-e89b-12d3-a456-426614174000"
+        let unlock = try #require(ISO8601DateFormatter().date(from: "2030-01-02T03:04:05Z"))
+        let plain = try crypto.decryptV3(blob, recoveryCode: recovery, salt: salt,
+                                         unlockAt: unlock, now: unlock.addingTimeInterval(1))
+        #expect(String(data: plain, encoding: .utf8) == "{\"letter\":\"跨端胶囊\",\"voiceDuration\":0,\"voiceWaveform\":[],\"photoFileNames\":[]}")
+    }
+
     // MARK: 媒体闭环回归（C1）
     /// 封存把语音嵌进加密 blob → 明文源可删 → 解封拿回正文与语音内容；
     /// 语音落临时目录而非媒体目录（不留明文）、按 salt 幂等命名（不产生孤儿）。
