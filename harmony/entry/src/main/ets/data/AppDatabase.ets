@@ -523,6 +523,18 @@ export class AppDatabase {
     return out;
   }
 
+  async fetchMediaForEntries(entryIds: string[]): Promise<Media[]> {
+    if (entryIds.length === 0) return [];
+    const pred = new relationalStore.RdbPredicates('media');
+    pred.in('entryId', entryIds);
+    pred.orderByAsc('createdAt');
+    const rs = await this.store!.query(pred);
+    const out: Media[] = [];
+    while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
+    rs.close();
+    return out;
+  }
+
   // 取所有照片（相册用）
   async fetchAllPhotos(): Promise<Media[]> {
     const pred = new relationalStore.RdbPredicates('media');

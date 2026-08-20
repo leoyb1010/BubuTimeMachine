@@ -7,7 +7,7 @@ iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketB
 ## 当前结论
 
 - API 26 代码能力已完成追平；逐项状态和真机验收边界见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
-- 本地 `73` 个逻辑/契约测试通过，API 26 unsigned HAP 构建通过。
+- 本地 `74` 个逻辑/契约测试通过，API 26 unsigned HAP 构建通过。
 - 2026-08-19 已在 HUAWEI Pura X Max（HarmonyOS 7.0.0 / API 26）完成一次签名安装、前台启动和无崩溃日志验证；当前新增横滑与 2.11 信息架构仍待下次真机交互回归。
 - Live View 使用 TIMER 原生实况窗；未获华为场景权益时自动降级为持续通知。
 

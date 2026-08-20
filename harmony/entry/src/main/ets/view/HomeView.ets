@@ -137,12 +137,11 @@ export struct HomeView {
       capsules.filter(c => c.syncState !== SyncState.synced).length;
     // 首张照片缩略图映射（最近两条 + 那年今日）。
     const map = new Map<string, string>();
-    for (const e of entries) {
-      const media = await AppDatabase.shared.fetchMediaForEntry(e.id) ?? [];
-      const photo = media.find(m => m.typeRaw === 'photo' && (m.localFileName !== undefined && m.localFileName.length > 0));
-      if (photo && photo.localFileName) {
-        map.set(e.id, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
-      }
+    const activeEntryIds = new Set<string>(entries.map((entry: Entry): string => entry.id));
+    const orderedPhotos = photos.slice().sort((a, b): number => a.createdAt - b.createdAt);
+    for (const photo of orderedPhotos) {
+      if (!activeEntryIds.has(photo.entryId) || map.has(photo.entryId) || !photo.localFileName) continue;
+      map.set(photo.entryId, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
     }
     this.photoMap = map;
     this.refreshSyncSnapshot();

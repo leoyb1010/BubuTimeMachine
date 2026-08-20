@@ -111,15 +111,12 @@ export struct TimelineView {
   private async loadPhotoMap(entries: Entry[], base: Map<string, string>): Promise<Map<string, string>> {
     const map = new Map<string, string>(base);
     const aspects = new Map<string, number>(this.photoAspectMap);
-    for (const e of entries) {
-      if (map.has(e.id)) continue;
-      const media = await AppDatabase.shared.fetchMediaForEntry(e.id);
-      const photo = media.find((m: Media) => m.typeRaw === 'photo' && m.localFileName !== undefined && m.localFileName.length > 0);
-      if (photo && photo.localFileName) {
-        map.set(e.id, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
-        if ((photo.width ?? 0) > 0 && (photo.height ?? 0) > 0) {
-          aspects.set(e.id, Math.max(0.8, Math.min(1.9, photo.width! / photo.height!)));
-        }
+    const media = await AppDatabase.shared.fetchMediaForEntries(entries.map((entry: Entry): string => entry.id));
+    for (const photo of media) {
+      if (map.has(photo.entryId) || photo.typeRaw !== 'photo' || !photo.localFileName) continue;
+      map.set(photo.entryId, 'file://' + MediaStore.shared.fullPath(photo.localFileName));
+      if ((photo.width ?? 0) > 0 && (photo.height ?? 0) > 0) {
+        aspects.set(photo.entryId, Math.max(0.8, Math.min(1.9, photo.width! / photo.height!)));
       }
     }
     this.photoAspectMap = aspects;
