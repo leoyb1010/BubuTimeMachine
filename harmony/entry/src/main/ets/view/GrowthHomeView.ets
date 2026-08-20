@@ -6,20 +6,35 @@ import { GrowthCurveView } from './GrowthCurveView';
 import { HealthHomeView } from './HealthHomeView';
 import { VaccineView } from './VaccineView';
 import { MilestonesView } from './MilestonesView';
+import { BackDispatcher } from '../services/BackDispatcher';
 
 @Component
 export struct GrowthHomeView {
   onBack: () => void = () => {};
   showBack: boolean = true;
 
-  @State route: string = '';
+  @State @Watch('syncBackHandler') route: string = '';
   @State milestones: Milestone[] = [];
   @State measurements: GrowthMeasurement[] = [];
   @State health: HealthRecord[] = [];
   @State vaccines: VaccineRecord[] = [];
   @State firstTimes: FirstTime[] = [];
 
-  aboutToAppear(): void { this.reload(); }
+  aboutToAppear(): void { this.reload(); this.syncBackHandler(); }
+
+  aboutToDisappear(): void { BackDispatcher.shared.unregister('growth-home'); }
+
+  private syncBackHandler(): void {
+    if (this.route.length > 0) {
+      BackDispatcher.shared.register('growth-home', 5, (): boolean => {
+        if (this.route.length === 0) return false;
+        this.route = '';
+        return true;
+      });
+    } else {
+      BackDispatcher.shared.unregister('growth-home');
+    }
+  }
 
   build() {
     if (this.route === 'curve') {

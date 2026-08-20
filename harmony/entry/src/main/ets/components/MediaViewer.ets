@@ -382,6 +382,8 @@ struct ZoomableImage {
   @State private offsetY: number = 0;
   @State private viewportWidth: number = 0;
   @State private viewportHeight: number = 0;
+  @State private sourceWidth: number = 0;
+  @State private sourceHeight: number = 0;
   private baseScale: number = 1;
   private baseOffsetX: number = 0;
   private baseOffsetY: number = 0;
@@ -396,6 +398,12 @@ struct ZoomableImage {
       .height('100%')
       .scale({ x: this.scaleValue, y: this.scaleValue })
       .translate({ x: this.offsetX, y: this.offsetY })
+      .onComplete((event) => {
+        if (!event) return;
+        this.sourceWidth = event.width;
+        this.sourceHeight = event.height;
+        this.clampPosition();
+      })
       .onAreaChange((_old: Area, area: Area) => {
         this.viewportWidth = area.width as number;
         this.viewportHeight = area.height as number;
@@ -466,8 +474,15 @@ struct ZoomableImage {
       this.offsetY = 0;
       return;
     }
-    const maxX = Math.max(0, this.viewportWidth * (this.scaleValue - 1) / 2);
-    const maxY = Math.max(0, this.viewportHeight * (this.scaleValue - 1) / 2);
+    let contentWidth = this.viewportWidth;
+    let contentHeight = this.viewportHeight;
+    if (this.sourceWidth > 0 && this.sourceHeight > 0 && this.viewportWidth > 0 && this.viewportHeight > 0) {
+      const containScale = Math.min(this.viewportWidth / this.sourceWidth, this.viewportHeight / this.sourceHeight);
+      contentWidth = this.sourceWidth * containScale;
+      contentHeight = this.sourceHeight * containScale;
+    }
+    const maxX = Math.max(0, (contentWidth * this.scaleValue - this.viewportWidth) / 2);
+    const maxY = Math.max(0, (contentHeight * this.scaleValue - this.viewportHeight) / 2);
     this.offsetX = Math.max(-maxX, Math.min(maxX, this.offsetX));
     this.offsetY = Math.max(-maxY, Math.min(maxY, this.offsetY));
   }

@@ -25,7 +25,8 @@ test('时光详情的多媒体查看器可用单指左右翻页，放大后改�
   assert.ok(viewer.includes('GestureJudgeResult.REJECT'));
   assert.ok(viewer.includes('isFingerCountLimited: true'));
   assert.ok(viewer.includes('private clampPosition(): void'));
-  assert.ok(viewer.includes('this.viewportWidth * (this.scaleValue - 1) / 2'));
+  assert.ok(viewer.includes('const containScale = Math.min'));
+  assert.ok(viewer.includes('(contentWidth * this.scaleValue - this.viewportWidth) / 2'));
   assert.ok(viewer.includes("@Watch('syncInitialIndex')"));
   assert.ok(viewer.includes('onZoomChanged'));
   assert.ok(detail.includes('mediaItems: this.galleryItems()'), '详情页必须把整条时光轴的可视媒体传给分页查看器');
