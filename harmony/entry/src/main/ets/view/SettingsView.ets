@@ -51,6 +51,7 @@ export struct SettingsView {
   @State @Watch('syncBackHandler') showPhotoFrame: boolean = false;
   @State statusText: string = '';
   @State dailyReminderEnabled: boolean = false;
+  @State simpleModeEnabled: boolean = false;
 
   aboutToAppear(): void {
     this.syncBackHandler();
@@ -64,6 +65,7 @@ export struct SettingsView {
     this.childName = c.childName;
     this.roleIndex = Math.max(0, ALL_FAMILY_ROLES.indexOf(c.currentRole));
     this.dailyReminderEnabled = c.dailyReminderEnabled;
+    this.simpleModeEnabled = c.simpleModeEnabled;
   }
 
   aboutToDisappear(): void { BackDispatcher.shared.unregister('settings'); }
@@ -333,7 +335,10 @@ export struct SettingsView {
 
   @Builder
   syncCenterPage() {
-    SyncCenterView({ onClose: () => { this.showSyncCenter = false; } })
+    SyncCenterView({
+      onClose: () => { this.showSyncCenter = false; },
+      onOpenExport: () => { this.showSyncCenter = false; this.showExport = true; }
+    })
   }
 
   @Builder
@@ -394,6 +399,17 @@ export struct SettingsView {
       Column({ space: 0 }) {
         this.navRow('主题与外观', '🎨', '马卡龙主题配色与首页背景', () => { this.showTheme = true; })
         this.navRow('相框模式', BubuIconName.photo, '把这台手机变成布布的全屏数字相框', () => { this.showPhotoFrame = true; })
+        Row({ space: 14 }) {
+          BubuIconBadge({ name: BubuIconName.sparkles, badgeSize: 36, iconSize: 19,
+            color: BubuColor.primary, fill: '#FFF0F4', radius: 10, strokeWidth: 2.1, filled: true })
+          Column({ space: 2 }) {
+            Text('简洁长辈模式').fontSize(16).fontColor(BubuColor.warmBrown)
+            Text('首页只保留看时光、拍照片、说一句').fontSize(11).fontColor(BubuColor.secondaryText)
+          }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Toggle({ type: ToggleType.Switch, isOn: this.simpleModeEnabled })
+            .selectedColor(BubuColor.primary)
+            .onChange((value: boolean) => { this.updateSimpleMode(value); })
+        }.width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
       }
       .width('100%')
       .padding({ top: 4, bottom: 4 })
@@ -571,5 +587,11 @@ export struct SettingsView {
     await ServerConfig.shared.setDailyReminderEnabled(value);
     await ReminderScheduler.shared.update(value);
     this.getUIContext().getPromptAction().showToast({ message: value ? '每日回忆提醒已开启' : '每日回忆提醒已关闭' });
+  }
+
+  private async updateSimpleMode(value: boolean): Promise<void> {
+    this.simpleModeEnabled = value;
+    await ServerConfig.shared.setSimpleModeEnabled(value);
+    this.getUIContext().getPromptAction().showToast({ message: value ? '已开启简洁长辈模式' : '已退出简洁长辈模式' });
   }
 }

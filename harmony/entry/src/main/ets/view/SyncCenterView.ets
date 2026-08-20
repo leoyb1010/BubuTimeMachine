@@ -1,19 +1,27 @@
 import { ServerConfig } from '../services/ServerConfig';
 import { SyncEngine, SyncStatusSnapshot } from '../sync/SyncEngine';
 import { BubuColor, BubuFont, BubuRadius } from '../theme/BubuTheme';
+import { preferences } from '@kit.ArkData';
+import { common } from '@kit.AbilityKit';
 
 @Component
 export struct SyncCenterView {
   onClose: () => void = () => {};
+  onOpenExport: () => void = () => {};
 
   @State state: string = 'offline';
   @State lastSyncedAt: number = 0;
   @State failureReason: string = '';
   @State nextRetrySeconds: number = 30;
   @State running: boolean = false;
+  @State lastExportAtSec: number = 0;
 
-  aboutToAppear(): void {
+  async aboutToAppear(): Promise<void> {
     this.refresh();
+    const context = this.getUIContext().getHostContext() as common.Context;
+    const store = await preferences.getPreferences(context, 'bubu_widget');
+    const value = await store.get('bubu.lastExportAt', 0);
+    this.lastExportAtSec = typeof value === 'number' ? value : 0;
   }
 
   build() {
@@ -59,6 +67,8 @@ export struct SyncCenterView {
           .backgroundColor(BubuColor.card)
           .borderRadius(BubuRadius.card)
 
+          this.backupHealthCard()
+
           Column({ space: 0 }) {
             this.detailRow('服务器', ServerConfig.shared.isConfigured ? '已配置' : '未登录')
             Divider().color(BubuColor.hairline)
@@ -100,6 +110,42 @@ export struct SyncCenterView {
       .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(BubuColor.background)
+  }
+
+  @Builder
+  backupHealthCard() {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        Text(this.exportStale() ? '⚠️' : '🛡️').fontSize(20)
+        Text('备份健康度').fontSize(BubuFont.body).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+        Blank()
+      }.width('100%')
+      this.detailRow('上次同步', this.lastSyncedText())
+      this.detailRow('上次全量存档', this.exportText())
+      if (this.exportStale()) {
+        Button('现在导出一份完整档案')
+          .width('100%').backgroundColor(BubuColor.warning).fontColor(Color.White)
+          .onClick(this.onOpenExport)
+      }
+    }
+    .width('100%').padding(16).backgroundColor(BubuColor.card).borderRadius(BubuRadius.card)
+  }
+
+  private daysSinceExport(): number {
+    if (this.lastExportAtSec <= 0) return -1;
+    return Math.floor((Date.now() - this.lastExportAtSec * 1000) / 86400000);
+  }
+
+  private exportStale(): boolean {
+    const days = this.daysSinceExport();
+    return days < 0 || days > 90;
+  }
+
+  private exportText(): string {
+    const days = this.daysSinceExport();
+    if (days < 0) return '从未导出';
+    if (days === 0) return '今天';
+    return `${days} 天前`;
   }
 
   @Builder

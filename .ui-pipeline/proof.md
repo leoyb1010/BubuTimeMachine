@@ -10,7 +10,7 @@
 ## Evidence
 
 - Screenshots / visual diffs: 已核对真机里程碑页面和首次仪式弹窗；截图含家庭隐私，仅留本机证据，不提交仓库
-- Storybook stories and tests: 不适用 ArkUI；当前 111 个 Node 契约/逻辑测试通过，新增账号登录态分支、禁止密码回填、授权改密、恢复码入口和退出确认门禁
+- Storybook stories and tests: 不适用 ArkUI；当前 113 个 Node 契约/逻辑测试通过，新增手动长辈模式、真实导出时间、90 天备份提醒与导出直达门禁
 - End-to-end interactions: 安装、启动、前台 Ability 和首屏渲染已通过；分层返回第二版已安装；全时光轴媒体序列第三版 signed HAP 已生成但设备转为 Offline，待重连安装
 - Accessibility checks: 设计契约已记录，运行验证待补
 - Console / network checks: API 26 unsigned HAP 构建成功；已获取一次真机启动日志且无崩溃
@@ -28,4 +28,4 @@
 - Deferred work: 多角色审计已确认旧版全屏 HUD 阻断 Swiper；根因版已修复命中与手势仲裁，并以 BackDispatcher 替换多页面返回广播；需下一次真机页码和逐层返回断言
 - Visual verification outstanding: 是（当前最新代码尚未重新安装）
 
-**当前状态：HOLD** — 当前版本通过 111 项测试与 API 26 signed 构建；账号页不再暴露已存密码，支持安全改密、恢复码和确认退出；设备当前 `[Empty]`，35MB HAP SHA-256 `a9c64bec68f3fd225a2da42976107431673ca7f910b214e455442de01a3e9ff1`，必须重连安装后执行媒体页码、缩略图与逐层返回断言才能转 PASS。
+**当前状态：HOLD** — 当前版本通过 113 项测试与 API 26 signed 构建；长辈模式可手动开关，备份健康不再是死源码；设备当前 `[Empty]`，35MB HAP SHA-256 `ce31a431ce795e6dfd4adea484d2d9d12b5e4a8f8ae4deef7ce1b63637a5c9ee`，必须重连安装后执行媒体页码、缩略图与逐层返回断言才能转 PASS。

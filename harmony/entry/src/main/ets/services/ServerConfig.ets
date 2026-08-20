@@ -123,6 +123,12 @@ export class ServerConfig {
     AppStorage.setOrCreate('bubuSimpleMode', false);
   }
 
+  async setSimpleModeEnabled(value: boolean): Promise<void> {
+    this.simpleModeEnabled = value;
+    await this.putBool('simpleModeEnabled', value);
+    AppStorage.setOrCreate('bubuSimpleMode', value);
+  }
+
   async setChildName(name: string): Promise<void> {
     this.childName = name;
     await this.put('childName', name);
