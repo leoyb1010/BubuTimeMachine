@@ -152,7 +152,6 @@ struct WidgetPhotoPipelineTests {
 
     @Test("缩略图优先于原图：两处都在时读的是缩略图")
     func thumbnailWinsOverOriginal() throws {
-        let store = MediaStore()
         let big = try makeJPEG(width: 2000, height: 2000, color: .systemBlue)
         let small = try makeJPEG(width: 120, height: 120, color: .systemGreen)
         defer { cleanUp([big, small]) }

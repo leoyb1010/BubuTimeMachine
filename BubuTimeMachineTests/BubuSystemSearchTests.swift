@@ -24,4 +24,27 @@ struct BubuSystemSearchTests {
         #expect(router.pendingTab == 1)
         #expect(router.pendingEntryID == nil)
     }
+
+    @Test("后到的时光链接会清掉残留快速记录状态")
+    func momentRouteClearsPendingCapture() {
+        let router = BubuRouter()
+        router.handle(BubuRoute.record.url)
+        #expect(router.pendingQuickCapture)
+
+        let id = UUID()
+        router.handle(BubuRoute.momentURL(id: id))
+        #expect(router.pendingQuickCapture == false)
+        #expect(router.pendingEntryID == id)
+    }
+
+    @Test("Spotlight 差集只删除不再存在的实体")
+    func spotlightStaleIdentifierDiff() {
+        let kept = UUID()
+        let removed = UUID()
+        let added = UUID()
+        let stale = BubuMomentSpotlightIndexer.staleIdentifiers(
+            previous: [kept, removed], current: [kept, added])
+
+        #expect(stale == [removed])
+    }
 }

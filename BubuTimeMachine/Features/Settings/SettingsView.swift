@@ -57,15 +57,18 @@ struct SettingsView: View {
                     Toggle(isOn: $photoInboxEnabled) {
                         settingRowLabel("照片智能收件箱", icon: "photo.badge.plus.fill",
                                         tint: BubuTheme.Color.pink,
-                                        subtitle: "首页自动发现新照片、提示「待收好」。关着也不影响手动记录和移动硬盘批量导入")
+                                        subtitle: "自动发现新照片并提示整理；关闭不影响手动记录和硬盘导入",
+                                        showsChevron: false)
                     }
                     .tint(env.theme.theme.primary)
                     Toggle(isOn: $spotlightEnabled) {
                         settingRowLabel("系统搜索里的时光", icon: "sparkle.magnifyingglass",
                                         tint: BubuTheme.Color.info,
-                                        subtitle: "开启后，Spotlight 可按文字找到时光并直达详情；仅建立本机索引，不上传照片或家庭资料")
+                                        subtitle: "本机按文字搜索并直达时光；不上传照片或家庭资料",
+                                        showsChevron: false)
                     }
                     .tint(env.theme.theme.primary)
+                    .accessibilityIdentifier("settings.spotlight")
                     .onChange(of: spotlightEnabled) { _, enabled in
                         BubuMomentSpotlightIndexer.setEnabled(enabled, context: context)
                     }
@@ -74,7 +77,8 @@ struct SettingsView: View {
                     row("主题与外观", icon: "paintpalette.fill", tint: env.theme.theme.primary) { ThemeSettingsView() }
                     Toggle(isOn: Binding(get: { soundOn }, set: { soundOn = $0; BubuSound.isEnabled = $0 })) {
                         settingRowLabel("声音反馈", icon: "speaker.wave.2.fill",
-                                        tint: BubuTheme.Color.info, subtitle: "保存、封存、开启时的轻声音效")
+                                        tint: BubuTheme.Color.info, subtitle: "保存、封存、开启时的轻声音效",
+                                        showsChevron: false)
                     }
                     .onChange(of: soundOn) { _, on in if on { BubuSound.play(.save) } }
                     .tint(env.theme.theme.primary)
@@ -82,7 +86,8 @@ struct SettingsView: View {
                     Toggle(isOn: $config.simpleModeEnabled) {
                         settingRowLabel(config.currentRole.simpleModeName, icon: "hand.tap.fill",
                                         tint: BubuTheme.Color.success,
-                                        subtitle: "大字大按钮，只保留 拍照 / 录音 / 看布布。切到长辈身份会自动开启")
+                                        subtitle: "大字大按钮，只保留 拍照 / 录音 / 看布布。切到长辈身份会自动开启",
+                                        showsChevron: false)
                     }
                     .tint(env.theme.theme.primary)
                     .bubuSettingsTip(SimpleModeTip(), enabled: shouldShowSimpleModeTip)
@@ -96,7 +101,7 @@ struct SettingsView: View {
                     // 每张停留多久：挂墙当相框时，有人嫌换得快、有人嫌慢
                     HStack {
                         settingRowLabel("每张停留", icon: "timer", tint: BubuTheme.Color.info,
-                                        subtitle: nil)
+                                        subtitle: nil, showsChevron: false)
                         Picker("每张停留", selection: $frameDwell) {
                             Text("5 秒").tag(5.0)
                             Text("8 秒").tag(8.0)
@@ -223,7 +228,8 @@ struct SettingsView: View {
             Toggle(isOn: Binding(get: { config.dailyReminderEnabled },
                                  set: { config.dailyReminderEnabled = $0 })) {
                 settingRowLabel("那年今日 · 每日回忆", icon: "bell.badge.fill",
-                                tint: BubuTheme.Color.warning, subtitle: "每天提醒：往年的今天")
+                                tint: BubuTheme.Color.warning, subtitle: "每天提醒：往年的今天",
+                                showsChevron: false)
             }
             .onChange(of: config.dailyReminderEnabled) { _, on in
                 Task { await ReminderScheduler.shared.update(enabled: on, context: context) }
@@ -279,7 +285,8 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    private func settingRowLabel(_ title: String, icon: String, tint: Color, subtitle: String?) -> some View {
+    private func settingRowLabel(_ title: String, icon: String, tint: Color, subtitle: String?,
+                                 showsChevron: Bool = true) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .font(BubuTheme.Font.scaled(17, weight: .semibold))
@@ -295,10 +302,13 @@ struct SettingsView: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right").font(BubuTheme.Font.scaled(14, weight: .semibold))
-                .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.6))
+            if showsChevron {
+                Image(systemName: "chevron.right").font(BubuTheme.Font.scaled(14, weight: .semibold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.6))
+            }
         }
         .padding(.horizontal, 14)
+        .padding(.vertical, subtitle == nil ? 0 : 6)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
     }

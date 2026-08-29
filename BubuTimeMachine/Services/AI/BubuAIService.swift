@@ -348,6 +348,10 @@ final class BubuAIService: AIService, @unchecked Sendable {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("bubu-transcribe-\(UUID().uuidString).body")
         FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        var completed = false
+        defer {
+            if !completed { try? FileManager.default.removeItem(at: tempURL) }
+        }
         let output = try FileHandle(forWritingTo: tempURL)
         defer { try? output.close() }
         func write(_ string: String) throws {
@@ -355,7 +359,8 @@ final class BubuAIService: AIService, @unchecked Sendable {
         }
 
         try write("--\(boundary)\r\n")
-        try write("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioURL.lastPathComponent)\"\r\n")
+        let safeName = MultipartFormData.safeFilename(audioURL.lastPathComponent, fallback: "voice.m4a")
+        try write("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"\r\n")
         try write("Content-Type: application/octet-stream\r\n\r\n")
 
         let input = try FileHandle(forReadingFrom: audioURL)
@@ -367,6 +372,7 @@ final class BubuAIService: AIService, @unchecked Sendable {
         }
 
         try write("\r\n--\(boundary)--\r\n")
+        completed = true
         return tempURL
     }
 

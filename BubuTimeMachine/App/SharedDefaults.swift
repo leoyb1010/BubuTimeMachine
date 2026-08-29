@@ -217,14 +217,14 @@ extension SharedWidgetSnapshot {
         return (try? context.fetchCount(descriptor)) ?? 0
     }
 
-    /// 总照片数：直接对 Media 做谓词 COUNT（不加载对象、不遍历每条 Entry 的关系）。
-    /// 只用 Media 自有字段（typeRaw / 缩略图 / 本地文件名）作条件，避免不稳的关系穿透谓词。
-    /// 说明：软删除（isArchived）记录里的照片会被计入，与旧实现（仅统计未归档）略有出入；
-    /// 归档是罕见的软删操作，桌面「总照片」是概览数字，为换取单条 COUNT 的性能与稳定，接受此微小口径差异。
+    /// 总照片数：直接对 Media 做谓词 COUNT（不加载对象、不遍历整张 Entry 表），
+    /// 同时穿透到所属 Entry 排除软删除记录，首页/小组件删除后数字立即回到真实口径。
     @MainActor
     private static func totalPhotoCount(context: ModelContext) -> Int {
         let descriptor = FetchDescriptor<Media>(predicate: #Predicate {
-            $0.typeRaw == "photo" && ($0.thumbnailFileName != nil || $0.localFileName != nil)
+            $0.typeRaw == "photo"
+                && ($0.thumbnailFileName != nil || $0.localFileName != nil)
+                && $0.entry?.isArchived == false
         })
         return (try? context.fetchCount(descriptor)) ?? 0
     }

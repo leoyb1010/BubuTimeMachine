@@ -19,6 +19,7 @@
 - ✅ 可选的 Spotlight 时光实体索引，搜索结果通过 deep link 直达单条旧记录
 - ✅ 首页限量查询 + SQLite COUNT/日期范围统计，不再随十几年数据量线性驻留
 - ✅ XCUITest 覆盖 iPhone/iPad 根导航、快速记录、时光搜索与 iPad 横屏
+- ✅ 2.12.1 二次审计：Spotlight 隐私清理、深链状态、语音任务生命周期、归档统计与 multipart 上传边界均有回归测试
 
 **地基**
 - ✅ Xcode 工程（xcodegen）+ SwiftData ModelContainer（11 个实体）

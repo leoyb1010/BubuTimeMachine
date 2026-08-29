@@ -742,7 +742,9 @@ private struct TimelineEntryDestination: View {
     @Query private var entries: [Entry]
 
     init(entryID: UUID) {
-        var descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryID })
+        var descriptor = FetchDescriptor<Entry>(predicate: #Predicate {
+            $0.id == entryID && !$0.isArchived
+        })
         descriptor.fetchLimit = 1
         _entries = Query(descriptor)
     }

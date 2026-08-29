@@ -137,6 +137,31 @@ struct GrowthIntegrityMigrationTests {
         #expect(!monthValues.values.contains(91))
     }
 
+    @Test("首页与小组件照片总数排除软删除记录")
+    func widgetPhotoCountExcludesArchivedEntries() throws {
+        let container = try makeContainer()
+        let context = container.mainContext
+        context.insert(ChildProfile(name: "布布", birthday: .now))
+
+        let active = Entry(authorRole: "妈妈", note: "保留")
+        let activePhoto = Media(type: .photo, localFileName: "active.jpg")
+        activePhoto.entry = active
+        context.insert(active)
+        context.insert(activePhoto)
+
+        let archived = Entry(authorRole: "妈妈", note: "已删除")
+        archived.isArchived = true
+        let archivedPhoto = Media(type: .photo, localFileName: "archived.jpg")
+        archivedPhoto.entry = archived
+        context.insert(archived)
+        context.insert(archivedPhoto)
+        try context.save()
+
+        let snapshot = try #require(SharedWidgetSnapshot.make(context: context))
+        #expect(snapshot.totalEntryCount == 1)
+        #expect(snapshot.totalPhotoCount == 1)
+    }
+
     @Test("真正晚一天的测量仍然优先于旧日正式记录")
     func laterDayStillWinsRegardlessOfSource() {
         let day = Date(timeIntervalSince1970: 1_780_100_000)

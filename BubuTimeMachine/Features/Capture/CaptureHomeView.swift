@@ -145,6 +145,7 @@ struct CaptureHomeView: View {
             }
         }
         .onChange(of: statsFingerprint, initial: true) { _, _ in rebuildStats() }
+        .onChange(of: env.syncEngine.lastSyncedAt) { _, _ in rebuildStats() }
         .task(id: heroBackgroundKey) {
             await refreshHeroBackgroundImage()
         }
@@ -279,6 +280,7 @@ struct CaptureHomeView: View {
         photoScanner.refreshAuthorizationState()
         guard Date.now.timeIntervalSince(lastHomeRefreshAt) > 2 else { return }
         lastHomeRefreshAt = .now
+        rebuildStats()
         if photoInboxEnabled, photoScanner.authorized { Task { _ = await photoScanner.scan() } }
         refreshUploadQueueSummary()
         Task { await refreshSSDCandidates() }
@@ -857,7 +859,9 @@ struct CaptureHomeView: View {
     private func rebuildStats() {
         let cal = Calendar.current
         let photoDescriptor = FetchDescriptor<Media>(predicate: #Predicate {
-            $0.typeRaw == "photo" && ($0.thumbnailFileName != nil || $0.localFileName != nil)
+            $0.typeRaw == "photo"
+                && ($0.thumbnailFileName != nil || $0.localFileName != nil)
+                && $0.entry?.isArchived == false
         })
         totalPhotos = (try? modelContext.fetchCount(photoDescriptor)) ?? 0
 
@@ -885,6 +889,8 @@ struct CaptureHomeView: View {
                 components.month = today.month
                 components.day = today.day
                 guard let dayStart = cal.date(from: components),
+                      cal.component(.month, from: dayStart) == today.month,
+                      cal.component(.day, from: dayStart) == today.day,
                       let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { continue }
                 let descriptor = FetchDescriptor<Entry>(
                     predicate: #Predicate {

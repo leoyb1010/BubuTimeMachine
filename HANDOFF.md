@@ -13,8 +13,8 @@
 - **仓库路径**：`/Users/leoyuan/Documents/Leo-布布时光机`
 - **工程管理**：xcodegen（改 `project.yml` 后必须重跑 `xcodegen generate`）
 - **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 26.0、watchOS 11.0 部署目标
-- **规模**（2026-08-29 实测）：主 App 约 180 个 Swift 文件 / 4 万行；单元测试 152 项 / 26 套件，另有 iPhone+iPad XCUITest。
-- **当前版本**：v2.12.0
+- **规模**（2026-08-29 实测）：主 App 约 180 个 Swift 文件 / 4 万行；单元测试 157 项 / 27 套件，另有 5 项 iPhone+iPad XCUITest。
+- **当前版本**：v2.12.1
 
 ---
 
@@ -42,13 +42,14 @@ xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
 APP=$(find ~/Library/Developer/Xcode/DerivedData/BubuTimeMachine-*/Build/Products/Debug-iphonesimulator -name "BubuTimeMachine.app" -maxdepth 1 | head -1)
 xcrun simctl boot "iPhone 17 Pro" 2>/dev/null
 xcrun simctl install "iPhone 17 Pro" "$APP"
-xcrun simctl launch "iPhone 17 Pro" com.bubu.timemachine -uitest-seed -uitest-settings
+xcrun simctl launch "iPhone 17 Pro" com.bubu.timemachine -uitest-in-memory -uitest-seed -uitest-settings
 sleep 4
 xcrun simctl io "iPhone 17 Pro" screenshot /tmp/shot.png
 ```
 
 **DEBUG 启动参数**（仅 DEBUG 编译有效，定义在 `App/BubuTimeMachineApp.swift` 与 `RootTabView.swift`）：
 - `-uitest-seed`：注入布布档案 + 成员 + 记录 + 里程碑 + 时间胶囊，并跳过引导（`-uitest-seed-big` 再铺 400 条压测数据）
+- `-uitest-in-memory`：UI 测试使用独立内存数据库，不读取或污染模拟器既有家庭档案。
 - `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
   时间胶囊已并入魔法屋，iPhone 只有 4 个 Tab + 中央「记一笔」；N≥4 会被夹到 3（档案馆 tag 4 只在 Mac Catalyst 侧栏存在）
 - 直达页面：`-uitest-simple` / `-uitest-capture` / `-uitest-timeline` / `-uitest-ai` / `-uitest-growth` /

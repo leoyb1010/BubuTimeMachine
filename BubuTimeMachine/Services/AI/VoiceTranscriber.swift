@@ -96,6 +96,7 @@ enum VoiceTranscriber {
                 return String(transcript.characters)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            defer { resultTask.cancel() }
 
             try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
             let text = try await resultTask.value

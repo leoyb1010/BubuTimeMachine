@@ -925,6 +925,10 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("bubu-upload-\(UUID().uuidString).body")
         FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        var completed = false
+        defer {
+            if !completed { try? FileManager.default.removeItem(at: tempURL) }
+        }
         let output = try FileHandle(forWritingTo: tempURL)
         defer { try? output.close() }
 
@@ -933,8 +937,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         }
 
         func writeFilePart(field: String, url: URL, name: String) throws {
+            let safeName = MultipartFormData.safeFilename(name)
             try write("--\(boundary)\r\n")
-            try write("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(name)\"\r\n")
+            try write("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(safeName)\"\r\n")
             try write("Content-Type: application/octet-stream\r\n\r\n")
             let input = try FileHandle(forReadingFrom: url)
             defer { try? input.close() }
@@ -959,6 +964,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         }
 
         try write("--\(boundary)--\r\n")
+        completed = true
         return tempURL
     }
 

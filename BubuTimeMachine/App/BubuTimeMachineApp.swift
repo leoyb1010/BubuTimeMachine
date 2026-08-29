@@ -7,6 +7,12 @@ import UIKit
 /// @main：装配 ModelContainer（全部 @Model）+ 注入全局 AppEnvironment（DI）。
 @main
 struct BubuTimeMachineApp: App {
+    #if DEBUG
+    private static let usesInMemoryUITestStore = ProcessInfo.processInfo.arguments.contains("-uitest-in-memory")
+    #else
+    private static let usesInMemoryUITestStore = false
+    #endif
+
     /// SwiftData 容器：唯一真相源。包含第 2 章全部实体。
     let modelContainer: ModelContainer
 
@@ -28,6 +34,17 @@ struct BubuTimeMachineApp: App {
     init() {
         // schema 唯一真相源：版本化 BubuSchemaV1（与 Widget/Intent 完全一致）
         let schema = SharedModelContainer.schema
+        if Self.usesInMemoryUITestStore {
+            let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            do {
+                modelContainer = try ModelContainer(for: schema, configurations: [memory])
+                BubuStoreHealth.markHealthy()
+                SharedModelContainer.injected = modelContainer
+                return
+            } catch {
+                fatalError("无法创建 UI Test 内存容器：\(error)")
+            }
+        }
         // App Group：先【同步】把旧私有沙盒的 store 三件套迁到共享容器（小、幂等、失败不删源），
         // 再让 ModelConfiguration 指向共享容器里的 store —— Widget/灵动岛等 extension 才能读到同一份数据。
         // 媒体库（可能几 GB）不在 init 里搬——它改到 .task 后台执行（migrateMediaIfNeeded），
@@ -80,8 +97,10 @@ struct BubuTimeMachineApp: App {
                         // 媒体库（Media/Thumbnails，老用户可能几 GB）从旧沙盒搬到 App Group 共享容器：
                         // 放到后台 detached 任务，绝不阻塞首帧/卡启动看门狗。迁移是拷贝不删源，
                         // 迁移窗口内 MediaStore 读取会自动回退旧目录，绝不白图。失败下次启动再补。
-                        Task.detached(priority: .utility) {
-                            StorageMigrator.migrateMediaIfNeeded()
+                        if !Self.usesInMemoryUITestStore {
+                            Task.detached(priority: .utility) {
+                                StorageMigrator.migrateMediaIfNeeded()
+                            }
                         }
                         #if DEBUG
                         if !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-uitest-") }) {

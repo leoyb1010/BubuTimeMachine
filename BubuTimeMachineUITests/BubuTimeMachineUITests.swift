@@ -6,7 +6,7 @@ final class BubuTimeMachineUITests: XCTestCase {
     func testAdaptiveRootAndQuickCapture() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-seed"]
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed"]
         app.launch()
 
         let globalRecord = app.buttons["root.record"]
@@ -37,7 +37,7 @@ final class BubuTimeMachineUITests: XCTestCase {
     func testTimelineProbeRendersAndSearches() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-seed", "-uitest-timeline"]
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-timeline"]
         app.launch()
 
         XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 8))
@@ -50,7 +50,7 @@ final class BubuTimeMachineUITests: XCTestCase {
     func testColdMomentDeepLinkOpensExactEntry() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-seed", "-uitest-open-first-moment"]
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-open-first-moment"]
         app.launch()
 
         let note = app.staticTexts["布布今天第一次自己扶着沙发站起来了！"]
@@ -63,7 +63,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-seed"]
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed"]
         app.launch()
 
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -74,6 +74,24 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(element(named: "魔法屋", in: app).exists)
         attachScreenshot("ipad-landscape-root", to: self)
         XCUIDevice.shared.orientation = .portrait
+    }
+
+    @MainActor
+    func testSpotlightPrivacyToggleCanBeReversed() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-settings"]
+        app.launch()
+
+        let toggle = app.switches["settings.spotlight"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8))
+        if toggle.value as? String == "1" { toggle.tap() }
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+        attachScreenshot("spotlight-privacy-off", to: self)
     }
 
     @MainActor

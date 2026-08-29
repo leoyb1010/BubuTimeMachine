@@ -17,7 +17,7 @@ final class BubuRouter {
     func handle(_ url: URL) {
         guard url.scheme == BubuRoute.scheme, let route = BubuRoute(host: url.host) else { return }
         pendingTab = route.tabIndex
-        if route == .record { pendingQuickCapture = true }
+        pendingQuickCapture = (route == .record)
         pendingEntryID = nil
         if route == .moment {
             if let rawID = url.pathComponents.dropFirst().first,
