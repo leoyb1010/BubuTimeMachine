@@ -2,30 +2,24 @@
 
 ## Verification scope
 
-- Release level: Level 3（跨端家庭数据产品）
-- Routes / screens: 同步中心、照片收件箱、移动硬盘候选、成长中心、问问布布、布布周报、声音年轮、三动作姥姥模式、真实 PDF 年册、三版式分享卡、持久哄睡计时、手机相框和时光详情媒体分页
-- Viewports / devices: HUAWEI Pura X Max 典藏版，HarmonyOS 7.0.0 / API 26；仅手机范围
-- Runtime baseline: 2.11.0 / 2026081901 最新签名 HAP 于 2026-08-19 17:51 覆盖安装成功，EntryAbility 启动成功、进程存在；HAP SHA-256 `2dbc666bf6b2cdb415ebcf58cb2181f58450dcf15e884ab60deb55bf67c59ea0`
+- Release level: Level 3（家庭长期数据 + iPhone/iPad）。
+- Runtime baseline: Xcode 26.6 / iOS 26.5 Simulator；iOS 27 API 仅编译器门控，待 Xcode 27 shadow build。
+- Devices: iPhone 17 Pro、iPad Pro 13-inch；iPad 横屏由 XCUITest 设置 orientation。
 
 ## Evidence
 
-- Screenshots / visual diffs: 已核对真机里程碑页面和首次仪式弹窗；截图含家庭隐私，仅留本机证据，不提交仓库
-- Storybook stories and tests: 不适用 ArkUI；当前 156 个 Node 契约/逻辑测试通过，新增家庭/Token/文件 URL 隔离、LWW 合并、媒体派生/哈希、格式嗅探、pending 计数、成长 Tab 和根返回门禁
-- End-to-end interactions: 安装、启动、前台 Ability 和首屏渲染已通过；分层返回第二版已安装；全时光轴媒体序列第三版 signed HAP 已生成但设备转为 Offline，待重连安装
-- Accessibility checks: 设计契约已记录，运行验证待补
-- Console / network checks: API 26 unsigned HAP 构建成功；已获取一次真机启动日志且无崩溃
-- Performance checks: 待补
-- Reduced-motion check: 待补
+- Build: iPhone 17 Pro simulator build succeeded after native Tab, SpeechAnalyzer, Spotlight and responsive changes.
+- Unit: 152 项 / 26 套件全绿，包含系统搜索 UUID 路由与非法 id 回归。
+- UI: iPhone 4 条 XCUITest（iPad 专属横屏用例按预期跳过）；iPad 4 条全部通过；iPhone 17e 核心记录流通过。
+- Screenshots: `/tmp/BubuIOS27Evidence/` 保留 baseline 与迭代截图；真实家庭 PII 不提交仓库。
+- Accessibility: 记录入口有稳定 identifier/label；系统搜索默认关闭，可在设置中启用并清除索引。
+- Performance: 首页由全量 `@Query` 改成最近 12 条 + COUNT/日期范围查询；远程/同步协议未重写。
 
 ## Snapshot decisions
 
-- Intentional baseline changes: 保留既有“家庭绘本 × 成长档案”视觉方向，不另起设计语言
-- Rejected changes: 用 emoji 替代正式系统图标、用占位页计入追平
+- Accepted: 原生系统 Tab、手机 Living Cover、平板宽屏完整身份卡、移除 AI 悬浮球、记录面板 900pt 收口。
+- Rejected: iPad 底部空 accessory；已改为宽屏禁用，记录由首页主动作与展开侧栏提供。
 
-## Remaining risk
+## Finish state
 
-- Known issues: Live View TIMER 权益未知；编译警告仍以 RDB/系统 API 的“可能抛异常”和设备能力提示为主
-- Deferred work: 多角色审计已确认旧版全屏 HUD 阻断 Swiper；根因版已修复命中与手势仲裁，并以 BackDispatcher 替换多页面返回广播；需下一次真机页码和逐层返回断言
-- Visual verification outstanding: 是（当前最新代码尚未重新安装）
-
-**当前状态：HOLD** — 当前版本通过 156 项测试与 API 26 signed 构建；最终对抗审计中的 P0 迁移、家庭隔离、文件凭据和原片保真已修；设备当前 `[Empty]`，35MB HAP SHA-256 `c120c7eceead097cf9f2a84ce5dbfe3db43d66f86d1d53905d028bdc53b5a82f`，必须重连安装后执行覆盖升级、媒体页码、账号隔离和逐层返回断言才能转 PASS。
+**PASS** — Debug clean build、Release build、152 单测、iPhone/iPad/紧凑 iPhone UI Test、iPad 横屏、深浅色/大字号与主要路由截图均通过。iOS 27 专属分支仍需 Xcode 27 shadow build；这不会影响当前 iOS 26 正式路径。

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import TipKit
 
 // MARK: - 设置（Wave L §5.1 重构）
 /// 信息架构按使用频率重排：个人化在前、资料中间、机房（服务器/AI Key）收进「高级 · 自托管」二级页。
@@ -7,15 +8,22 @@ import SwiftData
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Query private var members: [FamilyMember]
     @State private var soundOn = BubuSound.isEnabled
     @State private var showFrame = false
     /// 相框每张停留秒数（与 PhotoFrameView 共用同一个 AppStorage 键）
     @AppStorage("bubu.photoFrame.dwell") private var frameDwell: Double = 8
     @AppStorage("bubu.photoInbox.enabled") private var photoInboxEnabled = false
+    @AppStorage(BubuMomentSpotlightIndexer.enabledKey) private var spotlightEnabled = false
 
     private var currentMember: FamilyMember? {
         members.first { $0.id == env.currentMemberId } ?? members.first
+    }
+
+    private var shouldShowSimpleModeTip: Bool {
+        !dynamicTypeSize.isAccessibilitySize
+            && !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-uitest-") })
     }
 
     var body: some View {
@@ -52,6 +60,15 @@ struct SettingsView: View {
                                         subtitle: "首页自动发现新照片、提示「待收好」。关着也不影响手动记录和移动硬盘批量导入")
                     }
                     .tint(env.theme.theme.primary)
+                    Toggle(isOn: $spotlightEnabled) {
+                        settingRowLabel("系统搜索里的时光", icon: "sparkle.magnifyingglass",
+                                        tint: BubuTheme.Color.info,
+                                        subtitle: "开启后，Spotlight 可按文字找到时光并直达详情；仅建立本机索引，不上传照片或家庭资料")
+                    }
+                    .tint(env.theme.theme.primary)
+                    .onChange(of: spotlightEnabled) { _, enabled in
+                        BubuMomentSpotlightIndexer.setEnabled(enabled, context: context)
+                    }
                 }
                 group("外观") {
                     row("主题与外观", icon: "paintpalette.fill", tint: env.theme.theme.primary) { ThemeSettingsView() }
@@ -68,7 +85,7 @@ struct SettingsView: View {
                                         subtitle: "大字大按钮，只保留 拍照 / 录音 / 看布布。切到长辈身份会自动开启")
                     }
                     .tint(env.theme.theme.primary)
-                    .popoverTip(SimpleModeTip())
+                    .bubuSettingsTip(SimpleModeTip(), enabled: shouldShowSimpleModeTip)
 
                     Button { showFrame = true } label: {
                         settingRowLabel("相框模式", icon: "photo.stack.fill",
@@ -122,6 +139,7 @@ struct SettingsView: View {
                 footer
             }
             .padding()
+            .bubuContentColumn(760)
         }
         .navigationTitle("设置")
         .background(BubuTheme.Color.background.ignoresSafeArea())
@@ -283,5 +301,16 @@ struct SettingsView: View {
         .padding(.horizontal, 14)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func bubuSettingsTip(_ tip: some Tip, enabled: Bool) -> some View {
+        if enabled {
+            popoverTip(tip)
+        } else {
+            self
+        }
     }
 }

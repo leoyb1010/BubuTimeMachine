@@ -332,3 +332,73 @@ struct BubuIdentityCard: View {
         )
     }
 }
+
+// MARK: - 首页当下封面
+/// iPhone 首屏只放“此刻最重要的信息”，完整证件卡留给宽屏与档案页。
+struct BubuLivingCover: View {
+    let profile: ChildProfile
+    let theme: BubuThemeDefinition
+    let mediaStore: MediaStore
+
+    var body: some View {
+        HStack(spacing: 13) {
+            avatar
+            VStack(alignment: .leading, spacing: 3) {
+                Text("BUBU · TODAY")
+                    .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(theme.primary.opacity(0.78))
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(profile.name)
+                        .font(BubuTheme.Font.scaled(21, weight: .black, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
+                        .font(BubuTheme.Font.scaled(12.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(theme.primary)
+                }
+                Text("来到世界第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .contentTransition(.numericText())
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(BubuTheme.Font.caption.weight(.bold))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+        }
+        .padding(14)
+        .background(
+            LinearGradient(
+                colors: [BubuTheme.Color.card.opacity(0.96), theme.surfaceTint.opacity(0.28)],
+                startPoint: .leading,
+                endPoint: .trailing),
+            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
+                .stroke(.white.opacity(0.58), lineWidth: 1)
+        }
+        .bubuCardShadow()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(profile.name)，\(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))，来到世界第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天，打开完整档案")
+    }
+
+    @ViewBuilder
+    private var avatar: some View {
+        Group {
+            if let name = profile.avatarMediaFileName,
+               let data = mediaStore.data(forMedia: name),
+               let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                BubuMascotBadge(size: 58, expression: .happy)
+            }
+        }
+        .frame(width: 62, height: 62)
+        .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
+                .stroke(.white.opacity(0.75), lineWidth: 1)
+        }
+    }
+}

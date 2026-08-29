@@ -54,20 +54,3 @@ struct BubuSkeletonLines: View {
         }
     }
 }
-
-/// 卡片骨架：缩略图方块 + 两行文字。列表/网格加载下一屏时占位用。
-struct BubuSkeletonCard: View {
-    var thumbnailSide: CGFloat = 56
-
-    var body: some View {
-        HStack(spacing: BubuTheme.Spacing.m) {
-            BubuSkeletonBlock(cornerRadius: BubuTheme.Radius.sm)
-                .frame(width: thumbnailSide, height: thumbnailSide)
-            BubuSkeletonLines(lines: 2)
-            Spacer(minLength: 0)
-        }
-        .padding(BubuTheme.Spacing.item)
-        .background(BubuTheme.Color.card,
-                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-    }
-}

@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.11.0"
-    CURRENT_PROJECT_VERSION: "2026081901"
+    MARKETING_VERSION: "2.12.0"
+    CURRENT_PROJECT_VERSION: "2026082901"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -201,7 +201,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.widgets
         CODE_SIGN_ENTITLEMENTS: BubuWidgets/BubuWidgets.entitlements
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: BubuWidgets/Info.plist
     dependencies:
@@ -221,6 +221,19 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/BubuTimeMachine.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BubuTimeMachine"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
+  BubuTimeMachineUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: BubuTimeMachineUITests
+    dependencies:
+      - target: BubuTimeMachine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.uitests
+        TEST_TARGET_NAME: BubuTimeMachine
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+
 schemes:
   BubuTimeMachine:
     build:
@@ -233,3 +246,4 @@ schemes:
       config: Debug
       targets:
         - BubuTimeMachineTests
+        - BubuTimeMachineUITests

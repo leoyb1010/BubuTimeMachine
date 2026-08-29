@@ -237,7 +237,6 @@ final class SyncEngine {
     // MARK: 轮询与退避
 
     private static let basePollInterval = SyncBackoff.baseInterval
-    private static let maxPollInterval = SyncBackoff.maxInterval
     /// 连续失败次数，驱动指数退避。任一轮成功即清零。
     private var consecutiveFailures = 0
 
@@ -434,6 +433,7 @@ final class SyncEngine {
         guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
         SharedDefaults.saveWidgetSnapshot(snapshot)
         WidgetRefresher.reload()
+        BubuMomentSpotlightIndexer.schedule(context: context)
     }
 
     // MARK: - 删除队列消费

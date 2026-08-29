@@ -1,13 +1,5 @@
 import SwiftUI
 
-// MARK: - 主题感知背景
-/// 全 App 统一的页面背景：跟随当前主题的渐变。深色主题自动反色文字。
-struct ThemedBackground: View {
-    var body: some View {
-        BubuThemedBackground().ignoresSafeArea()
-    }
-}
-
 // MARK: - 深色模式感知的页面背景
 /// 关键修复：主题的 `backgroundStyle` 是写死的浅色渐变 hex，不会跟随系统深色模式。
 /// 这里在系统深色模式下强制用动态的 `BubuTheme.Color.background`（暖黑棕），

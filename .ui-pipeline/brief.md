@@ -2,32 +2,27 @@
 
 ## Outcome
 
-- User-visible outcome: HarmonyOS 手机端追平 iOS 2.11.0 的业务能力，并用鸿蒙原生交互承载卡片、意图与后台能力。
-- Success signal: 同一家庭数据下，鸿蒙手机核心任务结果与 iPhone 一致，并有真机运行证据。
+- User-visible outcome: iOS 主产品升级为更轻、更系统化的家庭档案；iPad 不是放大的 iPhone，而是可变侧栏、宽屏密度和多窗口工作区。
+- Success signal: iPhone/iPad 同一事实库下完成记录、回看、搜索和详情；关键路径有自动化与多尺寸截图证据。
 
 ## Users and situation
 
-- Primary users: 家庭成员，包含需要大字、低认知负担操作的长辈。
-- Job to be done: 可靠记录、回看、搜索、分享孩子成长资料，且不因断网、杀进程或换设备丢失。
-- Environment and devices: HarmonyOS 手机。
+- Primary users: 日常快速记录的父母，以及需要大字、低认知负担路径的长辈。
+- Job to be done: 几秒留下照片/声音/文字，可靠同步，数年后仍能按时间和语义找到。
+- Environment and devices: iPhone 为主；iPad 全屏、横竖屏、分屏与多窗口是一等平台。
 
 ## Scope
 
-- In scope: iOS 手机端全部用户能力、鸿蒙手机原生替代能力、无障碍、深色模式和关键状态。
-- Out of scope: 平板、折叠屏、鸿蒙电脑、穿戴设备，以及与家庭成长记录无关的通用社交或营销功能。
+- In scope: 原生 Tab/侧栏、记录入口、首页收敛、时光详情、SwiftData 查询、SpeechAnalyzer、Spotlight/App Entity、iPad Widget、XCUITest、iOS 27 渐进增强。
+- Out of scope: 本轮不重写数据库/同步/加密格式；不引入第三方 UI、图片或状态管理依赖；不把未安装的 Xcode 27 当成已验证。
 
 ## Facts and constraints
 
-- Product facts: 已有 ArkUI 马卡龙视觉系统、布布吉祥物、PocketBase + FastAPI 共用后端和 122 个 ETS 文件。
-- Technical constraints: API 26；离线优先；不得提交签名、账号或家庭数据；不能用页面存在替代真实链路验收。
-- Accessibility / localization constraints: 中文优先；支持系统字体缩放、关怀模式、深浅色、高对比和减少动效。
+- Product facts: SwiftData 是唯一事实源；PocketBase 是同步层；真实照片、声音、日期和成长事实是设计材料。
+- Technical constraints: 当前 Xcode 26.6 / iOS 26.5；deployment target 26.0；iOS 27 分支必须编译器+系统双门禁。
+- Accessibility / localization: 中文优先；VoiceOver、Dynamic Type、深色、高对比、减少动态；系统搜索必须可关闭并清除本机索引。
 
 ## References
 
-- Product references: iOS `main` 2.11.0、`harmony/PARITY_MATRIX.md`。
-- Visual references: iOS 当前产品截图与仓库既有 BubuTheme/MacaronComponents；不另起无关视觉方向。
-
-## Assumptions and open decisions
-
-- Assumptions: 业务能力等价优先于控件逐像素复制，系统能力采用鸿蒙推荐交互。
-- Open decisions: Live View 等受限权益以开发者后台实际开通结果为准。
+- Product plan: `docs/IOS_NEXT_WAVE_UPGRADE_PLAN_2026-08-29.md`。
+- Official direction: Apple 2026 SwiftUI、SwiftData、App Intents、Foundation Models、SpeechAnalyzer。

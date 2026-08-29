@@ -10,19 +10,18 @@
 原生 iOS App（SwiftUI + SwiftData），为女儿「布布」记录成长、传承一生。
 离线优先、隐私至上、自托管。真正的用户是未来 18 岁的布布。
 
-- **仓库路径**：`/Users/leoyuan/Desktop/leoworkspace/BubuTimeMachine`
+- **仓库路径**：`/Users/leoyuan/Documents/Leo-布布时光机`
 - **工程管理**：xcodegen（改 `project.yml` 后必须重跑 `xcodegen generate`）
 - **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 26.0、watchOS 11.0 部署目标
-- **规模**（2026-08-19 实测）：201 个 Swift 文件、约 4.5 万行（其中主 App 180 文件 / 4.04 万行），
-  另有 21 个测试文件（139 测试 / 23 套件全绿）；后端在 `server/`（FastAPI 137 个 pytest + PocketBase 迁移/hook）
-- **当前版本**：v2.11.0
+- **规模**（2026-08-29 实测）：主 App 约 180 个 Swift 文件 / 4 万行；单元测试 152 项 / 26 套件，另有 iPhone+iPad XCUITest。
+- **当前版本**：v2.12.0
 
 ---
 
 ## 1. 怎么验证（每次改完都要做）
 
 ```bash
-cd /Users/leoyuan/Desktop/leoworkspace/BubuTimeMachine
+cd /Users/leoyuan/Documents/Leo-布布时光机
 
 # 1) 重新生成工程（改了 project.yml 或增删文件后）
 xcodegen generate
@@ -70,7 +69,8 @@ BubuTimeMachine/
 ├── App/
 │   ├── BubuTimeMachineApp.swift   @main：Schema 装配 + DEBUG 种子 + RootView(引导/主界面切换)
 │   ├── AppEnvironment.swift       ★ DI 容器(@Observable @MainActor)。按配置动态装配 Mock vs 真实
-│   └── RootTabView.swift          4 Tab + 中央记一笔（iPhone）／NavigationSplitView（iPad）
+│   ├── RootTabView.swift          原生 4 Tab + 底部记录附件；iPad sidebarAdaptable
+│   └── BubuSearchEntities.swift   Spotlight/App Entity 索引 + 时光 deep link
 ├── Models/                        11 个 @Model（SwiftData，唯一真相源）
 │   └── Enums / AgeCalculator      Mood/Relation/SyncState + 年龄计算（全 App 年龄展示来源）
 ├── Services/

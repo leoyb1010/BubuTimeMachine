@@ -195,6 +195,7 @@ struct TimelineList: View {
             Text("删除后会从时光轴隐藏，本地记录会标记为待同步删除。")
         }
         .bubuToast($undoToast)
+        .bubuIOS27NavigationPolish()
     }
 
     /// 上次看过动态之后，家里其他人有没有新动作（新记录/新评论）。一次性算好写入缓存。
@@ -268,14 +269,10 @@ struct TimelineList: View {
             }
             .padding()
         }
+        .bubuIOS27SwipeActionsContainer()
         .navigationDestination(for: UUID.self) { entryID in
-            if let entry = entries.first(where: { $0.id == entryID }) {
-                EntryDetailView(entry: entry)
-                    .navigationTransition(.zoom(sourceID: entryID, in: zoomNS))
-            } else {
-                ContentUnavailableView("这条时光暂时找不到", systemImage: "clock.badge.questionmark")
-                    .background(BubuTheme.Color.background.ignoresSafeArea())
-            }
+            TimelineEntryDestination(entryID: entryID)
+                .navigationTransition(.zoom(sourceID: entryID, in: zoomNS))
         }
     }
 
@@ -316,6 +313,9 @@ struct TimelineList: View {
             }
             .accessibilityAction(named: "分享这一刻") { entryPendingShare = entry }
             .accessibilityAction(named: "删除记录") { entryPendingDelete = entry }
+            .bubuIOS27TimelineActions(
+                onShare: { entryPendingShare = entry },
+                onDelete: { entryPendingDelete = entry })
         }
     }
 
@@ -733,5 +733,26 @@ struct TimelineList: View {
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
+    }
+}
+
+/// Spotlight 可能打开 200 条分页窗口之外的旧记录；目标页按 id 单条查询，
+/// 不为一次深链把整个时光轴扩成全量常驻。
+private struct TimelineEntryDestination: View {
+    @Query private var entries: [Entry]
+
+    init(entryID: UUID) {
+        var descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryID })
+        descriptor.fetchLimit = 1
+        _entries = Query(descriptor)
+    }
+
+    var body: some View {
+        if let entry = entries.first {
+            EntryDetailView(entry: entry)
+        } else {
+            ContentUnavailableView("这条时光暂时找不到", systemImage: "clock.badge.questionmark")
+                .background(BubuTheme.Color.background.ignoresSafeArea())
+        }
     }
 }

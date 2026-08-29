@@ -168,6 +168,7 @@ final class AppEnvironment {
         // reload 放在 guard 之外：档案还没建好（make 返回 nil）时桌面也该刷成占位态，
         // 而不是留着上一份已失效的快照。
         WidgetRefresher.reload()
+        BubuMomentSpotlightIndexer.schedule(context: context)
     }
 
     /// 订阅后台缩略图补齐：把生成的缩略图文件名回填进 SwiftData 的 `Media.thumbnailFileName`，

@@ -102,14 +102,6 @@ struct AdvancedSettingsView: View {
         .onDisappear { env.reloadAIService() }
     }
 
-    private var connectionText: String {
-        switch env.syncEngine.connectionState {
-        case .offline:    return "离线（本地可用）"
-        case .connecting: return "连接中…"
-        case .online:     return "已连接"
-        }
-    }
-
     /// 分两段测：先只验服务器可达（不需要账号），再验账号。
     /// 这样「地址填对了但账号还没填」能得到确切答复，而不是被按钮禁用挡在门外。
     private func testConnection() async {

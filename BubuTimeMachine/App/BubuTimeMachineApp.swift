@@ -83,7 +83,13 @@ struct BubuTimeMachineApp: App {
                         Task.detached(priority: .utility) {
                             StorageMigrator.migrateMediaIfNeeded()
                         }
+                        #if DEBUG
+                        if !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-uitest-") }) {
+                            try? Tips.configure()
+                        }
+                        #else
                         try? Tips.configure()   // 渐进式功能引导（H-3）
+                        #endif
                         env.bootstrap(context: modelContainer.mainContext)
                         // env 就绪后注入后台补拉 runner（handler 已在 AppDelegate 注册）：
                         // syncOnce() 会 await 到一轮同步真正跑完，BGTask 才能如实 setTaskCompleted。
@@ -253,9 +259,13 @@ struct BubuTimeMachineApp: App {
         let moods: [Mood] = [.happy, .curious, .proud, .sleepy]
         let notes = ["布布今天第一次自己扶着沙发站起来了！", "在公园看小鸟看了好久，眼睛亮亮的。",
                      "午睡醒来冲我笑，奶香奶香的。", "把积木叠到了三层，特别得意。"]
+        let seedEntryIDs = (1...4).map {
+            UUID(uuidString: String(format: "00000000-0000-4000-8000-%012d", $0))!
+        }
         for i in 0..<4 {
             let day = Calendar.current.date(byAdding: .day, value: -i * 9, to: .now) ?? .now
             let e = Entry(happenedAt: day, authorRole: i % 2 == 0 ? "妈妈" : "姥姥", note: notes[i])
+            e.id = seedEntryIDs[i]
             e.mood = moods[i]
             e.locationName = i == 1 ? "家附近的公园" : "家"
             context.insert(e)

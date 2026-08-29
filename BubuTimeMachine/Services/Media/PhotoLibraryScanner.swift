@@ -30,8 +30,6 @@ final class PhotoLibraryScanner {
 
     private let store: PhotoIntakeStore
     private let changeTokenKey = "photo-library-change-token"
-    private let handledKey = "bubu.photoscan.handledIDs"
-    private let handledDayKey = "bubu.photoscan.handledDay"
     private var isScanning = false
     private var rescanRequested = false
 

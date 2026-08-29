@@ -1,11 +1,12 @@
 import Foundation
 import Speech
 import SwiftData
+import AVFoundation
 
 // MARK: - 语音自动转写（R4 E-1）
 /// 三年语音变成可搜索的文字：每段「说给布布」的录音自动转写落库（transcript 字段早已预留）。
-/// 路径①：端侧 SFSpeechRecognizer（离线、免费、快，中文支持好）；
-/// 路径②：自托管服务器 Whisper 兜底（端侧不可用/失败时）。
+/// 路径①：iOS 26 SpeechAnalyzer/SpeechTranscriber（长音频、端侧资源可管理）；
+/// 路径②：旧 SFSpeechRecognizer 兼容兜底；路径③：自托管服务器 Whisper。
 /// 转写是尽力而为的增强：失败静默留空，不打扰任何主流程。
 @MainActor
 enum VoiceTranscriber {
@@ -53,7 +54,7 @@ enum VoiceTranscriber {
         }
     }
 
-    // MARK: 端侧（SFSpeechRecognizer，优先设备端识别）
+    // MARK: 端侧（SpeechAnalyzer 优先，SFSpeechRecognizer 兼容）
 
     private enum DeviceOutcome {
         case text(String)
@@ -62,6 +63,49 @@ enum VoiceTranscriber {
     }
 
     private static func onDevice(url: URL) async -> DeviceOutcome {
+        if let modern = await speechAnalyzer(url: url) {
+            return modern
+        }
+        return await legacyRecognizer(url: url)
+    }
+
+    /// iOS 26 的新 SpeechAnalyzer 文件管线。返回 nil 表示当前设备/语言模型不支持，
+    /// 调用方再走旧识别器；单文件损坏则明确返回 fileFailed，避免反复下载模型。
+    private static func speechAnalyzer(url: URL) async -> DeviceOutcome? {
+        guard SpeechTranscriber.isAvailable,
+              let locale = await SpeechTranscriber.supportedLocale(
+                equivalentTo: Locale(identifier: "zh-CN")) else { return nil }
+
+        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+        do {
+            let status = await AssetInventory.status(forModules: [transcriber])
+            guard status != .unsupported else { return nil }
+            if status != .installed,
+               let request = try await AssetInventory.assetInstallationRequest(
+                supporting: [transcriber]) {
+                try await request.downloadAndInstall()
+            }
+
+            let audioFile = try AVAudioFile(forReading: url)
+            let analyzer = SpeechAnalyzer(modules: [transcriber])
+            let resultTask = Task<String, Error> {
+                var transcript = AttributedString()
+                for try await result in transcriber.results where result.isFinal {
+                    transcript.append(result.text)
+                }
+                return String(transcript.characters)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+            let text = try await resultTask.value
+            return text.isEmpty ? .fileFailed : .text(text)
+        } catch {
+            return .fileFailed
+        }
+    }
+
+    private static func legacyRecognizer(url: URL) async -> DeviceOutcome {
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")),
               recognizer.isAvailable else { return .recognizerUnavailable }
         let status = await withCheckedContinuation { cont in

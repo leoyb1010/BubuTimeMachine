@@ -254,8 +254,7 @@ struct AIStudioHomeView: View {
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding(.leading, 6)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
-                                     count: BubuAdaptive.columns(sizeClass, compact: 2, regular: 4)),
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145, maximum: 220), spacing: 10)],
                       spacing: 10) {
                 content()
             }

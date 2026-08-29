@@ -15,6 +15,20 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.12.0",
+            date: "2026-08-29",
+            title: "iPhone 更轻快，iPad 真正展开",
+            highlights: [
+                "底部导航换成 iOS 26 原生 Liquid Glass Tab：滚动时会自然收起，记录入口成为系统底部附件，不再靠自绘底栏长期压住内容",
+                "iPad 使用系统可变侧栏与自适应网格，支持多窗口、横竖屏和窄分屏；记录面板、设置等长页在宽屏保持舒适阅读宽度",
+                "首页完整证件卡在 iPhone 收成“今天的布布”当下封面，移除会遮挡内容的 AI 悬浮球；一句话智能记录仍在记录面板首位",
+                "首页不再把十几年时光全量载入内存：最近记录限量读取，照片总数和今日数据改为数据库 COUNT/日期范围查询",
+                "语音归档优先使用 SpeechAnalyzer / SpeechTranscriber，支持端侧语言资源管理；旧识别器与家庭 Whisper 保留为可靠兜底",
+                "新增隐私可控的 Spotlight 时光索引：可按文字找到某条记录并直达详情，关闭后会清掉系统索引",
+                "新增 iPhone/iPad XCUITest 与横屏视觉证据，删除未使用的旧底栏、卡片和动效组件"
+            ]
+        ),
+        ReleaseNote(
             version: "2.11.0",
             date: "2026-08-19",
             title: "桌面照片回来了，首页也清爽了",

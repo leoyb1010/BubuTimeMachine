@@ -1,17 +1,18 @@
 import SwiftUI
+import SwiftData
 
 // MARK: - 根导航
-/// 4 个页面 Tab + 中央记录键。时间胶囊收入「布布的魔法屋」，底栏保持轻量。
+/// iPhone 使用系统 Liquid Glass Tab；iPad/可调整宽窗口由 sidebarAdaptable 自动切成侧栏。
+/// 记录不是第五个页面，而是跨页面一直可用的底部附件/侧栏动作。
 struct RootTabView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(BubuRouter.self) private var router
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var selection = 0
     @State private var quickCaptureTrigger = 0
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var timelinePath: [UUID] = []
 
-    /// 宽屏（iPad 全屏/半屏）走侧栏，窄屏（iPhone 全部场景 + iPad 1/3 分屏）走原底栏。
-    /// 判断依据必须是 sizeClass 而非设备类型——分屏变窄要能自动退回手机布局。
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
     private var maximumSelectableTab: Int {
@@ -23,177 +24,146 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        Group {
-            if isWide { splitLayout } else { tabLayout }
-        }
-        // 档案馆（tag 4）只存在于宽屏侧栏：Catalyst 窗口拖窄切回 tabLayout 时，
-        // selection 还停在 4 会落到没有任何匹配页的空白。收窄即回时光页。
-        .onChange(of: isWide) { _, wide in
-            if !wide && selection > 3 { selection = 1 }
-        }
-        // 完整版 App 的 Dynamic Type 上限：4 Tab + 卡片 + 玻璃底栏属密集布局，
-        // 收紧到 accessibility1（无障碍档中最小的一档，body 已约 1.6×）——在「字尽量大」与
-        // 「不破版」之间取的保守安全档；younger 家人才走完整版，极端无障碍档少见。
-        // 老人主要走 SimpleMode，其上限在 RootView 放宽到 accessibility3。
-        // iPad 外接键盘快捷键：⌘1–4 切页、⌘N 记一笔。窄屏无键盘时这些按钮不显示、零成本。
-        .background {
-            Group {
-                Button("") { selection = 0 }.keyboardShortcut("1", modifiers: .command)
-                Button("") { selection = 1 }.keyboardShortcut("2", modifiers: .command)
-                Button("") { selection = 2 }.keyboardShortcut("3", modifiers: .command)
-                Button("") { selection = 3 }.keyboardShortcut("4", modifiers: .command)
-                #if targetEnvironment(macCatalyst)
-                Button("") { selection = 4 }.keyboardShortcut("5", modifiers: .command)
-                #endif
-                Button("") { selection = 0; quickCaptureTrigger += 1 }
-                    .keyboardShortcut("n", modifiers: .command)
+        tabsWithRecordAccessory
+            .tabViewStyle(.sidebarAdaptable)
+            .tabBarMinimizeBehavior(.onScrollDown)
+            .tabViewSidebarHeader {
+                Label("布布时光机", systemImage: "book.pages.fill")
+                    .font(BubuTheme.Font.headline)
+                    .foregroundStyle(env.theme.theme.primary)
+                    .padding(.vertical, 8)
             }
-            .opacity(0)
-            .accessibilityHidden(true)
-        }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .ignoresSafeArea(.keyboard)
-        .onAppear {
-            #if DEBUG
-            if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),
-               i + 1 < ProcessInfo.processInfo.arguments.count,
-               let t = Int(ProcessInfo.processInfo.arguments[i + 1]) {
-                selection = min(max(t, 0), maximumSelectableTab)
-            }
-            // 联调：-uitest-openurl bubu://moment 直接走深链路由，绕过系统 openurl 确认框。
-            if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-openurl"),
-               i + 1 < ProcessInfo.processInfo.arguments.count,
-               let url = URL(string: ProcessInfo.processInfo.arguments[i + 1]) {
-                router.handle(url)
-            }
-            #endif
-            consumePendingRoute()
-        }
-        // 小组件点击时 App 已在前台的情况：onOpenURL 更新 pendingTab，这里响应切 Tab。
-        .onChange(of: router.pendingTab) { _, _ in consumePendingRoute() }
-        // 控制中心/Action Button 在 App 已运行时只置 pendingQuickCapture 不动 pendingTab：
-        // 必须单独监听，否则不拉起面板、残留标志还会在之后点小组件时误弹（R4 P2-38）
-        .onChange(of: router.pendingQuickCapture) { _, _ in consumePendingRoute() }
-    }
-
-
-    // MARK: 宽屏：侧栏 + 详情列
-    //
-    // 侧栏替代的是【底栏】，页面整体进详情列——列表与详情仍在同一个 NavigationStack 内，
-    // 所以缩略图进详情的 zoom 共享元素转场在 iPad 上照常工作（不必像通常的双栏那样牺牲它）。
-    private var splitLayout: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            List(selection: Binding(get: { Optional(selection) },
-                                    set: { if let v = $0 { selection = v } })) {
-                Section {
-                    sidebarRow(0, "首页", "house.fill")
-                    sidebarRow(1, "时光", "clock.fill")
-                    sidebarRow(2, "成长", "chart.xyaxis.line")
-                    sidebarRow(3, "魔法屋", "wand.and.stars.inverse")
-                    #if targetEnvironment(macCatalyst)
-                    sidebarRow(4, "档案馆", "archivebox.fill")
-                    #endif
-                }
-                Section {
-                    Button {
-                        selection = 0
-                        quickCaptureTrigger += 1
-                    } label: {
+            .tabViewSidebarBottomBar {
+                if isWide {
+                    Button(action: openQuickCapture) {
                         Label("记一笔", systemImage: "plus.circle.fill")
-                            .foregroundStyle(env.theme.theme.primary)
                             .font(BubuTheme.Font.body.weight(.semibold))
+                            .foregroundStyle(env.theme.theme.primary)
                     }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 8)
+                    .accessibilityIdentifier("root.record")
                 }
             }
-            .listStyle(.sidebar)
-            .navigationTitle("布布")
-            .scrollContentBackground(.hidden)
-            .background(BubuTheme.Color.background.ignoresSafeArea())
-        } detail: {
-            NavigationStack {
-                switch selection {
-                case 1: TimelineView()
-                case 2: GrowthHomeView()
-                case 3: AIStudioHomeView()
-                #if targetEnvironment(macCatalyst)
-                case 4: MacArchiveWorkspaceView()
+            .onChange(of: isWide) { _, wide in
+                if !wide && selection > 3 { selection = 1 }
+            }
+            .background { keyboardShortcuts }
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            .ignoresSafeArea(.keyboard)
+            .onAppear {
+                #if DEBUG
+                if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),
+                   i + 1 < ProcessInfo.processInfo.arguments.count,
+                   let tab = Int(ProcessInfo.processInfo.arguments[i + 1]) {
+                    selection = min(max(tab, 0), maximumSelectableTab)
+                }
+                if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-openurl"),
+                   i + 1 < ProcessInfo.processInfo.arguments.count,
+                   let url = URL(string: ProcessInfo.processInfo.arguments[i + 1]) {
+                    router.handle(url)
+                }
+                if ProcessInfo.processInfo.arguments.contains("-uitest-open-first-moment") {
+                    openFirstMomentForUITest()
+                }
                 #endif
-                default:
-                    CaptureHomeView(openTimeline: { selection = 1 },
-                                    quickCaptureTrigger: quickCaptureTrigger)
-                }
+                consumePendingRoute()
             }
+            .onChange(of: router.pendingTab) { _, _ in consumePendingRoute() }
+            .onChange(of: router.pendingQuickCapture) { _, _ in consumePendingRoute() }
+            .onChange(of: router.pendingEntryID) { _, _ in openPendingTimelineEntryIfReady() }
+            .onChange(of: selection) { _, tab in
+                if tab == 1 { openPendingTimelineEntryIfReady() }
+            }
+    }
+
+    @ViewBuilder
+    private var tabsWithRecordAccessory: some View {
+        if #available(iOS 26.1, *) {
+            tabs.tabViewBottomAccessory(isEnabled: !isWide) {
+                BubuRecordAccessory { openQuickCapture() }
+            }
+        } else if !isWide {
+            tabs.tabViewBottomAccessory {
+                BubuRecordAccessory { openQuickCapture() }
+            }
+        } else {
+            tabs
         }
-        .navigationSplitViewStyle(.balanced)
     }
 
-    private func sidebarRow(_ tag: Int, _ title: String, _ icon: String) -> some View {
-        Label(title, systemImage: icon)
-            .font(BubuTheme.Font.body)
-            .tag(tag)
-    }
-
-    // MARK: 窄屏：原有 Tab + 玻璃底栏（iPhone 一个像素不变）
-    private var tabLayout: some View {
-        ZStack(alignment: .bottom) {
-            TabView(selection: $selection) {
+    private var tabs: some View {
+        TabView(selection: $selection) {
+            Tab("首页", systemImage: "house.fill", value: 0) {
                 NavigationStack {
-                    // Entry 详情的 navigationDestination 已下沉到 CaptureHomeView，
-                    // 以便与该页的 zoomNS 配对实现缩放共享元素转场。
                     CaptureHomeView(openTimeline: { selection = 1 },
                                     quickCaptureTrigger: quickCaptureTrigger)
                 }
                 .bubuTabContentTransition(isActive: selection == 0)
-                .safeAreaInset(edge: .bottom) { tabBarSpacer }
-                .tabItem { Label("首页", systemImage: "house.fill") }
-                .tag(0)
-                .toolbar(.hidden, for: .tabBar)
+            }
 
-                NavigationStack {
+            Tab("时光", systemImage: "clock.fill", value: 1) {
+                NavigationStack(path: $timelinePath) {
                     TimelineView()
+                        .onAppear { openPendingTimelineEntryIfReady() }
                 }
-                .bubuTabContentTransition(isActive: selection == 1)
-                .safeAreaInset(edge: .bottom) { tabBarSpacer }
-                .tabItem { Label("时光", systemImage: "clock.fill") }
-                .tag(1)
-                .toolbar(.hidden, for: .tabBar)
-
-                NavigationStack {
-                    GrowthHomeView()
-                }
-                .bubuTabContentTransition(isActive: selection == 2)
-                .safeAreaInset(edge: .bottom) { tabBarSpacer }
-                .tabItem { Label("成长", systemImage: "chart.xyaxis.line") }
-                .tag(2)
-                .toolbar(.hidden, for: .tabBar)
-
-                NavigationStack {
-                    AIStudioHomeView()
-                }
-                .bubuTabContentTransition(isActive: selection == 3)
-                .safeAreaInset(edge: .bottom) { tabBarSpacer }
-                .tabItem { Label("魔法屋", systemImage: "wand.and.stars.inverse") }
-                .tag(3)
-                .toolbar(.hidden, for: .tabBar)
+                    .bubuTabContentTransition(isActive: selection == 1)
             }
-            .tint(env.theme.theme.tabTint)
-            BubuGlassTabBar(selection: $selection, tint: env.theme.theme.primary) {
-                selection = 0
-                quickCaptureTrigger += 1
+
+            Tab("成长", systemImage: "chart.xyaxis.line", value: 2) {
+                NavigationStack { GrowthHomeView() }
+                    .bubuTabContentTransition(isActive: selection == 2)
             }
+
+            Tab("魔法屋", systemImage: "wand.and.stars.inverse", value: 3) {
+                NavigationStack { AIStudioHomeView() }
+                    .bubuTabContentTransition(isActive: selection == 3)
+            }
+
+            #if targetEnvironment(macCatalyst)
+            Tab("档案馆", systemImage: "archivebox.fill", value: 4) {
+                NavigationStack { MacArchiveWorkspaceView() }
+            }
+            #endif
         }
+        .tint(env.theme.theme.tabTint)
+        .accessibilityIdentifier("root.tabs")
     }
 
-    /// 消费一次待处理的深链目标 Tab / 快速记录信号（消费后置回，避免重复触发）。
+    private var keyboardShortcuts: some View {
+        Group {
+            Button("") { selection = 0 }.keyboardShortcut("1", modifiers: .command)
+            Button("") { selection = 1 }.keyboardShortcut("2", modifiers: .command)
+            Button("") { selection = 2 }.keyboardShortcut("3", modifiers: .command)
+            Button("") { selection = 3 }.keyboardShortcut("4", modifiers: .command)
+            #if targetEnvironment(macCatalyst)
+            Button("") { selection = 4 }.keyboardShortcut("5", modifiers: .command)
+            #endif
+            Button("") { openQuickCapture() }.keyboardShortcut("n", modifiers: .command)
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    private func openQuickCapture() {
+        selection = 0
+        quickCaptureTrigger += 1
+        BubuHaptics.tapLight()
+    }
+
     private func consumePendingRoute() {
         if let tab = router.pendingTab {
             selection = min(max(tab, 0), 3)
             router.pendingTab = nil
         }
+        if router.pendingEntryID != nil {
+            selection = 1
+            // 具体详情必须等时光 NavigationStack 真正出现并注册 destination 后再推入。
+            // 冷启动时在这里立刻写 path 会得到一帧没有 destination 的白屏。
+        }
         if router.pendingQuickCapture {
             selection = 0
             router.pendingQuickCapture = false
-            // 延迟一拍：确保首页已切换并注册好 onChange 监听后再拉起记录（冷启动 deep link 时机安全）。
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
                 quickCaptureTrigger += 1
@@ -201,9 +171,75 @@ struct RootTabView: View {
         }
     }
 
-    private var tabBarSpacer: some View {
-        Color.clear
-            .frame(height: 92)
-            .allowsHitTesting(false)
+    private func openPendingTimelineEntryIfReady() {
+        guard selection == 1, let entryID = router.pendingEntryID else { return }
+        router.pendingEntryID = nil
+        Task { @MainActor in
+            // 原生 Tab 切换与 NavigationStack 挂载分两次 transaction；等它完成后再导航。
+            try? await Task.sleep(for: .milliseconds(650))
+            guard selection == 1 else { return }
+            timelinePath = [entryID]
+        }
+    }
+
+    #if DEBUG
+    private func openFirstMomentForUITest() {
+        Task { @MainActor in
+            // App 外层 .task 会先注入测试种子；这里略等一拍后从真实 SwiftData 取 id，
+            // 因此测试不依赖模拟器是否残留上一轮随机 UUID。
+            try? await Task.sleep(for: .milliseconds(500))
+            var descriptor = FetchDescriptor<Entry>(
+                predicate: #Predicate { !$0.isArchived },
+                sortBy: [SortDescriptor(\Entry.happenedAt, order: .reverse)])
+            descriptor.fetchLimit = 1
+            guard let entryID = try? modelContext.fetch(descriptor).first?.id else { return }
+            router.pendingTab = 1
+            router.pendingEntryID = entryID
+        }
+    }
+    #endif
+}
+
+/// 系统底部附件会在 Tab 展开/收缩间变形；内容跟随 placement 调整，避免压缩时塞两行文字。
+private struct BubuRecordAccessory: View {
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    @Environment(AppEnvironment.self) private var env
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill")
+                    .font(BubuTheme.Font.scaled(20, weight: .bold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, env.theme.theme.primary)
+                if placement == .expanded {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("记录此刻")
+                            .font(BubuTheme.Font.body.weight(.semibold))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("照片、声音和一句话一起收好")
+                            .font(BubuTheme.Font.caption)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up")
+                        .font(BubuTheme.Font.caption.weight(.bold))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                } else {
+                    Text("记录")
+                        .font(BubuTheme.Font.caption.weight(.bold))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: placement == .expanded ? .infinity : nil,
+                   minHeight: placement == .expanded ? 48 : 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("root.record")
+        .accessibilityLabel("记录此刻")
     }
 }

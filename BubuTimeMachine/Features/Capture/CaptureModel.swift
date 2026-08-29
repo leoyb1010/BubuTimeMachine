@@ -434,6 +434,7 @@ final class CaptureModel {
         guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
         SharedDefaults.saveWidgetSnapshot(snapshot)
         WidgetRefresher.reload()
+        BubuMomentSpotlightIndexer.schedule(context: context)
     }
 }
 

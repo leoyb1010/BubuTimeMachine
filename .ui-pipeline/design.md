@@ -2,35 +2,26 @@
 
 ## Chosen direction
 
-- Subject-grounded concept: 温暖家庭绘本 × 清晰成长档案。
-- Distinctive signature: 布布吉祥物、马卡龙层级色、照片优先卡片与轻量仪式动效。
-- Reason selected: 延续 iOS 已验证的产品识别，不在追平过程中引入第二套视觉语言。
+- Mode: Operate（日常记录/回看）为主，Experience（胶囊/里程碑/作品）为辅。
+- Concept spine: 一本会生长的家庭档案。
+- First-read object: iPhone 是“今天的布布 + 记录此刻”；iPad 是同一档案在系统侧栏和宽屏内容列中展开。
+- Signature: 保存从系统记录附件进入，最终回到时光卡；真实照片和时间承担主视觉。
 
 ## System
 
-- Typography: 系统字体，标题强调，长辈模式提高字号和行高。
-- Color and surfaces: 复用 `BubuTheme.ets`，深浅色均保持文字对比。
-- Grid and spacing: 复用现有间距阶梯；仅面向 HarmonyOS 手机，窄屏单列、普通手机双列能力卡。
-- Shape and borders: 复用马卡龙卡片圆角与轻描边。
-- Iconography and imagery: 使用鸿蒙系统图标语义和现有布布资源，不用 emoji 作为正式功能图标。
-- Density: 默认舒适；长辈模式减少同屏操作与次级信息。
+- Navigation: iOS 26 原生 Liquid Glass Tab、滚动收缩、bottom accessory；iPad `sidebarAdaptable`。
+- Spatial thesis: 手机单列、每屏一个主体；平板以可用宽度决定列数，正文 700–920pt 收口，不按设备型号写死。
+- Material: 暖纸面和真实素材；Glass 只用于系统导航、附件和弹层。
+- Typography: 系统字体；首页证件卡在手机收为紧凑 Living Cover，完整信息留给宽屏/档案页。
+- Motion: quick/gentle/smooth/ceremony/breathe 五级 token；减少动态时移除位移与循环。
+- Anti-defaults: 不做幼儿九宫格，不让玻璃铺满页面，不让浮动 AI 球遮挡业务操作。
 
-## Components and tokens
+## Responsive behavior
 
-- Existing component source: `harmony/entry/src/main/ets/theme` 与 `components`。
-- Components to reuse: MacaronComponents、BubuIdentityCard、MediaThumbnail、BubuGlassTabBar。
-- New components justified: 仅为 iOS 新能力且现有组件无法表达的真实状态新增。
-- Token changes: 先对齐现有 token，禁止页面级散落魔法值。
-
-## Motion budget
-
-- Primary motion engine: ArkUI 原生动画。
-- Functional transitions: 页面进入、保存成功、同步/上传状态和胶囊解锁。
-- Dominant effect, if any: 每页最多一个布布仪式动效。
-- Reduced-motion behavior: 尊重系统减少动效，退化为淡入和即时状态更新。
-
-## State matrix
-
-| Surface | Loading | Empty | Error | Success | Disabled | Long content | Responsive |
-|---|---|---|---|---|---|---|---|
-| 核心记录与时光轴 | 骨架屏 | 布布空状态 | 可重试错误 | 明确保存/同步状态 | 阻止重复提交 | 文本折行不截断 | 手机宽度内自适应 |
+| Width/state | Navigation | Content |
+|---|---|---|
+| iPhone / compact | Bottom Tab + record accessory | Single column, compact living cover |
+| iPad narrow split | Same compact path | Single column, no clipped controls |
+| iPad regular | Adaptive top/sidebar | 700–920pt reading columns, adaptive grids |
+| iPad landscape/window | Sidebar available, keyboard shortcuts | Higher density without stretching text |
+| iOS 27 resizable | Same width-driven rules | Xcode 27 shadow build validates continuous resize |

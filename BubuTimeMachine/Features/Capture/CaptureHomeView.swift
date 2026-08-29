@@ -18,8 +18,7 @@ struct CaptureHomeView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Query private var profiles: [ChildProfile]
-    @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
-    private var entries: [Entry]
+    @Query private var entries: [Entry]
     // 里程碑 / 成长实测 / 健康记录的 @Query 随四宫格一起撤走：
     // 首页不再展示这三域的派生统计，留着只会让每次首页刷新多拉三张全表。
 
@@ -28,18 +27,12 @@ struct CaptureHomeView: View {
     @State private var firstTimeEntryID: UUID?
     @State private var photoScanner = PhotoLibraryScanner()
     @State private var showTodayPhotos = false
-    @State private var showNaturalCapture = false
     @State private var uploadQueueSummary = PhotoUploadQueueSummary(
         pendingBatches: 0, failedBatches: 0)
     @State private var ssdIntakeCandidates: [SSDIntakeCandidate] = []
     @State private var showSSDIntakeCandidates = false
     @State private var showPendingRecallDialog = false
-    /// 悬浮球位置存**比例**（0…1，相对可移动范围）而非绝对点偏移。
-    /// 绝对值在 iPad 旋转/分屏/台前调度改尺寸后会落到屏幕外且再也点不回来
-    /// （横屏吸左 offset≈-940，转竖屏可移动范围只剩 -680，球停在 -940 处）。
-    @State private var naturalCaptureButtonRatio: CGSize = .zero
     @State private var heroBackgroundImage: UIImage?
-    @GestureState private var naturalCaptureButtonDrag: CGSize = .zero
 
     // 首页统计缓存：全表派生值只在数据指纹变化时重算一次，
     // 避免拖动 AI 球/同步进度等高频 body 重绘里 O(n·m) 全表 faulting（U-P1-5）。
@@ -49,6 +42,18 @@ struct CaptureHomeView: View {
 
     /// 缩略图 → 详情页的 iOS 18+ 缩放共享元素转场（与 TimelineView 同一套做法）。
     @Namespace private var zoomNS
+
+    init(openTimeline: (() -> Void)? = nil, quickCaptureTrigger: Int = 0) {
+        self.openTimeline = openTimeline
+        self.quickCaptureTrigger = quickCaptureTrigger
+        var descriptor = FetchDescriptor<Entry>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\Entry.happenedAt, order: .reverse)])
+        // 首页只展示最近两条。留到 12 条是为了详情返回与数据刚同步时仍有稳定缓冲，
+        // 但不再让十几年档案全部驻留首页；统计改走 COUNT/日期范围查询。
+        descriptor.fetchLimit = 12
+        _entries = Query(descriptor, animation: .default)
+    }
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: BubuThemeDefinition { env.theme.theme }
@@ -93,10 +98,11 @@ struct CaptureHomeView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+                .bubuContentColumn(920)
             }
             // 详情页转场移到此处（而非 RootTabView），以便与本页 zoomNS 配对实现缩放共享元素转场。
             .navigationDestination(for: UUID.self) { entryID in
-                if let entry = entries.first(where: { $0.id == entryID }) {
+                if let entry = navigableEntries.first(where: { $0.id == entryID }) {
                     EntryDetailView(entry: entry)
                         .navigationTransition(.zoom(sourceID: entryID, in: zoomNS))
                 } else {
@@ -113,8 +119,6 @@ struct CaptureHomeView: View {
                     }
                 if model.savedFlash { savedToast }
             }
-
-            naturalCaptureFloatingButton
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -159,9 +163,6 @@ struct CaptureHomeView: View {
             Button("好") { model?.partialSaveWarning = nil }
         } message: {
             Text(model?.partialSaveWarning ?? "")
-        }
-        .sheet(isPresented: $showNaturalCapture) {
-            NaturalCapturePanel()
         }
         .sheet(isPresented: $showTodayPhotos) {
             TodayPhotosSheet(assets: photoScanner.pendingAssets, groups: photoScanner.eventGroups) { outcome in
@@ -729,7 +730,14 @@ struct CaptureHomeView: View {
     @ViewBuilder
     private var identityCardTop: some View {
         if let profile {
-            BubuIdentityCard(profile: profile, theme: theme, mediaStore: env.mediaStore)
+            if BubuAdaptive.isWide(sizeClass) {
+                BubuIdentityCard(profile: profile, theme: theme, mediaStore: env.mediaStore)
+            } else {
+                NavigationLink { ChildProfileView() } label: {
+                    BubuLivingCover(profile: profile, theme: theme, mediaStore: env.mediaStore)
+                }
+                .buttonStyle(.plain)
+            }
         } else {
             // 无档案：引导建档（保证空态也好看，不留空白）
             NavigationLink { ChildProfileView() } label: {
@@ -789,6 +797,7 @@ struct CaptureHomeView: View {
             }
             .buttonStyle(.plain)
             .layoutPriority(1)
+            .accessibilityIdentifier("home.record")
 
             NavigationLink { AlbumHomeView() } label: {
                 quickDockButton(icon: "photo.on.rectangle.angled.fill", title: "相册",
@@ -830,8 +839,13 @@ struct CaptureHomeView: View {
         .accessibilityLabel("\(title)，\(subtitle)")
     }
 
-    /// 首页统计指纹：条数 + 媒体总数 + 当天（跨天重算「那年今日/今日一问」）。
-    /// 只做 O(n) 整型累加，不读 Media 属性，不构建数组。
+    private var navigableEntries: [Entry] {
+        entries + onThisDayEntries.filter { memory in
+            !entries.contains(where: { $0.id == memory.id })
+        }
+    }
+
+    /// 首页统计指纹只看限量窗口和当天；实际统计走 SQLite COUNT/日期范围查询。
     private var statsFingerprint: String {
         var mediaCount = 0
         for e in entries { mediaCount += e.sortedMedia.count }
@@ -839,27 +853,48 @@ struct CaptureHomeView: View {
         return "\(entries.count)-\(mediaCount)-\(day)"
     }
 
-    /// 重算三项全表派生统计（照片总数 / 今日已答家人 / 那年今日）。仅在指纹变化时调用。
+    /// 重算三项派生统计。照片走 COUNT；今日问题和那年今日只查询命中的日期窗口。
     private func rebuildStats() {
         let cal = Calendar.current
-        // 照片总数（唯一读 Media.type 的 O(n·m) 处，收拢到这里只跑一次）
-        totalPhotos = entries.reduce(0) { total, entry in
-            total + entry.sortedMedia.filter { $0.type == .photo }.count
-        }
-        // 今天已回答「今日一问」的家人称谓（全家合唱，R4 F-6）
+        let photoDescriptor = FetchDescriptor<Media>(predicate: #Predicate {
+            $0.typeRaw == "photo" && ($0.thumbnailFileName != nil || $0.localFileName != nil)
+        })
+        totalPhotos = (try? modelContext.fetchCount(photoDescriptor)) ?? 0
+
+        let startOfToday = cal.startOfDay(for: .now)
+        let startOfTomorrow = cal.date(byAdding: .day, value: 1, to: startOfToday) ?? .now
+        let todayDescriptor = FetchDescriptor<Entry>(predicate: #Predicate {
+            !$0.isArchived && $0.happenedAt >= startOfToday && $0.happenedAt < startOfTomorrow
+        })
         var roles: [String] = []
-        for e in entries where cal.isDateInToday(e.happenedAt) {
+        for e in (try? modelContext.fetch(todayDescriptor)) ?? [] {
             guard e.note?.hasPrefix("【今日一问】") == true else { continue }
             if !roles.contains(e.authorRole) { roles.append(e.authorRole) }
         }
         todayQuestionAnswerers = roles
-        // 历史上的今天（同月同日，往年）
+
         let today = cal.dateComponents([.month, .day], from: .now)
-        onThisDayEntries = entries.filter { entry in
-            let c = cal.dateComponents([.month, .day], from: entry.happenedAt)
-            let isPast = !cal.isDate(entry.happenedAt, inSameDayAs: .now)
-            return c.month == today.month && c.day == today.day && isPast
+        let currentYear = cal.component(.year, from: .now)
+        let firstYear = profile.map { cal.component(.year, from: $0.birthday) } ?? currentYear - 18
+        var memories: [Entry] = []
+        if firstYear < currentYear {
+            for year in firstYear..<currentYear {
+                var components = DateComponents()
+                components.calendar = cal
+                components.year = year
+                components.month = today.month
+                components.day = today.day
+                guard let dayStart = cal.date(from: components),
+                      let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+                let descriptor = FetchDescriptor<Entry>(
+                    predicate: #Predicate {
+                        !$0.isArchived && $0.happenedAt >= dayStart && $0.happenedAt < dayEnd
+                    },
+                    sortBy: [SortDescriptor(\Entry.happenedAt, order: .reverse)])
+                memories.append(contentsOf: (try? modelContext.fetch(descriptor)) ?? [])
+            }
         }
+        onThisDayEntries = memories.sorted { $0.happenedAt > $1.happenedAt }
     }
 
     // MARK: 今日一问（轻条）
@@ -1076,68 +1111,6 @@ struct CaptureHomeView: View {
         return years <= 0 ? "今年" : "\(years)年前的今天"
     }
 
-    // MARK: 每日一问
-
-    private var dailyQuestionCard: some View {
-        let question = DailyQuestion.todays(birthday: profile?.birthday ?? .now)
-        return Button {
-            startQuickCapture(prefillNote: "【今日一问】\(question)\n")
-        } label: {
-            HStack(spacing: 14) {
-                BubuMascotBadge(size: 46, expression: .surprised)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("今日一问")
-                        .font(BubuTheme.Font.caption.weight(.semibold))
-                        .foregroundStyle(theme.primary)
-                    Text(question)
-                        .font(BubuTheme.Font.body.weight(.medium))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Text("答一句")
-                    .font(BubuTheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(theme.primary, in: Capsule())
-            }
-            .padding()
-            .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-            .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: 布布健康入口
-
-    private var healthEntryCard: some View {
-        NavigationLink {
-            HealthHomeView()
-        } label: {
-            HStack(spacing: 14) {
-                BubuMascotBadge(size: 48, expression: .eating)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("布布健康")
-                        .font(BubuTheme.Font.headline)
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("餐食、零食、营养补充、睡眠和不舒服都记在这里")
-                        .font(BubuTheme.Font.caption)
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(2)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(BubuTheme.Font.scaled(13, weight: .semibold))
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-            .padding()
-            .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-            .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme.primary, interactive: true)
-        }
-        .buttonStyle(.plain)
-    }
-
     /// 保存成功：布布「耶」贴纸弹入 + 成功触觉（haptic 在 CaptureModel.flashSaved 触发）。
     private var savedToast: some View {
         VStack {
@@ -1158,71 +1131,6 @@ struct CaptureHomeView: View {
         .transition(.scale(scale: 0.5, anchor: .top).combined(with: .opacity))
     }
 
-    private var naturalCaptureFloatingButton: some View {
-        GeometryReader { geo in
-            let bubbleSize: CGFloat = 58
-            let trailing: CGFloat = 16
-            let bottom: CGFloat = 118
-            let sideMargin: CGFloat = 16      // 吸边后与屏缘保留的间距
-            let topMargin: CGFloat = 70       // 别顶到状态栏/标题
-            // 相对右下角静止位的可移动范围：只能往左/上，且不越出屏幕（P2k）
-            let minW = -max(0, geo.size.width - bubbleSize - trailing - sideMargin)
-            let minH = -max(0, geo.size.height - bubbleSize - bottom - topMargin)
-            // 比例 → 当前尺寸下的绝对偏移。尺寸一变，位置自动跟着重算，永远落在屏内。
-            let baseOffset = CGSize(width: minW * naturalCaptureButtonRatio.width,
-                                    height: minH * naturalCaptureButtonRatio.height)
-
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button {
-                        BubuHaptics.tapLight()
-                        showNaturalCapture = true
-                    } label: {
-                        NaturalCaptureFloatingBubble(isDragging: naturalCaptureButtonDrag != .zero)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("一句话智能记录")
-                    .offset(CGSize(width: baseOffset.width + naturalCaptureButtonDrag.width,
-                                   height: baseOffset.height + naturalCaptureButtonDrag.height))
-                    .transaction { transaction in
-                        if naturalCaptureButtonDrag != .zero {
-                            transaction.animation = nil
-                        }
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 4)
-                            .updating($naturalCaptureButtonDrag) { value, state, _ in
-                                state = value.translation
-                            }
-                            .onEnded { value in
-                                var next = CGSize(
-                                    width: baseOffset.width + value.translation.width,
-                                    height: baseOffset.height + value.translation.height)
-                                // 钳制在屏内
-                                next.width = min(0, max(minW, next.width))
-                                next.height = min(0, max(minH, next.height))
-                                // 释放吸边：拖过 25% 即吸左缘。
-                                // 原来阈值是可移动范围的一半——iPad 上要拖过 470pt 才吸边，
-                                // 手感从「轻轻一推就贴边」退化成「拖过半个屏幕」。
-                                let snapLeft = minW < 0 && next.width < minW * 0.25
-                                next.width = snapLeft ? minW : 0
-                                // 存回比例，尺寸变化后自动换算，不会飞出屏幕
-                                withAnimation(reduceMotion ? nil : BubuMotion.gentle) {
-                                    naturalCaptureButtonRatio = CGSize(
-                                        width: minW == 0 ? 0 : next.width / minW,
-                                        height: minH == 0 ? 0 : next.height / minH)
-                                }
-                            }
-                    )
-                    .padding(.trailing, trailing)
-                    .padding(.bottom, bottom)
-                }
-            }
-        }
-        .allowsHitTesting(true)
-    }
 }
 
 private struct SSDIntakeCandidatesSheet: View {
@@ -1337,63 +1245,6 @@ private func makeIntakeService(_ env: AppEnvironment) -> BubuAIService? {
     guard env.config.isConfigured, let url = env.config.aiBaseURL else { return nil }
     return BubuAIService(baseURL: url) {
         try await env.apiClient.authenticate(role: "intake").token
-    }
-}
-
-private struct NaturalCaptureFloatingBubble: View {
-    let isDragging: Bool
-
-    var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Circle()
-                .fill(
-                    LinearGradient(colors: [
-                        BubuTheme.Color.primary,
-                        BubuTheme.Color.pink.opacity(0.95),
-                        BubuTheme.Color.peach.opacity(0.90)
-                    ], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .frame(width: 50, height: 50)
-                .overlay {
-                    Circle()
-                        .stroke(.white.opacity(0.86), lineWidth: 1.4)
-                }
-                .shadow(color: BubuTheme.Color.deepRose.opacity(isDragging ? 0.10 : 0.24),
-                        radius: isDragging ? 5 : 10,
-                        y: isDragging ? 2 : 5)
-                .overlay {
-                    Image(systemName: "wand.and.stars")
-                        .font(BubuTheme.Font.scaled(24, weight: .black))
-                        .foregroundStyle(.white)
-                        .rotationEffect(.degrees(-10))
-                        .shadow(color: BubuTheme.Color.deepRose.opacity(0.18), radius: 2, y: 1)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    Text("AI")
-                        .font(BubuTheme.Font.scaled(10.5, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .shadow(color: BubuTheme.Color.deepRose.opacity(0.36), radius: 2, y: 1)
-                        .padding(.trailing, 7)
-                        .padding(.bottom, 5)
-                }
-                .offset(x: -7, y: -7)
-
-            BubuStarShape()
-                .fill(BubuTheme.Color.butter)
-                .frame(width: 9, height: 9)
-                .rotationEffect(.degrees(-12))
-                .offset(x: -42, y: -38)
-                .opacity(isDragging ? 0.55 : 0.86)
-
-            Image(systemName: "sparkles")
-                .font(BubuTheme.Font.scaled(9, weight: .black))
-                .foregroundStyle(BubuTheme.Color.butter)
-                .offset(x: -3, y: -40)
-                .opacity(isDragging ? 0.55 : 0.92)
-
-        }
-        .frame(width: 58, height: 58)
-        .contentShape(Circle())
     }
 }
 

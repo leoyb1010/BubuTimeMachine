@@ -12,6 +12,14 @@
 
 已完成 **完整的离线体验层**（不依赖任何后端，全功能本地可用）。核心闭环 + 六大专属能力：
 
+**iOS / iPadOS 2.12**
+- ✅ iOS 26 原生 Liquid Glass Tab、滚动收缩与“记录此刻”底部附件；iPad 自动切换系统侧栏
+- ✅ iPad 多窗口、横竖屏、窄分屏、宽屏内容列与自适应网格；iPad Widget target 已开放
+- ✅ SpeechAnalyzer / SpeechTranscriber 端侧转写，旧 SFSpeechRecognizer 与家庭 Whisper 分层兜底
+- ✅ 可选的 Spotlight 时光实体索引，搜索结果通过 deep link 直达单条旧记录
+- ✅ 首页限量查询 + SQLite COUNT/日期范围统计，不再随十几年数据量线性驻留
+- ✅ XCUITest 覆盖 iPhone/iPad 根导航、快速记录、时光搜索与 iPad 横屏
+
 **地基**
 - ✅ Xcode 工程（xcodegen）+ SwiftData ModelContainer（11 个实体）
 - ✅ `AppEnvironment` 依赖容器（DI）+ `APIClient`/`AIService` 协议 + Mock 实现
@@ -102,7 +110,7 @@ xcodebuild -project BubuTimeMachine.xcodeproj -scheme BubuTimeMachine \
 # 或直接 open BubuTimeMachine.xcodeproj 用 Xcode 运行
 ```
 
-要求：Xcode 26+、iOS 18+ 部署目标。`project.pbxproj` 由 `project.yml` 生成，**修改工程配置请改 `project.yml` 后重跑 `xcodegen generate`**。
+要求：Xcode 26+、iOS/iPadOS 26.0+ 部署目标。`project.pbxproj` 由 `project.yml` 生成，**修改工程配置请改 `project.yml` 后重跑 `xcodegen generate`**。iOS 27 新交互使用编译器与系统双门禁；安装 Xcode 27 后走 shadow build 验证，不影响 Xcode 26 正式路径。
 
 ### HarmonyOS
 

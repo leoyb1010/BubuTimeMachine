@@ -60,6 +60,7 @@ struct QuickCaptureSheet: View {
                             Spacer(minLength: 12)
                         }
                         .padding()
+                        .bubuContentColumn(900)
                         .opacity(panelAppeared ? 1 : 0)
                         .offset(y: panelAppeared ? 0 : 14)
                         .onAppear {
@@ -262,38 +263,6 @@ struct QuickCaptureSheet: View {
                 .stroke(.white.opacity(0.58), lineWidth: 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-    }
-
-    private var photoPicker: some View {
-        let tint = theme
-        return PhotosPicker(
-            selection: $model.pickedItems,
-            maxSelectionCount: 9,
-            matching: .any(of: [.images, .videos])
-        ) {
-            HStack(spacing: 14) {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(BubuTheme.Font.scaled(30, weight: .medium))
-                    .foregroundStyle(tint)
-                    .frame(width: 48, height: 48)
-                    .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("从相册补充照片或视频")
-                        .font(BubuTheme.Font.headline)
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("会自动认出拍摄时间、地点和画面内容")
-                        .font(BubuTheme.Font.caption)
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(BubuTheme.Font.scaled(13, weight: .semibold))
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-            .padding()
-            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-            .bubuCardShadow()
-        }
     }
 
     private var includeLocationBinding: Binding<Bool> {

@@ -10,12 +10,21 @@ final class BubuRouter {
     var pendingTab: Int?
     /// 待触发「快速记录」信号（小组件/控件按钮打开 App 后直达记录，被首页消费后置回 false）。
     var pendingQuickCapture = false
+    /// Spotlight / App Entity 指向的具体时光；RootTabView 消费后推入时光导航栈。
+    var pendingEntryID: UUID?
 
     /// 解析 deep link。识别不了的 URL 安全忽略（不跳转、不崩）。
     func handle(_ url: URL) {
         guard url.scheme == BubuRoute.scheme, let route = BubuRoute(host: url.host) else { return }
         pendingTab = route.tabIndex
         if route == .record { pendingQuickCapture = true }
+        pendingEntryID = nil
+        if route == .moment {
+            if let rawID = url.pathComponents.dropFirst().first,
+               let id = UUID(uuidString: rawID) {
+                pendingEntryID = id
+            }
+        }
     }
 }
 
@@ -44,4 +53,8 @@ enum BubuRoute: String {
 
     /// 供小组件构造 `.widgetURL`。
     var url: URL { URL(string: "\(Self.scheme)://\(rawValue)")! }
+
+    nonisolated static func momentURL(id: UUID) -> URL {
+        URL(string: "bubu://moment/\(id.uuidString)")!
+    }
 }

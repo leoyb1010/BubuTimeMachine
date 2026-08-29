@@ -7,7 +7,6 @@ import SwiftData
 struct GrowthHomeView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @Query(sort: \Milestone.createdAt, order: .reverse) private var milestones: [Milestone]
     @Query(sort: \GrowthMeasurement.measuredAt, order: .reverse) private var measurements: [GrowthMeasurement]
     /// 健康记录只用来显示条数：日打卡量级几年就是万行，@Query 全量拉太重，
@@ -103,10 +102,7 @@ struct GrowthHomeView: View {
 
     private var primaryLinks: some View {
         LazyVGrid(
-            columns: Array(
-                repeating: GridItem(.flexible(), spacing: 12),
-                count: BubuAdaptive.columns(sizeClass, compact: 2, regular: 4)
-            ),
+            columns: [GridItem(.adaptive(minimum: 150, maximum: 250), spacing: 12)],
             spacing: 12
         ) {
             NavigationLink { GrowthCurveView() } label: {
