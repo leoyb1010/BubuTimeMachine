@@ -2,7 +2,7 @@
 
 ## Outcome
 
-- User-visible outcome: iOS 主产品升级为更轻、更系统化的家庭档案；iPad 不是放大的 iPhone，而是可变侧栏、宽屏密度和多窗口工作区。
+- User-visible outcome: iOS 主产品升级为更轻、更系统化的家庭档案；完整布布身份卡是 iPhone/iPad 首页不可降级的核心识别，iPad 不是放大的 iPhone，而是可变侧栏、宽屏密度和多窗口工作区。
 - Success signal: iPhone/iPad 同一事实库下完成记录、回看、搜索和详情；关键路径有自动化与多尺寸截图证据。
 
 ## Users and situation
@@ -13,7 +13,7 @@
 
 ## Scope
 
-- In scope: 原生 Tab/侧栏、记录入口、首页收敛、时光详情、SwiftData 查询、SpeechAnalyzer、Spotlight/App Entity、iPad Widget、XCUITest、iOS 27 渐进增强。
+- In scope: 原生 Tab/侧栏、记录入口、首页完整双面身份卡、时光详情、SwiftData 查询、SpeechAnalyzer、Spotlight/App Entity、iPad Widget、XCUITest、iOS 27 渐进增强。
 - Out of scope: 本轮不重写数据库/同步/加密格式；不引入第三方 UI、图片或状态管理依赖；不把未安装的 Xcode 27 当成已验证。
 
 ## Facts and constraints

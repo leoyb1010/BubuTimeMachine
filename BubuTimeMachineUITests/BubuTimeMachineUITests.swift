@@ -22,6 +22,20 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(element(named: "时光", in: app).exists)
         XCTAssertTrue(element(named: "成长", in: app).exists)
         XCTAssertTrue(element(named: "魔法屋", in: app).exists)
+        let identityCard = element(named: "home.identity-card", in: app)
+        XCTAssertTrue(identityCard.waitForExistence(timeout: 5),
+                      "iPhone 首页必须展示完整布布身份卡，不能用简化封面替代")
+        let flipButton = app.buttons["home.identity-card.flip"]
+        XCTAssertTrue(flipButton.waitForExistence(timeout: 3), "身份卡必须提供稳定、可发现的翻面按钮")
+        flipButton.tap()
+        let flipped = NSPredicate(format: "label == %@", "翻回身份卡正面")
+        expectation(for: flipped, evaluatedWith: flipButton)
+        waitForExpectations(timeout: 3)
+        attachScreenshot("identity-card-back", to: self)
+        flipButton.tap()
+        let restoredFront = NSPredicate(format: "label == %@", "翻看身份卡背面")
+        expectation(for: restoredFront, evaluatedWith: flipButton)
+        waitForExpectations(timeout: 3)
         attachScreenshot("adaptive-root", to: self)
 
         record.tap()

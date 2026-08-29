@@ -32,6 +32,7 @@ struct CaptureHomeView: View {
     @State private var ssdIntakeCandidates: [SSDIntakeCandidate] = []
     @State private var showSSDIntakeCandidates = false
     @State private var showPendingRecallDialog = false
+    @State private var identityCardFlipped = false
     @State private var heroBackgroundImage: UIImage?
 
     // 首页统计缓存：全表派生值只在数据指纹变化时重算一次，
@@ -732,14 +733,12 @@ struct CaptureHomeView: View {
     @ViewBuilder
     private var identityCardTop: some View {
         if let profile {
-            if BubuAdaptive.isWide(sizeClass) {
-                BubuIdentityCard(profile: profile, theme: theme, mediaStore: env.mediaStore)
-            } else {
-                NavigationLink { ChildProfileView() } label: {
-                    BubuLivingCover(profile: profile, theme: theme, mediaStore: env.mediaStore)
-                }
-                .buttonStyle(.plain)
-            }
+            BubuIdentityCard(
+                profile: profile,
+                theme: theme,
+                mediaStore: env.mediaStore,
+                isFlipped: $identityCardFlipped)
+                .entranceEffect(index: 0)
         } else {
             // 无档案：引导建档（保证空态也好看，不留空白）
             NavigationLink { ChildProfileView() } label: {

@@ -8,8 +8,9 @@ struct BubuIdentityCard: View {
     let theme: BubuThemeDefinition
     let mediaStore: MediaStore
 
-    /// 翻面：轻点头像看背面（血型/性别/出生地/完整 ID）；背面任意处轻点翻回。
-    @State private var isFlipped = false
+    /// 翻面状态由首页持有，避免 iPad 宽屏父布局刷新时把卡片重建回正面。
+    @Binding var isFlipped: Bool
+    @State private var sheenProgress: CGFloat = -1.2
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var ageText: String {
@@ -31,6 +32,53 @@ struct BubuIdentityCard: View {
     }
 
     var body: some View {
+        ZStack(alignment: .topTrailing) {
+            card
+                .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+                .onTapGesture { flip() }
+                .accessibilityIdentifier("home.identity-card")
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel(isFlipped
+                    ? "布布身份卡背面，性别、血型、出生地，轻点翻回正面"
+                    : "布布身份卡，\(profile.name)，\(ageText)，\(daysText)，轻点翻面查看性别、血型、出生地")
+                .accessibilityValue(isFlipped ? "背面" : "正面")
+
+            Button(action: flip) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text(isFlipped ? "翻回正面" : (isBirthdayMonth ? "生日月 · 翻面" : "轻点翻面"))
+                }
+                .font(BubuTheme.Font.scaled(9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(theme.primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.white.opacity(0.34), in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.48), lineWidth: 0.7))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("home.identity-card.flip")
+            .accessibilityLabel(isFlipped ? "翻回身份卡正面" : "翻看身份卡背面")
+            .padding(.top, 10)
+            .padding(.trailing, 12)
+        }
+        .bubuSensoryFeedback(.impact(weight: .light), trigger: isFlipped)
+        // 身份卡是固定比例的高密度证件版式；完整内容由 VoiceOver 标签一次读出。
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .task(id: isFlipped) {
+            guard !reduceMotion else {
+                sheenProgress = 2.2
+                return
+            }
+            sheenProgress = -1.2
+            await Task.yield()
+            withAnimation(BubuMotion.smooth) {
+                sheenProgress = 2.2
+            }
+        }
+    }
+
+    private var card: some View {
         ZStack {
             front
                 .opacity(isFlipped ? 0 : 1)
@@ -61,23 +109,37 @@ struct BubuIdentityCard: View {
                     .offset(x: 18, y: 30)
             }
         }
+        // 一次性的镜面高光：首次出现与每次翻面各扫过一次，不常驻循环。
+        .overlay {
+            GeometryReader { geometry in
+                LinearGradient(
+                    colors: [.clear, .white.opacity(0.08), .white.opacity(0.42), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom)
+                    .frame(width: geometry.size.width * 0.34)
+                    .rotationEffect(.degrees(14))
+                    .offset(x: geometry.size.width * sheenProgress)
+                    .blendMode(.screen)
+            }
+            .allowsHitTesting(false)
+        }
         .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
-                .stroke(.white.opacity(0.45), lineWidth: 1)
+                .stroke(
+                    LinearGradient(
+                        colors: [.white.opacity(0.78), theme.primary.opacity(0.20), .white.opacity(0.34)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing),
+                    lineWidth: 1)
+                .padding(0.5)
         }
         .bubuCardShadow()
-        .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        // 卡片本身只翻面（不进编辑页），标签与操作照实描述（P2f）
-        .accessibilityLabel(isFlipped
-            ? "布布身份卡背面，性别、血型、出生地，轻点翻回正面"
-            : "布布身份卡，\(profile.name)，\(ageText)，\(daysText)，轻点翻面查看性别、血型、出生地")
-        .accessibilityAction { flip() }
-        // 身份卡是固定比例的高密度证件版式；视觉字号需限幅，完整内容仍由合并后的
-        // VoiceOver 标签一次读出，避免生日和编号在无障碍超大字号下被裁切。
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        // leotexiao Flip Card：双面共用真实透视空间，Spring 由品牌 ceremony token 统一。
+        .rotation3DEffect(
+            .degrees(isFlipped ? 180 : 0),
+            axis: (x: 0, y: 1, z: 0),
+            perspective: 0.68)
     }
 
     private func flip() {
@@ -95,7 +157,6 @@ struct BubuIdentityCard: View {
 
             HStack(alignment: .center, spacing: 10) {
                 avatarBlock
-                    .onTapGesture { flip() }
 
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline) {
@@ -118,12 +179,16 @@ struct BubuIdentityCard: View {
 
                         Spacer()
 
-                        Text("ACTIVE")
-                            .font(BubuTheme.Font.scaled(10, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(theme.primary, in: Capsule())
+                        HStack(spacing: 4) {
+                            Circle().fill(.white.opacity(0.92)).frame(width: 5, height: 5)
+                            Text("ACTIVE")
+                        }
+                        .font(BubuTheme.Font.scaled(10, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(theme.primary, in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.42), lineWidth: 0.8))
                     }
 
                     infoGrid
@@ -194,7 +259,6 @@ struct BubuIdentityCard: View {
         .padding(16)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
-        .onTapGesture { flip() }
     }
 
     private func backRow(title: String, value: String) -> some View {
@@ -219,22 +283,6 @@ struct BubuIdentityCard: View {
                 .frame(width: 48, height: 6)
                 .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
             Spacer()
-            if isBirthdayMonth {
-                HStack(spacing: 4) {
-                    Text("🎂")
-                        .font(BubuTheme.Font.scaled(12))
-                    Text("生日月")
-                        .font(BubuTheme.Font.scaled(10, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(theme.primary, in: Capsule())
-            } else {
-                Image(systemName: "sparkle")
-                    .font(BubuTheme.Font.scaled(13, weight: .bold))
-                    .foregroundStyle(theme.primary)
-            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 5)
@@ -261,6 +309,7 @@ struct BubuIdentityCard: View {
                 RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.65), lineWidth: 1)
             }
+            .shadow(color: theme.primary.opacity(0.18), radius: 8, y: 4)
 
             Text("布布")
                 .font(BubuTheme.Font.scaled(11, weight: .black, design: .rounded))
@@ -301,7 +350,16 @@ struct BubuIdentityCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [.white.opacity(0.46), .white.opacity(0.30)],
+                startPoint: .top,
+                endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
+                .stroke(.white.opacity(0.32), lineWidth: 0.7)
+        }
     }
 
     private var barcode: some View {
@@ -330,75 +388,5 @@ struct BubuIdentityCard: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-    }
-}
-
-// MARK: - 首页当下封面
-/// iPhone 首屏只放“此刻最重要的信息”，完整证件卡留给宽屏与档案页。
-struct BubuLivingCover: View {
-    let profile: ChildProfile
-    let theme: BubuThemeDefinition
-    let mediaStore: MediaStore
-
-    var body: some View {
-        HStack(spacing: 13) {
-            avatar
-            VStack(alignment: .leading, spacing: 3) {
-                Text("BUBU · TODAY")
-                    .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundStyle(theme.primary.opacity(0.78))
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(profile.name)
-                        .font(BubuTheme.Font.scaled(21, weight: .black, design: .rounded))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
-                        .font(BubuTheme.Font.scaled(12.5, weight: .bold, design: .rounded))
-                        .foregroundStyle(theme.primary)
-                }
-                Text("来到世界第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .contentTransition(.numericText())
-            }
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.right")
-                .font(BubuTheme.Font.caption.weight(.bold))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-        }
-        .padding(14)
-        .background(
-            LinearGradient(
-                colors: [BubuTheme.Color.card.opacity(0.96), theme.surfaceTint.opacity(0.28)],
-                startPoint: .leading,
-                endPoint: .trailing),
-            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                .stroke(.white.opacity(0.58), lineWidth: 1)
-        }
-        .bubuCardShadow()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(profile.name)，\(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))，来到世界第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天，打开完整档案")
-    }
-
-    @ViewBuilder
-    private var avatar: some View {
-        Group {
-            if let name = profile.avatarMediaFileName,
-               let data = mediaStore.data(forMedia: name),
-               let image = UIImage(data: data) {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                BubuMascotBadge(size: 58, expression: .happy)
-            }
-        }
-        .frame(width: 62, height: 62)
-        .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
-                .stroke(.white.opacity(0.75), lineWidth: 1)
-        }
     }
 }
