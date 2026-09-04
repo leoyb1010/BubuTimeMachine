@@ -26,9 +26,21 @@ struct BubuMascotBadge: View {
             .accessibilityHidden(true)
     }
 
+    /// UI 测试期间不做循环动画。
+    /// XCUITest 在每次查询/点击前会等 App 进入 idle，而 phaseAnimator 是**永不停止**的循环——
+    /// 身份卡上正好有一个，于是 CI 那台较慢的机器上「等 idle」会被拖到超时。
+    /// 本机跑得快、侥幸绿了，CI 上稳定红：这类问题只有真的把 iPad 回归接进 CI 才会暴露。
+    private static var isUITesting: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("-uitest-") }
+        #else
+        false
+        #endif
+    }
+
     @ViewBuilder
     private var sticker: some View {
-        if isAlive && !reduceMotion {
+        if isAlive && !reduceMotion && !Self.isUITesting {
             base.phaseAnimator(Breath.allCases) { view, phase in
                 view
                     .scaleEffect(phase == .inhale ? 1.035 : 1, anchor: .bottom)

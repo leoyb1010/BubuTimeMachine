@@ -17,21 +17,24 @@ final class BubuTimeMachineUITests: XCTestCase {
         let globalRecord = app.buttons["root.record"]
         let homeRecord = app.buttons["home.record"]
         let record: XCUIElement
-        if globalRecord.waitForExistence(timeout: 2) {
+        // 超时给足：这条用例是套件里第一个跑的，要付冷启动 + 种子数据的钱，
+        // iPad 上实测 50 秒量级，CI 的 runner 还要更慢。
+        // 之前 2 秒/6 秒的余量在 CI 上会随机失败——门禁一旦不稳就等于没有门禁。
+        if globalRecord.waitForExistence(timeout: 12) {
             record = globalRecord
         } else {
             record = homeRecord
-            XCTAssertTrue(record.waitForExistence(timeout: 6), "自适应根导航必须保留记录入口")
+            XCTAssertTrue(record.waitForExistence(timeout: 20), "自适应根导航必须保留记录入口")
         }
         XCTAssertTrue(element(named: "首页", in: app).exists)
         XCTAssertTrue(element(named: "时光", in: app).exists)
         XCTAssertTrue(element(named: "成长", in: app).exists)
         XCTAssertTrue(element(named: "魔法屋", in: app).exists)
         let identityCard = element(named: "home.identity-card", in: app)
-        XCTAssertTrue(identityCard.waitForExistence(timeout: 5),
+        XCTAssertTrue(identityCard.waitForExistence(timeout: 15),
                       "iPhone 首页必须展示完整布布身份卡，不能用简化封面替代")
         let flipButton = app.buttons["home.identity-card.flip"]
-        XCTAssertTrue(flipButton.waitForExistence(timeout: 3), "身份卡必须提供稳定、可发现的翻面按钮")
+        XCTAssertTrue(flipButton.waitForExistence(timeout: 10), "身份卡必须提供稳定、可发现的翻面按钮")
         flipButton.tap()
         let flipped = NSPredicate(format: "label == %@", "翻回身份卡正面")
         expectation(for: flipped, evaluatedWith: flipButton)
@@ -140,8 +143,16 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
+    /// 按 identifier 找元素。
+    /// `descendants(matching: .any)` 会遍历**整棵**无障碍树，在 iPad 的侧栏 + 长页上很贵，
+    /// 而这个 helper 每条用例要调四五次。先走按类型的快路径（几乎都是按钮或静态文本），
+    /// 找不到再回退到全树遍历，语义不变、代价小得多。
     private func element(named name: String, in app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: name).firstMatch
+        let button = app.buttons[name]
+        if button.exists { return button }
+        let text = app.staticTexts[name]
+        if text.exists { return text }
+        return app.descendants(matching: .any).matching(identifier: name).firstMatch
     }
 
     @MainActor

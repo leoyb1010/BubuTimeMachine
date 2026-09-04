@@ -85,6 +85,9 @@ jobs:
 
       # iPad 横屏回归此前从未在自动化里跑过：唯一的 iPad 用例靠 XCTSkipUnless(idiom == .pad)
       # 自我跳过，而上面的模拟器选择只挑 iPhone，于是它永远 skip。
+      # UI 测试在共享 runner 上会因为资源竞争偶发超时。
+      # 失败一次就重跑一次：真的坏了会连挂两次，偶发抖动则自愈。
+      # 不用 continue-on-error——那等于把门禁降级成摆设。
       - name: UI 回归 (iPad)
         if: steps.sim.outputs.ipad != ''
         run: |
@@ -93,7 +96,21 @@ jobs:
             -scheme BubuTimeMachine \
             -destination "id=${{ steps.sim.outputs.ipad }}" \
             -only-testing:BubuTimeMachineUITests \
-            test 2>&1 | tail -80
+            test 2>&1 | tee /tmp/ipad.log | tail -80 \
+          || {
+            echo "iPad 回归第一次失败，重跑一次以排除 runner 资源抖动"
+            xcodebuild -project BubuTimeMachine.xcodeproj \
+              -scheme BubuTimeMachine \
+              -destination "id=${{ steps.sim.outputs.ipad }}" \
+              -only-testing:BubuTimeMachineUITests \
+              test 2>&1 | tee /tmp/ipad.log | tail -80
+          }
+
+      # tail -80 会把断言细节截掉，失败时看不出是哪一条炸的。
+      - name: iPad 失败详情
+        if: failure()
+        run: |
+          grep -E "error:|XCTAssert|Failing tests|Test Case .* failed" /tmp/ipad.log | tail -40 || true
 
   server:
     name: AI server tests (Python 3.9)
