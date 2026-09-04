@@ -7,6 +7,13 @@ import FoundationModels
 /// 断网/自托管 AI 不可用时的第二道防线：用系统端上大模型把一句话解析成结构化记录。
 /// 全程不出设备、免费、无 Key。设备不支持（旧机型/未开 Apple Intelligence）时返回 nil，
 /// 调用方降级为纯文本时光（绝不编造数值——所有端上解析结果一律 needsConfirmation）。
+///
+/// 【为什么用 @Generable 而不是「让模型吐 JSON 再自己解」】
+/// 旧实现是在 prompt 里描述 JSON 格式，拿到文本后剥 ```json 围栏、JSONSerialization、
+/// 逐字段 best-effort 映射，解不出就返回 nil——**模型多输出一个字，整条功能就静默失效**。
+/// `@Generable` 走的是约束解码：schema 在解码层面就被强制满足，拿到的直接是类型化结果，
+/// 不存在「格式跑偏」这个失败模式。`.anyOf` 还能把取值域焊死，比在 prompt 里写规则可靠得多。
+/// 这也让这个文件从 ~90 行降到不需要任何手写解析。
 @MainActor
 enum OnDeviceNaturalParser {
 
@@ -25,17 +32,16 @@ enum OnDeviceNaturalParser {
         #if canImport(FoundationModels)
         guard #available(iOS 26.0, *), isAvailable else { return nil }
         let instructions = """
-        你把家长记录宝宝生活的一句话解析成 JSON 数组。只输出 JSON，不要任何其他文字。
-        每个元素：{"domain":"water|meal|sleep|symptom|growth|vaccine|first_time|timeline",
-        "title":"简短标题","note":"原文相关部分或null",
-        "fields":{可选，仅当句子明确给出数值：amount_ml(数字),height_cm(数字),weight_kg(数字),
-        temperature_celsius(数字),food_items(字符串数组),vaccine_name(字符串)}}
-        规则：句子里没有的数值绝不编造；拿不准就用 domain=timeline 原文保底。
+        你把家长记录宝宝生活的一句话拆成若干条结构化记录。
+        规则：
+        1. 句子里没有出现的数值绝对不要填，宁可留空。
+        2. 拿不准属于哪一类，就用 timeline，把原文放进 note。
+        3. title 是给家长看的简短标题，不超过 12 个字。
         """
         do {
             let session = LanguageModelSession(instructions: instructions)
-            let response = try await session.respond(to: request.text)
-            return Self.decode(response.content, sourceText: request.text)
+            let response = try await session.respond(to: request.text, generating: ParsedBatch.self)
+            return Self.convert(response.content, sourceText: request.text)
         } catch {
             return nil
         }
@@ -44,40 +50,81 @@ enum OnDeviceNaturalParser {
         #endif
     }
 
-    /// 宽容解码：剥掉 ```json 围栏，逐项 best-effort 映射；解不出返回 nil。
-    private static func decode(_ raw: String, sourceText: String) -> NaturalCaptureResult? {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]") {
-            text = String(text[start...end])
-        }
-        guard let data = text.data(using: .utf8),
-              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              !array.isEmpty else { return nil }
+    #if canImport(FoundationModels)
 
-        var items: [NaturalCaptureItem] = []
-        for obj in array {
-            guard let domainRaw = obj["domain"] as? String,
-                  let domain = NaturalCaptureDomain(rawValue: domainRaw) else { continue }
+    /// 端上模型的输出契约。取值域用 `.anyOf` 焊死，不靠 prompt 自觉。
+    @available(iOS 26.0, *)
+    @Generable
+    struct ParsedRecord {
+        @Guide(description: "这条记录属于哪一类",
+               .anyOf(["water", "meal", "sleep", "symptom", "growth", "vaccine", "first_time", "timeline"]))
+        var domain: String
+
+        @Guide(description: "给家长看的简短标题，不超过 12 个字")
+        var title: String
+
+        @Guide(description: "原文里与这条记录相关的部分；没有就留空")
+        var note: String?
+
+        @Guide(description: "喝水/喝奶的毫升数。句子里没有明确说就留空，不要估算")
+        var amountML: Int?
+
+        @Guide(description: "身高厘米数。句子里没有明确说就留空")
+        var heightCM: Double?
+
+        @Guide(description: "体重公斤数。句子里没有明确说就留空")
+        var weightKG: Double?
+
+        @Guide(description: "体温摄氏度。句子里没有明确说就留空")
+        var temperatureCelsius: Double?
+
+        @Guide(description: "吃了哪些食物；句子里没提就留空数组")
+        var foodItems: [String]
+
+        @Guide(description: "疫苗名称。句子里没有明确说就留空")
+        var vaccineName: String?
+    }
+
+    @available(iOS 26.0, *)
+    @Generable
+    struct ParsedBatch {
+        @Guide(description: "从这句话里拆出的记录，最多 5 条", .count(1...5))
+        var items: [ParsedRecord]
+    }
+
+    /// 把类型化结果搬进产品自己的 DTO。没有解析、没有容错分支——
+    /// 约束解码已经保证了结构，这里只是换个壳。
+    @available(iOS 26.0, *)
+    private static func convert(_ batch: ParsedBatch, sourceText: String) -> NaturalCaptureResult? {
+        let items: [NaturalCaptureItem] = batch.items.compactMap { record in
+            guard let domain = NaturalCaptureDomain(rawValue: record.domain) else { return nil }
             var fields: [String: JSONValue] = [:]
-            if let f = obj["fields"] as? [String: Any] {
-                for (k, v) in f {
-                    if let n = v as? Double { fields[k] = .number(n) }
-                    else if let n = v as? Int { fields[k] = .number(Double(n)) }
-                    else if let s = v as? String { fields[k] = .string(s) }
-                    else if let a = v as? [String] { fields[k] = .array(a.map { .string($0) }) }
-                }
+            if let ml = record.amountML { fields["amount_ml"] = .number(Double(ml)) }
+            if let h = record.heightCM { fields["height_cm"] = .number(h) }
+            if let w = record.weightKG { fields["weight_kg"] = .number(w) }
+            if let t = record.temperatureCelsius { fields["temperature_celsius"] = .number(t) }
+            if !record.foodItems.isEmpty {
+                fields["food_items"] = .array(record.foodItems.map { .string($0) })
             }
-            let title = (obj["title"] as? String)?.trimmingCharacters(in: .whitespaces)
-            items.append(NaturalCaptureItem(
-                domain: domain, action: .create,
-                title: (title?.isEmpty == false ? title! : String(sourceText.prefix(12))),
-                note: obj["note"] as? String ?? sourceText,
-                date: .now, fields: fields, tags: [],
+            if let vaccine = record.vaccineName, !vaccine.isEmpty {
+                fields["vaccine_name"] = .string(vaccine)
+            }
+            let title = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return NaturalCaptureItem(
+                domain: domain,
+                action: .create,
+                title: title.isEmpty ? String(sourceText.prefix(12)) : title,
+                note: record.note?.isEmpty == false ? record.note : sourceText,
+                date: .now,
+                fields: fields,
+                tags: [],
                 confidence: 0.7,
-                needsConfirmation: true,   // 端上解析一律让家长确认，数值错了改一下就好
-                sourceText: sourceText))
+                // 端上解析一律让家长确认：数值错了改一下就好，写错事实是不可接受的。
+                needsConfirmation: true,
+                sourceText: sourceText)
         }
         guard !items.isEmpty else { return nil }
         return NaturalCaptureResult(confidence: 0.7, items: items, warnings: ["on_device_parse"])
     }
+    #endif
 }

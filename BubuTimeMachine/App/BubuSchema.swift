@@ -51,32 +51,37 @@ enum BubuMigrationPlan: SchemaMigrationPlan {
     }
 }
 
-// MARK: - 【下一次改模型必读】新增 V2 的标准做法（照抄改名即可）
+// MARK: - 【下一次改模型必读】
 //
-// 场景 A · 只是加/删字段、或改可选性等 SwiftData 能自动推断的变更 → 轻量迁移：
+// ⚠️ 这一段以前放的是一份「照抄改名即可」的 V2 模板。**那份模板照抄必然失败**，
+// 原因就写在上面几行：V1/V2 引用同一批模型类时，两个版本的实体形状完全相同而版本号不同，
+// 迁移器直接 abort（真机已验证）。为了不让下一个会话踩这个坑，模板已删除，换成事实描述。
 //
-//   enum BubuSchemaV2: VersionedSchema {
-//       static let versionIdentifier = Schema.Version(2, 0, 0)   // 只有真正改模型才涨大版本
-//       static var models: [any PersistentModel.Type] { /* V2 的全实体列表 */ }
-//   }
-//   // BubuMigrationPlan.schemas = [BubuSchemaV1.self, BubuSchemaV2.self]
-//   // BubuMigrationPlan.stages  = [
-//   //     .lightweight(fromVersion: BubuSchemaV1.self, toVersion: BubuSchemaV2.self)
-//   // ]
+// 【现状的准确说法】
+// `BubuSchemaV1.models` 返回的是工程里**当前**的 16 个类，不是冻结快照——
+// 类改一个字段，所谓的「V1 历史快照」跟着变。`stages` 为空。
+// 也就是说：**目前实际生效的仍然是 SwiftData 的隐式轻量迁移**，
+// 版本化 schema 这套机制在这个工程里是装饰性的。
 //
-// 场景 B · 需要搬数据/拆合字段等自动推断做不到的 → 自定义迁移（willMigrate 里搬数据）：
+// 【在真正修好之前，允许做什么】
+// ✅ 加 optional 字段（`var foo: T?`）—— 纯 additive，自动轻量迁移，
+//    已被 Media 追加 remoteThumbURL / contentHash 实践验证过。
+// ✅ 加带默认值的非 optional 字段（`var flag: Bool = false`）—— 同理。
+// ✅ 加 `#Index` —— 2026-09-04 已用真实旧版 store 基线实测：加完索引后仍能无损打开。
+// ❌ 改名、改类型、Optional→非 Optional、删字段、删/加 @Model 实体 ——
+//    这些 SwiftData 推断不出来，会让 ModelContainer 构造抛错，
+//    全家所有设备升级后打开是空 App（降级到内存容器，磁盘数据还在但功能全损）。
 //
-//   static let BubuSchemaV1toV2 = MigrationStage.custom(
-//       fromVersion: BubuSchemaV1.self,
-//       toVersion:   BubuSchemaV2.self,
-//       willMigrate: { context in /* 读旧字段、写新字段、context.save() */ },
-//       didMigrate:  nil
-//   )
-//   // BubuMigrationPlan.stages = [BubuSchemaV1toV2]
+// 【真正修好它要做什么】
+// 在 `BubuSchemaV1` 命名空间里**真正复制一份**当前 16 个类的定义，让 V1 冻结成快照；
+// V2 用活类；`stages` 填 `.lightweight(fromVersion:toVersion:)`；
+// App 侧用 `typealias Entry = BubuSchemaV2.Entry` 之类把引用指过去。
+// 这是一次涉及全工程模型引用的改动，必须单独排期、单独验证，不要顺手做。
 //
-// 铁律复述：① 绝不再动 BubuSchemaV1 的任何定义（它是历史快照）；② 新版本另起 V2/V3…；
-// ③ 每次都补上 schemas + stages，让升级走计划迁移。改完务必在真机/模拟器上用"装了旧版
-// 数据的 store"验证能无损打开。
+// 【无论如何都要做的一件事】
+// 改任何模型之前，先跑 `BubuTimeMachineTests/StoreMigrationTests.swift`。
+// 它用一份**真实装机数据**（Fixtures/LegacyStore_v2.12.2.store）以生产同款配置去打开，
+// 是目前唯一能在发版前挡住「升级后全家打开是空 App」的东西。它红了就不要发版。
 
 // MARK: - 数据保护模式标志
 /// 容器打开失败时置位：App 以内存容器运行（不崩、不清数据），

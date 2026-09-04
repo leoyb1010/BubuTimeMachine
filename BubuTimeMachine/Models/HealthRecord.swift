@@ -4,6 +4,9 @@ import SwiftData
 // MARK: - 健康记录
 @Model
 final class HealthRecord {
+    // 喂养/睡眠/喝水是日打卡，三年就是上万行，而健康页按 recordedAt 排序取全表。
+    #Index<HealthRecord>([\.recordedAt], [\.kindRaw, \.recordedAt])
+
     @Attribute(.unique) var id: UUID
     var remoteId: String?
     var kindRaw: String

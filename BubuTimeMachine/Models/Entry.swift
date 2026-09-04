@@ -5,6 +5,12 @@ import Foundation
 /// 核心聚合根。1 个 Entry → N Media / N Comment / 0..1 Milestone / 0..1 FirstTime。
 @Model
 final class Entry {
+    // 全仓此前零索引。fetchLimit 只限制**返回**多少行——没有索引，SQLite 必须扫完
+    // 整张表再排序，才知道哪 200 条排最前。今天几千行无感，十年后是每次进时光页都付一遍。
+    // 复合索引 (isArchived, happenedAt) 直接对上时光轴那条最热的查询：
+    // predicate 过滤未归档 + 按发生时间倒序。
+    #Index<Entry>([\.happenedAt], [\.createdAt], [\.isArchived, \.happenedAt])
+
     @Attribute(.unique) var id: UUID
     var remoteId: String?
     var title: String?

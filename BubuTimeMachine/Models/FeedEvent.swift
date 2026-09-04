@@ -4,6 +4,9 @@ import SwiftData
 // MARK: - 家庭动态
 @Model
 final class FeedEvent {
+    // 家庭动态永远按时间倒序取最近的一段。
+    #Index<FeedEvent>([\.createdAt])
+
     @Attribute(.unique) var id: UUID
     var kindRaw: String
     var actorRole: String

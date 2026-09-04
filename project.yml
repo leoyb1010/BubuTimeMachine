@@ -213,6 +213,13 @@ targets:
     platform: iOS
     sources:
       - path: BubuTimeMachineTests
+        excludes:
+          - "Fixtures/**"
+      # 旧版装机 store 基线：必须作为资源原样进 bundle，不能被当成源码编译。
+      # StoreMigrationTests 用它验证「升级之后全家的数据还打得开」。
+      - path: BubuTimeMachineTests/Fixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: BubuTimeMachine
     settings:
