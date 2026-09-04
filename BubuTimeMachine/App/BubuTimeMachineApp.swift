@@ -439,6 +439,8 @@ struct RootView: View {
     /// 引导里选了「加入已有家庭」：进主界面后立刻把登录页推到面前，
     /// 不让第二台设备停在一个空库上、再自己建出第二个布布。
     @State private var showFamilyLogin = false
+    /// 用户在挡页上明确选择了「仍要临时使用」。只在本次进程有效，不落盘——下次启动仍然拦。
+    @State private var storeRecoveryBypassed = false
 
     var body: some View {
         rootContent
@@ -476,7 +478,13 @@ struct RootView: View {
 
     @ViewBuilder
     private var rootContent: some View {
-        if env.hasCompletedOnboarding {
+        // 数据保护模式挡页：store 打不开时先不进主界面。
+        // 否则用户看到的是一个「空的家」，首页还写着「记第一笔」——重建档案记一整天，
+        // 退出即全丢，且假档案可能被同步污染全家其它设备。
+        if BubuStoreHealth.loadFailed, !storeRecoveryBypassed {
+            BubuStoreRecoveryView { storeRecoveryBypassed = true }
+                .transition(.opacity)
+        } else if env.hasCompletedOnboarding {
             content
                 .transition(.opacity)
                 // 升级后首次启动：弹出本版更新内容（全新安装不弹；老用户升级会弹）。

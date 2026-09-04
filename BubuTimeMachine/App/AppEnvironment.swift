@@ -96,14 +96,21 @@ final class AppEnvironment {
             DataMigration(id: "birthday-normalize-v1") { try BirthdayNormalizationMigrator.perform(context: $0) },
             // 存量脏数据自愈：预览小图曾被落进 Media/ 却写进 thumbnailFileName，
             // 导致主 App 缩略图与桌面小组件永远查不到（桌面照片整体消失的根因）。
-            DataMigration(id: "thumbnail-path-repair-v1") { try ThumbnailPathRepair.perform(context: $0) }
+            DataMigration(id: "thumbnail-path-repair-v1") { try ThumbnailPathRepair.perform(context: $0) },
+            // 历史本地重复里程碑的一次性清理。以前它在 bootstrap 里每次启动都跑一遍无上限硬删；
+            // 现在只跑一次，后续重复交给同步侧的归一化。
+            DataMigration(id: "milestone-dedupe-v1") { try MilestoneDedupe.perform(context: $0) }
         ]
     }
 
     /// App 启动后调用：注入上下文、启动同步层（离线时无副作用）。
     func bootstrap(context: ModelContext) {
+        // 预设补种是幂等的（按标题跳过已存在的），每次启动跑没有副作用，
+        // 而且新版本追加预设（例如幼儿园包）必须靠它落地，所以留在这里。
         seedMilestonePresetsIfNeeded(context: context)
-        normalizeMilestonePresets(context: context)
+        // 去重已收编进下面的一次性迁移框架：它是**物理删除**，不该每次启动都跑一遍。
+        // 日常的重复来自同步（两台设备各记了同名里程碑），那条路径由
+        // SyncEngine.normalizeMilestonesByTitle 在每轮合并后处理，覆盖更全（还会 trim 标题）。
         // 一次性动作统一收编进版本化迁移框架：只在未完成时跑一次，成功才落标记。
         DataMigrationRunner(migrations: Self.dataMigrations).runPendingMigrations(context: context)
         syncEngine.attach(context: context)
@@ -197,44 +204,6 @@ final class AppEnvironment {
         try? context.save()
     }
 
-    private func normalizeMilestonePresets(context: ModelContext) {
-        let milestones = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
-        guard !milestones.isEmpty else { return }
-        let presetTitles = Set(MilestoneTemplate.presets.map(\.title))
-        var bestByTitle: [String: Milestone] = [:]
-        var duplicates: [Milestone] = []
-
-        for milestone in milestones {
-            let key = milestone.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !key.isEmpty else { continue }
-            if let best = bestByTitle[key] {
-                if milestoneRank(milestone) > milestoneRank(best) {
-                    duplicates.append(best)
-                    bestByTitle[key] = milestone
-                } else {
-                    duplicates.append(milestone)
-                }
-            } else {
-                bestByTitle[key] = milestone
-            }
-        }
-
-        for milestone in milestones where presetTitles.contains(milestone.title) && !milestone.isCustom && !milestone.isAchieved && (milestone.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
-            milestone.syncState = .synced
-        }
-        for duplicate in duplicates {
-            context.delete(duplicate)
-        }
-        try? context.save()
-    }
-
-    private func milestoneRank(_ milestone: Milestone) -> Int {
-        (milestone.isAchieved ? 1_000 : 0)
-        + ((milestone.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? 200 : 0)
-        + (milestone.isCustom ? 100 : 0)
-        + (milestone.remoteId == nil ? 0 : 20)
-        + Int(min(19, max(0, Date.now.timeIntervalSince(milestone.createdAt) / 86_400)))
-    }
 
     /// 设置变更后重建客户端（用户改了服务器地址/账户/AI 开关时调用）。
     func reloadServices(context: ModelContext) {

@@ -207,12 +207,14 @@ final class ServerConfig {
         self.aiBaseURLString = initialAIBaseURL
         // v2.7 起 AI 复用 PocketBase 用户登录态；清掉旧共享 key，避免被发往误填的主机。
         KeychainStore.delete(Self.legacyAIKeyKey)
-        let packagedFamilyAI = !initialAIBaseURL.isEmpty
-            && URL(string: initialBaseURL) != nil
-            && !initialAccountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !initialAccountPassword.isEmpty
-        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool
-            ?? packagedFamilyAI
+        // 数据外发必须用户显式开启（CLAUDE.md 铁律）。这里**只能** `?? false`：
+        // 曾经的兜底是「打包 AI 地址非空 + 账号密码非空 → 默认开」，而 AI 地址是出厂硬编码的，
+        // 于是用户只要为了同步填完家庭账号密码，下次冷启动 AI 就自己变成开——记录原文
+        // （含疫苗/症状）随即经家庭服务转发给 DeepSeek 云端，用户从未碰过那个开关。
+        // 更隐蔽的是 aiEnabled 的持久化写在 didSet 里，而 **Swift 在 init 内赋值不触发 didSet**，
+        // 兜底值永不落盘 → 每次冷启动重新求值，关掉也可能被再次打开。
+        // 结论：没存过就是关。开启入口只有设置页那个开关（旁边已写明外发目的地）。
+        self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
         self.semanticSearchEnabled = UserDefaults.standard.object(
             forKey: Self.semanticSearchEnabledKey
         ) as? Bool ?? false

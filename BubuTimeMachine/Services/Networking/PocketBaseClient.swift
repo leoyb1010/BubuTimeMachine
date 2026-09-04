@@ -795,9 +795,14 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         return body
     }
 
-    private func activeRecordFields(_ fields: [String: String]) async -> [String: String] {
+    /// multipart 版的 activeRecord 补字段。
+    /// `defaultIsDeleted` 必须与 JSON 路径 `activeRecordJSON(_:defaultIsDeleted:)` 同语义：
+    /// **只有新建（POST）才注入 isDeleted=false，更新（PATCH）绝不注入**——否则一次内容更新
+    /// 就会把服务器上的墓碑翻活（妈妈删掉的糊照片，被爸爸的重传 PATCH 复活给全家）。
+    private func activeRecordFields(_ fields: [String: String],
+                                    defaultIsDeleted: Bool) async -> [String: String] {
         var result = fields
-        if result["isDeleted"] == nil { result["isDeleted"] = "false" }
+        if defaultIsDeleted, result["isDeleted"] == nil { result["isDeleted"] = "false" }
         if result["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
             result["authorUserId"] = userId
         }
@@ -851,7 +856,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         var uploadFields = fields
         uploadFields["localId"] = localId
         Self.addSyncTimestamp(to: &uploadFields)
-        uploadFields = await activeRecordFields(uploadFields)
+        uploadFields = await activeRecordFields(uploadFields, defaultIsDeleted: existingId == nil)
         let bodyURL = try multipartBodyFile(boundary: boundary, fields: uploadFields,
                                             fileField: fileField, fileURL: fileURL, fileName: fileName)
         defer { try? FileManager.default.removeItem(at: bodyURL) }
@@ -888,7 +893,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         if let resourceRole = file.resourceRole { fields["resourceRole"] = resourceRole }
         if let assetGroupId = file.assetGroupId { fields["assetGroupId"] = assetGroupId }
         Self.addSyncTimestamp(to: &fields)
-        fields = await activeRecordFields(fields)
+        fields = await activeRecordFields(fields, defaultIsDeleted: existingId == nil)
         // 缩略图随原文件一并上传（服务端 thumbnail 字段早已就绪）：
         // 家人设备先拿小图出预览，视频不用下完原片。
         let extraFile: (field: String, url: URL, name: String)? = file.thumbnailURL.map {

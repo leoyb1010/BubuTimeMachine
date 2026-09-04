@@ -1550,7 +1550,7 @@ final class SyncEngine {
             }
             milestone.title = title
             if let current = bestByTitle[title] {
-                if Self.milestoneRank(milestone) > Self.milestoneRank(current) {
+                if Milestone.prefersKeeping(milestone, over: current) {
                     duplicates.append(current)
                     bestByTitle[title] = milestone
                 } else {
@@ -1571,13 +1571,6 @@ final class SyncEngine {
         try? context.save()
     }
 
-    private static func milestoneRank(_ milestone: Milestone) -> Int {
-        (milestone.isAchieved ? 1_000 : 0)
-        + ((milestone.detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? 200 : 0)
-        + (milestone.isCustom ? 100 : 0)
-        + (milestone.remoteId == nil ? 0 : 20)
-        + Int(min(19, max(0, Date.now.timeIntervalSince(milestone.createdAt) / 86_400)))
-    }
 
     private func mergeRemoteFirstTime(_ dto: FirstTimeDTO) async -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
@@ -1592,6 +1585,9 @@ final class SyncEngine {
             if let entryLocalId = dto.entryLocalId, let entryId = UUID(uuidString: entryLocalId) {
                 let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
                 item.entry = try? context.fetch(entryDescriptor).first
+                // 父 Entry 还没到：先落库保住「第一次」这条事实本身，但扣住游标，
+                // 下一轮父记录到了会重新走 merge 把关联补上。不扣游标就永远补不上了。
+                if item.entry == nil { holdCursorForCurrentPull = true }
             }
             context.insert(item)
         }
@@ -1691,7 +1687,14 @@ final class SyncEngine {
             else { return false }
         } else {
             let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-            guard let entry = try? context.fetch(entryDescriptor).first else { return false }
+            guard let entry = try? context.fetch(entryDescriptor).first else {
+                // 父 Entry 这轮还没落库（entries 批次失败或排在后面）。必须扣住游标：
+                // 否则 comments 游标照样推到本轮最大 updated，下轮父记录到了，
+                // 这条家人补充却已落在游标之后——这台设备永远拉不回来。
+                // 与 mergeRemoteMedia 的处理保持一致。
+                holdCursorForCurrentPull = true
+                return false
+            }
             let item = Comment(authorRole: dto.authorRole, text: dto.text)
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
@@ -1709,7 +1712,11 @@ final class SyncEngine {
             else { return false }
         } else {
             let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-            guard let entry = try? context.fetch(entryDescriptor).first else { return false }
+            guard let entry = try? context.fetch(entryDescriptor).first else {
+                // 同 mergeRemoteComment：父 Entry 未落库时扣住游标，否则这条语音留言永久丢失。
+                holdCursorForCurrentPull = true
+                return false
+            }
             let item = VoiceNote(localFileName: nil, durationSeconds: dto.durationSeconds, authorRole: dto.authorRole, waveformSamples: dto.waveform)
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)

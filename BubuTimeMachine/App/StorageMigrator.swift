@@ -36,6 +36,12 @@ nonisolated enum StorageMigrator {
         let media: Int
         let fileBytes: Int64
 
+        /// 四张业务表全空。只有「打得开且确实为空」才算数——
+        /// 打不开的库压根不会生成 StoreStats（见 inspectStore 返回可选）。
+        var isEmpty: Bool {
+            childProfiles == 0 && entries == 0 && milestones == 0 && media == 0
+        }
+
         var score: Int64 {
             Int64(childProfiles) * 1_000_000
             + Int64(entries) * 10_000
@@ -87,23 +93,37 @@ nonisolated enum StorageMigrator {
         ].compactMap { $0 }
 
         let bestSource = legacyStores.max(by: { $0.stats.score < $1.stats.score })
+        let destinationFileExists = fm.fileExists(atPath: destinationStore.path)
+
+        // 一次性迁移的正确语义：**目标不存在才搬**。
+        //
+        // 以前这里是「谁分高谁赢」的启发式，两条路径都能把正在用的库删掉换成旧库：
+        //   A) 活库瞬时打不开（被别的进程持锁 / -shm 建不出）→ 分数塌成文件字节数 →
+        //      旧沙盒里一条儿童档案就值一百万分，稳赢。
+        //   B) SwiftData 走 WAL，最近写入还在 -wal 里没落主文件 → 活库被系统性低估，
+        //      早已 checkpoint 完毕的冻结旧库被系统性高估。
+        // 它确实会先备份到 MigrationBackups/，但 App 里没有任何恢复入口，
+        // 用户看到的就是「这半年的记录全没了」。
+        //
+        // 唯一保留的替换场景：目标**打得开、且四张业务表确认全空**（上次迁移中断留下的空壳），
+        // 而源确实有数据。这个判断必须建立在一次成功的 open 之上，不能靠猜。
+        let destinationIsVerifiedEmpty = destination?.stats.isEmpty ?? false
+        let sourceHasData = !(bestSource?.stats.isEmpty ?? true)
         let storeNeedsRepair: Bool = {
-            guard let bestSource else { return false }
-            guard let destination else { return true }
-            return bestSource.stats.score > destination.stats.score
+            guard bestSource != nil else { return false }
+            if !destinationFileExists { return true }
+            return destinationIsVerifiedEmpty && sourceHasData
         }()
 
-        if defaults.bool(forKey: storeDoneKey), destination != nil, !storeNeedsRepair {
+        if defaults.bool(forKey: storeDoneKey), destinationFileExists, !storeNeedsRepair {
             return
         }
 
         if let bestSource, storeNeedsRepair {
-            if let destination {
-                if bestSource.stats.score > destination.stats.score {
-                    log.notice("App Group store 较旧，备份后用 \(bestSource.label, privacy: .public) 替换")
-                    allOK = copyStoreTrio(from: bestSource.url, to: destinationStore,
-                                          replacingExisting: true, fm: fm) && allOK
-                }
+            if destinationFileExists {
+                log.notice("App Group store 确认为空壳，备份后用 \(bestSource.label, privacy: .public) 补齐")
+                allOK = copyStoreTrio(from: bestSource.url, to: destinationStore,
+                                      replacingExisting: true, fm: fm) && allOK
             } else {
                 log.notice("迁移 store 到 App Group：\(bestSource.label, privacy: .public)")
                 allOK = copyStoreTrio(from: bestSource.url, to: destinationStore,
@@ -174,16 +194,24 @@ nonisolated enum StorageMigrator {
 
     private static func makeCandidate(label: String, url: URL, fm: FileManager) -> StoreCandidate? {
         guard fm.fileExists(atPath: url.path) else { return nil }
-        return StoreCandidate(label: label, url: url, stats: inspectStore(at: url, fm: fm))
+        guard let stats = inspectStore(at: url, fm: fm) else {
+            // 打得开才算「一个可比较的候选」。以前这里在打不开时返回全 0 统计，
+            // 结果活库被瞬时锁住/‑shm 建不出时会被低估成空库，让几个月前的旧库赢了打分，
+            // 进而把正在用的库整个替换掉。宁可不比较，也不能拿假数据比。
+            log.error("store 打不开，本轮不参与迁移比较：\(label, privacy: .public)")
+            return nil
+        }
+        return StoreCandidate(label: label, url: url, stats: stats)
     }
 
-    private static func inspectStore(at url: URL, fm: FileManager) -> StoreStats {
+    /// 打不开返回 nil（而不是全 0 统计）——见 makeCandidate 的说明。
+    private static func inspectStore(at url: URL, fm: FileManager) -> StoreStats? {
         let fileBytes = ((try? fm.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value) ?? 0
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK, let db else {
             if let db { sqlite3_close(db) }
-            return StoreStats(childProfiles: 0, entries: 0, milestones: 0, media: 0, fileBytes: fileBytes)
+            return nil
         }
         defer { sqlite3_close(db) }
 

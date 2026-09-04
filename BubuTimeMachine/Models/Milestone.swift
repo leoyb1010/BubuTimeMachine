@@ -26,6 +26,24 @@ final class Milestone {
         set { syncStateRaw = newValue.rawValue }
     }
 
+    /// 同标题去重时的保留优先级。**必须是确定性的**：
+    /// 旧实现里混了一项 `min(19, 距创建天数)`，两条近乎相同的里程碑在第 19 天之后同时封顶，
+    /// 胜负改由无排序 fetch 的行序决定——而输的那条是被物理删除的，不可逆。
+    /// 现在只用记录自身的稳定属性打分，平局再按「先创建的赢」这个稳定次序裁决。
+    var dedupeRank: Int {
+        (isAchieved ? 1_000 : 0)
+        + ((detail?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? 200 : 0)
+        + (isCustom ? 100 : 0)
+        + (remoteId == nil ? 0 : 20)
+    }
+
+    /// `lhs` 是否应当被保留（`rhs` 被删）。全序、与时间无关、与 fetch 顺序无关。
+    static func prefersKeeping(_ lhs: Milestone, over rhs: Milestone) -> Bool {
+        if lhs.dedupeRank != rhs.dedupeRank { return lhs.dedupeRank > rhs.dedupeRank }
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
     init(title: String, category: String, emoji: String = "🌟",
          happenedAt: Date? = nil, isCustom: Bool = false) {
         self.id = UUID()
