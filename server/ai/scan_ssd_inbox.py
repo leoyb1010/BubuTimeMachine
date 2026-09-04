@@ -21,8 +21,11 @@ def main() -> int:
     existing_hashes = set()
     try:
         with PocketBaseMemoryStore() as pocketbase:
+            # localId 有唯一索引且稳定；不要用 created 排序——集合缺 autodate 时
+            # 它会直接 400，而下面的 except 会把整次摄取静默延期（只打一行错误类型），
+            # SSD 素材从此永远进不了候选箱。memory_query.py 早就为同一原因改过。
             records = pocketbase.list_records(
-                "media", filter_value="contentHash!=''", sort="created", per_page=500
+                "media", filter_value="contentHash!=''", sort="localId", per_page=500
             )
         existing_hashes = {
             str(record.get("contentHash") or "") for record in records

@@ -43,6 +43,72 @@ def test_migration_numbers_are_unique_and_preserve_production_autodate_slot():
     assert (migration_dir / "1700000012_add_automation_collections.js").exists()
 
 
+# 全部会被 iOS 端增量拉取的集合。iOS 的 listRecordsQueryItems() 用
+# sort=updated 与 filter=(updated>'…')，任何一个集合缺 autodate，
+# 该集合的每一次拉取都会 400，而客户端把它当软失败静默吞掉——
+# 这正是 2026-07「云端同步从未成功」的机制。
+SYNCED_COLLECTIONS = [
+    "entries",
+    "media",
+    "comments",
+    "voicenotes",
+    "milestones",
+    "firsttimes",
+    "voicememos",
+    "members",
+    "childprofile",
+    "healthrecords",
+    "timecapsules",
+    "feed_events",
+    "vaccinerecords",
+    "growthmeasurements",
+    "automation_jobs",
+    "derived_artifacts",
+    "families",
+    "users",
+]
+
+
+def test_every_collection_gets_autodate_fields_from_repo_migrations():
+    """仓库自身必须能把 autodate 建出来——正向断言，不是「别占用 0011 号」。
+
+    旧守卫只断言 0011 号没被复用，所以「修复只活在生产 mini 上、仓库里一条都没有」
+    这件事 CI 全绿也测不出来。换机器、重装或跑恢复演练时，
+    start_pocketbase.sh 用的是受 git 管理的 --migrationsDir，事故会原样复现。
+    """
+    migration_dir = REPO_ROOT / "server/pocketbase/migrations"
+    combined = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(migration_dir.glob("*.js"))
+    )
+
+    assert "AutodateField" in combined, (
+        "仓库里没有任何一条迁移会创建 created/updated autodate 字段。"
+        "只要不是在那台已经手工修过的生产机上，增量同步就会全线 400。"
+    )
+
+    # 兜底迁移必须覆盖全部会被同步的集合，一个都不能漏。
+    fallback = (migration_dir / "1700000015_ensure_autodate_fields.js").read_text(
+        encoding="utf-8"
+    )
+    assert "AutodateField" in fallback
+    for field in ("created", "updated"):
+        assert f"'{field}'" in fallback, f"兜底迁移没有声明 {field} 字段"
+    # created 只在新建时写，updated 必须随每次更新走——后者正是增量游标的依据。
+    assert "onUpdate: true" in fallback, "updated 必须 onUpdate:true，否则增量游标永远不动"
+    assert "onUpdate: false" in fallback, "created 不应随更新变动"
+    missing = [name for name in SYNCED_COLLECTIONS if f"'{name}'" not in fallback]
+    assert not missing, f"autodate 兜底迁移漏了这些集合：{missing}"
+
+    # 新加的 autodate 列对既有行是空值，而空值不满足 filter=(updated>'…')，
+    # 那些历史记录会对所有设备永久不可见。必须回填。
+    assert "clientUpdatedAt" in fallback, "补了字段却没有回填历史行"
+    assert "UPDATE" in fallback, "补了字段却没有回填历史行"
+
+    # 回滚不得删除 autodate：删掉就等于把同步打回 400。
+    down_half = fallback.split("}, (app) => {", 1)[-1]
+    assert "removeById" not in down_half, "回滚不得删除 created/updated"
+
+
 def test_ntfy_hook_only_reports_dead_letters_without_memory_content():
     hook = (REPO_ROOT / "server/pocketbase/pb_hooks/notify.pb.js").read_text(
         encoding="utf-8"

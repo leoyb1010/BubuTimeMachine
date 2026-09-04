@@ -99,13 +99,39 @@ final class BubuTimeMachineUITests: XCTestCase {
 
         let toggle = app.switches["settings.spotlight"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 8))
-        if toggle.value as? String == "1" { toggle.tap() }
-        XCTAssertEqual(toggle.value as? String, "0")
-        toggle.tap()
-        XCTAssertEqual(toggle.value as? String, "1")
-        toggle.tap()
-        XCTAssertEqual(toggle.value as? String, "0")
+        // 三次翻转都必须落到「读回的值确实变了」，而不是点完立刻读。
+        // 旧写法在 CI 的模拟器上稳定失败：轻点已注册但 SwiftUI 状态还没提交，
+        // 同步读到的仍是旧值。本机快、CI 慢，于是主干红了却没人看见。
+        XCTAssertTrue(setSwitch(toggle, to: false), "关不掉 Spotlight 开关")
+        XCTAssertTrue(setSwitch(toggle, to: true), "开不起 Spotlight 开关")
+        XCTAssertTrue(setSwitch(toggle, to: false), "第二次关不掉 Spotlight 开关")
         attachScreenshot("spotlight-privacy-off", to: self)
+    }
+
+    /// 把开关拨到目标状态并等到读回的值确实变了。
+    /// 已经是目标状态就直接返回 true（幂等）。不可点时先把它滚进可视区。
+    @MainActor
+    @discardableResult
+    private func setSwitch(_ element: XCUIElement, to on: Bool,
+                           timeout: TimeInterval = 5) -> Bool {
+        let target = on ? "1" : "0"
+        if element.value as? String == target { return true }
+        if !element.isHittable {
+            // Form 长页在小屏 iPhone 上会把开关顶出屏幕；轻点非 hittable 元素是静默无效的。
+            app_scrollDown()
+        }
+        element.tap()
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", target),
+            object: element)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    @MainActor
+    private func app_scrollDown() {
+        let scroll = XCUIApplication().scrollViews.firstMatch
+        guard scroll.exists else { return }
+        scroll.swipeUp()
     }
 
     @MainActor

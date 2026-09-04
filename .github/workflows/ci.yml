@@ -45,24 +45,55 @@ jobs:
       - name: Generate project
         run: xcodegen generate
 
-      - name: Pick a simulator
+      - name: Pick simulators
         id: sim
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          pick() {
+            xcrun simctl list devices available -j | python3 -c "
           import json,sys
+          kind = sys.argv[1]
           data = json.load(sys.stdin)
-          devices = [d for devs in data['devices'].values() for d in devs if 'iPhone' in d['name']]
-          print(devices[-1]['udid'] if devices else '')")
-          if [ -z "$UDID" ]; then echo '没有可用 iPhone 模拟器'; exit 1; fi
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          devices = [d for devs in data['devices'].values() for d in devs if kind in d['name']]
+          print(devices[-1]['udid'] if devices else '')" "$1"
+          }
+          IPHONE=$(pick iPhone)
+          if [ -z "$IPHONE" ]; then echo '没有可用 iPhone 模拟器'; exit 1; fi
+          echo "iphone=$IPHONE" >> "$GITHUB_OUTPUT"
+          # iPad 缺失不算失败：iPad 回归会被跳过并在日志里说明，而不是让整条 CI 红掉。
+          IPAD=$(pick iPad)
+          echo "ipad=$IPAD" >> "$GITHUB_OUTPUT"
 
-      - name: Build & test
+      - name: Build & test (iPhone)
         run: |
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
             -scheme BubuTimeMachine \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            clean test | tail -120
+            -destination "id=${{ steps.sim.outputs.iphone }}" \
+            clean test 2>&1 | tee /tmp/build-iphone.log | tail -120
+
+      # CLAUDE.md 的验收标准是「零 error 零 warning」，但过去 CI 只看退出码，
+      # 于是零警告全靠人在本机手工 grep 维持，带 warning 的 PR 能顺利合进 main。
+      # 这里把它变成门禁：只统计本仓源码的警告，不管 SDK/工具链的。
+      - name: 零警告门禁
+        run: |
+          if grep -E "^/Users/runner/work/.*/(BubuTimeMachine|BubuWatch|BubuWidgets|WatchShared)[^:]*:[0-9]+:[0-9]+: warning:" /tmp/build-iphone.log | sort -u > /tmp/warnings.txt && [ -s /tmp/warnings.txt ]; then
+            echo "::error::本仓源码出现编译警告，验收标准是零 warning："
+            cat /tmp/warnings.txt
+            exit 1
+          fi
+          echo "零警告 ✅"
+
+      # iPad 横屏回归此前从未在自动化里跑过：唯一的 iPad 用例靠 XCTSkipUnless(idiom == .pad)
+      # 自我跳过，而上面的模拟器选择只挑 iPhone，于是它永远 skip。
+      - name: UI 回归 (iPad)
+        if: steps.sim.outputs.ipad != ''
+        run: |
+          set -o pipefail
+          xcodebuild -project BubuTimeMachine.xcodeproj \
+            -scheme BubuTimeMachine \
+            -destination "id=${{ steps.sim.outputs.ipad }}" \
+            -only-testing:BubuTimeMachineUITests \
+            test 2>&1 | tail -80
 
   server:
     name: AI server tests (Python 3.9)
