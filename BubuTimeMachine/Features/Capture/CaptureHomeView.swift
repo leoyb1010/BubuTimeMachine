@@ -102,6 +102,9 @@ struct CaptureHomeView: View {
                 .padding(.top, 8)
                 .bubuContentColumn(920)
             }
+            // 下拉刷新此前全仓 0 处。首页只在出现和回到前台时刷新，同步状态还藏在页面最底部，
+            // 而下拉是「我要最新的」最强的本能——之前它纹丝不动。
+            .refreshable { await pullToRefresh() }
             // 详情页转场移到此处（而非 RootTabView），以便与本页 zoomNS 配对实现缩放共享元素转场。
             .navigationDestination(for: UUID.self) { entryID in
                 if let entry = navigableEntries.first(where: { $0.id == entryID }) {
@@ -277,6 +280,16 @@ struct CaptureHomeView: View {
     /// 照片智能收件箱总开关（默认关）：实际使用验证下来，手动发记录 + SSD 批量
     /// 导入才是主路；自动收件箱交互不顺手，收进设置里做可选能力。
     @AppStorage("bubu.photoInbox.enabled") private var photoInboxEnabled = false
+
+    /// 下拉刷新：重算本页派生数据 + 立刻催一轮同步。
+    /// 留一段最短可见时间，否则本地重算是同步的，转轮会闪一下就消失，
+    /// 用户会以为「没反应」——这里的等待是给人看的，不是给机器的。
+    @MainActor
+    private func pullToRefresh() async {
+        kickOffHomeRefresh()
+        env.syncEngine.syncNow()
+        try? await Task.sleep(for: .milliseconds(650))
+    }
 
     private func kickOffHomeRefresh() {
         photoScanner.refreshAuthorizationState()

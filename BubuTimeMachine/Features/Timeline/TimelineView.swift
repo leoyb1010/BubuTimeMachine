@@ -269,6 +269,11 @@ struct TimelineList: View {
             }
             .padding()
         }
+        // 同上：时光轴是最想「看看家人有没有新记录」的地方，下拉必须有反应。
+        .refreshable {
+            env.syncEngine.syncNow()
+            try? await Task.sleep(for: .milliseconds(650))
+        }
         .bubuIOS27SwipeActionsContainer()
         .navigationDestination(for: UUID.self) { entryID in
             TimelineEntryDestination(entryID: entryID)

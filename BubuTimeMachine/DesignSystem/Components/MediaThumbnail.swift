@@ -12,6 +12,7 @@ struct MediaThumbnail: View {
     @Environment(AppEnvironment.self) private var env
     @State private var image: UIImage?
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -48,6 +49,10 @@ struct MediaThumbnail: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .clipped()
+        // 图加载完成是「占位 → 图片」的直接替换，没有过渡就是一下子跳出来。
+        // 相册一屏 90 格、时光轴每张封面、首页最近时光都走这个组件，
+        // 滚动时表现为满屏方块闪跳。一处淡入，全 App 每一张图受益。
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: image != nil)
         .task(id: media.id) { await load() }
         // 远端文件由 SyncEngine 下载落地后 localFileName 才有值：跟着重载，不再一直占位（R4 待核-缩略图）
         .onChange(of: media.localFileName) { _, _ in Task { await load() } }
