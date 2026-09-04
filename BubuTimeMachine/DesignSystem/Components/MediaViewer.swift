@@ -19,6 +19,8 @@ struct MediaGalleryViewer: View {
     /// 本次手势是否已判定为「垂直下滑」。判定一次就锁住，
     /// 免得中途方向抖动把 UIPageViewController 的左右翻页抢过来。
     @State private var dragEngaged = false
+    /// 已脱敏、可以交给系统分享面板的临时副本。
+    @State private var shareURL: URL?
 
     /// 拖动过程中背景跟着变透明：手感上是「把这一层拉走」，而不是「按了个按钮」。
     private var backdropOpacity: Double {
@@ -39,6 +41,25 @@ struct MediaGalleryViewer: View {
 
     private var currentMedia: Media? {
         mediaItems.first(where: { $0.id == selectedID })
+    }
+
+    /// 分享前抹掉位置。抹不掉（视频、或本来就没有 GPS）就原样分享。
+    @MainActor
+    private func shareSanitized(_ url: URL) {
+        guard MediaPrivacy.isStrippableImage(url), MediaPrivacy.hasLocation(url) else {
+            shareURL = url
+            return
+        }
+        if let clean = MediaPrivacy.strippingLocation(of: url) {
+            withAnimation { saveToast = "已去掉照片里的位置信息" }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { saveToast = nil }
+            }
+            shareURL = clean
+        } else {
+            shareURL = url
+        }
     }
 
     private var currentFileURL: URL? {
@@ -93,13 +114,21 @@ struct MediaGalleryViewer: View {
                                 .background(.black.opacity(0.45), in: Circle())
                         }
                         .accessibilityLabel("存到系统相册")
-                        ShareLink(item: url) {
+                        // 以前这里是 ShareLink(item: url)，把**原文件**直接推给微信/AirDrop——
+                        // 原片保留完整 EXIF（PhotoAnalyzer 就是靠它读 GPS 生成地点标签），
+                        // 于是家里的经纬度跟着照片一起出门。
+                        // 现在照片先拷一份抹掉 GPS 再分享；视频要重封装容器才能去掉，
+                        // 成本高得多，如实按原文件分享并在提示里说明。
+                        Button {
+                            shareSanitized(url)
+                        } label: {
                             Image(systemName: "square.and.arrow.up")
                                 .font(BubuTheme.Font.scaled(15, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 44, height: 44)
                                 .background(.black.opacity(0.45), in: Circle())
                         }
+                        .buttonStyle(.plain)
                         .accessibilityLabel("分享")
                     }
                     Spacer()
@@ -149,6 +178,9 @@ struct MediaGalleryViewer: View {
                         .padding(.bottom, 18)
                 }
             }
+        }
+        .sheet(item: $shareURL) { url in
+            ShareSheet(items: [url])
         }
         .offset(y: dragOffset)
         // 放大看细节时 UIKit 层会把 isScrollEnabled 打开由 UIScrollView 接管平移，

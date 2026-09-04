@@ -235,6 +235,10 @@ struct ExportView: View {
             let zip = try await Task.detached(priority: .userInitiated) {
                 try Self.zip(folder: folder)
             }.value
+            // zip 出来之后，展开的那份目录就没用了。以前它一直留在 tmp 里，
+            // 目录名带时间戳，导出 N 次就有 N 份「布布的一生」完整明文副本
+            // （全部照片、视频、语音、健康记录）堆在 App 容器里，直到系统磁盘吃紧。
+            try? FileManager.default.removeItem(at: folder)
             exportedURL = zip
             // 诚实告知：有媒体因源文件缺失或拷贝失败未能纳入档案。
             if !result.incompleteReferences.isEmpty {
@@ -249,6 +253,17 @@ struct ExportView: View {
             }
         } catch {
             errorText = "导出失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 清掉历史遗留的展开目录与旧 zip。
+    /// 老版本从不清理，装了一年的机器上可能躺着好几份完整档案。
+    static func purgeStaleExports() {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+        guard let items = try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) else { return }
+        for url in items where url.lastPathComponent.hasPrefix("布布的一生") {
+            try? fm.removeItem(at: url)
         }
     }
 

@@ -132,6 +132,9 @@ final class AppEnvironment {
         #endif
         ReminderScheduler.shared.refreshIfEnabled(enabled: config.dailyReminderEnabled, context: context)
         Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }
+        // 清掉历史遗留的导出展开目录：老版本导出后从不清理，
+        // 每导一次就在 tmp 里多留一份「布布的一生」完整明文副本。
+        ExportView.purgeStaleExports()
         installThumbnailBackfill(context: context)
         refreshWidgetSnapshot(context: context)
         logStoreIntegrity(context: context)
