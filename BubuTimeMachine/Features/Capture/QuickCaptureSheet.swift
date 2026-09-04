@@ -9,6 +9,8 @@ import UIKit
 /// 保存时端侧自动分析照片（时间/地点/标签）。
 struct QuickCaptureSheet: View {
     @State private var discardConfirm = false
+    /// 作品扫描（系统文稿相机，自动裁边去畸变）。
+    @State private var showArtworkScanner = false
     @Bindable var model: CaptureModel
     @Environment(\.modelContext) private var modelContext
     @Environment(AppEnvironment.self) private var env
@@ -99,6 +101,16 @@ struct QuickCaptureSheet: View {
                     model.addCameraPhoto(image)
                 } onCancel: {
                     showCamera = false
+                }
+                .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showArtworkScanner) {
+                ArtworkScannerView { pages, text in
+                    model.addScannedArtwork(pages: pages, recognizedText: text)
+                    showArtworkScanner = false
+                    BubuHaptics.success()
+                } onCancel: {
+                    showArtworkScanner = false
                 }
                 .ignoresSafeArea()
             }
@@ -243,6 +255,17 @@ struct QuickCaptureSheet: View {
             }
             .buttonStyle(BubuPressableStyle(scale: 0.97))
             .disabled(requestingCamera)
+
+            if ArtworkScannerView.isSupported {
+                Button {
+                    BubuHaptics.selection()
+                    showArtworkScanner = true
+                } label: {
+                    actionChip("作品", systemImage: "doc.viewfinder", tint: BubuTheme.Color.butter)
+                }
+                .buttonStyle(BubuPressableStyle(scale: 0.97))
+                .accessibilityHint("用文稿相机扫描画作或手工，自动裁边")
+            }
 
             Button {
                 jump(to: .note, proxy: proxy)

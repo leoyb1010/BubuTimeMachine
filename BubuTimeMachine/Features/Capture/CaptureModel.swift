@@ -307,6 +307,21 @@ final class CaptureModel {
         updatePreviews()
     }
 
+    /// 收下文稿相机扫回来的作品。
+    /// OCR 结果只作为正文**初稿**：正文为空时才填，绝不覆盖家长已经写下的字。
+    /// 识别错了家长删掉就好；覆盖掉人写的东西是不可接受的。
+    func addScannedArtwork(pages: [UIImage], recognizedText: String) {
+        guard !pages.isEmpty else { return }
+        for page in pages {
+            cameraPhotos.append(SelectedCameraPhoto(image: page))
+        }
+        let trimmed = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !trimmed.isEmpty {
+            note = trimmed
+        }
+        updatePreviews()
+    }
+
     /// 直接录像：拷入沙盒临时位置，生成缩略图，加入待保存列表。
     func addCameraVideo(url: URL) {
         Task {

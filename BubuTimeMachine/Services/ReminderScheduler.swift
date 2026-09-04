@@ -12,6 +12,9 @@ final class ReminderScheduler {
     private init() {}
 
     private let identifierPrefix = "bubu.onThisDay."
+    /// 「那年今日」的扫描窗口。按 happenedAt 倒序取最近这么多条：
+    /// 一天记 10 条也够覆盖 5 年多，而它给出的是一个明确的内存与耗时上界。
+    private static let onThisDayScanLimit = 20_000
     private let daysAhead = 30
 
     private var allIdentifiers: [String] {
@@ -33,7 +36,14 @@ final class ReminderScheduler {
     /// App 启动时按开关状态刷新（滚动重排未来 7 天）。
     func refreshIfEnabled(enabled: Bool, context: ModelContext) {
         guard enabled else { return }
-        scheduleWeekAhead(center: .current(), context: context)
+        // **不要**在这里同步跑：调用点在 AppEnvironment.bootstrap 里，属于启动关键路径，
+        // 而 scheduleWeekAhead 会做一次无上限的全表取数（那年今日要跨所有年份找同月同日）。
+        // 几千条时无感，几万条时就是几万个 SwiftData 对象在主线程物化——
+        // 启动路径上最重的一次操作，直接顶启动看门狗（0x8badf00d）。
+        // 推到下一个 runloop：首帧先渲染出来，通知晚几十毫秒排期没有任何影响。
+        Task { @MainActor [weak self] in
+            self?.scheduleWeekAhead(center: .current(), context: context)
+        }
     }
 
     private func scheduleWeekAhead(center: UNUserNotificationCenter, context: ModelContext) {
@@ -44,9 +54,14 @@ final class ReminderScheduler {
         // 只取一次全量（而非过去每天各取一次 → 30 次主线程全表 fetch），按(月,日)分桶，
         // 填 30 天时纯内存查表。entries 已按 happenedAt 倒序，桶内也保持倒序，选取逻辑与旧实现一致。
         let entries: [Entry] = {
-            let d = FetchDescriptor<Entry>(
+            var d = FetchDescriptor<Entry>(
                 predicate: #Predicate { !$0.isArchived },
                 sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+            // 「那年今日」本质是按 (月,日) 分桶，跨年份找，所以确实要看全量。
+            // 但每个桶只用得上最新的那一条，取回上万条只是为了扔掉——
+            // 这里给一个足够大又不至于失控的上限：Entry 已按 happenedAt 倒序，
+            // 超出这个窗口的都是十几年前的记录，那年今日拿不到也无所谓。
+            d.fetchLimit = Self.onThisDayScanLimit
             return (try? context.fetch(d)) ?? []
         }()
         let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
