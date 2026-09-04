@@ -208,5 +208,22 @@ struct MilestoneTemplate: Identifiable, Hashable, Sendable {
         .init(title: "第一次参加家庭聚会", category: "家庭关系", emoji: "👨‍👩‍👧"),
         .init(title: "第一次给家人礼物", category: "家庭关系", emoji: "🎁"),
         .init(title: "第一次说我爱你", category: "家庭关系", emoji: "❤️"),
+
+        // 幼儿园
+        // 原有 12 类 118 条全部是 0–3 岁的发育项，没有一条与入园相关。
+        // 而入园之后家长每天只看得见早晚那几个小时，白天六成清醒时间是空白——
+        // 这几条正好落在那段空白里，是需要靠她自己讲出来、家长再补记的时刻。
+        .init(title: "第一天上幼儿园", category: "幼儿园", emoji: "🎒"),
+        .init(title: "第一次不哭着进园", category: "幼儿园", emoji: "🌤"),
+        .init(title: "第一次在幼儿园自己午睡", category: "幼儿园", emoji: "🛏"),
+        .init(title: "第一次交到好朋友", category: "幼儿园", emoji: "🧑‍🤝‍🧑"),
+        .init(title: "第一次被老师表扬", category: "幼儿园", emoji: "🌟"),
+        .init(title: "第一次上台表演", category: "幼儿园", emoji: "🎤"),
+        .init(title: "第一次自己吃完一整碗饭", category: "幼儿园", emoji: "🍚"),
+        .init(title: "第一次自己穿脱鞋", category: "幼儿园", emoji: "👟"),
+        .init(title: "第一次当值日生", category: "幼儿园", emoji: "🧹"),
+        .init(title: "第一次带作品回家", category: "幼儿园", emoji: "🖼"),
+        .init(title: "第一次说想去幼儿园", category: "幼儿园", emoji: "💗"),
+        .init(title: "第一次讲幼儿园发生的事", category: "幼儿园", emoji: "💬"),
     ]
 }

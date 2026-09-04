@@ -44,6 +44,14 @@ struct VaccineView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("疫苗接种")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                // 入园查验接种证是强制环节，而这里的数据本来就够算——只差一页拿得出手的清单。
+                NavigationLink { SchoolVaccineCheckView() } label: {
+                    Label("入园查验", systemImage: "checklist")
+                }
+            }
+        }
         .sheet(item: $logTarget) { target in
             VaccineQuickLogSheet(dose: target.dose,
                                  record: target.record,

@@ -37,14 +37,56 @@ enum DailyQuestion {
         "今天她做了什么小大人的事？",
     ]
 
-    /// 取「今天」的问题：先按月龄选桶，再以当天日期为种子在桶内轮换。
-    static func todays(birthday: Date?, on date: Date = .now) -> String {
-        let bank = bucket(birthday: birthday, on: date)
+    /// 上幼儿园之后的题库。
+    ///
+    /// 这一桶和上面三桶有个根本区别：**问题是问布布本人的，不是问家长的。**
+    /// 家长照着念，记录她的原话。
+    ///
+    /// 为什么必须换口径：入园之后家长每天只看得见早晚那几个小时，白天六成的清醒时间
+    /// 是空白。再问家长「今天她最得意的一件事是什么」，家长也不知道——他不在场。
+    /// 而 18 年后最值钱的从来不是家长的转述，是她三岁时自己怎么说话。
+    private static let kindergarten: [String] = [
+        "今天谁和你一起玩？你们玩了什么？",
+        "今天老师教了什么歌？唱一句给我听好不好？",
+        "今天午饭吃了什么？好吃吗？",
+        "今天有小朋友不开心吗？他为什么不开心？",
+        "今天你帮了谁？",
+        "今天在幼儿园，什么事情最好玩？",
+        "今天有没有什么事情让你有一点点害怕？",
+        "今天老师夸你了吗？夸你什么？",
+        "睡午觉的时候你在想什么？",
+        "今天你最想把哪件事讲给妈妈听？",
+        "今天你学会了一个新的什么？",
+        "幼儿园里你最喜欢待的地方是哪儿？",
+        "今天有人和你分享东西吗？",
+        "今天你有没有想家？什么时候想的？",
+        "今天你说过最长的一句话是什么？",
+        "明天你最想在幼儿园做什么？",
+        "今天有什么事情你觉得不公平吗？",
+        "你们班谁最好笑？他做了什么？",
+        "今天你自己做成了什么事？",
+        "老师今天讲了什么故事？讲的是谁？",
+        "今天你有没有和谁说悄悄话？",
+        "今天什么时候你觉得最开心？",
+        "今天有没有你不想做但还是做了的事？",
+        "如果明天可以带一样东西去幼儿园，你带什么？",
+    ]
+
+    /// 取「今天」的问题：先选桶，再以当天日期为种子在桶内轮换。
+    /// 全家同一天看到同一题（种子只跟日期走）。
+    static func todays(birthday: Date?, schoolStartDate: Date? = nil, on date: Date = .now) -> String {
+        let bank = bucket(birthday: birthday, schoolStartDate: schoolStartDate, on: date)
         let day = Calendar.current.ordinality(of: .day, in: .era, for: date) ?? 0
         return bank[abs(day) % bank.count]
     }
 
-    private static func bucket(birthday: Date?, on date: Date) -> [String] {
+    /// 已经开学就一律走幼儿园桶——入园是内容模型的分水岭，比月龄更能决定该问什么。
+    /// 没填入园日期时保持原来的月龄分桶，行为不变。
+    private static func bucket(birthday: Date?, schoolStartDate: Date?, on date: Date) -> [String] {
+        if let start = schoolStartDate,
+           AgeCalculator.daysSinceSchoolStart(start, at: date) != nil {
+            return kindergarten
+        }
         guard let birthday else { return toddler }
         let months = Calendar.current.dateComponents([.month], from: birthday, to: date).month ?? 0
         switch months {

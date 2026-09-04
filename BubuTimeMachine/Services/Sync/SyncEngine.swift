@@ -1865,12 +1865,19 @@ final class SyncEngine {
     private static func makeDTO(_ item: ChildProfile) -> ChildProfileDTO {
         ChildProfileDTO(id: item.remoteId, localId: item.id.uuidString, name: item.name, birthday: item.birthday,
                         gender: item.gender, bloodType: item.bloodType, birthPlace: item.birthPlace,
-                        avatarRemoteURL: item.avatarRemoteURL, createdAt: item.createdAt)
+                        avatarRemoteURL: item.avatarRemoteURL, schoolStartDate: item.schoolStartDate,
+                        allergies: item.allergies, medicalNotes: item.medicalNotes,
+                        createdAt: item.createdAt)
     }
 
     private static func apply(_ dto: ChildProfileDTO, to item: ChildProfile) {
         item.name = dto.name; item.birthday = dto.birthday; item.gender = dto.gender
         item.bloodType = dto.bloodType; item.birthPlace = dto.birthPlace
+        // 只在远端确实给了值时才覆盖：老客户端推上来的 DTO 没有这个键，
+        // 不能让它把另一台设备刚填的入园日期清空。
+        if let schoolStart = dto.schoolStartDate { item.schoolStartDate = schoolStart }
+        if let allergies = dto.allergies { item.allergies = allergies }
+        if let notes = dto.medicalNotes { item.medicalNotes = notes }
         // 远端头像变更：更新 URL 并清掉本地文件名，下一轮 downloadMissingFiles 重新落地
         if let remote = dto.avatarRemoteURL, remote != item.avatarRemoteURL {
             item.avatarRemoteURL = remote

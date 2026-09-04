@@ -139,6 +139,33 @@ struct ChildProfileView: View {
                 Text("未填写").tag(Self.unset)
                 ForEach(Self.bloodTypeOptions, id: \.self) { Text($0).tag($0) }
             }
+
+            // 入园日：填了之后首页与身份卡会多一条「上学第 N 天」，开学前是倒计时。
+            // 幼儿园那三年是她记忆开始成形的三年，值得和「来到世界第 N 天」并列。
+            Toggle("已经上幼儿园了", isOn: Binding(
+                get: { profile.schoolStartDate != nil },
+                set: { on in
+                    profile.schoolStartDate = on
+                        ? Calendar.current.startOfDay(for: profile.schoolStartDate ?? .now)
+                        : nil
+                    profile.syncState = .local
+                    commitProfile()
+                }))
+            if let start = profile.schoolStartDate {
+                DatePicker("第一天", selection: Binding(
+                    get: { start },
+                    set: {
+                        // 与生日同口径归一化到当天 0 点，否则「上学第 N 天」会忽早忽晚。
+                        profile.schoolStartDate = Calendar.current.startOfDay(for: $0)
+                        profile.syncState = .local
+                        commitProfile()
+                    }), displayedComponents: .date)
+                if let text = AgeCalculator.schoolDescription(schoolStartDate: start) {
+                    Text(text)
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+            }
         }
     }
 

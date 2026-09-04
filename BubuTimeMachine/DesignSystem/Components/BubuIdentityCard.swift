@@ -236,12 +236,15 @@ struct BubuIdentityCard: View {
             backRow(title: "血型", value: profile.bloodType?.isEmpty == false ? profile.bloodType! : "未填写")
             backRow(title: "出生地", value: profile.birthPlace?.isEmpty == false ? profile.birthPlace! : "未填写")
 
+            // 这里以前印的是 profile.id 的 UUID。整张卡的学生证质感做得很好，
+            // 翻到背面看见一串机器码，人设瞬间就碎了——那串号码对布布毫无意义，
+            // 对调试也没用（真要查用日志）。换成她自己的东西。
             VStack(alignment: .leading, spacing: 2) {
-                Text("FULL ID")
+                Text(backHighlight.label)
                     .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
                     .foregroundStyle(theme.primary.opacity(0.70))
-                Text(profile.id.uuidString)
-                    .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .monospaced))
+                Text(backHighlight.value)
+                    .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
@@ -259,6 +262,18 @@ struct BubuIdentityCard: View {
         .padding(16)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
+    }
+
+    /// 背面那格印什么：上学了就印上学天数（这三年最值得记的一条），
+    /// 否则印小名，都没有就回到「来到世界第 N 天」——永远是一句关于布布的话。
+    private var backHighlight: (label: String, value: String) {
+        if let school = AgeCalculator.schoolDescription(schoolStartDate: profile.schoolStartDate) {
+            return ("幼儿园", school)
+        }
+        if let nickname = profile.nickname, !nickname.isEmpty {
+            return ("小名", nickname)
+        }
+        return ("来到世界", "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天")
     }
 
     private func backRow(title: String, value: String) -> some View {

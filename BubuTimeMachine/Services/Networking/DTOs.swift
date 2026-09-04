@@ -114,6 +114,12 @@ struct ChildProfileDTO: Codable, Sendable, SyncCursorProviding {
     var bloodType: String?
     var birthPlace: String?
     var avatarRemoteURL: String?   // 由服务端 avatar file 字段派生，身份卡跨设备显示头像
+    /// 上幼儿园第一天。可选且带默认值：老客户端和老服务端的 JSON 里没有这个键也能解出来。
+    var schoolStartDate: Date? = nil
+    /// 过敏源与健康备注：爸妈两台手机都得看得到，属于家庭事实，随档案同步。
+    /// （家人的手机号刻意不进 DTO——那是本机的事，见 FamilyMember.contactPhone。）
+    var allergies: String? = nil
+    var medicalNotes: String? = nil
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
 }

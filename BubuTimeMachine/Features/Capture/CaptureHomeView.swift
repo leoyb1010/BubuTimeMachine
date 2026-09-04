@@ -77,14 +77,15 @@ struct CaptureHomeView: View {
                 VStack(spacing: 12) {
                     greetingRow
                     if isBirthdayToday { birthdayBanner }   // 🎂 生日当天全 App 仪式（R4 C4）
+                    schoolBanner               // 🎒 入园倒计时 / 上学头一个月（过后自动安静）
                     identityCardTop            // ① 布布身份卡（可翻面看性别/血型/出生地）
                     ssdCandidateCard           // 移动硬盘只生成候选，必须回手机确认
                     uploadQueueCard            // 后台原片必须可见、可重试，不能假装已经收好
                     todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
                     primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
-                    BubuMovedHint(
-                        storageKey: "bubu.moved.home.v2110",
-                        message: "里程碑和成长数据搬到了「成长」页，故事绘本搬到了「魔法屋」。首页现在只留最常用的。")
+                    // 「功能搬家」提示卡已移除：那次信息架构调整是 2.11.0 的事，
+                    // 早就不是新消息了，却还常驻在首屏最值钱的位置上。
+                    // 项目已经接了 TipKit，真要做渐进引导用它，不用再自养一套常驻横幅。
                     if entries.isEmpty {
                         firstRecordEmptyState  // ③a 空库：单焦点，只说「记第一笔」
                     } else {
@@ -626,6 +627,57 @@ struct CaptureHomeView: View {
         .overlay { BubuBurst(count: 20, radius: 150) }
     }
 
+    // MARK: 入园（幼儿园）
+
+    /// 只在真正相关的窗口里出现：开学前 30 天内的倒计时，或开学后头 30 天的「上学第 N 天」。
+    /// 过了就自动安静下去——首页不该再多一张常驻卡；之后想看，身份卡背面一直印着。
+    @ViewBuilder
+    private var schoolBanner: some View {
+        if let start = profile?.schoolStartDate, let copy = schoolBannerCopy(start: start) {
+            HStack(spacing: 12) {
+                BubuMascotBadge(size: 44, expression: copy.expression)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(copy.title)
+                        .font(BubuTheme.Font.scaled(16, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.paperInk)
+                    Text(copy.subtitle)
+                        .font(BubuTheme.Font.scaled(12.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.paperInkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Text("🎒").font(BubuTheme.Font.scaled(26))
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(
+                LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.pink],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+            .bubuCardShadow()
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func schoolBannerCopy(start: Date) -> (title: String, subtitle: String, expression: BubuExpression)? {
+        let name = profile?.name ?? "布布"
+        if let left = AgeCalculator.daysUntilSchoolStart(start) {
+            guard left <= 30 else { return nil }
+            if left == 1 {
+                return ("明天就要上幼儿园了", "今晚问问\(name)，她期待什么、担心什么——这句话以后再也问不到了。", .surprised)
+            }
+            return ("还有 \(left) 天上幼儿园", "开学那天只有一次。可以先记下现在的\(name)是什么样子。", .thinking)
+        }
+        guard let day = AgeCalculator.daysSinceSchoolStart(start) else { return nil }
+        switch day {
+        case 1:
+            return ("今天是上幼儿园第 1 天", "接回来先别急着问乖不乖。问问她今天认识了谁。", .cheer)
+        case 2...30:
+            return ("上幼儿园第 \(day) 天", "白天你看不见的那几个小时，靠她自己讲出来。", .happy)
+        default:
+            return nil
+        }
+    }
+
     // 顶部问候行（纯展示，对照设计稿「☀︎ 早安呀 + 名字 + 年龄」）
     private var greetingRow: some View {
         HStack(alignment: .center) {
@@ -908,7 +960,7 @@ struct CaptureHomeView: View {
     /// 文案里带上今天已回答的家人，全家合唱的感觉比一个静态图标更能推动人去答。
     private var dailyQuestionStrip: some View {
         Button {
-            startQuickCapture(prefillNote: "【今日一问】\(DailyQuestion.todays(birthday: profile?.birthday ?? .now))\n")
+            startQuickCapture(prefillNote: "【今日一问】\(DailyQuestion.todays(birthday: profile?.birthday ?? .now, schoolStartDate: profile?.schoolStartDate))\n")
         } label: {
             HStack(spacing: 11) {
                 BubuMascotBadge(size: 34, expression: .surprised)
@@ -947,7 +999,7 @@ struct CaptureHomeView: View {
 
     private var dailyQuestionSubtitle: String {
         todayQuestionAnswerers.isEmpty
-            ? DailyQuestion.todays(birthday: profile?.birthday ?? .now)
+            ? DailyQuestion.todays(birthday: profile?.birthday ?? .now, schoolStartDate: profile?.schoolStartDate)
             : "\(todayQuestionAnswerers.joined(separator: "、"))已回答，一起合个唱？"
     }
 

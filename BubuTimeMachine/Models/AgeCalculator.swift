@@ -59,6 +59,38 @@ enum AgeCalculator {
         return m == 0 ? "\(y)岁" : "\(y)岁\(m)月"
     }
 
+    // MARK: - 上学
+
+    /// 上学第几天（开学当天算第 1 天）。还没到开学日返回 nil。
+    /// 与 daysSinceBirth 同口径：两端都归一化到当天 0 点，避免入园日带时分秒时忽早忽晚。
+    static func daysSinceSchoolStart(_ start: Date, at date: Date = .now) -> Int? {
+        let cal = Calendar.current
+        let from = cal.startOfDay(for: start)
+        let to = cal.startOfDay(for: date)
+        guard to >= from else { return nil }
+        return (cal.dateComponents([.day], from: from, to: to).day ?? 0) + 1
+    }
+
+    /// 距离开学还有几天。开学当天及之后返回 nil。
+    static func daysUntilSchoolStart(_ start: Date, from date: Date = .now) -> Int? {
+        let cal = Calendar.current
+        let from = cal.startOfDay(for: date)
+        let to = cal.startOfDay(for: start)
+        guard to > from else { return nil }
+        return cal.dateComponents([.day], from: from, to: to).day
+    }
+
+    /// 一句话上学状态："还有 5 天上幼儿园" / "今天是上幼儿园第 1 天" / "上幼儿园第 23 天"。
+    /// 没填入园日期返回 nil。
+    static func schoolDescription(schoolStartDate: Date?, at date: Date = .now) -> String? {
+        guard let start = schoolStartDate else { return nil }
+        if let left = daysUntilSchoolStart(start, from: date) {
+            return "还有 \(left) 天上幼儿园"
+        }
+        guard let day = daysSinceSchoolStart(start, at: date) else { return nil }
+        return day == 1 ? "今天是上幼儿园第 1 天" : "上幼儿园第 \(day) 天"
+    }
+
     /// 距离下个生日还有几天。
     static func daysUntilNextBirthday(birthday: Date, from date: Date = .now) -> Int {
         let cal = Calendar.current

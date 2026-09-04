@@ -31,9 +31,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 18) {
                 identityCard
-                BubuMovedHint(
-                    storageKey: "bubu.moved.settings.v2110",
-                    message: "「健康」搬到了首页和「成长」页，「成长之声」搬到了「魔法屋 · 声音」。设置里只留配置。")
+                // 「功能搬家」提示卡已移除：那是 2.11.0 的信息架构调整，早已不是新消息。
                 // 设置只放「配置」，不放业务。
                 // 「健康」是天天用的记录能力，归首页与成长 Tab；「成长之声」是创作能力，归魔法屋。
                 // 它们过去挂在这里，等于把高频操作藏进「设置」心智里。
@@ -41,6 +39,14 @@ struct SettingsView: View {
                     row("布布的档案", icon: "figure.child", tint: env.theme.theme.primary) { ChildProfileView() }
                     row("认布布与精选", icon: "person.crop.rectangle.stack.fill",
                         tint: BubuTheme.Color.pink) { ChildIdentitySettingsView() }
+                }
+                // 入园相关的两件事都要拿出去给别人看，所以单独成组，
+                // 并在文案里说清楚哪些字段会离开这台手机。
+                group("上幼儿园", footer: "这两页都是重新绘制的图片，只含下面列出的字段，不含照片、位置和任何记录正文。") {
+                    row("给老师的一页", icon: "person.text.rectangle",
+                        tint: BubuTheme.Color.info) { SchoolTeacherSheetView() }
+                    row("入园查验接种证", icon: "checklist",
+                        tint: BubuTheme.Color.success) { SchoolVaccineCheckView() }
                 }
                 group("这个家", footer: "每位家人各自登录、各自署名，看的是同一个布布。") {
                     row("账号与安全", icon: "person.crop.circle.badge.checkmark",

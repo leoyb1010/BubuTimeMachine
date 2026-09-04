@@ -267,6 +267,11 @@ struct BubuTimeMachineApp: App {
 
         let birthday = Calendar.current.date(byAdding: .month, value: -19, to: .now) ?? .now
         let profile = ChildProfile(name: "布布", birthday: birthday)
+        // 入园相关的视觉验证需要一个「快开学了」的档案：种子里放 5 天后开学，
+        // 这样 -uitest-seed 起来的首页一定能看到倒计时横幅（过了开学日就变成上学第 N 天）。
+        profile.schoolStartDate = Calendar.current.date(byAdding: .day, value: 5, to: .now)
+            .map { Calendar.current.startOfDay(for: $0) }
+        profile.allergies = "芒果（起疹子）"
         context.insert(profile)
 
         let mama = FamilyMember(name: "妈妈", relation: "妈妈", avatarEmoji: "👩", themeColorHex: "#F28C9E")
