@@ -318,8 +318,12 @@ final class SyncEngine {
             return
         }
         guard !Task.isCancelled else { finalizeRun(); return }
+        // ping + auth 成功只说明「连得上」，不说明「同步成功」。
+        // 以前这里直接置 .online 并把失败计数清零，于是推拉全线报错时
+        // 连接状态仍然是在线、退避仍然是 30 秒，用户看到的是一切正常。
         connectionState = .online
         updateBackoff(succeeded: true)   // 连上了就回到 30 秒节奏
+        lastFailureReason = nil          // 新一轮重新判定，不带上一轮的旧结论
 
         await pushLocal()
         guard !Task.isCancelled else { finalizeRun(); return }
@@ -988,6 +992,12 @@ final class SyncEngine {
             if Self.isMissingOptionalServerCollection(error, collection: collection) {
                 return PulledBatch(missingCollection: true)
             }
+            // 以前这里只 return failed 标记位，不记录失败原因：
+            // 于是「每个集合的每一次拉取都 400」这种故障（2026-07 的 autodate 事故就是）
+            // 在界面上完全不可见，同步中心照样显示绿勾「全部同步好了」，静默了几个月。
+            // recordFailure 内部会把网络抖动、缺可选集合这类归成软失败，
+            // 真正的服务端错误才会落到 lastFailureReason。
+            recordFailure(error, item: "拉取 \(collection)")
             return PulledBatch(failed: true)
         }
     }
@@ -1070,7 +1080,12 @@ final class SyncEngine {
         if modelContext != nil, let maxUpdated, !holdCursorForCurrentPull {
             setCursor(maxUpdated, for: collection)
         }
-        lastSyncedAt = Date.now
+        // 「上次同步成功」只在本轮没有硬失败时才刷新。
+        // 否则拉取全线 400 的时候，这个时间戳每 30 秒照常往前跳，
+        // 界面上看起来一切正常——这正是故障能静默几个月的另一半原因。
+        if lastFailureReason == nil {
+            lastSyncedAt = Date.now
+        }
     }
 
     /// 取两个可选时间里较晚的一个（nil 视作无约束）。
@@ -2064,7 +2079,8 @@ final class SyncEngine {
     private static func makeDTO(_ item: TimeCapsule) -> TimeCapsuleDTO {
         TimeCapsuleDTO(id: item.remoteId, localId: item.id.uuidString, title: item.title,
                        fromRole: item.fromRole, unlockAt: item.unlockAt, isLocked: item.isLocked,
-                       encryptedBlobRemoteURL: nil, coverEmoji: item.coverEmoji, createdAt: item.createdAt)
+                       encryptedBlobRemoteURL: nil, coverEmoji: item.coverEmoji,
+                       cryptoVersion: item.cryptoVersion, createdAt: item.createdAt)
     }
 
     private static func apply(_ dto: TimeCapsuleDTO, to item: TimeCapsule) {
@@ -2075,6 +2091,11 @@ final class SyncEngine {
         // 新建路径由 TimeCapsule(init:) 直接用远端值，不经过这里。
         item.isLocked = dto.isLocked
         item.coverEmoji = dto.coverEmoji
+        // 加密版本只升不降。服务器是不可信的一方：能替换 blob 的人也能改这个数字，
+        // 所以这里绝不接受「远端说版本更低」——否则版本锁自己就成了降级攻击的入口。
+        if let remote = dto.cryptoVersion, remote > (item.cryptoVersion ?? 0) {
+            item.cryptoVersion = remote
+        }
         item.createdAt = dto.createdAt
     }
 

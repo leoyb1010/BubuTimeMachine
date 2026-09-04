@@ -226,6 +226,10 @@ struct TimeCapsuleDTO: Codable, Sendable, SyncCursorProviding {
     var isLocked: Bool
     var encryptedBlobRemoteURL: String?
     var coverEmoji: String?
+    /// 封存时的加密版本。**合并规则是「只升不降」**（见 SyncEngine 的 apply）：
+    /// 服务器是不可信的一方——攻击者若能改 blob，也能改这个数字。只升不降意味着
+    /// 攻击者最多做到「没能把保护提上去」，永远做不到「把已知 v3 的信降级成 v2」。
+    var cryptoVersion: Int? = nil
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
 }

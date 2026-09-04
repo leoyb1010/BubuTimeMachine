@@ -208,7 +208,8 @@ struct CapsuleComposeView: View {
         if let blob = editing.encryptedBlobFileName, editing.unlockAt <= .now {
             if let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt,
                                                    salt: editing.id.uuidString,
-                                                   recoveryCode: CapsuleRecovery.current()) {
+                                                   recoveryCode: CapsuleRecovery.current(),
+                                                   expectedVersion: editing.cryptoVersion) {
                 loadedPayload = payload
                 letter = payload.letter
                 if let voice = payload.voiceFileName {
@@ -261,6 +262,9 @@ struct CapsuleComposeView: View {
             }
             capsule.encryptedBlobFileName = blobName
             capsule.isLocked = true
+            // 新信一律是 v3。记下版本号之后，这封信永远不再接受 v1/v2 的 blob——
+            // 那两版的密钥只由随记录同步的明文字段派生，可被持库者伪造。
+            capsule.cryptoVersion = 3
             capsule.syncState = .local
             if editing == nil { context.insert(capsule) }
             try context.save()

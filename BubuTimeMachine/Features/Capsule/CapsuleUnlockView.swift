@@ -229,9 +229,15 @@ struct CapsuleUnlockView: View {
             let p = try env.vault.unseal(fileName: blob,
                                          unlockAt: capsule.unlockAt,
                                          salt: capsule.id.uuidString,
-                                         recoveryCode: CapsuleRecovery.current())
+                                         recoveryCode: CapsuleRecovery.current(),
+                                         expectedVersion: capsule.cryptoVersion)
             payload = p
             capsule.isLocked = false
+            // 老数据首次成功解开时回填版本号：从此这封信只接受同版本的 blob，
+            // 再有人拿明文字段派生旧版密钥替换服务器上的内容，本机会直接拒绝。
+            if capsule.cryptoVersion == nil {
+                capsule.cryptoVersion = env.vault.detectedVersion(fileName: blob)
+            }
             capsule.syncState = .local
             try? context.save()
             env.syncEngine.syncNow()

@@ -107,7 +107,10 @@ struct SyncCenterView: View {
             if let soft = engine.softNotice {
                 noticeLine(soft, tint: BubuTheme.Color.secondaryText, icon: "clock.arrow.circlepath")
             }
-            if let failure = engine.lastFailureReason, engine.pendingCount > 0 {
+            // 去掉 pendingCount > 0 这个条件：纯拉取故障时待同步数正好是 0，
+            // 于是红字永不显示、状态卡还显示绿勾「全部同步好了」——
+            // 失败原因存在却没人看得见，是这类故障能静默几个月的最后一环。
+            if let failure = engine.lastFailureReason {
                 noticeLine(failure, tint: BubuTheme.Color.danger, icon: "exclamationmark.triangle.fill")
             }
         }
@@ -146,7 +149,11 @@ struct SyncCenterView: View {
         switch engine.connectionState {
         case .offline:    return "离线中"
         case .connecting: return "正在连接…"
-        case .online:     return engine.pendingCount == 0 ? "全部同步好了" : "正在同步"
+        case .online:
+            // 有硬失败时绝不说「全部同步好了」。连得上不等于同步成功：
+            // 拉取全线 400 的时候待同步数正好是 0，旧逻辑照样显示绿勾。
+            if engine.lastFailureReason != nil { return "同步没成功" }
+            return engine.pendingCount == 0 ? "全部同步好了" : "正在同步"
         }
     }
 
@@ -159,6 +166,11 @@ struct SyncCenterView: View {
         case .connecting:
             return "正在和家里的服务器握手…"
         case .online:
+            if engine.lastFailureReason != nil {
+                return engine.lastSyncedAt.map {
+                    "连得上服务器，但这一轮没能取回数据。上次成功：\(BubuDateFormat.shortDateTime($0))"
+                } ?? "连得上服务器，但一直没能取回数据。"
+            }
             if engine.pendingCount == 0 {
                 return engine.lastSyncedAt.map { "上次同步：\(BubuDateFormat.shortDateTime($0))" } ?? "已连接"
             }

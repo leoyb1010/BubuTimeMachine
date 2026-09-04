@@ -109,6 +109,47 @@ def test_every_collection_gets_autodate_fields_from_repo_migrations():
     assert "removeById" not in down_half, "回滚不得删除 created/updated"
 
 
+def test_family_isolation_is_tightened_after_backfill():
+    """0009 承诺的「后续收紧」必须真的存在，且必须是先回填再收紧。
+
+    0009 的家庭规则两个 OR 分支都是放行，配合记录级（而非字段级）的 users 更新规则，
+    任何已登录用户把自己的 familyId 改成空就能拿到全库读写。
+    这在单家庭内网部署下今天不可被外人利用，但多一个亲戚账号就变成 P0。
+    """
+    migration = (
+        REPO_ROOT / "server/pocketbase/migrations/1700000018_tighten_family_isolation.js"
+    ).read_text(encoding="utf-8")
+
+    # users.familyId 必须有字段守卫，否则用户能自助改空
+    assert "@request.body.familyId" in migration
+    assert "users.updateRule" in migration
+    # 收紧后的规则不得再接受空 familyId
+    assert '@request.auth.familyId != ""' in migration
+    # 必须先回填再收紧：直接收紧会把历史空 familyId 的记录全部锁死
+    assert "UPDATE" in migration and "familyId" in migration
+    assert "remaining" in migration, "必须在确认没有残留空 familyId 之后才收紧"
+    # 回滚不得清空 familyId——那等于重新制造全局可读的记录
+    down_half = migration.split("}, (app) => {", 1)[-1]
+    assert "UPDATE" not in down_half
+
+
+def test_timecapsule_records_crypto_version():
+    """时间胶囊必须记住封存版本，否则可被降级伪造。
+
+    v2 的密钥只由 unlockAt 与 salt(=胶囊 id) 派生，两个都是随记录同步的明文字段。
+    持有数据库或备份的人可以自造 v2 密文替换掉 v3 的信，而 unseal 只看 blob 头部魔数。
+    """
+    migration = (
+        REPO_ROOT
+        / "server/pocketbase/migrations/1700000017_add_timecapsule_crypto_version.js"
+    ).read_text(encoding="utf-8")
+    assert "cryptoVersion" in migration
+    assert "timecapsules" in migration
+    # 回滚不得删字段：删掉等于把所有设备打回「版本未知」，重新暴露降级面
+    down_half = migration.split("}, (app) => {", 1)[-1]
+    assert "removeById" not in down_half
+
+
 def test_ntfy_hook_only_reports_dead_letters_without_memory_content():
     hook = (REPO_ROOT / "server/pocketbase/pb_hooks/notify.pb.js").read_text(
         encoding="utf-8"

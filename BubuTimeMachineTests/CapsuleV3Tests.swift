@@ -91,6 +91,54 @@ struct CapsuleV3Tests {
         #expect(String(data: plain, encoding: .utf8) == "{\"letter\":\"跨端胶囊\",\"voiceDuration\":0,\"voiceWaveform\":[],\"photoFileNames\":[]}")
     }
 
+    // MARK: 版本降级伪造（安全回归）
+
+    /// 攻击面：`unseal` 完全按 blob 头部魔数分派版本，而 v2 的密钥只由 unlockAt 与
+    /// salt(=胶囊 id) 派生——这两项都是随记录同步到服务器的**明文字段**。
+    /// 拿到数据库或备份的人可以自己派生 v2 密钥、封一段自己写的正文替换上去，
+    /// 换机后同步拉回，解封认魔数就成功了。布布 18 岁打开的会是别人写的信。
+    /// 记住封存版本之后，v3 的信必须拒绝一切非 v3 的 blob。
+    @Test("v3 的信拒绝被换成 v2 blob（版本降级伪造）")
+    func rejectsDowngradedBlob() throws {
+        let media = MediaStore()
+        let vault = CapsuleVault(crypto: crypto, mediaStore: media)
+        let capsuleId = UUID().uuidString
+        let unlockAt = Date(timeIntervalSince1970: 1_000_000_000)
+        let now = unlockAt.addingTimeInterval(1)
+
+        // 攻击者只用两个公开字段就能造出一份「合法」的 v2 密文。
+        // 明文得是货真价实的 CapsulePayload JSON——真实攻击者当然会照着格式写，
+        // 否则解密成功也会卡在 JSON 解码上，测不到我们要测的那一层。
+        let forgedPayload = CapsulePayload(letter: "这不是爸爸写的信")
+        let forged = try crypto.encrypt(JSONEncoder().encode(forgedPayload),
+                                        unlockAt: unlockAt, salt: capsuleId)
+        let forgedName = try media.saveBlob(forged, preferredExtension: "capsule")
+        #expect(!CapsuleCrypto.isV3(forged), "前提：伪造的是旧版格式")
+
+        // 不带版本信息时，旧行为会照解不误——这正是漏洞本身
+        let legacyOpen = try? vault.unseal(fileName: forgedName, unlockAt: unlockAt,
+                                           salt: capsuleId, recoveryCode: nil, now: now)
+        #expect(legacyOpen?.letter == "这不是爸爸写的信",
+                "前提：不知道版本时伪造的信确实读得出来，所以必须记住版本")
+
+        // 这封信当初是 v3 封的 → 必须拒绝
+        #expect(throws: CapsuleCrypto.CryptoError.self) {
+            _ = try vault.unseal(fileName: forgedName, unlockAt: unlockAt, salt: capsuleId,
+                                 recoveryCode: self.code, expectedVersion: 3, now: now)
+        }
+
+        // 真正的 v3 blob 在同样的版本要求下照常打开
+        let real = try vault.sealV3(CapsulePayload(letter: "这才是爸爸写的信"),
+                                    recoveryCode: code, salt: capsuleId)
+        let out = try vault.unseal(fileName: real, unlockAt: unlockAt, salt: capsuleId,
+                                   recoveryCode: code, expectedVersion: 3, now: now)
+        #expect(out.letter == "这才是爸爸写的信")
+        #expect(vault.detectedVersion(fileName: real) == 3)
+
+        media.deleteMedia(named: forgedName)
+        media.deleteMedia(named: real)
+    }
+
     // MARK: 媒体闭环回归（C1）
     /// 封存把语音嵌进加密 blob → 明文源可删 → 解封拿回正文与语音内容；
     /// 语音落临时目录而非媒体目录（不留明文）、按 salt 幂等命名（不产生孤儿）。

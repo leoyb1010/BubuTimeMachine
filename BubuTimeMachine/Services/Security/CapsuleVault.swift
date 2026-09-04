@@ -77,11 +77,25 @@ struct CapsuleVault: Sendable {
                                       unlockAt: unlockAt, now: futureNow)) != nil
     }
 
+    /// 判断某个 blob 实际是哪一版（用于首次解开后回填 cryptoVersion）。
+    func detectedVersion(fileName: String) -> Int? {
+        guard let cipher = mediaStore.blob(named: fileName) else { return nil }
+        return CapsuleCrypto.isV3(cipher) ? 3 : 2
+    }
+
     /// 到期解密读出。未到期抛 CapsuleCrypto.CryptoError.stillLocked。
     /// v3 blob 需提供 recoveryCode（来自 iCloud Keychain 或纸条）；v1/v2 自动按旧逻辑解。
+    /// - Parameter expectedVersion: 这封信封存时的加密版本（`TimeCapsule.cryptoVersion`）。
+    ///   传 3 时**拒绝一切非 BTC3 的 blob**——防版本降级伪造，见 TimeCapsule.cryptoVersion 的说明。
+    ///   传 nil 表示老数据、版本未知，按 blob 头分派（并由调用方回填版本号）。
     func unseal(fileName: String, unlockAt: Date, salt: String,
-                recoveryCode: String? = nil, now: Date = .now) throws -> CapsulePayload {
+                recoveryCode: String? = nil, expectedVersion: Int? = nil,
+                now: Date = .now) throws -> CapsulePayload {
         guard let cipher = mediaStore.blob(named: fileName) else {
+            throw CapsuleCrypto.CryptoError.decryptionFailed
+        }
+        if expectedVersion == 3, !CapsuleCrypto.isV3(cipher) {
+            // 这封信当初是 v3 封的，现在拿到的却是旧格式——只可能是被替换过。
             throw CapsuleCrypto.CryptoError.decryptionFailed
         }
         let plain: Data
