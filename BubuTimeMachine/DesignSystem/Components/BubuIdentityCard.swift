@@ -18,7 +18,7 @@ struct BubuIdentityCard: View {
     }
 
     private var daysText: String {
-        "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天"
+        "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天"   // 见下方 contentTransition
     }
 
     private var cardNo: String {

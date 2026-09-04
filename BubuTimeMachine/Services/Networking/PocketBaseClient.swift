@@ -682,30 +682,64 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     /// 翻页拉增量：游标改用 PocketBase 服务器系统字段 `updated`（单一权威时钟），
     /// 而非各写入设备各自打的 clientUpdatedAt——后者在设备时钟偏移下会漏拉（S-P1-1）。
     private func fetchRecords(collection: String, since: Date?, sort: String? = "updated") async throws -> [[String: Any]] {
-        var all: [[String: Any]] = []
-        var page = 1
-        while true {
-            let (items, totalPages) = try await fetchPage(collection: collection, since: since, sort: sort, page: page)
-            all.append(contentsOf: items)
-            if page >= totalPages || items.isEmpty { break }
-            page += 1
-        }
+        let all = try await paginate(collection: collection, since: since, sort: sort, onlyDeleted: false)
         return all.filter { ($0["isDeleted"] as? Bool) != true }
+    }
+
+    /// **keyset 翻页**（按游标推进），不是 offset 翻页。
+    ///
+    /// 为什么必须换掉 `page=N`：排序键 `updated` 是**可变的**。
+    /// 新设备首次同步两千条记录时要翻十页；翻到第五页时另一台手机编辑了第一页里的某条，
+    /// 那条的 `updated` 跳到最新、排到最后一页去，它后面所有行整体上移一位 ——
+    /// 于是第五、六页的边界处**恰好有一条被跳过**。而它的 updated 比本轮游标早，
+    /// 下一轮的 `updated > 游标` 也不会再取到它：这台设备永远缺这一条，且没有任何提示。
+    ///
+    /// keyset 的做法是每页把 `since` 推到本页最后一条的 `updated`，
+    /// 行怎么移动都不影响「从这个时间点之后继续取」这个语义。
+    /// 代价是同一毫秒内的并列记录要多带一条重叠（见下面的 seen 去重）。
+    private func paginate(collection: String, since: Date?, sort: String?,
+                          onlyDeleted: Bool) async throws -> [[String: Any]] {
+        var all: [[String: Any]] = []
+        var seen = Set<String>()
+        var cursor = since
+        // 同一毫秒的记录多到撑满一整页时，游标推不动会原地打转。
+        // 这个上限只是兜底，正常情况下循环会因为「取回空页」而结束。
+        let maxRounds = 500
+        for _ in 0..<maxRounds {
+            let (items, _) = try await fetchPage(collection: collection, since: cursor,
+                                                 sort: sort, page: 1, onlyDeleted: onlyDeleted)
+            if items.isEmpty { break }
+
+            var newest: Date?
+            var appended = 0
+            for item in items {
+                // id 去重：keyset 的边界会把「与游标同一时刻」的记录再取一次。
+                if let id = item["id"] as? String {
+                    guard seen.insert(id).inserted else { continue }
+                }
+                all.append(item)
+                appended += 1
+                if let updated = Self.serverUpdatedDate(item) {
+                    newest = newest.map { max($0, updated) } ?? updated
+                }
+            }
+
+            // 拿不到 updated（服务端格式变了）或者游标没往前走：
+            // 再循环下去就是无限重复同一页，停在这里，本轮当作取到这么多。
+            guard let newest, newest != cursor else { break }
+            // 整页都是重复的说明已经追平，不必再问。
+            if appended == 0 { break }
+            cursor = newest
+        }
+        return all
     }
 
     /// 拉取自 since 以来被删除记录的墓碑（localId + 服务器 updated）。
     /// 删除必须跨设备传播——否则妈妈删的照片在爸爸设备上永远存在（R4 P1-8）。
     /// 游标同样按服务器 `updated` 过滤/排序，并把每条墓碑的 updated 带回，让删除也能推进游标。
     func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone] {
-        var all: [[String: Any]] = []
-        var page = 1
-        while true {
-            let (items, totalPages) = try await fetchPage(collection: collection, since: since,
-                                                          sort: "updated", page: page, onlyDeleted: true)
-            all.append(contentsOf: items)
-            if page >= totalPages || items.isEmpty { break }
-            page += 1
-        }
+        // 墓碑同样走 keyset：删除也参与游标推进，漏掉一条墓碑等于「别人删的照片在这台设备上复活」。
+        let all = try await paginate(collection: collection, since: since, sort: "updated", onlyDeleted: true)
         return all.compactMap { obj in
             guard let localId = obj["localId"] as? String else { return nil }
             return RemoteTombstone(localId: localId, serverUpdatedAt: Self.serverUpdatedDate(obj))

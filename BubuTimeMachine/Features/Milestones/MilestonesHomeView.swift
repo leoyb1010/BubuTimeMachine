@@ -214,7 +214,22 @@ struct MilestonesHomeView: View {
                 .background(
                     Circle().fill(lit ? theme.opacity(0.15) : BubuTheme.Color.softFill)
                 )
-                .overlay { Circle().stroke(lit ? theme : .clear, lineWidth: 2) }
+                // 点亮时那圈描边「画」出来（SF Symbols 7 的 drawOn），
+                // 而不是凭空出现——点亮是这一页唯一的高光动作，值得这一帧。
+                .overlay {
+                    Circle().stroke(lit ? theme : .clear, lineWidth: 2)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if lit {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(BubuTheme.Font.scaled(15, weight: .bold))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, theme)
+                            .symbolEffect(.drawOn, isActive: lit)
+                            .offset(x: 3, y: 3)
+                            .accessibilityHidden(true)
+                    }
+                }
             Text(milestone.title)
                 .font(BubuTheme.Font.scaled(12, weight: .medium))
                 .foregroundStyle(lit ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)

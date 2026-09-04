@@ -563,6 +563,11 @@ struct CaptureHomeView: View {
 
     // MARK: 背景
 
+    /// 视差幅度。单独抽成属性而不是在 heroBackground 里写 `let`：
+    /// 那样会用 `return` 关掉 ViewBuilder。visualEffect 的闭包是 Sendable 的，
+    /// 不能在里面直接引用 MainActor 隔离的 reduceMotion，所以先取成值类型再捕获。
+    private var heroParallax: CGFloat { reduceMotion ? 0 : 0.08 }
+
     @ViewBuilder
     private var heroBackground: some View {
         ZStack {
@@ -573,6 +578,13 @@ struct CaptureHomeView: View {
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
+                    // 背景此前完全不动，滚动时整页像一张贴纸。给它一点点视差
+                    // （只有滚动距离的 8%），照片就有了「在后面」的层次。
+                    // 全仓 visualEffect 此前是 0 处；幅度刻意压得很小，
+                    // 大了会变成廉价的动效炫技，也会让照片顶出安全区。
+                    .visualEffect { [factor = heroParallax] content, proxy in
+                        content.offset(y: proxy.frame(in: .scrollView).minY * factor)
+                    }
                     .overlay {
                         LinearGradient(colors: [
                             Color.black.opacity(colorScheme == .dark ? 0.36 : 0.12),
@@ -871,6 +883,9 @@ struct CaptureHomeView: View {
             NavigationLink { AlbumHomeView() } label: {
                 quickDockButton(icon: "photo.on.rectangle.angled.fill", title: "相册",
                                 subtitle: "\(totalPhotos) 张", tint: BubuTheme.Color.mint)
+                    // 照片数会随收图变化，硬切换数字看起来像重绘了一次；滚动一下就有了「又多了一张」的感觉。
+                    .contentTransition(.numericText(value: Double(totalPhotos)))
+                    .animation(reduceMotion ? nil : BubuMotion.gentle, value: totalPhotos)
             }
             .buttonStyle(BubuPressableStyle())
 

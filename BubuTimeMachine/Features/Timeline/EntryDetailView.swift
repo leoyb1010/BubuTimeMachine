@@ -20,6 +20,9 @@ struct EntryDetailView: View {
     @State private var viewingMediaID: UUID?
     @State private var showDeleteConfirm = false
     @State private var appendMediaStatus: String?
+    /// 追加媒体的进度：总数与已完成数。大视频要几十秒，没有进度用户会以为卡死。
+    @State private var appendTotal = 0
+    @State private var appendDone = 0
     @State private var showReactionPicker = false
     @State private var showShareCard = false
     @State private var storybookToast: String?
@@ -235,8 +238,15 @@ struct EntryDetailView: View {
         }
     }
 
+    /// 追加媒体时的进度行。
+    /// 以前这里只有一行静态文字，而导入一段大视频要走「解码 + 压缩 + 生成缩略图」几十秒，
+    /// 整个页面没有任何 ProgressView——用户会以为 App 卡死了，直接杀进程，
+    /// 于是这段视频永远导不进来。现在给一个明确的「第 N / M 个」。
     private func mediaStatusRow(_ text: String) -> some View {
-        Label(text, systemImage: "arrow.triangle.2.circlepath")
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small).tint(theme)
+            Text(appendTotal > 1 ? "\(text) 第 \(appendDone + 1)/\(appendTotal) 个" : text)
+        }
             .font(BubuTheme.Font.caption)
             .foregroundStyle(theme)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -514,8 +524,15 @@ struct EntryDetailView: View {
 
     private func appendMedia(_ items: [PhotosPickerItem]) async {
         appendMediaStatus = items.isEmpty ? nil : "正在整理新照片/视频…"
-        defer { appendMediaStatus = nil }
+        appendTotal = items.count
+        appendDone = 0
+        defer {
+            appendMediaStatus = nil
+            appendTotal = 0
+            appendDone = 0
+        }
         for item in items {
+            defer { appendDone += 1 }
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self),
                let imported = try? await env.mediaStore.importVideoForSync(from: movie.url) {
                 let fileName = imported.fileName
