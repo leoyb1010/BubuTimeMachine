@@ -40,6 +40,7 @@ sleep 4 && xcrun simctl io "iPhone 17 Pro" screenshot /tmp/shot.png
 ## 模拟器视觉验证（DEBUG 启动参数）
 GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMachineApp.swift` 与 `RootTabView.swift`，仅 DEBUG 生效）：
 - `-uitest-seed`：注入布布档案 + 成员 + 记录 + 里程碑 + 胶囊，跳过引导
+  （档案里带 5 天后开学的入园日期与过敏信息，用于验证幼儿园相关界面）
 - `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
   时间胶囊已并入魔法屋；iPhone 是原生 4 Tab +「记录此刻」底部附件，iPad 由
   `sidebarAdaptable` 自动切换顶部/侧栏，Mac Catalyst 额外保留 tag 4「档案馆」
@@ -61,5 +62,10 @@ GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMa
 - 每批出口：clean build + 测试全绿 → 模拟器/真机截图核验 → 中文 commit → push → 装机
 
 ## 注意事项
-- 截图含真实 PII（布布生日、身份证等字段），**对外分享前必须高斯模糊脱敏**
+- 截图含真实 PII（布布真名、生日、照片），**对外分享前必须高斯模糊脱敏**。
+  注：ChildProfile **没有身份证字段**，身份卡上的 `No.BUBU…` 是装饰性假号（2026-09-04 审计更正）
 - 数据外发（同步/AI）必须用户显式开启，默认全离线；人脸/图片分析一律端侧
+- **改任何 @Model 之前先跑 `BubuTimeMachineTests/StoreMigrationTests.swift`**：
+  它用一份真实装机数据验证「升级后全家的数据还打得开」。BubuSchemaV1 目前不是冻结快照、
+  stages 为空，破坏性变更没有可用迁移路径——现阶段只允许加可选字段、带默认值字段和 #Index。
+  详见 `BubuTimeMachine/App/BubuSchema.swift` 顶部与 `docs/AUDIT_AND_UPGRADE_PLAN_2026-09-04.md`

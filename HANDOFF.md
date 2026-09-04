@@ -13,8 +13,8 @@
 - **仓库路径**：`/Users/leoyuan/Documents/Leo-布布时光机`
 - **工程管理**：xcodegen（改 `project.yml` 后必须重跑 `xcodegen generate`）
 - **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 26.0、watchOS 11.0 部署目标
-- **规模**（2026-08-29 实测）：主 App 约 180 个 Swift 文件 / 4 万行；单元测试 157 项 / 27 套件，另有 5 项 iPhone+iPad XCUITest。
-- **当前版本**：v2.12.2
+- **规模**（2026-09-04 实测）：主 App 约 190 个 Swift 文件 / 4.2 万行；单元测试 170+ 项 / 31 套件，另有 5 项 iPhone+iPad XCUITest。
+- **当前版本**：v2.13.0
 
 ---
 
@@ -145,6 +145,49 @@ server/                           自托管后端（详见 server/README.md）
   GrowthMoviePlayer 用 ImageIO 降采样 + 邻片预载 + 平移；CeremonyAnimation 加触觉反馈，
   两处都尊重 reduceMotion。
 
+## 4B. 2026-09-04 全面审计后的落地（新会话必读）
+
+完整审计与方案见 `docs/AUDIT_AND_UPGRADE_PLAN_2026-09-04.md`。已落地的部分：
+
+**数据与安全（P0）**
+- AI 开关不再自己打开。旧兜底「打包 AI 地址非空 + 账号密码非空 → 默认开」配合
+  「Swift 在 init 内赋值不触发 didSet」，导致用户只要为同步填完账号密码，
+  下次冷启动 AI 就自动开启并把记录原文发往 DeepSeek。现在没存过就是关。
+- 同步三处丢数据修复：评论/语音留言/人生第一次在父记录未落库时不再丢游标；
+  multipart 上传不再把已删除记录翻活；翻页改 keyset，全量首同步不再静默跳记录。
+- 启动迁移不再可能用旧库覆盖活库（打不开的库不参与打分比较）；
+  store 打不开时挡一张全屏说明页，不再诱导用户重建档案。
+- 时间胶囊记住封存版本，v3 的信拒绝一切非 v3 blob（防降级伪造），版本号只升不降。
+- 家庭隔离规则收紧（先回填再收紧）；分享照片先去掉 GPS；恢复码改成可打印纸条；
+  导出不再在 tmp 留下一份份完整明文副本。
+- autodate 迁移终于进了仓库（0015 幂等兜底），守卫测试改成正向断言。
+
+**地基**
+- ⚠️ **`BubuTimeMachineTests/StoreMigrationTests.swift` 是新的发版底线。**
+  它用一份真实装机数据（`Fixtures/LegacyStore_v2.12.2.store`）以生产同款配置
+  验证「升级后全家的数据还打得开」。**改任何 @Model 之前先跑它，它红了不要发版。**
+- `BubuSchema.swift` 底部那份「照抄改名即可」的 V2 模板已删除——照抄必然 abort。
+  换成事实描述：现阶段只允许加可选字段、带默认值字段和 `#Index`。
+- 全仓第一次有了索引（Entry / HealthRecord / FeedEvent），加完用上面那份
+  **加索引之前**生成的基线实测仍能无损打开。
+- 端上自然语言解析改用 `@Generable` 约束解码，删掉整个手写 JSON 解析。
+
+**幼儿园（布布 2026-09-09 入园）**
+- ChildProfile 加 `schoolStartDate` / `allergies` / `medicalNotes`（均为 additive 可选）；
+  FamilyMember 加 `contactPhone` / `canPickUpFromSchool`（刻意不进 DTO，只在本机）。
+- 首页入园倒计时横幅、身份卡背面「上幼儿园第 N 天」、24 题幼儿园问答桶、
+  12 条幼儿园里程碑、入园查验接种证、给老师的一页、作品扫描（文稿相机 + 中文 OCR）。
+- **产品边界**：接送打卡、缴费、请假条这类家长行政工具刻意不做——
+  判据是「这条记录，18 岁的布布会想看吗」。
+
+**交互与动效**
+- 吉祥物 `phaseAnimator` 呼吸（一个文件、37 处受益）、缩略图淡入、下拉刷新（此前全仓 0 处）、
+  大图下滑退出、四处破坏性操作补确认与触觉、记录面板防误丢、切 Tab 触觉、
+  首页去掉重复的「记录此刻」与常驻搬家提示、生日音效接上、「人生第一次」接上仪式动画。
+
+**CI**
+- 加了零警告门禁与 iPad 回归（iPad 用例此前因模拟器只选 iPhone 而从未真正跑过）。
+
 ## 5. 未做 / 可继续（按价值排序）
 
 1. **真 E2E 时间胶囊**：随机密钥 + iCloud Keychain 同步 + 打印恢复码。
@@ -153,6 +196,13 @@ server/                           自托管后端（详见 server/README.md）
 4. **后台上传**：现为前台 URLSession。可换 background URLSession + 断点续传（UploadQueue 有骨架）。
 5. **冲突解决**：现策略是"本地已 synced 才接受远端覆盖"。多端并发编辑同一条的合并策略可细化。
 6. **产品向**：桌面 Widget（年龄 + 那年今日）/ PDF 年册导出 / SpeechAnalyzer 端侧转写替代 Whisper 服务。
+7. **版本化 Schema 真修复**：把 16 个类的定义真正复制进 `BubuSchemaV1` 命名空间冻结成快照，
+   V2 用活类，App 侧改用 typealias 指过去。涉及全工程模型引用，必须单独排期。
+   在此之前只能加可选字段（见 CLAUDE.md 注意事项）。
+8. **大文件上传**：仍是前台 URLSession + 无退避。改 background session + 断点续传是一整块工作。
+9. **鸿蒙端**：停在 2.11.0，落后 iOS 两个小版本，且 91% 的断言是把源码当文本 grep。
+   需要决策：继续跟随（要真机 + 补真执行的测试）还是明说冻结。
+10. **姥姥模式**：仍是只读定位，不能记喂养/睡眠、不能删改。入园后长辈接送频率会上升。
 
 ---
 
