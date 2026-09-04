@@ -10,8 +10,20 @@ struct MediaGalleryViewer: View {
     var onDismiss: () -> Void
 
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedID: UUID
     @State private var saveToast: String?
+    /// 下滑退出的当前位移。系统相册、微信、Instagram 都能下滑关掉大图，
+    /// 而这里此前唯一的出口是右上角一个按钮——姥姥模式看大图走的也是这一页。
+    @State private var dragOffset: CGFloat = 0
+    /// 本次手势是否已判定为「垂直下滑」。判定一次就锁住，
+    /// 免得中途方向抖动把 UIPageViewController 的左右翻页抢过来。
+    @State private var dragEngaged = false
+
+    /// 拖动过程中背景跟着变透明：手感上是「把这一层拉走」，而不是「按了个按钮」。
+    private var backdropOpacity: Double {
+        max(0.35, 1 - Double(abs(dragOffset)) / 420)
+    }
 
     init(mediaItems: [Media], initialMediaID: UUID, mediaStore: MediaStore, onDismiss: @escaping () -> Void) {
         self.mediaItems = mediaItems
@@ -56,7 +68,7 @@ struct MediaGalleryViewer: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black.opacity(backdropOpacity).ignoresSafeArea()
 
             if mediaItems.isEmpty {
                 ContentUnavailableView("没有可查看的媒体", systemImage: "photo")
@@ -77,7 +89,7 @@ struct MediaGalleryViewer: View {
                             Image(systemName: "square.and.arrow.down")
                                 .font(BubuTheme.Font.scaled(15, weight: .bold))
                                 .foregroundStyle(.white)
-                                .frame(width: 40, height: 40)
+                                .frame(width: 44, height: 44)
                                 .background(.black.opacity(0.45), in: Circle())
                         }
                         .accessibilityLabel("存到系统相册")
@@ -85,7 +97,7 @@ struct MediaGalleryViewer: View {
                             Image(systemName: "square.and.arrow.up")
                                 .font(BubuTheme.Font.scaled(15, weight: .bold))
                                 .foregroundStyle(.white)
-                                .frame(width: 40, height: 40)
+                                .frame(width: 44, height: 44)
                                 .background(.black.opacity(0.45), in: Circle())
                         }
                         .accessibilityLabel("分享")
@@ -97,7 +109,7 @@ struct MediaGalleryViewer: View {
                         Image(systemName: "xmark")
                             .font(BubuTheme.Font.scaled(15, weight: .bold))
                             .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 44, height: 44)
                             .background(.black.opacity(0.45), in: Circle())
                     }
                     .accessibilityLabel("关闭")
@@ -138,6 +150,33 @@ struct MediaGalleryViewer: View {
                 }
             }
         }
+        .offset(y: dragOffset)
+        // 放大看细节时 UIKit 层会把 isScrollEnabled 打开由 UIScrollView 接管平移，
+        // 这个手势自然拿不到事件；未放大时 isScrollEnabled = false，事件才会落到这里。
+        // 另外必须挡住横向：左右翻页归 UIPageViewController，只接管明显偏垂直向下的拖动。
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onChanged { value in
+                    if !dragEngaged {
+                        let t = value.translation
+                        guard t.height > 0, abs(t.height) > abs(t.width) * 1.4 else { return }
+                        dragEngaged = true
+                    }
+                    dragOffset = max(0, value.translation.height)
+                }
+                .onEnded { value in
+                    defer { dragEngaged = false }
+                    guard dragEngaged else { return }
+                    if value.translation.height > 120 || value.predictedEndTranslation.height > 260 {
+                        BubuHaptics.tapLight()
+                        onDismiss()
+                    } else if reduceMotion {
+                        dragOffset = 0
+                    } else {
+                        withAnimation(BubuMotion.gentle) { dragOffset = 0 }
+                    }
+                }
+        )
     }
 }
 

@@ -63,7 +63,9 @@ struct HealthHomeView: View {
     private var sleepTimerCard: some View {
         if let startedAt = sleepStartedAt {
             HStack(spacing: 12) {
-                Text("😴").font(BubuTheme.Font.scaled(30))
+                // 20 个布布表情里，.sleeping 只能经 HealthKindDesign 间接出现，
+                // 而哄睡计时卡是全 App 最适合她出场的一张卡，之前用的却是裸 emoji。
+                BubuMascotBadge(size: 40, expression: .sleeping)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("布布睡着啦")
                         .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
@@ -92,7 +94,7 @@ struct HealthHomeView: View {
                 startSleep()
             } label: {
                 HStack(spacing: 12) {
-                    Text("🌙").font(BubuTheme.Font.scaled(26))
+                    BubuMascotBadge(size: 36, expression: .sleeping)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("开始哄睡计时")
                             .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))

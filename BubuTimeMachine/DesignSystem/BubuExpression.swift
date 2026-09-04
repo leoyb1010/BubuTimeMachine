@@ -20,6 +20,8 @@ enum BubuExpression: String, CaseIterable {
     case bye = "BubuBye"                // 拜拜
     case love = "BubuLove"              // 比心
     case travel = "BubuTravel"          // 旅行
+    // 刻意暂时没有使用点：产品目前不建模「洗澡」这件事（HealthRecordKind 里没有对应类别），
+    // 硬塞进某个不相干的位置只会变成装饰。等真的有洗澡记录场景再接。
     case bath = "BubuBath"              // 洗澡
     case music = "BubuMusic"            // 听音乐
     case tv = "BubuTV"                  // 看电视

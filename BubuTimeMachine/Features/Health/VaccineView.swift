@@ -12,6 +12,8 @@ struct VaccineView: View {
     @Query(sort: \VaccineRecord.injectedAt) private var records: [VaccineRecord]
 
     @State private var logTarget: VaccineLogTarget?
+    /// 待确认删除的接种记录。删掉之后入园查验那张单子会立刻少一剂，值得问一句。
+    @State private var pendingDelete: VaccineRecord?
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -44,6 +46,17 @@ struct VaccineView: View {
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("疫苗接种")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("删掉这条接种记录？", isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+               presenting: pendingDelete) { record in
+            Button("删掉", role: .destructive) {
+                deleteRecord(record)
+                pendingDelete = nil
+            }
+            Button("留着", role: .cancel) { pendingDelete = nil }
+        } message: { record in
+            Text("「\(record.vaccineName)」的接种日期和医院信息会一起删掉，入园查验清单也会少这一剂。")
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 // 入园查验接种证是强制环节，而这里的数据本来就够算——只差一页拿得出手的清单。
@@ -209,7 +222,7 @@ struct VaccineView: View {
         }
         .contextMenu {
             Button(role: .destructive) {
-                deleteRecord(record)
+                pendingDelete = record
             } label: {
                 Label("删除这条记录", systemImage: "trash")
             }
@@ -232,6 +245,7 @@ struct VaccineView: View {
     }
 
     private func deleteRecord(_ record: VaccineRecord) {
+        BubuHaptics.warning()
         let collection = record.sourceRaw == "health-fallback" ? "healthrecords" : "vaccinerecords"
         PendingDeletion.enqueue(collection: collection, remoteId: record.remoteId, in: context)
         context.delete(record)

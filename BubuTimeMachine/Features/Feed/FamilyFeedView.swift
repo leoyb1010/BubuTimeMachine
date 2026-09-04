@@ -191,11 +191,24 @@ struct FamilyFeedView: View {
     }
 
     private var emptyState: some View {
-        Text("还没有家庭动态。发一条记录后，这里就会热闹起来。")
-            .font(BubuTheme.Font.body)
-            .foregroundStyle(BubuTheme.Color.secondaryText)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 60)
+        // 「家人在一起」这一页此前的空状态是一行灰字，没有图、没有吉祥物、没有按钮——
+        // 全 App 与产品调性差距最大的一处。
+        VStack(spacing: 14) {
+            BubuMascotBadge(size: 84, expression: .bye)
+            VStack(spacing: 6) {
+                Text("这里还静悄悄的")
+                    .font(BubuTheme.Font.title)
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text("爸爸妈妈姥姥谁记了一笔，这里就会热闹起来。\n也可以去别人的记录下面补一句。")
+                    .font(BubuTheme.Font.body)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 50)
+        .padding(.horizontal, 24)
     }
 }
 

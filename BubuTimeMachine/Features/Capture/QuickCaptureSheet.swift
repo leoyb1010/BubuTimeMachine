@@ -8,6 +8,7 @@ import UIKit
 /// 拍/选媒体 + 一句话 + 心情 + 语音。全程可选填，任一有内容即可存。
 /// 保存时端侧自动分析照片（时间/地点/标签）。
 struct QuickCaptureSheet: View {
+    @State private var discardConfirm = false
     @Bindable var model: CaptureModel
     @Environment(\.modelContext) private var modelContext
     @Environment(AppEnvironment.self) private var env
@@ -127,13 +128,30 @@ struct QuickCaptureSheet: View {
             }
             .navigationTitle("记录此刻")
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog("这一笔还没保存", isPresented: $discardConfirm, titleVisibility: .visible) {
+                Button("丢掉这一笔", role: .destructive) {
+                    BubuHaptics.warning()
+                    model.showQuickCapture = false
+                }
+                Button("继续记", role: .cancel) {}
+            } message: {
+                Text("照片、文字和录音都会一起丢掉，找不回来。")
+            }
             .onChange(of: model.pickedItems) { _, _ in
                 model.updatePreviews()   // 单飞：内部自动取消上一次加载，防网格错位
             }
+            // 写了半屏字、选了 9 张照片，一滑就全没了——重开面板时 startQuickCapture()
+            // 会把 note / pickedItems / mood / pendingVoice 全部清零，不是「草稿留着」，是真丢。
+            // 有内容时禁掉下滑关闭，走「以后再说」的二次确认。
+            // 本仓录音中已有同款保护（VoiceComponents 的 interactiveDismissDisabled）。
+            .interactiveDismissDisabled(model.canSave && !model.isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("以后再说") { model.showQuickCapture = false }
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                    Button("以后再说") {
+                        if model.canSave { discardConfirm = true }
+                        else { model.showQuickCapture = false }
+                    }
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {

@@ -5,6 +5,9 @@ import PhotosUI
 // MARK: - 记录详情（可编辑、可补充、家人合奏）
 /// 已上传内容不再"只读"：可改文字/心情/时间、追加照片、追加语音、家人多视角补充。
 struct EntryDetailView: View {
+    /// 编辑态下删照片/语音此前是「一点即删本地文件」，无确认无触觉。
+    @State private var pendingMediaDelete: Media?
+    @State private var pendingVoiceDelete: VoiceNote?
     @Bindable var entry: Entry
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
@@ -62,6 +65,18 @@ struct EntryDetailView: View {
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle(BubuDateFormat.shortDate(entry.happenedAt))
+        .alert("移除这张素材？", isPresented: Binding(get: { pendingMediaDelete != nil },
+                                             set: { if !$0 { pendingMediaDelete = nil } }),
+               presenting: pendingMediaDelete) { media in
+            Button("移除", role: .destructive) { deleteMedia(media); pendingMediaDelete = nil }
+            Button("留着", role: .cancel) { pendingMediaDelete = nil }
+        } message: { _ in Text("本地原文件会一起删掉，找不回来。") }
+        .alert("删掉这段语音？", isPresented: Binding(get: { pendingVoiceDelete != nil },
+                                             set: { if !$0 { pendingVoiceDelete = nil } }),
+               presenting: pendingVoiceDelete) { voice in
+            Button("删掉", role: .destructive) { deleteVoice(voice); pendingVoiceDelete = nil }
+            Button("留着", role: .cancel) { pendingVoiceDelete = nil }
+        } message: { _ in Text("录音文件会一起删掉，找不回来。") }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -189,7 +204,7 @@ struct EntryDetailView: View {
                         .buttonStyle(.plain)
                         if editing {
                             Button {
-                                deleteMedia(media)
+                                pendingMediaDelete = media
                             } label: {
                                 Image(systemName: "minus.circle.fill")
                                     .font(BubuTheme.Font.scaled(24))
@@ -318,7 +333,14 @@ struct EntryDetailView: View {
                         Text("\(mood.emoji) \(mood.rawValue)")
                     }
                     if let place = entry.locationName {
-                        Label(place, systemImage: "mappin.and.ellipse")
+                        // .travel 表情此前全仓零引用（是两个死资产之一）。
+                        // 「这条记录发生在外面」正是它的语义，比一个通用图钉图标更像布布。
+                        HStack(spacing: 5) {
+                            BubuMascotBadge(size: 20, expression: .travel, isAlive: false)
+                            Text(place)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("地点 \(place)")
                     }
                 }
                 .font(BubuTheme.Font.caption)
@@ -371,7 +393,7 @@ struct EntryDetailView: View {
                             Text(voice.authorRole).font(BubuTheme.Font.caption)
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                             if editing {
-                                Button { deleteVoice(voice) } label: {
+                                Button { pendingVoiceDelete = voice } label: {
                                     Image(systemName: "trash.circle.fill").font(BubuTheme.Font.scaled(22))
                                         .foregroundStyle(BubuTheme.Color.secondaryText)
                                 }
@@ -530,6 +552,7 @@ struct EntryDetailView: View {
     }
 
     private func deleteMedia(_ media: Media) {
+        BubuHaptics.warning()
         PendingDeletion.enqueue(collection: "media", remoteId: media.remoteId, in: context)
         env.mediaStore.deleteLocalFiles(media: media.localFileName, thumbnail: media.thumbnailFileName)
         context.delete(media)
@@ -540,6 +563,7 @@ struct EntryDetailView: View {
     }
 
     private func deleteVoice(_ voice: VoiceNote) {
+        BubuHaptics.warning()
         PendingDeletion.enqueue(collection: "voicenotes", remoteId: voice.remoteId, in: context)
         env.mediaStore.deleteLocalFiles(media: voice.localFileName)
         context.delete(voice)
@@ -577,6 +601,9 @@ struct EntryDetailView: View {
     }
 
     private func deleteEntry() {
+        // 与时光轴的删除保持一致（那边有 alert + 触觉 + 撤销 toast）：
+        // 同一条数据、同一个动作，从两个入口进来的反馈不该一个有一个没有。
+        BubuHaptics.warning()
         entry.isArchived = true
         markEntryDirty()
         context.insert(FeedEvent(kind: .entryArchived,

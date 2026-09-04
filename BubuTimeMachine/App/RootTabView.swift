@@ -25,6 +25,9 @@ struct RootTabView: View {
 
     var body: some View {
         tabsWithRecordAccessory
+            // 切 Tab 此前手上没有任何回音：内容过渡做了、记录按钮的轻触做了，
+            // 唯独最高频的这个动作是哑的。bubuSensoryFeedback 全仓只用了 2 处，严重低用。
+            .bubuSensoryFeedback(.selection, trigger: selection)
             .tabViewStyle(.sidebarAdaptable)
             .tabBarMinimizeBehavior(.onScrollDown)
             .tabViewSidebarHeader {

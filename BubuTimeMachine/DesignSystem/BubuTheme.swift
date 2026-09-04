@@ -300,7 +300,9 @@ nonisolated enum BubuTheme {
     enum Copy {
         static let recordNow = "记录此刻"
         static let speakToBubu = "直接说给布布听"
-        static let emptyTimeline = "还没有记录呢\n点上面的「记录此刻」，留住布布的第一个瞬间吧"
+        // 时光轴这一页上面没有「记录此刻」——它在屏幕**底部**的系统附件里，
+        // 旧文案把人往反方向指。
+        static let emptyTimeline = "还没有记录呢\n点屏幕底部的「记录此刻」，留住布布的第一个瞬间吧"
         static let saving = "正在保存…"
         static let savedLocally = "已经存在手机里啦"
     }

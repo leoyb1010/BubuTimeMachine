@@ -95,6 +95,12 @@ struct MilestoneEditSheet: View {
     @State private var detail = ""
     @State private var achieved = false
     @State private var happenedAt = Date.now
+    /// 删里程碑此前无确认、无触觉、无撤销，而它是物理删除。
+    @State private var confirmDelete = false
+    /// 本次保存是否点亮了一个新里程碑（决定要不要放庆祝）。
+    @State private var justLit = false
+    /// 落盘失败：不放庆祝、不关页面，让用户能重试。
+    @State private var saveFailed = false
 
     private var profile: ChildProfile? { profiles.first }
     private var theme: Color { env.theme.theme.primary }
@@ -216,13 +222,24 @@ struct MilestoneEditSheet: View {
                 }
                 if milestone != nil {
                     Section {
-                        Button(role: .destructive) { deleteMilestone() } label: {
+                        Button(role: .destructive) { confirmDelete = true } label: {
                             Label("删除这个里程碑", systemImage: "trash")
                         }
                     }
                 }
             }
             .navigationTitle(milestone == nil ? "自定义里程碑" : "编辑里程碑")
+            .alert("没能保存", isPresented: $saveFailed) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text("这一条还没存进去，页面先留着，可以再点一次保存。")
+            }
+            .alert("删掉这个里程碑？", isPresented: $confirmDelete) {
+                Button("删掉", role: .destructive) { deleteMilestone() }
+                Button("留着", role: .cancel) {}
+            } message: {
+                Text("达成日期和你写下的那段话会一起消失，找不回来。")
+            }
             .scrollContentBackground(.hidden)
             .background(BubuTheme.Color.background)
             .navigationBarTitleDisplayMode(.inline)
@@ -266,20 +283,34 @@ struct MilestoneEditSheet: View {
                 m.ageDescription = AgeCalculator.ageDescription(birthday: profile.birthday, at: happenedAt)
             }
             if wasNewlyAchieved {
-                BubuSound.play(.milestone)
                 context.insert(FeedEvent(kind: .milestoneLit, actorRole: env.config.currentRole.rawValue,
                                          summary: "点亮了「\(m.title)」"))
+                justLit = true
             }
         } else {
             m.happenedAt = nil
             m.ageDescription = nil
         }
-        try? context.save()
+
+        // 庆祝必须发生在**落盘成功之后**。
+        // 以前音效与 `try? context.save()` 同层：保存失败照样播庆祝、照样关闭页面，
+        // 用户看到了仪式、数据却没进库——这直接损伤「仪式感」本身的可信度。
+        do {
+            try context.save()
+        } catch {
+            saveFailed = true
+            return
+        }
+        if justLit {
+            BubuSound.play(.milestone)
+            BubuHaptics.success()
+        }
         env.refreshWidgetSnapshot(context: context)
         dismiss()
     }
 
     private func deleteMilestone() {
+        BubuHaptics.warning()
         if let m = milestone {
             PendingDeletion.enqueue(collection: "milestones", remoteId: m.remoteId, in: context)
             context.delete(m)

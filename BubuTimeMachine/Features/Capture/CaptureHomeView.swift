@@ -8,6 +8,8 @@ import UIKit
 /// 专属布布的主屏：年龄实时计数 + 那年今日 + 统计 + 精选 + 大记录按钮。
 /// 背景可用主题渐变或布布的照片。
 struct CaptureHomeView: View {
+    /// 刚刚确认的「人生第一次」，非空时播一次仪式动画。
+    @State private var ceremonyTitle: String?
     var openTimeline: (() -> Void)?
     var quickCaptureTrigger: Int = 0
 
@@ -104,6 +106,14 @@ struct CaptureHomeView: View {
             }
             // 下拉刷新此前全仓 0 处。首页只在出现和回到前台时刷新，同步状态还藏在页面最底部，
             // 而下拉是「我要最新的」最强的本能——之前它纹丝不动。
+.overlay {
+    if let title = ceremonyTitle {
+        CeremonyAnimation(title: title, subtitle: "布布的人生第一次，已经收进档案里了。") {
+            withAnimation(BubuMotion.gentle) { ceremonyTitle = nil }
+        }
+        .transition(.opacity)
+    }
+}
             .refreshable { await pullToRefresh() }
             // 详情页转场移到此处（而非 RootTabView），以便与本页 zoomNS 配对实现缩放共享元素转场。
             .navigationDestination(for: UUID.self) { entryID in
@@ -534,8 +544,12 @@ struct CaptureHomeView: View {
         modelContext.insert(FeedEvent(kind: .firstTimeConfirmed, actorRole: env.config.currentRole.rawValue,
                                       summary: "确认了「\(what)」",
                                       targetLocalId: id.uuidString))
-        try? modelContext.save()
+        guard (try? modelContext.save()) != nil else { firstTimeSuggestion = nil; return }
         firstTimeSuggestion = nil
+        // CeremonyAnimation 的注释写的是「里程碑 / **人生第一次**完成时」，
+        // 但一直只接了里程碑那一处。「第一次」是 AI 主动认出来、家长点头确认的时刻，
+        // 是这个产品最感人的几秒之一，此前却只是插条数据、关掉弹窗，像在填表。
+        ceremonyTitle = what
     }
 
     private func startQuickCapture(prefillNote: String = "") {
@@ -638,6 +652,16 @@ struct CaptureHomeView: View {
             in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .bubuCardShadow()
         .overlay { BubuBurst(count: 20, radius: 150) }
+        // sfx-birthday.caf 与 BubuSound.Effect.birthday 早就做好了，却从没有一处调用。
+        // 当天只放一次：横幅在首页常驻，每次滚回来都响会变成骚扰。
+        // BubuSound 本身默认关闭、跟随静音键，用户没开就什么都不会发生。
+        .onAppear {
+            let key = "bubu.birthdaySoundPlayed"
+            let today = BubuDateFormat.yearMonthDay(.now)
+            guard UserDefaults.standard.string(forKey: key) != today else { return }
+            UserDefaults.standard.set(today, forKey: key)
+            BubuSound.play(.birthday)
+        }
     }
 
     // MARK: 入园（幼儿园）
@@ -833,49 +857,57 @@ struct CaptureHomeView: View {
 
     private var primaryActionDock: some View {
         HStack(spacing: 10) {
-            Button { startQuickCapture() } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus")
-                        .font(BubuTheme.Font.scaled(20, weight: .black))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(BubuTheme.Gradient.primaryButton, in: Circle())
-                        .shadow(color: BubuTheme.Color.deepRose.opacity(0.35), radius: 8, y: 3)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("记录此刻")
-                            .font(BubuTheme.Font.scaled(16, weight: .heavy, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text("照片、语音、文字一起收好")
-                            .font(BubuTheme.Font.scaled(11.5, weight: .medium, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
-                            .lineLimit(1)
-                    }
-                }
-                .padding(.leading, 12)
-                .padding(.trailing, 10)
-                .frame(height: 64)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                        .stroke(.white.opacity(0.58), lineWidth: 1)
-                }
+            // 「记录此刻」在窄屏是重复的：系统底部附件（RootTabView 的 root.record）
+            // 已经常驻在屏幕底部，两处同名同功能、副标题还不一样，读起来像 bug。
+            // 宽屏没有底部附件（tabViewBottomAccessory(isEnabled: !isWide)），
+            // 所以 iPad / Mac 侧栏形态下这里仍是唯一入口，必须保留。
+            if BubuAdaptive.isWide(sizeClass) {
+                Button { startQuickCapture() } label: { recordButtonLabel }
+                    .buttonStyle(BubuPressableStyle())
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("home.record")
             }
-            .buttonStyle(.plain)
-            .layoutPriority(1)
-            .accessibilityIdentifier("home.record")
 
             NavigationLink { AlbumHomeView() } label: {
                 quickDockButton(icon: "photo.on.rectangle.angled.fill", title: "相册",
                                 subtitle: "\(totalPhotos) 张", tint: BubuTheme.Color.mint)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BubuPressableStyle())
 
             NavigationLink { HealthHomeView() } label: {
                 quickDockButton(icon: "cross.case.fill", title: "健康",
                                 subtitle: "餐睡", tint: BubuTheme.Color.sky)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BubuPressableStyle())
+        }
+    }
+
+    private var recordButtonLabel: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "plus")
+                .font(BubuTheme.Font.scaled(20, weight: .black))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(BubuTheme.Gradient.primaryButton, in: Circle())
+                .shadow(color: BubuTheme.Color.deepRose.opacity(0.35), radius: 8, y: 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("记录此刻")
+                    .font(BubuTheme.Font.scaled(16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                Text("照片、声音和一句话一起收好")
+                    .font(BubuTheme.Font.scaled(11.5, weight: .medium, design: .rounded))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 10)
+        .frame(height: 64)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
+                .stroke(.white.opacity(0.58), lineWidth: 1)
         }
     }
 

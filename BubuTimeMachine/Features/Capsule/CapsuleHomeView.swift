@@ -4,6 +4,9 @@ import SwiftData
 // MARK: - 时间胶囊 · 列表
 /// 写给未来布布的信，到期前加密锁定、只显示倒计时。到期后可庄重开启。
 struct CapsuleHomeView: View {
+    /// 待确认删除的胶囊。删除会连加密 blob 一起落盘删掉，且这是写给 18 岁布布的信——
+    /// 之前是菜单一点即毁，没有确认、没有触觉、没有撤销。
+    @State private var pendingDelete: TimeCapsule?
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -38,6 +41,17 @@ struct CapsuleHomeView: View {
                     .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
                 }
             }
+        }
+        .alert("删掉这封信？", isPresented: Binding(get: { pendingDelete != nil },
+                                              set: { if !$0 { pendingDelete = nil } }),
+               presenting: pendingDelete) { capsule in
+            Button("删掉", role: .destructive) {
+                deleteCapsule(capsule)
+                pendingDelete = nil
+            }
+            Button("留着", role: .cancel) { pendingDelete = nil }
+        } message: { capsule in
+            Text("「\(capsule.title)」连同里面的文字和录音会被永久删除，找不回来。")
         }
         .navigationTitle("时间胶囊")
         .toolbar {
@@ -218,10 +232,11 @@ struct CapsuleHomeView: View {
     @ViewBuilder
     private func capsuleActions(_ capsule: TimeCapsule) -> some View {
         Button { editing = capsule } label: { Label("修改", systemImage: "pencil") }
-        Button(role: .destructive) { deleteCapsule(capsule) } label: { Label("删除", systemImage: "trash") }
+        Button(role: .destructive) { pendingDelete = capsule } label: { Label("删除", systemImage: "trash") }
     }
 
     private func deleteCapsule(_ capsule: TimeCapsule) {
+        BubuHaptics.warning()
         if let blob = capsule.encryptedBlobFileName {
             env.mediaStore.deleteMedia(named: blob)
         }
