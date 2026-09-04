@@ -9,10 +9,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed"]
         app.launch()
 
+        // 两种形态各有各的记录入口，用例必须两边都认：
+        // - 窄屏（iPhone）：系统底部附件 root.record。行内那个已经去掉了——
+        //   底部附件常驻在屏幕下方，两处同名同功能会重复。
+        // - 宽屏（iPad / Mac 侧栏）：没有底部附件
+        //   （tabViewBottomAccessory(isEnabled: !isWide)），行内 home.record 是唯一入口。
         let globalRecord = app.buttons["root.record"]
-        // 窄屏的记录入口是系统底部附件（root.record）；行内那个只在宽屏存在，
-        // 因为窄屏下两者同名同功能会重复。iPad 用例仍然查 home.record。
-        let homeRecord = app.buttons["root.record"]
+        let homeRecord = app.buttons["home.record"]
         let record: XCUIElement
         if globalRecord.waitForExistence(timeout: 2) {
             record = globalRecord
