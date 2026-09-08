@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util, buffer } from '@kit.ArkTS';
 import {
@@ -52,18 +53,27 @@ export class CapsuleCrypto {
     const v3 = CapsuleCrypto.base64Bytes(CAPSULE_GOLDEN_V3_BASE64);
     const v2 = CapsuleCrypto.base64Bytes(CAPSULE_GOLDEN_V2_BASE64);
     const now = CAPSULE_GOLDEN_UNLOCK_MS + 1000;
+    hilog.info(0x0000, 'Bubu', 'CAPSULE_SELF_TEST_INPUT v3=%{public}s size=%{public}d', String(v3.slice(0, 4)), v3.length);
     const plainV3 = await CapsuleCrypto.shared.decryptV3(
       v3, CAPSULE_GOLDEN_RECOVERY, CAPSULE_GOLDEN_SALT, CAPSULE_GOLDEN_UNLOCK_MS, now);
+    hilog.info(0x0000, 'Bubu', 'CAPSULE_SELF_TEST_V3_OK');
     const plainV2 = await CapsuleCrypto.shared.decrypt(v2, CAPSULE_GOLDEN_UNLOCK_MS, CAPSULE_GOLDEN_SALT, now);
+    hilog.info(0x0000, 'Bubu', 'CAPSULE_SELF_TEST_V2_OK');
     if (CapsuleCrypto.utf8Decode(plainV3) !== CAPSULE_GOLDEN_PLAIN
       || CapsuleCrypto.utf8Decode(plainV2) !== CAPSULE_GOLDEN_PLAIN) {
       throw new Error('BTC2/BTC3 golden vector mismatch');
     }
+    const sealed = await CapsuleCrypto.shared.encryptV3(CapsuleCrypto.utf8Encode(CAPSULE_GOLDEN_PLAIN), CAPSULE_GOLDEN_RECOVERY, CAPSULE_GOLDEN_SALT);
+    const reopened = await CapsuleCrypto.shared.decryptV3(sealed, CAPSULE_GOLDEN_RECOVERY, CAPSULE_GOLDEN_SALT, CAPSULE_GOLDEN_UNLOCK_MS, now);
+    if (CapsuleCrypto.utf8Decode(reopened) !== CAPSULE_GOLDEN_PLAIN) throw new Error('BTC3 round trip mismatch');
+    hilog.info(0x0000, 'Bubu', 'CAPSULE_SELF_TEST_ROUNDTRIP_OK');
   }
 
   private static base64Bytes(value: string): Uint8Array {
     const decoded = buffer.from(value, 'base64');
-    return new Uint8Array(decoded.buffer.slice(decoded.byteOffset, decoded.byteOffset + decoded.length));
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index++) bytes[index] = decoded[index];
+    return bytes;
   }
 
   // v2 / v3 魔数前缀（"BTC2" / "BTC3" 的 UTF-8 字节）。
@@ -84,11 +94,21 @@ export class CapsuleCrypto {
 
   // MARK: - 派生工具
   private static async sha256(material: string): Promise<Uint8Array> {
+    try {
+      if (canIUse('SystemCapability.Security.CryptoFramework.MessageDigest')) {
     const md = cryptoFramework.createMd('SHA256');
-    const data: cryptoFramework.DataBlob = { data: new Uint8Array(buffer.from(material, 'utf-8').buffer) };
+    const data: cryptoFramework.DataBlob = { data: CapsuleCrypto.utf8Encode(material) };
     await md.update(data);
     const digest = await md.digest();
     return digest.data;
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleCrypto.sha256 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // v2：规范化时间字符串 + salt 派生。
@@ -121,13 +141,25 @@ export class CapsuleCrypto {
 
   // MARK: - AES-GCM 原语
   private static async makeSymKey(keyBytes: Uint8Array): Promise<cryptoFramework.SymKey> {
+    try {
+      if (canIUse('SystemCapability.Security.CryptoFramework.Key.SymKey')) {
     const gen = cryptoFramework.createSymKeyGenerator('AES256');
     const blob: cryptoFramework.DataBlob = { data: keyBytes };
     return gen.convertKey(blob);
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleCrypto.makeSymKey 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // 加密：随机 12 字节 nonce，输出 combined = nonce + ciphertext + tag。
   private static async sealGcm(plaintext: Uint8Array, keyBytes: Uint8Array): Promise<Uint8Array> {
+    try {
+      if (canIUse('SystemCapability.Security.CryptoFramework.Cipher') && canIUse('SystemCapability.Security.CryptoFramework.Rand')) {
     const key = await CapsuleCrypto.makeSymKey(keyBytes);
     const cipher = cryptoFramework.createCipher('AES256|GCM|NoPadding');
     const nonce = new Uint8Array(GCM_NONCE_LEN);
@@ -149,10 +181,19 @@ export class CapsuleCrypto {
     combined.set(nonce, 0);
     combined.set(body, GCM_NONCE_LEN);
     return combined;
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleCrypto.sealGcm 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // 解密 combined = nonce + ciphertext + tag。失败抛 decryptionFailed。
   private static async openGcm(combined: Uint8Array, keyBytes: Uint8Array): Promise<Uint8Array> {
+      if (canIUse('SystemCapability.Security.CryptoFramework.Cipher')) {
     if (combined.length < GCM_NONCE_LEN + GCM_TAG_LEN) {
       throw CapsuleCryptoError.decryptionFailed();
     }
@@ -174,9 +215,14 @@ export class CapsuleCrypto {
       const out = await cipher.doFinal({ data: ciphertext });
       return out.data;
     } catch (e) {
+      hilog.error(0x0000, 'Bubu', '胶囊 GCM 解密未通过: %{public}s', (e as Error).message);
       throw CapsuleCryptoError.decryptionFailed();
     }
-  }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    }
 
   // MARK: - 前缀工具
   private static hasPrefix(data: Uint8Array, prefix: Uint8Array): boolean {
@@ -253,10 +299,18 @@ export class CapsuleCrypto {
 
   // 文本 <-> 字节（供 Vault 序列化 JSON 载荷使用）。
   static utf8Encode(text: string): Uint8Array {
-    return new Uint8Array(buffer.from(text, 'utf-8').buffer);
+    const encoded = buffer.from(text, 'utf-8');
+    const bytes = new Uint8Array(encoded.length);
+    for (let index = 0; index < encoded.length; index++) bytes[index] = encoded[index];
+    return bytes;
   }
 
   static utf8Decode(bytes: Uint8Array): string {
+    try {
     return buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('utf-8');
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleCrypto.utf8Decode 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 }

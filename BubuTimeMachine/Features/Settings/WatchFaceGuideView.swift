@@ -50,7 +50,7 @@ struct WatchFaceGuideView: View {
                 Circle().fill(BubuTheme.Color.primary.opacity(0.16)).frame(width: 44, height: 44)
                 Image(systemName: step.icon)
                     .font(BubuTheme.Font.scaled(18, weight: .bold))
-                    .foregroundStyle(BubuTheme.Color.primary)
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text("第 \(index) 步 · \(step.title)")

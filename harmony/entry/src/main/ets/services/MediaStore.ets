@@ -294,7 +294,7 @@ export class MediaStore {
     try {
       packer = image.createImagePacker();
       const opts: image.PackingOption = { format: 'image/jpeg', quality: 70 };
-      const buf: ArrayBuffer = await packer.packing(pixelMap, opts);
+      const buf: ArrayBuffer = await packer.packToData(pixelMap, opts);
       const name = `thumb_${util.generateRandomUUID(true)}.jpg`;
       const ok = this.writeData(`${this.thumbDir}/${name}`, buf);
       return ok ? name : null;

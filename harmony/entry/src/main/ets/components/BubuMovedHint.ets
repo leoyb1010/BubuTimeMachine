@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { BubuColor } from '../theme/BubuTheme';
@@ -10,9 +11,13 @@ export struct BubuMovedHint {
   @State private visible: boolean = false;
 
   async aboutToAppear(): Promise<void> {
+    try {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const store = await preferences.getPreferences(context, 'bubu_moved_hints');
     this.visible = !(await store.get(this.storageKey, false) as boolean);
+    } catch (error) {
+      this.visible = false; hilog.warn(0x0000, 'Bubu', '迁移提示状态暂不可读');
+    }
   }
 
   build() {
@@ -28,10 +33,14 @@ export struct BubuMovedHint {
   }
 
   private async dismiss(): Promise<void> {
+    try {
     this.visible = false;
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const store = await preferences.getPreferences(context, 'bubu_moved_hints');
     await store.put(this.storageKey, true);
     await store.flush();
+    } catch (error) {
+      hilog.warn(0x0000, 'Bubu', '迁移提示未持久保存，下次可再次确认');
+    }
   }
 }

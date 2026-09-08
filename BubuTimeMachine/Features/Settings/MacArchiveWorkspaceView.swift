@@ -311,7 +311,7 @@ struct MacArchiveWorkspaceView: View {
                     if entry.syncState != .synced { Label("待同步", systemImage: "arrow.triangle.2.circlepath") }
                 }
                 .font(BubuTheme.Font.scaled(11, weight: .semibold))
-                .foregroundStyle(env.theme.theme.primary)
+                .foregroundStyle(env.theme.theme.textAccent)
             }
             Spacer(minLength: 8)
             Image(systemName: selectedIDs.contains(entry.id) ? "checkmark.circle.fill" : "circle")
@@ -362,7 +362,7 @@ struct MacArchiveWorkspaceView: View {
 
     private func statCard(_ title: String, _ value: Int, _ symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: symbol).foregroundStyle(env.theme.theme.primary)
+            Image(systemName: symbol).foregroundStyle(env.theme.theme.textAccent)
             Text("\(value)").font(BubuTheme.Font.hugeTitle).foregroundStyle(BubuTheme.Color.warmBrown)
             Text(title).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
         }
@@ -376,7 +376,7 @@ struct MacArchiveWorkspaceView: View {
         VStack(spacing: 22) {
             Image(systemName: "checkmark.circle.fill")
                 .font(BubuTheme.Font.scaled(54))
-                .foregroundStyle(env.theme.theme.primary)
+                .foregroundStyle(env.theme.theme.textAccent)
             Text("已选择 \(selectedIDs.count) 条时光")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)

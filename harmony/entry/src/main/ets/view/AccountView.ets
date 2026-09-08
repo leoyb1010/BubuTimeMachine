@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { ALL_FAMILY_ROLES, FamilyRole } from '../models/Enums';
 import { ServerConfig } from '../services/ServerConfig';
 import { AccountService } from '../services/AccountService';
@@ -162,7 +163,7 @@ export struct AccountView {
       await this.service.login(this.username, this.password, role);
       this.password = '';
       SyncEngine.shared.start();
-      this.getUIContext().getPromptAction().showToast({ message: '已登录，开始同步' });
+      SafePrompt.toast(this.getUIContext(), { message: '已登录，开始同步' });
       if (this.onDone) this.onDone();
     } catch (e) {
       this.errorText = e instanceof Error ? e.message : '登录失败，请稍后再试';
@@ -174,7 +175,7 @@ export struct AccountView {
     await this.service.logout();
     this.username = '';
     this.password = '';
-    this.getUIContext().getPromptAction().showToast({ message: '已退出当前账号' });
+    SafePrompt.toast(this.getUIContext(), { message: '已退出当前账号' });
     if (this.onDone) this.onDone();
   }
 
@@ -198,7 +199,7 @@ export struct AccountView {
       this.confirmPassword = '';
       this.showChangePassword = false;
       SyncEngine.shared.start();
-      this.getUIContext().getPromptAction().showToast({ message: '密码已更新' });
+      SafePrompt.toast(this.getUIContext(), { message: '密码已更新' });
     } catch (e) {
       this.errorText = e instanceof Error ? e.message : '修改密码失败';
     }

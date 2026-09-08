@@ -72,7 +72,7 @@ struct TodayPhotosSheet: View {
                                     }
                                 }
                                 .font(BubuTheme.Font.scaled(12.5, weight: .bold))
-                                .foregroundStyle(BubuTheme.Color.primary)
+                                .foregroundStyle(BubuTheme.Color.primaryInk)
                             }
                         }
                     }

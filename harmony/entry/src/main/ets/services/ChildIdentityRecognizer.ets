@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { faceComparator } from '@kit.CoreVisionKit';
@@ -13,16 +14,26 @@ export class ChildIdentityRecognizer {
   initialize(context: common.Context): void { this.context = context; }
 
   isEnabled(): boolean {
+    try {
     if (!this.context) return false;
     const store = preferences.getPreferencesSync(this.context, { name: ChildIdentityRecognizer.storeName });
     return store.getSync('enabled', false) as boolean;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ChildIdentityRecognizer.isEnabled 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   setEnabled(enabled: boolean): void {
+    try {
     if (!this.context) return;
     const store = preferences.getPreferencesSync(this.context, { name: ChildIdentityRecognizer.storeName });
     store.putSync('enabled', enabled);
     store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ChildIdentityRecognizer.setEnabled 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   async isLikelySamePerson(candidateUri: string, avatarPath: string): Promise<boolean> {

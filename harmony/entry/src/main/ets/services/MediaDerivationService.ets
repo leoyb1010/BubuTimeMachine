@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { AppDatabase } from '../data/AppDatabase';
@@ -47,6 +48,8 @@ export class MediaDerivationService {
   }
 
   static async sha256File(path: string): Promise<string> {
+    try {
+      if (canIUse('SystemCapability.Security.CryptoFramework.MessageDigest')) {
     const md = cryptoFramework.createMd('SHA256');
     const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
     try {
@@ -66,6 +69,14 @@ export class MediaDerivationService {
       }).join('');
     } finally {
       fileIo.closeSync(file);
+    }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'MediaDerivationService.sha256File 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 }

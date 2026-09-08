@@ -3,6 +3,7 @@ import SwiftData
 import Observation
 import OSLog
 import UIKit
+import CryptoKit
 
 // MARK: - 同步引擎
 /// 双向收敛：本地未同步的 Entry/Media 推送到 PocketBase；远端变更拉回本地。
@@ -18,6 +19,7 @@ final class SyncEngine {
 
     private(set) var connectionState: ConnectionState = .offline
     private(set) var lastSyncedAt: Date?
+    private(set) var isSyncing = false
     private(set) var pendingCount: Int = 0
     private(set) var totalPendingAtStart: Int = 0
     private(set) var processedThisRun: Int = 0
@@ -25,6 +27,13 @@ final class SyncEngine {
     private(set) var currentUploadProgress: Double?
     private(set) var lastFailureReason: String?
     private(set) var lastLargeFileNotice: String?
+    struct CollectionProgress: Identifiable {
+        var id: String
+        var received: Int = 0
+        var deleted: Int = 0
+        var state: String = "核对中"
+    }
+    private(set) var collectionProgress: [String: CollectionProgress] = [:]
     /// 可自愈的瞬时波动提示（平和措辞、非报红）。仅当连续多轮仍失败才显示。
     private(set) var softNotice: String?
 
@@ -53,20 +62,20 @@ final class SyncEngine {
     /// 任一集合拉取失败则该集合游标不推进，下次补拉；游标回退 60 秒容忍时钟偏差（合并幂等）。
     private static let cursorOverlap: TimeInterval = 60
 
-    private func cursor(for collection: String) -> Date? {
-        UserDefaults.standard.object(forKey: "bubu.sync.cursor.\(collection)") as? Date
+    private var checkpointGeneration: String {
+        UserDefaults.standard.string(forKey: "bubu.sync.checkpointGeneration") ?? "initial"
     }
 
-    private func setCursor(_ date: Date, for collection: String) {
-        let key = "bubu.sync.cursor.\(collection)"
-        // 回退 60 秒重叠余量，容忍边界并保证自我重拉幂等（localId 去重）。
-        let candidate = date.addingTimeInterval(-Self.cursorOverlap)
-        // 游标只进不退：服务器 updated 单调递增，只有 60 秒 overlap 窗口可能带来轻微回退，用 max 夹住，
-        // 避免每轮把重叠窗口反复重拉。
-        if let existing = UserDefaults.standard.object(forKey: key) as? Date, existing >= candidate {
-            return
-        }
-        UserDefaults.standard.set(candidate, forKey: key)
+    private func checkpointKey(for collection: String) -> String {
+        let account = config.accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let scope = "\(config.baseURLString)|\(account)"
+        let digest = SHA256.hash(data: Data(scope.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "\(digest):\(collection)"
+    }
+
+    private func cursor(for collection: String) throws -> Date? {
+        guard let context = modelContext else { return nil }
+        return try SyncCheckpoint.read(key: checkpointKey(for: collection), generation: checkpointGeneration, in: context)
     }
 
     init(apiClient: APIClient, config: ServerConfig, mediaStore: MediaStore) {
@@ -109,10 +118,9 @@ final class SyncEngine {
         "healthrecords", "vaccinerecords", "growthmeasurements", "comments",
         "voicenotes", "voicememos", "timecapsules",
     ]
-    private static let cursorMigrationFlagKey = "bubu.sync.cursor.serverUpdatedMigration.v1"
+    private static let cursorMigrationFlagKey = "bubu.sync.cursor.atomicCheckpoint.v3"
 
-    /// 游标从「本机时钟/clientUpdatedAt」改为「服务器 updated」是跨参照系的契约变更（S-P1-1）。
-    /// 升级后旧游标是本机时钟值，直接拿去和服务器 updated 比较在时钟偏移下可能漏窗口。
+    /// 联合游标升级后全量补拉一次，恢复旧时间戳分页可能遗漏的记录和墓碑。
     /// 一次性清空所有游标，让升级后首轮做一次全量拉取（localId 去重 + merge 见已 synced 幂等，无重复无覆盖），
     /// 从此游标全部以服务器时钟重建，保证「不丢窗口」。
     private func migrateCursorsIfNeeded() {
@@ -128,6 +136,7 @@ final class SyncEngine {
     /// 历史记录拉不全（游标已越过它们的 updated 时间）。清空后下一轮做一次全量拉取（localId 去重 + merge 幂等）。
     static func resetAllCursors() {
         let defaults = UserDefaults.standard
+        defaults.set(UUID().uuidString, forKey: "bubu.sync.checkpointGeneration")
         for collection in cursorCollections {
             defaults.removeObject(forKey: "bubu.sync.cursor.\(collection)")
         }
@@ -201,18 +210,19 @@ final class SyncEngine {
     @discardableResult
     func forceUploadAllLocalData() async -> String {
         guard let context = modelContext else { return "BUBU_FORCE_UPLOAD_FAILED no_context at=\(Date())" }
-        let entries = (try? context.fetch(FetchDescriptor<Entry>())) ?? []
-        let media = (try? context.fetch(FetchDescriptor<Media>())) ?? []
-        let firstTimes = (try? context.fetch(FetchDescriptor<FirstTime>())) ?? []
-        let members = (try? context.fetch(FetchDescriptor<FamilyMember>())) ?? []
-        let profiles = (try? context.fetch(FetchDescriptor<ChildProfile>())) ?? []
-        let health = (try? context.fetch(FetchDescriptor<HealthRecord>())) ?? []
-        let vaccines = (try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []
-        let growth = (try? context.fetch(FetchDescriptor<GrowthMeasurement>())) ?? []
-        let comments = (try? context.fetch(FetchDescriptor<Comment>())) ?? []
-        let notes = (try? context.fetch(FetchDescriptor<VoiceNote>())) ?? []
-        let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>())) ?? []
-        let capsules = (try? context.fetch(FetchDescriptor<TimeCapsule>())) ?? []
+        do {
+        let entries = try context.fetch(FetchDescriptor<Entry>())
+        let media = try context.fetch(FetchDescriptor<Media>())
+        let firstTimes = try context.fetch(FetchDescriptor<FirstTime>())
+        let members = try context.fetch(FetchDescriptor<FamilyMember>())
+        let profiles = try context.fetch(FetchDescriptor<ChildProfile>())
+        let health = try context.fetch(FetchDescriptor<HealthRecord>())
+        let vaccines = try context.fetch(FetchDescriptor<VaccineRecord>())
+        let growth = try context.fetch(FetchDescriptor<GrowthMeasurement>())
+        let comments = try context.fetch(FetchDescriptor<Comment>())
+        let notes = try context.fetch(FetchDescriptor<VoiceNote>())
+        let memos = try context.fetch(FetchDescriptor<VoiceMemo>())
+        let capsules = try context.fetch(FetchDescriptor<TimeCapsule>())
 
         entries.forEach { $0.syncState = .local }
         media.forEach { $0.syncState = .local; $0.uploadProgress = 0 }
@@ -227,9 +237,13 @@ final class SyncEngine {
         memos.forEach { $0.syncState = .local }
         capsules.forEach { $0.syncState = .local }
 
-        saveAndRefresh(context)
+        guard saveAndRefresh(context) else { return "BUBU_FORCE_UPLOAD_FAILED save" }
         await connectAndSync()
         return "BUBU_FORCE_UPLOAD_DONE entries=\(entries.count) media=\(media.count) firstTimes=\(firstTimes.count) members=\(members.count) profiles=\(profiles.count) health=\(health.count) vaccines=\(vaccines.count) growth=\(growth.count) comments=\(comments.count) voiceNotes=\(notes.count) voiceMemos=\(memos.count) capsules=\(capsules.count) failure=\(lastFailureReason ?? "none") at=\(Date())"
+        } catch {
+            recordFailure(error, item: "准备重传")
+            return "BUBU_FORCE_UPLOAD_FAILED read"
+        }
     }
 
     // MARK: - 连接
@@ -301,7 +315,6 @@ final class SyncEngine {
             currentUploadProgress = nil
             recordFailure(APIError.network("连不上家里的服务器"), item: "连接")
             refreshPendingCount()
-            updateBackoff(succeeded: false)
             finalizeRun()
             return
         }
@@ -313,7 +326,6 @@ final class SyncEngine {
             currentUploadProgress = nil
             recordFailure(error, item: "账号")
             refreshPendingCount()
-            updateBackoff(succeeded: false)
             finalizeRun()
             return
         }
@@ -322,7 +334,6 @@ final class SyncEngine {
         // 以前这里直接置 .online 并把失败计数清零，于是推拉全线报错时
         // 连接状态仍然是在线、退避仍然是 30 秒，用户看到的是一切正常。
         connectionState = .online
-        updateBackoff(succeeded: true)   // 连上了就回到 30 秒节奏
         lastFailureReason = nil          // 新一轮重新判定，不带上一轮的旧结论
 
         await pushLocal()
@@ -344,6 +355,10 @@ final class SyncEngine {
 
     /// 一轮结束后评估瞬时失败：单轮抖动静默自愈，连续两轮（≈60s）仍失败才平和提示。
     private func finalizeRun() {
+        isSyncing = false
+        let succeeded = connectionState == .online && lastFailureReason == nil && !softFailureThisRun && !Task.isCancelled
+        updateBackoff(succeeded: succeeded)
+        if succeeded, modelContext != nil { lastSyncedAt = .now }
         if softFailureThisRun {
             softFailureStreak += 1
             if softFailureStreak >= 2 {
@@ -359,7 +374,8 @@ final class SyncEngine {
 
     private func pushLocal() async {
         guard let context = modelContext else { return }
-        normalizeMilestonesByTitle(context)
+        do { try normalizeMilestonesByTitle(context) }
+        catch { recordFailure(error, item: "核对里程碑"); return }
         // 先消费删除队列：删除意图优先于数据推送，避免「先推后删」竞态
         await processPendingDeletions(context)
         // 取所有未同步（local/failed）的 Entry
@@ -382,8 +398,8 @@ final class SyncEngine {
                 // 这里重查本地：没了就立刻给刚创建的服务器记录补墓碑，并跳过写回
                 // （顺带避免对已删除模型赋值）。
                 let entryId = entry.id
-                let stillExists = ((try? context.fetchCount(FetchDescriptor<Entry>(
-                    predicate: #Predicate { $0.id == entryId }))) ?? 0) > 0
+                let stillExists = try context.fetchCount(FetchDescriptor<Entry>(
+                    predicate: #Predicate { $0.id == entryId })) > 0
                 guard stillExists else {
                     PendingDeletion.enqueue(collection: "entries", remoteId: saved.id, in: context)
                     finishItem()
@@ -395,7 +411,7 @@ final class SyncEngine {
                 // createEntry 会原样带回远端版本——本地也换成新版，旧编辑不吃掉新编辑。
                 if let remoteEdited = saved.editedAt,
                    remoteEdited > (dto.editedAt ?? .distantPast) {
-                    _ = await mergeRemoteEntry(saved)
+                    _ = try await mergeRemoteEntry(saved)
                 }
                 entry.syncState = .synced
             } catch {
@@ -418,19 +434,23 @@ final class SyncEngine {
     /// 计数只是给进度条看的，节流到 0.4 秒完全够用。
     private static let pendingCountMinInterval: TimeInterval = 0.4
 
-    private func saveAndRefresh(_ context: ModelContext, forceCount: Bool = false) {
+    @discardableResult
+    private func saveAndRefresh(_ context: ModelContext, forceCount: Bool = false) -> Bool {
         // save 失败不能再静默吞掉：它意味着这一轮的改动根本没落盘，
         // 而 UI 上仍显示「已同步」。记进 lastFailureReason，首页同步条会直接说出来。
         do {
             try context.save()
         } catch {
+            holdCursorForCurrentPull = true
             recordFailure(error, item: "本地保存")
             Self.log.error("同步保存失败：\(error.localizedDescription, privacy: .public)")
+            return false
         }
         if forceCount || Date.now.timeIntervalSince(lastPendingCountAt) >= Self.pendingCountMinInterval {
             lastPendingCountAt = .now
             refreshPendingCount()
         }
+        return true
     }
 
     private func refreshWidgetSnapshot(_ context: ModelContext) {
@@ -467,14 +487,15 @@ final class SyncEngine {
         try await apiClient.deleteRecord(collection: deletion.collection, remoteId: deletion.remoteId)
     }
 
-    private func isPendingDeletion(collection: String, remoteId: String?, context: ModelContext) -> Bool {
+    private func isPendingDeletion(collection: String, remoteId: String?, context: ModelContext) throws -> Bool {
         guard let remoteId, !remoteId.isEmpty else { return false }
-        let pendings = (try? context.fetch(FetchDescriptor<PendingDeletion>(
-            predicate: #Predicate { $0.collection == collection }))) ?? []
-        return pendings.contains { $0.remoteId == remoteId }
+        var query = FetchDescriptor<PendingDeletion>(predicate: #Predicate { $0.collection == collection && $0.remoteId == remoteId })
+        query.fetchLimit = 1
+        return try !context.fetch(query).isEmpty
     }
 
     private func beginSyncRun() {
+        isSyncing = true
         lastPendingCountAt = .now
         refreshPendingCount()
         totalPendingAtStart = pendingCount
@@ -614,7 +635,8 @@ final class SyncEngine {
     }
 
     private func count<T: PersistentModel>(_ context: ModelContext, _ predicate: Predicate<T>) -> Int {
-        (try? context.fetchCount(FetchDescriptor<T>(predicate: predicate))) ?? 0
+        do { return try context.fetchCount(FetchDescriptor<T>(predicate: predicate)) }
+        catch { recordFailure(error, item: "读取同步状态"); return 0 }
     }
 
     private func pushLocalJSONObjects(_ context: ModelContext) async {
@@ -688,8 +710,8 @@ final class SyncEngine {
                 let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item))
                 // 同 Entry：await 期间被撤销（手表打卡撤销窗口正好压着这段）→ 补墓碑防复活。
                 let itemId = item.id
-                let stillExists = ((try? context.fetchCount(FetchDescriptor<HealthRecord>(
-                    predicate: #Predicate { $0.id == itemId }))) ?? 0) > 0
+                let stillExists = try context.fetchCount(FetchDescriptor<HealthRecord>(
+                    predicate: #Predicate { $0.id == itemId })) > 0
                 guard stillExists else {
                     PendingDeletion.enqueue(collection: "healthrecords", remoteId: saved.id, in: context)
                     finishItem()
@@ -714,8 +736,8 @@ final class SyncEngine {
                 // 同 Entry/HealthRecord 的复活守卫：await 期间用户可能已删除（疫苗页有删除入口），
                 // 彼时 remoteId 为 nil、删除队列空转——写回会让记录在全家复活。重查补墓碑。
                 let vaccineId = item.id
-                let vaccineExists = ((try? context.fetchCount(FetchDescriptor<VaccineRecord>(
-                    predicate: #Predicate { $0.id == vaccineId }))) ?? 0) > 0
+                let vaccineExists = try context.fetchCount(FetchDescriptor<VaccineRecord>(
+                    predicate: #Predicate { $0.id == vaccineId })) > 0
                 guard vaccineExists else {
                     PendingDeletion.enqueue(collection: "vaccinerecords", remoteId: saved.id, in: context)
                     finishItem()
@@ -983,12 +1005,14 @@ final class SyncEngine {
         _ collection: String,
         fetch: @escaping @Sendable (Date?) async throws -> [DTO]
     ) async -> PulledBatch<DTO> {
-        let since = cursor(for: collection)
+        collectionProgress[collection] = CollectionProgress(id: collection)
         do {
+            let since = try cursor(for: collection)
             async let itemsTask = fetch(since)
             async let tombstonesTask = apiClient.fetchDeletedTombstones(collection: collection, since: since)
             return PulledBatch(items: try await itemsTask, tombstones: try await tombstonesTask)
         } catch {
+            collectionProgress[collection]?.state = "稍后重试"
             if Self.isMissingOptionalServerCollection(error, collection: collection) {
                 return PulledBatch(missingCollection: true)
             }
@@ -1024,22 +1048,23 @@ final class SyncEngine {
         async let voiceMemosBatch = fetchBatch("voicememos") { try await self.apiClient.fetchVoiceMemos(since: $0) }
         async let capsulesBatch = fetchBatch("timecapsules") { try await self.apiClient.fetchTimeCapsules(since: $0) }
 
-        await apply(await entriesBatch, collection: "entries") { await self.mergeRemoteEntry($0) }
-        await apply(await mediaBatch, collection: "media") { await self.mergeRemoteMedia($0) }
-        await apply(await milestonesBatch, collection: "milestones") { await self.mergeRemoteMilestone($0) }
+        await apply(await entriesBatch, collection: "entries") { try await self.mergeRemoteEntry($0) }
+        await apply(await mediaBatch, collection: "media") { try await self.mergeRemoteMedia($0) }
+        await apply(await milestonesBatch, collection: "milestones") { try await self.mergeRemoteMilestone($0) }
         if let context = modelContext {
-            normalizeMilestonesByTitle(context)
+            do { try normalizeMilestonesByTitle(context) }
+            catch { recordFailure(error, item: "核对里程碑") }
         }
-        await apply(await firstTimesBatch, collection: "firsttimes") { await self.mergeRemoteFirstTime($0) }
-        await apply(await membersBatch, collection: "members") { await self.mergeRemoteMember($0) }
-        await apply(await profilesBatch, collection: "childprofile") { await self.mergeRemoteChildProfile($0) }
-        await apply(await healthBatch, collection: "healthrecords") { await self.mergeRemoteHealth($0) }
-        await apply(await vaccinesBatch, collection: "vaccinerecords") { await self.mergeRemoteVaccine($0) }
-        await apply(await growthBatch, collection: "growthmeasurements") { await self.mergeRemoteGrowth($0) }
-        await apply(await commentsBatch, collection: "comments") { await self.mergeRemoteComment($0) }
-        await apply(await voiceNotesBatch, collection: "voicenotes") { await self.mergeRemoteVoiceNote($0) }
-        await apply(await voiceMemosBatch, collection: "voicememos") { await self.mergeRemoteVoiceMemo($0) }
-        await apply(await capsulesBatch, collection: "timecapsules") { await self.mergeRemoteTimeCapsule($0) }
+        await apply(await firstTimesBatch, collection: "firsttimes") { try await self.mergeRemoteFirstTime($0) }
+        await apply(await membersBatch, collection: "members") { try await self.mergeRemoteMember($0) }
+        await apply(await profilesBatch, collection: "childprofile") { try await self.mergeRemoteChildProfile($0) }
+        await apply(await healthBatch, collection: "healthrecords") { try await self.mergeRemoteHealth($0) }
+        await apply(await vaccinesBatch, collection: "vaccinerecords") { try await self.mergeRemoteVaccine($0) }
+        await apply(await growthBatch, collection: "growthmeasurements") { try await self.mergeRemoteGrowth($0) }
+        await apply(await commentsBatch, collection: "comments") { try await self.mergeRemoteComment($0) }
+        await apply(await voiceNotesBatch, collection: "voicenotes") { try await self.mergeRemoteVoiceNote($0) }
+        await apply(await voiceMemosBatch, collection: "voicememos") { try await self.mergeRemoteVoiceMemo($0) }
+        await apply(await capsulesBatch, collection: "timecapsules") { try await self.mergeRemoteTimeCapsule($0) }
     }
 
     /// 本次 pull 是否挂起游标推进：merge 过程中出现「可恢复但本轮没消费成功」的记录
@@ -1050,8 +1075,11 @@ final class SyncEngine {
     /// 合并阶段：把一个集合已取回的数据落库并推进游标。全程在 MainActor 上顺序执行。
     private func apply<DTO: SyncCursorProviding>(_ batch: PulledBatch<DTO>,
                                                  collection: String,
-                                                 merge: (DTO) async -> Bool) async {
-        if batch.missingCollection { return }   // 集合在服务端不存在：静默跳过，游标保持不动
+                                                 merge: (DTO) async throws -> Bool) async {
+        if batch.missingCollection {
+            collectionProgress[collection]?.state = "服务端暂未提供"
+            return
+        }
         if batch.failed {
             // 瞬时拉取失败不立刻报红：标记本轮软失败，游标不推进，下轮自动补拉。
             softFailureThisRun = true
@@ -1064,27 +1092,52 @@ final class SyncEngine {
         var maxUpdated: Date? = nil
         for dto in batch.items {
             guard !Task.isCancelled else { return }
-            _ = await merge(dto)
+            do { _ = try await merge(dto) }
+            catch {
+                holdCursorForCurrentPull = true
+                collectionProgress[collection]?.state = "本地读取待重试"
+                recordFailure(error, item: "合并同步记录")
+                return
+            }
             maxUpdated = Self.laterDate(maxUpdated, dto.serverUpdatedAt)
         }
         // tombstone 传播：别的设备删掉的，这台也要删（R4 P1-8）。
         // 墓碑的服务器 updated 同样参与游标推进，避免「本轮只有删除」时游标停滞、每轮重复拉同一批墓碑。
         if !batch.tombstones.isEmpty {
-            removeLocals(collection: collection, localIds: batch.tombstones.map(\.localId))
+            do { try removeLocals(collection: collection, localIds: batch.tombstones.map(\.localId)) }
+            catch {
+                holdCursorForCurrentPull = true
+                collectionProgress[collection]?.state = "删除标记待重试"
+                recordFailure(error, item: "保存删除标记")
+                return
+            }
             for t in batch.tombstones { maxUpdated = Self.laterDate(maxUpdated, t.serverUpdatedAt) }
         }
         // 游标推进用「本轮拉到的最大服务器 updated」（服务器单一权威时钟，与过滤字段 updated 同参照系），
         // 而非本机 Date.now——杜绝读设备时钟偏移把游标推过头、写设备刚写的记录被判旧而永久跳过（S-P1-1）。
         // setCursor 内部回退 60 秒重叠余量，边界不丢记录、自我重拉幂等（localId 去重 + merge 见已 synced 不回退）。
         // 无 context 时不推进（没落库不能推进游标）；本轮无任何新记录/墓碑则游标保持不动（下轮空查询极廉价）。
-        if modelContext != nil, let maxUpdated, !holdCursorForCurrentPull {
-            setCursor(maxUpdated, for: collection)
-        }
-        // 「上次同步成功」只在本轮没有硬失败时才刷新。
-        // 否则拉取全线 400 的时候，这个时间戳每 30 秒照常往前跳，
-        // 界面上看起来一切正常——这正是故障能静默几个月的另一半原因。
-        if lastFailureReason == nil {
-            lastSyncedAt = Date.now
+        // 落盘失败时绝不把增量游标写到 UserDefaults，否则重启后会永久越过未保存记录。
+        guard let context = modelContext else { return }
+        do {
+            if let maxUpdated, !holdCursorForCurrentPull {
+                try SyncCheckpoint.commit(key: checkpointKey(for: collection), generation: checkpointGeneration,
+                                          updated: maxUpdated.addingTimeInterval(-Self.cursorOverlap), in: context) {
+                    try context.save()
+                }
+            } else {
+                guard saveAndRefresh(context) else {
+                    collectionProgress[collection]?.state = "本地保存待重试"
+                    return
+                }
+            }
+            collectionProgress[collection] = CollectionProgress(id: collection, received: batch.items.count,
+                                                                deleted: batch.tombstones.count,
+                                                                state: holdCursorForCurrentPull ? "有内容待补拉" : "已核对")
+        } catch {
+            holdCursorForCurrentPull = true
+            collectionProgress[collection]?.state = "本地保存待重试"
+            recordFailure(error, item: "保存同步进度")
         }
     }
 
@@ -1101,9 +1154,10 @@ final class SyncEngine {
     /// 冲突策略（S-P2）：只删「本地已 synced」的记录。若本地这条有未推送的改动（syncState != .synced，
     /// 用户刚写还没传上去），则「保留本地、跳过删除」——本地编辑优先，绝不静默吞掉用户刚写的东西；
     /// 该记录随后由 pushLocal 继续收敛。删除依然会传播（synced 的记录照删），只是不越过本地未推编辑。
-    private func removeLocals(collection: String, localIds: [String]) {
+    private func removeLocals(collection: String, localIds: [String]) throws {
         guard let context = modelContext, !localIds.isEmpty else { return }
         var skippedDirty = false
+        var files: [(String?, String?)] = []
         /// 有本地未推改动（非 synced）就保留、跳过删除；返回 true 表示「已保留、不要删」。
         func keepIfDirty(_ state: SyncState) -> Bool {
             guard state != .synced else { return false }
@@ -1114,79 +1168,83 @@ final class SyncEngine {
             guard let uuid = UUID(uuidString: localId) else { continue }
             switch collection {
             case "entries":
-                if let obj = (try? context.fetch(FetchDescriptor<Entry>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<Entry>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
+                    if obj.media.contains(where: { $0.syncState != .synced }) || obj.comments.contains(where: { $0.syncState != .synced }) || obj.voiceNotes.contains(where: { $0.syncState != .synced }) {
+                        skippedDirty = true
+                        continue
+                    }
                     for m in obj.media {
-                        mediaStore.deleteLocalFiles(media: m.localFileName, thumbnail: m.thumbnailFileName)
+                        files.append((m.localFileName, m.thumbnailFileName))
                     }
                     for v in obj.voiceNotes {
-                        mediaStore.deleteLocalFiles(media: v.localFileName)
+                        files.append((v.localFileName, nil))
                     }
                     context.delete(obj)   // 级联删除 media/comments/voiceNotes 行
                 }
             case "media":
-                if let obj = (try? context.fetch(FetchDescriptor<Media>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<Media>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
-                    mediaStore.deleteLocalFiles(media: obj.localFileName, thumbnail: obj.thumbnailFileName)
+                    files.append((obj.localFileName, obj.thumbnailFileName))
                     context.delete(obj)
                 }
             case "milestones":
-                if let obj = (try? context.fetch(FetchDescriptor<Milestone>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<Milestone>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
                     context.delete(obj)
                 }
             case "firsttimes":
-                if let obj = (try? context.fetch(FetchDescriptor<FirstTime>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<FirstTime>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
                     context.delete(obj)
                 }
             case "healthrecords":
-                if let obj = (try? context.fetch(FetchDescriptor<HealthRecord>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<HealthRecord>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
                     context.delete(obj)
                 }
             case "vaccinerecords":
-                if let obj = (try? context.fetch(FetchDescriptor<VaccineRecord>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<VaccineRecord>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
                     context.delete(obj)
                 }
             case "growthmeasurements":
-                if let obj = (try? context.fetch(FetchDescriptor<GrowthMeasurement>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<GrowthMeasurement>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
                     context.delete(obj)
                 }
             case "comments":
-                if let obj = (try? context.fetch(FetchDescriptor<Comment>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<Comment>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
                     context.delete(obj)
                 }
             case "voicenotes":
-                if let obj = (try? context.fetch(FetchDescriptor<VoiceNote>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<VoiceNote>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
-                    mediaStore.deleteLocalFiles(media: obj.localFileName)
+                    files.append((obj.localFileName, nil))
                     context.delete(obj)
                 }
             case "voicememos":
-                if let obj = (try? context.fetch(FetchDescriptor<VoiceMemo>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<VoiceMemo>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
-                    mediaStore.deleteLocalFiles(media: obj.localFileName)
+                    files.append((obj.localFileName, nil))
                     context.delete(obj)
                 }
             case "timecapsules":
-                if let obj = (try? context.fetch(FetchDescriptor<TimeCapsule>(
-                    predicate: #Predicate { $0.id == uuid })))?.first {
+                if let obj = (try context.fetch(FetchDescriptor<TimeCapsule>(
+                    predicate: #Predicate { $0.id == uuid }))).first {
                     if keepIfDirty(obj.syncState) { continue }
-                    mediaStore.deleteLocalFiles(media: obj.encryptedBlobFileName)
+                    files.append((obj.encryptedBlobFileName, nil))
                     context.delete(obj)
                 }
             default:
@@ -1197,13 +1255,14 @@ final class SyncEngine {
             // 手表 undo 侧早已这么做（undoRecord），这里补齐墓碑侧。
             if collection == "entries" || collection == "healthrecords" {
                 let target = localId
-                if let events = try? context.fetch(FetchDescriptor<FeedEvent>(
-                    predicate: #Predicate { $0.targetLocalId == target })) {
-                    for event in events { context.delete(event) }
-                }
+                let events = try context.fetch(FetchDescriptor<FeedEvent>(
+                    predicate: #Predicate { $0.targetLocalId == target }))
+                for event in events { context.delete(event) }
             }
         }
-        try? context.save()
+        // 先提交数据库，再清理文件；落盘失败时原片仍然保留。
+        try context.save()
+        for (media, thumbnail) in files { mediaStore.deleteLocalFiles(media: media, thumbnail: thumbnail) }
         // 有本地未推编辑因远端删除被保留：给用户一个平和提示，避免「远端删了但这台还在」显得诡异。
         if skippedDirty {
             softNotice = "有几项别处删掉了，但这里还有没传上去的改动，先替你留着。"
@@ -1305,7 +1364,7 @@ final class SyncEngine {
                         // 下载失败属瞬时、可自愈：软失败，下轮继续补拉（字段仍空会被重新选中）。
                         softFailureThisRun = true
                     }
-                    try? context.save()
+                    saveAndRefresh(context)
                 }
                 currentSyncLabel = total > 20 ? "\(label) \(done)/\(total)" : label
                 addNext()
@@ -1382,7 +1441,7 @@ final class SyncEngine {
             } catch {
                 softFailureThisRun = true
             }
-            try? context.save()
+            saveAndRefresh(context)
         }
 
         let comments = (try? context.fetch(FetchDescriptor<Comment>(
@@ -1396,7 +1455,7 @@ final class SyncEngine {
             } catch {
                 softFailureThisRun = true
             }
-            try? context.save()
+            saveAndRefresh(context)
         }
 
         let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(
@@ -1410,7 +1469,7 @@ final class SyncEngine {
             } catch {
                 softFailureThisRun = true
             }
-            try? context.save()
+            saveAndRefresh(context)
         }
 
         let profiles = (try? context.fetch(FetchDescriptor<ChildProfile>(
@@ -1424,7 +1483,7 @@ final class SyncEngine {
             } catch {
                 softFailureThisRun = true
             }
-            try? context.save()
+            saveAndRefresh(context)
         }
     }
 
@@ -1444,12 +1503,12 @@ final class SyncEngine {
     }
 
     /// 把远端 Entry 合并进本地（按 localId 去重；远端较新则更新）。
-    private func mergeRemoteEntry(_ dto: EntryDTO) async -> Bool {
+    private func mergeRemoteEntry(_ dto: EntryDTO) async throws -> Bool {
         guard let context = modelContext,
               let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "entries", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "entries", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
-        let existing = try? context.fetch(descriptor).first
+        let existing = try context.fetch(descriptor).first
 
         if let entry = existing {
             // 已有：仅当本地已同步（无本地未推改动）时用远端覆盖，避免踩掉本地草稿
@@ -1471,17 +1530,17 @@ final class SyncEngine {
             entry.syncState = .synced
             context.insert(entry)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteMedia(_ dto: MediaDTO) async -> Bool {
+    private func mergeRemoteMedia(_ dto: MediaDTO) async throws -> Bool {
         guard let context = modelContext,
               let mediaId = UUID(uuidString: dto.localId),
               let entryId = UUID(uuidString: dto.entryLocalId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "media", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "media", remoteId: dto.id, context: context) { return true }
         let mediaDescriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.id == mediaId })
-        if let existing = try? context.fetch(mediaDescriptor).first {
+        if let existing = try context.fetch(mediaDescriptor).first {
             if existing.syncState == .synced {
                 Self.apply(dto, to: existing)
             } else {
@@ -1490,7 +1549,7 @@ final class SyncEngine {
             return true
         }
         let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-        var parent = try? context.fetch(entryDescriptor).first
+        var parent = try context.fetch(entryDescriptor).first
         if parent == nil {
             // 孤儿媒体闭环（存储 P0-1）：本轮 entries 拉取抖动失败而 media 成功时，
             // 父记录还没落地。原实现直接丢弃这条媒体、游标照推——照片在这台设备永久消失。
@@ -1499,8 +1558,8 @@ final class SyncEngine {
             // 补拉网络失败→挂起本轮游标，下轮从同一窗口幂等重拉。
             do {
                 if let entryDTO = try await apiClient.fetchEntry(localId: dto.entryLocalId) {
-                    _ = await mergeRemoteEntry(entryDTO)
-                    parent = try? context.fetch(entryDescriptor).first
+                    _ = try await mergeRemoteEntry(entryDTO)
+                    parent = try context.fetch(entryDescriptor).first
                 } else {
                     return true
                 }
@@ -1519,19 +1578,20 @@ final class SyncEngine {
         media.entry = entry
         media.syncState = .synced
         context.insert(media)
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteMilestone(_ dto: MilestoneDTO) async -> Bool {
+    private func mergeRemoteMilestone(_ dto: MilestoneDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
         guard !Self.isRemotePresetPlaceholder(dto) else { return true }
-        if isPendingDeletion(collection: "milestones", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "milestones", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<Milestone>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
-        } else if let existingByTitle = findMilestone(title: dto.title, context: context) {
+        } else if let existingByTitle = try findMilestone(title: dto.title, context: context),
+                  !dto.isCustom, Self.isLocalPresetPlaceholder(existingByTitle) {
             if existingByTitle.syncState == .synced {
                 Self.apply(dto, to: existingByTitle)
                 existingByTitle.remoteId = dto.id
@@ -1541,19 +1601,19 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func findMilestone(title: String, context: ModelContext) -> Milestone? {
+    private func findMilestone(title: String, context: ModelContext) throws -> Milestone? {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return nil }
         let descriptor = FetchDescriptor<Milestone>(predicate: #Predicate { $0.title == cleanTitle })
-        return try? context.fetch(descriptor).first
+        return try context.fetch(descriptor).first
     }
 
-    private func normalizeMilestonesByTitle(_ context: ModelContext) {
-        let milestones = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
+    private func normalizeMilestonesByTitle(_ context: ModelContext) throws {
+        let milestones = try context.fetch(FetchDescriptor<Milestone>())
         guard milestones.count > 1 else { return }
         var bestByTitle: [String: Milestone] = [:]
         var duplicates: [Milestone] = []
@@ -1580,18 +1640,19 @@ final class SyncEngine {
                 milestone.syncState = .synced
             }
         }
-        for duplicate in duplicates {
+        // 同名不代表同一段经历。只清理没有用户事实的出厂占位，保留已达成/自定义记录。
+        for duplicate in duplicates where Self.isLocalPresetPlaceholder(duplicate) {
             context.delete(duplicate)
         }
-        try? context.save()
+        saveAndRefresh(context)
     }
 
 
-    private func mergeRemoteFirstTime(_ dto: FirstTimeDTO) async -> Bool {
+    private func mergeRemoteFirstTime(_ dto: FirstTimeDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "firsttimes", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "firsttimes", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1599,22 +1660,22 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             if let entryLocalId = dto.entryLocalId, let entryId = UUID(uuidString: entryLocalId) {
                 let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-                item.entry = try? context.fetch(entryDescriptor).first
+                item.entry = try context.fetch(entryDescriptor).first
                 // 父 Entry 还没到：先落库保住「第一次」这条事实本身，但扣住游标，
                 // 下一轮父记录到了会重新走 merge 把关联补上。不扣游标就永远补不上了。
                 if item.entry == nil { holdCursorForCurrentPull = true }
             }
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteMember(_ dto: FamilyMemberDTO) async -> Bool {
+    private func mergeRemoteMember(_ dto: FamilyMemberDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "members", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "members", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1622,15 +1683,15 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteChildProfile(_ dto: ChildProfileDTO) async -> Bool {
+    private func mergeRemoteChildProfile(_ dto: ChildProfileDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "childprofile", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "childprofile", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1638,15 +1699,15 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteHealth(_ dto: HealthRecordDTO) async -> Bool {
+    private func mergeRemoteHealth(_ dto: HealthRecordDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "healthrecords", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "healthrecords", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1654,18 +1715,18 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
-        backfillVaccineIfNeeded(from: dto, context: context)
+        saveAndRefresh(context)
+        try backfillVaccineIfNeeded(from: dto, context: context)
         GrowthMeasurementBackfill.run(context: context, insertedSyncState: .synced, source: "health-fallback")
         return true
     }
 
-    private func mergeRemoteVaccine(_ dto: VaccineRecordDTO) async -> Bool {
+    private func mergeRemoteVaccine(_ dto: VaccineRecordDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
         // 防复活：该远端记录已在本地删除队列中（删除尚未推到服务器）时，不重新合并
-        if isPendingDeletion(collection: "vaccinerecords", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "vaccinerecords", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1673,15 +1734,15 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteGrowth(_ dto: GrowthMeasurementDTO) async -> Bool {
+    private func mergeRemoteGrowth(_ dto: GrowthMeasurementDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "growthmeasurements", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "growthmeasurements", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1689,20 +1750,20 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteComment(_ dto: CommentDTO) async -> Bool {
+    private func mergeRemoteComment(_ dto: CommentDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "comments", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "comments", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<Comment>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
             let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-            guard let entry = try? context.fetch(entryDescriptor).first else {
+            guard let entry = try context.fetch(entryDescriptor).first else {
                 // 父 Entry 这轮还没落库（entries 批次失败或排在后面）。必须扣住游标：
                 // 否则 comments 游标照样推到本轮最大 updated，下轮父记录到了，
                 // 这条家人补充却已落在游标之后——这台设备永远拉不回来。
@@ -1714,20 +1775,20 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteVoiceNote(_ dto: VoiceNoteDTO) async -> Bool {
+    private func mergeRemoteVoiceNote(_ dto: VoiceNoteDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId), let entryId = UUID(uuidString: dto.entryLocalId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "voicenotes", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "voicenotes", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
             let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
-            guard let entry = try? context.fetch(entryDescriptor).first else {
+            guard let entry = try context.fetch(entryDescriptor).first else {
                 // 同 mergeRemoteComment：父 Entry 未落库时扣住游标，否则这条语音留言永久丢失。
                 holdCursorForCurrentPull = true
                 return false
@@ -1736,15 +1797,15 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteVoiceMemo(_ dto: VoiceMemoDTO) async -> Bool {
+    private func mergeRemoteVoiceMemo(_ dto: VoiceMemoDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "voicememos", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "voicememos", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
             else { return false }
         } else {
@@ -1752,15 +1813,15 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
-    private func mergeRemoteTimeCapsule(_ dto: TimeCapsuleDTO) async -> Bool {
+    private func mergeRemoteTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> Bool {
         guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
-        if isPendingDeletion(collection: "timecapsules", remoteId: dto.id, context: context) { return true }
+        if try isPendingDeletion(collection: "timecapsules", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == localId })
-        if let existing = try? context.fetch(descriptor).first {
+        if let existing = try context.fetch(descriptor).first {
             if existing.syncState == .synced {
                 Self.apply(dto, to: existing)
                 existing.remoteId = dto.id
@@ -1775,7 +1836,7 @@ final class SyncEngine {
             context.insert(item)
             await ensureLocalCapsuleBlob(for: item, dto: dto)
         }
-        try? context.save()
+        saveAndRefresh(context)
         return true
     }
 
@@ -2008,12 +2069,12 @@ final class SyncEngine {
         return String(format: "%.1f", rounded)
     }
 
-    private func backfillVaccineIfNeeded(from dto: HealthRecordDTO, context: ModelContext) {
+    private func backfillVaccineIfNeeded(from dto: HealthRecordDTO, context: ModelContext) throws {
         guard let localId = UUID(uuidString: dto.localId) else { return }
         let isVaccine = dto.tags.contains("疫苗") || dto.title.contains("疫苗")
         guard isVaccine else { return }
         let descriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == localId })
-        guard (try? context.fetch(descriptor).first) == nil else { return }
+        guard (try context.fetch(descriptor).first) == nil else { return }
 
         let name = Self.vaccineName(from: dto)
         let item = VaccineRecord(vaccineName: name, injectedAt: dto.recordedAt, source: "health-fallback")
@@ -2023,7 +2084,7 @@ final class SyncEngine {
         item.note = dto.detail
         item.syncState = .synced
         context.insert(item)
-        try? context.save()
+        saveAndRefresh(context)
     }
 
     private static func vaccineName(from dto: HealthRecordDTO) -> String {

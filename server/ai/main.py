@@ -60,7 +60,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="1.4.1")
+app = FastAPI(title="布布时光机 AI 服务", version="2.14.0")
 
 llm = LLMClient()
 

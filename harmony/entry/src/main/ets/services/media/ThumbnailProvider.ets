@@ -220,6 +220,7 @@ export class ThumbnailProvider {
   // 视频首帧缩略图（对照 iOS MediaStore.makeVideoThumbnail 用 AVAssetImageGenerator）。
   // HarmonyOS: @kit.MediaKit media.AVImageGenerator，取 0 时刻帧。
   static async videoFrame(videoPath: string, maxPixel: number): Promise<image.PixelMap | null> {
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
     let generator: media.AVImageGenerator | null = null;
     try {
       const file = fileIo.openSync(videoPath, fileIo.OpenMode.READ_ONLY);
@@ -242,5 +243,9 @@ export class ThumbnailProvider {
         try { await generator.release(); } catch (e) {}
       }
     }
-  }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    }
 }

@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { AppDatabase } from '../data/AppDatabase';
@@ -65,29 +66,49 @@ export class VoiceTranscriptionService {
   }
 
   private static async canAttempt(key: string): Promise<boolean> {
+    try {
     const store = await VoiceTranscriptionService.failureStore();
     if (!store) return false;
     const value = await store.get(key, 0);
     return typeof value !== 'number' || value < VoiceTranscriptionService.maxFailures;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'VoiceTranscriptionService.canAttempt 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static async recordFailure(key: string): Promise<void> {
+    try {
     const store = await VoiceTranscriptionService.failureStore();
     if (!store) return;
     const value = await store.get(key, 0);
     await store.put(key, (typeof value === 'number' ? value : 0) + 1);
     await store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'VoiceTranscriptionService.recordFailure 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static async clearFailure(key: string): Promise<void> {
+    try {
     const store = await VoiceTranscriptionService.failureStore();
     if (!store) return;
     await store.delete(key);
     await store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'VoiceTranscriptionService.clearFailure 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static async failureStore(): Promise<preferences.Preferences | null> {
+    try {
     if (!VoiceTranscriptionService.context) return null;
     return await preferences.getPreferences(VoiceTranscriptionService.context, 'bubu_transcription_failures');
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'VoiceTranscriptionService.failureStore 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 }

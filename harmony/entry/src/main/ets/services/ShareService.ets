@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { fileUri } from '@kit.CoreFileKit';
 import { systemShare } from '@kit.ShareKit';
@@ -30,6 +31,7 @@ export class ShareService {
 
   static async shareEntryLink(context: common.UIAbilityContext, entryId: string,
                               title: string, text: string): Promise<void> {
+    try {
     const plain: systemShare.SharedRecord = {
       utd: 'general.plain-text', content: text, title: title, label: 'TEXT', description: '布布时光'
     };
@@ -39,6 +41,10 @@ export class ShareService {
       title: '在布布时光机中打开', label: 'HYPERLINK', description: '直达这条时光'
     });
     await ShareService.show(context, data);
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ShareService.shareEntryLink 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static async share(context: common.UIAbilityContext, path: string, title: string,
@@ -54,10 +60,15 @@ export class ShareService {
   }
 
   private static async show(context: common.UIAbilityContext, data: systemShare.SharedData): Promise<void> {
+    try {
     const controller = new systemShare.ShareController(data);
     await controller.show(context, {
       selectionMode: systemShare.SelectionMode.SINGLE,
       previewMode: systemShare.SharePreviewMode.DEFAULT
     });
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ShareService.show 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 }

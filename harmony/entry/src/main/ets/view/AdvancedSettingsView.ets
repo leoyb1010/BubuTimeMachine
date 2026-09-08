@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 // MARK: - 高级 · 自托管（对照 iOS Features/Settings/AdvancedSettingsView.swift）
 // 服务器地址 / 账号密码 / AI 服务 / 连接诊断。普通成员永远不必看见 URL 和密钥——全收进这里。
 // iOS 用 Form + Section；ArkUI 用自绘卡片行 + 顶部返回栏（由调用方提供或内置）。
@@ -74,7 +75,7 @@ export struct AdvancedSettingsView {
           Button('立即同步')
             .width('100%').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)
             .enabled(ServerConfig.shared.isConfigured)
-            .onClick(() => { SyncEngine.shared.start(); this.getUIContext().getPromptAction().showToast({ message: '正在同步…' }); })
+            .onClick(() => { SyncEngine.shared.start(); SafePrompt.toast(this.getUIContext(), { message: '正在同步…' }); })
 
           // —— 家里的服务器 ——
           Text('家里的服务器（多设备同步）').fontSize(13).fontColor(BubuColor.secondaryText).width('100%').margin({ top: 8 })
@@ -188,7 +189,7 @@ export struct AdvancedSettingsView {
     } catch (e) {
       this.statusText = e instanceof Error ? e.message : '账号或密码不对';
     }
-    this.getUIContext().getPromptAction().showToast({ message: this.statusText });
+    SafePrompt.toast(this.getUIContext(), { message: this.statusText });
   }
 }
 

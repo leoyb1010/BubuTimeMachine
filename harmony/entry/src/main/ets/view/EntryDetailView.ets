@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { Entry, ChildProfile, Media, Comment, VoiceNote, FeedEvent } from '../models/Models';
 import { Mood, moodEmoji, MediaType, SyncState, FeedEventKind } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
@@ -550,7 +551,7 @@ export struct EntryDetailView {
     this.entry.inStorybook = next;
     this.entry.editedAt = now;
     this.entry.syncState = SyncState.local;
-    this.getUIContext().getPromptAction().showToast({ message: next ? '已收进成长绘本' : '已移出成长绘本' });
+    SafePrompt.toast(this.getUIContext(), { message: next ? '已收进成长绘本' : '已移出成长绘本' });
   }
 
   private pickHappenedDate(): void {
@@ -585,10 +586,7 @@ export struct EntryDetailView {
     const store = AppDatabase.shared.raw;
     if (store) {
       for (const c of mineReactions) {
-        await AppDatabase.shared.enqueueRemoteDeletion('comments', c.remoteId);
-        const pred = new relationalStore.RdbPredicates('comment');
-        pred.equalTo('id', c.id);
-        await store.delete(pred);
+        await AppDatabase.shared.deleteEntryResource('comment', 'comments', c.id, c.remoteId, this.entry.id);
       }
     }
     if (!already) {
@@ -620,29 +618,23 @@ export struct EntryDetailView {
   }
 
   private async deleteMedia(m: Media): Promise<void> {
-    await AppDatabase.shared.enqueueRemoteDeletion('media', m.remoteId);
-    MediaStore.shared.deleteLocalFiles(m.localFileName, m.thumbnailFileName);
-    const store = AppDatabase.shared.raw;
-    if (store) {
-      const pred = new relationalStore.RdbPredicates('media');
-      pred.equalTo('id', m.id);
-      await store.delete(pred);
+    try {
+      await AppDatabase.shared.deleteEntryResource('media', 'media', m.id, m.remoteId, this.entry.id);
+      MediaStore.shared.deleteLocalFiles(m.localFileName, m.thumbnailFileName);
+      await this.load();
+    } catch (error) {
+      SafePrompt.toast(this.getUIContext(), { message: '删除未能完成，原片仍然保留，请稍后重试' });
     }
-    await AppDatabase.shared.updateEntryFields(this.entry.id, { editedAt: Date.now(), syncState: SyncState.local });
-    await this.load();
   }
 
   private async deleteVoice(v: VoiceNote): Promise<void> {
-    await AppDatabase.shared.enqueueRemoteDeletion('voicenotes', v.remoteId);
-    if (v.localFileName) MediaStore.shared.deleteLocalFiles(v.localFileName);
-    const store = AppDatabase.shared.raw;
-    if (store) {
-      const pred = new relationalStore.RdbPredicates('voice_note');
-      pred.equalTo('id', v.id);
-      await store.delete(pred);
+    try {
+      await AppDatabase.shared.deleteEntryResource('voice_note', 'voicenotes', v.id, v.remoteId, this.entry.id);
+      if (v.localFileName) MediaStore.shared.deleteLocalFiles(v.localFileName);
+      await this.load();
+    } catch (error) {
+      SafePrompt.toast(this.getUIContext(), { message: '删除未能完成，录音仍然保留，请稍后重试' });
     }
-    await AppDatabase.shared.updateEntryFields(this.entry.id, { editedAt: Date.now(), syncState: SyncState.local });
-    await this.load();
   }
 
   private async addVoice(fileName: string, duration: number, waveform: number[]): Promise<void> {
@@ -704,9 +696,9 @@ export struct EntryDetailView {
       }
       await AppDatabase.shared.updateEntryFields(this.entry.id, { editedAt: now, syncState: SyncState.local });
       await this.load();
-      this.getUIContext().getPromptAction().showToast({ message: count > 0 ? `已追加 ${count} 个媒体` : '媒体读取失败' });
+      SafePrompt.toast(this.getUIContext(), { message: count > 0 ? `已追加 ${count} 个媒体` : '媒体读取失败' });
     } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '已取消' });
+      SafePrompt.toast(this.getUIContext(), { message: '已取消' });
     }
   }
 
@@ -727,7 +719,7 @@ export struct EntryDetailView {
 
   // 删除记录（对照 iOS deleteEntry：软删除 + entryArchived FeedEvent + dismiss）。
   private confirmDelete(): void {
-    this.getUIContext().getPromptAction().showDialog({
+    SafePrompt.dialog(this.getUIContext(), {
       title: '删除这条记录？',
       message: '删除后会从时光轴隐藏，本地记录会标记为待同步删除。',
       buttons: [
@@ -749,7 +741,7 @@ export struct EntryDetailView {
           createdAt: now
         };
         await AppDatabase.shared.insertFeedEvent(event);
-        this.getUIContext().getPromptAction().showToast({ message: '已删除' });
+        SafePrompt.toast(this.getUIContext(), { message: '已删除' });
         if (this.onDismiss) this.onDismiss();
       }
     });

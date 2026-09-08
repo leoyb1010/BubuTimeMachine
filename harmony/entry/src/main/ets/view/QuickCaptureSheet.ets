@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { CaptureModel, SelectedMediaPreview } from './CaptureModel';
 import { CameraCaptureView } from './CameraCaptureView';
 import { VideoCaptureView } from './VideoCaptureView';
@@ -139,10 +140,10 @@ export struct QuickCaptureSheet {
     const ok = await this.model.save();
     if (ok) {
       BubuHaptics.success();
-      this.getUIContext().getPromptAction().showToast({ message: '已经收好啦 🌟' });
+      SafePrompt.toast(this.getUIContext(), { message: '已经收好啦 🌟' });
       this.onSaved?.();
     } else if (this.model.saveError !== null) {
-      this.getUIContext().getPromptAction().showToast({ message: this.model.saveError });
+      SafePrompt.toast(this.getUIContext(), { message: this.model.saveError });
       this.model.saveError = null;
     }
   }
@@ -222,10 +223,10 @@ export struct QuickCaptureSheet {
       this.actionCard('照片', BubuIconName.photo, '#61FFC2D6', () => { this.pickPhotos(); })
       this.actionCard('视频', BubuIconName.video, '#66DCC9FF', () => { this.pickVideos(); })
       this.actionCard('文字', BubuIconName.textBubble, '#66BFEBD2', () => {
-        this.getUIContext().getPromptAction().showToast({ message: '在下方「写一句」里写下此刻' });
+        SafePrompt.toast(this.getUIContext(), { message: '在下方「写一句」里写下此刻' });
       })
       this.actionCard('语音', BubuIconName.waveform, '#66C4E4FF', () => {
-        this.getUIContext().getPromptAction().showToast({ message: '在下方「说给布布」卡片里录音' });
+        SafePrompt.toast(this.getUIContext(), { message: '在下方「说给布布」卡片里录音' });
       })
     }
     .width('100%')
@@ -578,10 +579,10 @@ export struct QuickCaptureSheet {
       const res = await picker.select(opt);
       if (res.photoUris && res.photoUris.length > 0) {
         this.model.addPhotoUris(res.photoUris);
-        this.getUIContext().getPromptAction().showToast({ message: `已选择 ${res.photoUris.length} 张照片` });
+        SafePrompt.toast(this.getUIContext(), { message: `已选择 ${res.photoUris.length} 张照片` });
       }
     } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '已取消' });
+      SafePrompt.toast(this.getUIContext(), { message: '已取消' });
     }
   }
 
@@ -594,10 +595,10 @@ export struct QuickCaptureSheet {
       const res = await picker.select(opt);
       if (res.photoUris && res.photoUris.length > 0) {
         this.model.addVideoUris(res.photoUris);
-        this.getUIContext().getPromptAction().showToast({ message: `已选择 ${res.photoUris.length} 段视频` });
+        SafePrompt.toast(this.getUIContext(), { message: `已选择 ${res.photoUris.length} 段视频` });
       }
     } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '已取消' });
+      SafePrompt.toast(this.getUIContext(), { message: '已取消' });
     }
   }
 
@@ -606,11 +607,11 @@ export struct QuickCaptureSheet {
     const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
       if (!(await PermissionService.request(ctx, 'ohos.permission.CAMERA'))) {
-        this.getUIContext().getPromptAction().showToast({ message: '需要相机权限，也可以从相册选择' });
+        SafePrompt.toast(this.getUIContext(), { message: '需要相机权限，也可以从相册选择' });
         return;
       }
     } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '相机权限暂时不可用，也可以从相册选择' });
+      SafePrompt.toast(this.getUIContext(), { message: '相机权限暂时不可用，也可以从相册选择' });
       return;
     }
     if (video) {
@@ -618,14 +619,14 @@ export struct QuickCaptureSheet {
       if (uri) {
         this.model.addVideoUri(uri);
       } else {
-        this.getUIContext().getPromptAction().showToast({ message: '已取消或设备无相机，可从相册选择' });
+        SafePrompt.toast(this.getUIContext(), { message: '已取消或设备无相机，可从相册选择' });
       }
     } else {
       const uri = await CameraCaptureView.capturePhoto(ctx);
       if (uri) {
         this.model.addPhotoUri(uri);
       } else {
-        this.getUIContext().getPromptAction().showToast({ message: '已取消或设备无相机，可从相册选择' });
+        SafePrompt.toast(this.getUIContext(), { message: '已取消或设备无相机，可从相册选择' });
       }
     }
   }

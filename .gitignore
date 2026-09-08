@@ -20,3 +20,7 @@ build/
 .claude/
 harmony/.codegenie/
 harmony/.ios_ref/
+
+# SQLite inspection sidecars (the legacy fixture itself remains tracked)
+*.store-shm
+*.store-wal

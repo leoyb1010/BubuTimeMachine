@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 // MARK: - 成长之声（声纹长卷，对照 iOS Features/Settings/VoiceArchiveView.swift）
 // 按「岁」归档布布的声音 + 家人对她说的话。录制时按布布生日自动算 ageYears 归档。
 // iOS 用 Menu + sheet 录制；ArkUI 用顶部「录布布的声音 / 家人对她说」两个入口 + 内嵌录制面板。
@@ -249,6 +250,6 @@ export struct VoiceArchiveView {
     VoiceTranscriptionService.transcribeVoiceMemo(memo);
     this.closeRecorder();
     await this.reload();
-    this.getUIContext().getPromptAction().showToast({ message: '已收好 💛' });
+    SafePrompt.toast(this.getUIContext(), { message: '已收好 💛' });
   }
 }

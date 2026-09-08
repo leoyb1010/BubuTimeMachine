@@ -151,7 +151,14 @@ final class ServerConfig {
     }
 
     /// 是否已配置真实服务器；未配置时全程走 Mock，仍可离线使用。
-    var isConfigured: Bool { baseURL != nil && hasServerCredentials }
+    var isConfigured: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory") || ProcessInfo.processInfo.environment["BUBU_UNIT_TEST_HOST"] == "1" {
+            return false
+        }
+        #endif
+        return baseURL != nil && hasServerCredentials
+    }
 
     /// 是否可用真实 AI。
     var isAIConfigured: Bool {

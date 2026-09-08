@@ -50,7 +50,7 @@ struct BubuIdentityCard: View {
                     Text(isFlipped ? "翻回正面" : (isBirthdayMonth ? "生日月 · 翻面" : "轻点翻面"))
                 }
                 .font(BubuTheme.Font.scaled(9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.primary)
+                .foregroundStyle(theme.textAccent)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(.white.opacity(0.34), in: Capsule())
@@ -164,7 +164,7 @@ struct BubuIdentityCard: View {
                             Text("BUBU IDENTITY")
                                 .font(BubuTheme.Font.scaled(9, weight: .bold, design: .rounded))
                                 .tracking(1.4)
-                                .foregroundStyle(theme.primary.opacity(0.72))
+                                .foregroundStyle(theme.textAccent)
 
                             Text(profile.name)
                                 .font(BubuTheme.Font.scaled(23, weight: .black, design: .rounded))
@@ -173,7 +173,7 @@ struct BubuIdentityCard: View {
                                 .minimumScaleFactor(0.6)
                             Text("中文名 · \(profile.name)")
                                 .font(BubuTheme.Font.scaled(10.5, weight: .bold, design: .rounded))
-                                .foregroundStyle(theme.primary.opacity(0.80))
+                                .foregroundStyle(theme.textAccent)
                                 .lineLimit(1)
                         }
 
@@ -187,7 +187,7 @@ struct BubuIdentityCard: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(theme.primary, in: Capsule())
+                        .background(theme.actionFill, in: Capsule())
                         .overlay(Capsule().stroke(.white.opacity(0.42), lineWidth: 0.8))
                     }
 
@@ -201,7 +201,7 @@ struct BubuIdentityCard: View {
                                 .foregroundStyle(BubuTheme.Color.secondaryText)
                             Text("小小探险家 · 家庭认证")
                                 .font(BubuTheme.Font.scaled(10.5, weight: .semibold, design: .rounded))
-                                .foregroundStyle(theme.primary)
+                                .foregroundStyle(theme.textAccent)
                         }
                         Spacer()
                     }
@@ -222,11 +222,11 @@ struct BubuIdentityCard: View {
                 Text("BUBU IDENTITY · 背面")
                     .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
                     .tracking(1.4)
-                    .foregroundStyle(theme.primary.opacity(0.72))
+                    .foregroundStyle(theme.textAccent)
                 Spacer()
                 Image(systemName: "arrow.uturn.left.circle")
                     .font(BubuTheme.Font.scaled(14, weight: .semibold))
-                    .foregroundStyle(theme.primary)
+                    .foregroundStyle(theme.textAccent)
             }
 
             if let nickname = profile.nickname, !nickname.isEmpty {
@@ -242,7 +242,7 @@ struct BubuIdentityCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(backHighlight.label)
                     .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
-                    .foregroundStyle(theme.primary.opacity(0.70))
+                    .foregroundStyle(theme.textAccent)
                 Text(backHighlight.value)
                     .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -280,7 +280,7 @@ struct BubuIdentityCard: View {
         HStack {
             Text(title)
                 .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.primary.opacity(0.70))
+                .foregroundStyle(theme.textAccent)
             Spacer()
             Text(value)
                 .font(BubuTheme.Font.scaled(13, weight: .semibold, design: .rounded))
@@ -331,7 +331,7 @@ struct BubuIdentityCard: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(theme.primary, in: Capsule())
+                .background(theme.actionFill, in: Capsule())
                 .offset(x: 6, y: 6)
         }
     }
@@ -353,7 +353,7 @@ struct BubuIdentityCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(BubuTheme.Font.scaled(9, weight: .black, design: .rounded))
-                .foregroundStyle(theme.primary.opacity(0.70))
+                .foregroundStyle(theme.textAccent)
             Text(value)
                 .font(BubuTheme.Font.scaled(11.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(BubuTheme.Color.warmBrown)

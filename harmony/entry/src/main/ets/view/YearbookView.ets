@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 // MARK: - PDF 年册导出（对照 iOS Features/Settings/YearbookView.swift）
 // 选一个年龄段（如「1 岁这一年」），生成 A4 竖版年册并分享。
 // HarmonyOS 用 ArkGraphics2D 排版，再由 PDF Kit 合成单个 A4 PDF。
@@ -244,7 +245,7 @@ export struct YearbookView {
       const pdfPath = await YearbookExporter.shared.makePDF(input);
       if (pdfPath) {
         this.resultPath = pdfPath;
-        this.getUIContext().getPromptAction().showToast({ message: '年册已生成 💛' });
+        SafePrompt.toast(this.getUIContext(), { message: '年册已生成 💛' });
       } else {
         this.errorText = '年册生成失败了，稍后再试试。';
       }

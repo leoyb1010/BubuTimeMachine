@@ -9,6 +9,7 @@ import UIKit
 struct BubuTimeMachineApp: App {
     #if DEBUG
     private static let usesInMemoryUITestStore = ProcessInfo.processInfo.arguments.contains("-uitest-in-memory")
+        || ProcessInfo.processInfo.environment["BUBU_UNIT_TEST_HOST"] == "1"
     #else
     private static let usesInMemoryUITestStore = false
     #endif
@@ -50,10 +51,8 @@ struct BubuTimeMachineApp: App {
         // 媒体库（可能几 GB）不在 init 里搬——它改到 .task 后台执行（migrateMediaIfNeeded），
         // 避免大库用户升级时主线程同步拷贝超过启动看门狗被 0x8badf00d 强杀。
         StorageMigrator.migrateStoreIfNeeded()
-        let config = ModelConfiguration(schema: schema, url: BubuStorage.storeURL)
         do {
-            modelContainer = try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
-                                                configurations: [config])
+            modelContainer = try BubuStoreLoader.open(at: BubuStorage.storeURL)
             BubuStoreHealth.markHealthy()
         } catch {
             // 数据保护模式（R4 G-3）：以前这里 fatalError——升级迁移一旦失败，
@@ -88,6 +87,13 @@ struct BubuTimeMachineApp: App {
                     seedBigForPerfIfNeeded()
                     dumpShareCardsIfNeeded()
                     dumpGrowthAuditIfNeeded()
+                    dumpUpgradeAuditIfNeeded(stage: "initial")
+                    if ProcessInfo.processInfo.arguments.contains("-uitest-upgrade-audit") {
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(20))
+                            dumpUpgradeAuditIfNeeded(stage: "after-sync")
+                        }
+                    }
                     #endif
                     // 只做一次的启动装配（多窗口下 .task 每个 scene 都会跑，需防重）。
                     // 注意：NotificationReplyHandler / BGTask handler / WC 激活已前移到 BubuAppDelegate，
@@ -167,6 +173,33 @@ struct BubuTimeMachineApp: App {
     }
 
     #if DEBUG
+    /// 仅显式真机验收时输出数量和健康标记，不导出家庭正文、账号或密钥。
+    @MainActor
+    private func dumpUpgradeAuditIfNeeded(stage: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-uitest-upgrade-audit") else { return }
+        do {
+            let backup = StoreUpgradeBackup.destination(for: BubuStorage.storeURL)
+            let hasBackup = FileManager.default.fileExists(atPath: backup.path)
+            if hasBackup { try StoreUpgradeBackup.validate(backup) }
+            let current = try StoreUpgradeBackup.factCounts(BubuStorage.storeURL)
+            let before = hasBackup ? try StoreUpgradeBackup.factCounts(backup) : [:]
+            let payload: [String: Any] = [
+                "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+                "stage": stage, "storeHealthy": !BubuStoreHealth.loadFailed,
+                "backupValid": hasBackup, "before": before, "current": current,
+                "migrationCountsMatch": before == current,
+                "pending": env.syncEngine.pendingCount,
+                "syncHasFailure": env.syncEngine.lastFailureReason != nil
+            ]
+            let directory = BubuStorage.containerURL.appendingPathComponent("Documents")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]).write(
+                to: directory.appendingPathComponent("upgrade-audit-\(stage).json"), options: .atomic)
+        } catch {
+            // 不生成成功文件；设备验收会明确发现缺少数据保护证明。
+        }
+    }
+
     /// 真机只读诊断探针：把成长测量的数值/时间/来源与当前 widget 快照写进 App Group Documents。
     /// 不输出姓名、备注、账号或服务器配置；仅在显式 `-uitest-growth-audit` 参数下执行。
     @MainActor

@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { VaccineRecord, ChildProfile } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
@@ -260,7 +261,7 @@ export struct VaccineView {
     await AppDatabase.shared.insertVaccine(record);
     await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     await this.reload();
-    this.getUIContext().getPromptAction().showToast({ message: '打卡完成 ✅' });
+    SafePrompt.toast(this.getUIContext(), { message: '打卡完成 ✅' });
   }
 
   private async deleteRecord(record: VaccineRecord): Promise<void> {

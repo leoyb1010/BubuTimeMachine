@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { VaccineRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
@@ -181,7 +182,7 @@ export struct VaccineQuickLogSheet {
       };
       await AppDatabase.shared.insertVaccine(newRecord);
     }
-    this.getUIContext().getPromptAction().showToast({ message: '已记录 💉' });
+    SafePrompt.toast(this.getUIContext(), { message: '已记录 💉' });
     await ReminderScheduler.shared.refreshAll(ServerConfig.shared.dailyReminderEnabled);
     this.onDone();
   }

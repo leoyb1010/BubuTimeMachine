@@ -438,7 +438,7 @@ struct TimelineList: View {
             if let profile = profiles.first, let anchor = section.entries.first.map(sortDate) {
                 Text("\(profile.name) \(AgeCalculator.compactAge(birthday: profile.birthday, at: anchor))")
                     .font(BubuTheme.Font.caption.weight(.medium))
-                    .foregroundStyle(env.theme.theme.primary)
+                    .foregroundStyle(env.theme.theme.textAccent)
                     .padding(.horizontal, 10).padding(.vertical, 3)
                     .background(env.theme.theme.primary.opacity(0.10), in: Capsule())
             }

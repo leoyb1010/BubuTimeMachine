@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { FeedEvent, HealthRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { HealthRecordKind, ALL_HEALTH_KINDS, FeedEventKind, SyncState, healthKindMeta } from '../models/Enums';
@@ -214,7 +215,7 @@ export struct HealthHomeView {
     this.startSleepTicker();
     await BubuActivityController.shared.startSleepTimer(ServerConfig.shared.childName, now);
     BubuHaptics.success();
-    this.getUIContext().getPromptAction().showToast({ message: '开始哄睡，计时中' });
+    SafePrompt.toast(this.getUIContext(), { message: '开始哄睡，计时中' });
   }
 
   private async endSleep(): Promise<void> {
@@ -240,7 +241,7 @@ export struct HealthHomeView {
     await BubuActivityController.shared.endSleepTimer(amountText);
     await this.reload();
     BubuHaptics.success();
-    this.getUIContext().getPromptAction().showToast({ message: `睡了 ${amountText}，已记下` });
+    SafePrompt.toast(this.getUIContext(), { message: `睡了 ${amountText}，已记下` });
   }
 
   private startSleepTicker(): void {

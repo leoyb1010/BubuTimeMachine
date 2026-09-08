@@ -283,6 +283,64 @@ def test_backup_rejects_nonempty_target_without_sentinel(tmp_path: Path):
     assert not (mirror / "data.db").exists()
 
 
+def test_backup_copies_external_storage_contents_without_replacing_mirror(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    external = tmp_path / "external-storage"
+    mirror = tmp_path / "mirror"
+    source.mkdir()
+    external.mkdir()
+    (source / "storage").symlink_to(external, target_is_directory=True)
+    (external / "new-photo.jpg").write_bytes(b"synthetic-new-photo")
+    (mirror / "storage").mkdir(parents=True)
+    (mirror / "storage/old-photo.jpg").write_bytes(b"keep-old-backup")
+    (mirror / ".bubu-pocketbase-backup-target").write_text("bubu-pocketbase-backup-v1\n")
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO memories VALUES ('one')")
+    stamp = tmp_path / "success"
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "server/ops/backup_pb_data.sh")],
+        env=os.environ | {"PB_DATA_DIR": str(source), "MIRROR_DIR": str(mirror),
+                          "LOCK_DIR": str(tmp_path / "lock"), "BACKUP_STAMP": str(stamp),
+                          "RESTIC_REPOSITORY": "", "RESTIC_SECONDARY_REPOSITORY": "",
+                          "REQUIRE_RESTIC_REPOSITORIES": "false"},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (mirror / "storage").is_symlink()
+    assert (mirror / "storage/new-photo.jpg").read_bytes() == b"synthetic-new-photo"
+    assert (mirror / "storage/old-photo.jpg").read_bytes() == b"keep-old-backup"
+    assert stamp.exists()
+    with sqlite3.connect(mirror / "data.db") as db:
+        assert db.execute("SELECT id FROM memories").fetchall() == [("one",)]
+
+
+def test_backup_rejects_storage_alias_into_source(tmp_path: Path):
+    source = tmp_path / "pb_data"
+    external = tmp_path / "external-storage"
+    source.mkdir()
+    external.mkdir()
+    (source / "storage").symlink_to(external, target_is_directory=True)
+    (external / "photo.jpg").write_bytes(b"preserve-original")
+    with sqlite3.connect(source / "data.db") as db:
+        db.execute("CREATE TABLE memories (id TEXT PRIMARY KEY)")
+    for name, mirror in [("nested", external / "mirror"), ("alias", tmp_path / "mirror")]:
+        mirror.mkdir()
+        (mirror / ".bubu-pocketbase-backup-target").write_text("bubu-pocketbase-backup-v1\n")
+        if name == "alias":
+            (mirror / "storage").symlink_to(external, target_is_directory=True)
+        result = subprocess.run(
+            ["bash", str(REPO_ROOT / "server/ops/backup_pb_data.sh")],
+            env=os.environ | {"PB_DATA_DIR": str(source), "MIRROR_DIR": str(mirror),
+                              "LOCK_DIR": str(tmp_path / "lock"), "RESTIC_REPOSITORY": "",
+                              "RESTIC_SECONDARY_REPOSITORY": "", "REQUIRE_RESTIC_REPOSITORIES": "false"},
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode != 0
+        assert "storage" in result.stderr
+        assert (external / "photo.jpg").read_bytes() == b"preserve-original"
+
+
 def test_production_restic_gate_requires_local_and_offsite_repositories(tmp_path: Path):
     source = tmp_path / "pb_data"
     (source / "storage").mkdir(parents=True)

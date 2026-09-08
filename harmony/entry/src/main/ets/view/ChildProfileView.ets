@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { preferences } from '@kit.ArkData';
 import { ChildProfile } from '../models/Models';
@@ -26,6 +27,12 @@ export struct ChildProfileView {
   @State bloodIndex: number = 0;    // 0 未填写 / A / B / O / AB
   @State avatarFileName: string | undefined = undefined;
   @State heroFileName: string | undefined = undefined;
+  @State schoolStartMs: number = 0;
+  @State allergies: string = '';
+  @State medicalNotes: string = '';
+  @State schoolEdited: boolean = false;
+  @State allergiesEdited: boolean = false;
+  @State medicalNotesEdited: boolean = false;
 
   private genderOptions: string[] = ['未填写', '男', '女', '其他'];
   private bloodOptions: string[] = ['未填写', 'A', 'B', 'O', 'AB'];
@@ -45,6 +52,9 @@ export struct ChildProfileView {
       this.bloodIndex = Math.max(0, this.bloodOptions.indexOf(p.bloodType ?? '未填写'));
       this.avatarFileName = p.avatarMediaFileName;
       this.heroFileName = p.heroBackgroundFileName;
+      this.schoolStartMs = p.schoolStartDate ?? 0;
+      this.allergies = p.allergies ?? '';
+      this.medicalNotes = p.medicalNotes ?? '';
     }
   }
 
@@ -81,7 +91,7 @@ export struct ChildProfileView {
               Button('恢复主题背景').fontColor(BubuColor.danger).onClick(() => { this.heroFileName = undefined; })
             }
           }.width('100%')
-        }.fieldRow()
+        }.width('100%').padding(12).backgroundColor(BubuColor.card).borderRadius(12)
 
         // 名字
         Row() {
@@ -131,6 +141,24 @@ export struct ChildProfileView {
             .onSelect((i: number) => { this.bloodIndex = i; })
         }.fieldRow()
 
+        Column({ space: 12 }) {
+          Text('入园与健康备注').fontSize(17).fontWeight(FontWeight.Bold).fontColor(BubuColor.warmBrown)
+          Row({ space: 8 }) {
+            Text('入园日期').fontSize(15).fontColor(BubuColor.warmBrown)
+            Blank()
+            Button(this.schoolStartMs > 0 ? this.dateText(this.schoolStartMs) : '选择日期')
+              .onClick(() => { this.pickSchoolDate(); })
+            if (this.schoolStartMs > 0) {
+              Button('清除').onClick(() => { this.schoolStartMs = 0; this.schoolEdited = true; })
+            }
+          }.width('100%')
+          TextInput({ text: this.allergies, placeholder: '过敏信息（可选）' })
+            .onChange((value: string) => { this.allergies = value; this.allergiesEdited = true; })
+          TextArea({ text: this.medicalNotes, placeholder: '需要老师知道的健康备注（可选）' })
+            .height(80).onChange((value: string) => { this.medicalNotes = value; this.medicalNotesEdited = true; })
+          Text('这些内容只保存在本机并同步到家庭服务器。').fontSize(12).fontColor(BubuColor.secondaryText)
+        }.alignItems(HorizontalAlign.Start).width('100%').padding(12).backgroundColor(BubuColor.card).borderRadius(12)
+
         Button('保存档案')
           .width('100%').backgroundColor(BubuColor.primary)
           .margin({ top: 12 })
@@ -142,6 +170,7 @@ export struct ChildProfileView {
   }
 
   private async save(): Promise<void> {
+    try {
     const gender = this.genderIndex === 0 ? undefined : this.genderOptions[this.genderIndex];
     const blood = this.bloodIndex === 0 ? undefined : this.bloodOptions[this.bloodIndex];
     const place = this.birthPlace.trim().length === 0 ? undefined : this.birthPlace.trim();
@@ -157,6 +186,9 @@ export struct ChildProfileView {
       avatarMediaFileName: this.avatarFileName,
       avatarRemoteURL: this.avatarFileName === this.profile?.avatarMediaFileName ? this.profile?.avatarRemoteURL : undefined,
       heroBackgroundFileName: this.heroFileName,
+      schoolStartDate: this.schoolEdited ? this.schoolStartMs : this.profile?.schoolStartDate,
+      allergies: this.allergiesEdited ? this.allergies.trim() : this.profile?.allergies,
+      medicalNotes: this.medicalNotesEdited ? this.medicalNotes.trim() : this.profile?.medicalNotes,
       syncState: SyncState.local,
       createdAt: this.profile?.createdAt ?? now
     };
@@ -176,7 +208,10 @@ export struct ChildProfileView {
       store.putSync('childName', p.name);
       store.flush();
     } catch (e) {}
-    this.getUIContext().getPromptAction().showToast({ message: '已保存档案 💛' });
+    SafePrompt.toast(this.getUIContext(), { message: '已保存档案 💛' });
+    } catch (error) {
+      SafePrompt.toast(this.getUIContext(), { message: '档案还未保存，填写的内容仍在，请稍后重试' });
+    }
   }
 
   private async pickImage(purpose: 'avatar' | 'hero'): Promise<void> {
@@ -195,8 +230,19 @@ export struct ChildProfileView {
         && previous !== this.profile?.heroBackgroundFileName) MediaStore.shared.deleteMedia(previous);
       if (purpose === 'avatar') this.avatarFileName = name; else this.heroFileName = name;
     } catch (e) {
-      this.getUIContext().getPromptAction().showToast({ message: '已取消或照片暂时无法读取' });
+      SafePrompt.toast(this.getUIContext(), { message: '已取消或照片暂时无法读取' });
     }
+  }
+
+  private pickSchoolDate(): void {
+    this.getUIContext().showDatePickerDialog({
+      start: new Date(2020, 0, 1), end: new Date(2040, 11, 31),
+      selected: new Date(this.schoolStartMs > 0 ? this.schoolStartMs : Date.now()),
+      onDateAccept: (value: Date) => {
+        this.schoolStartMs = new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+        this.schoolEdited = true;
+      }
+    });
   }
 
   private dateText(ms: number): string {

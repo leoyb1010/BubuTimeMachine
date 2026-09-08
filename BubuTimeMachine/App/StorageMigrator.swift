@@ -215,21 +215,20 @@ nonisolated enum StorageMigrator {
         }
         defer { sqlite3_close(db) }
 
-        return StoreStats(
-            childProfiles: tableCount("ZCHILDPROFILE", db: db),
-            entries: tableCount("ZENTRY", db: db),
-            milestones: tableCount("ZMILESTONE", db: db),
-            media: tableCount("ZMEDIA", db: db),
-            fileBytes: fileBytes
-        )
+        guard let childProfiles = tableCount("ZCHILDPROFILE", db: db),
+              let entries = tableCount("ZENTRY", db: db),
+              let milestones = tableCount("ZMILESTONE", db: db),
+              let media = tableCount("ZMEDIA", db: db) else { return nil }
+        return StoreStats(childProfiles: childProfiles, entries: entries, milestones: milestones,
+                          media: media, fileBytes: fileBytes)
     }
 
-    private static func tableCount(_ table: String, db: OpaquePointer) -> Int {
+    private static func tableCount(_ table: String, db: OpaquePointer) -> Int? {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, "SELECT count(*) FROM \(table);", -1, &statement, nil) == SQLITE_OK,
-              let statement else { return 0 }
+              let statement else { return nil }
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return Int(sqlite3_column_int64(statement, 0))
     }
 

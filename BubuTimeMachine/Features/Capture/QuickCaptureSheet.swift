@@ -25,7 +25,7 @@ struct QuickCaptureSheet: View {
     @State private var panelAppeared = false
     @State private var mediaSourceSheet: CaptureMediaSource?
 
-    private var theme: Color { env.theme.theme.primary }
+    private var theme: Color { env.theme.theme.textAccent }
 
     var body: some View {
         NavigationStack {
@@ -35,9 +35,8 @@ struct QuickCaptureSheet: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: BubuTheme.Spacing.item) {
-                            introCard
-                            naturalCaptureEntry
                             primaryActions(proxy: proxy)
+                            naturalCaptureEntry
 
                             if !model.selectedPreviews.isEmpty {
                                 selectedPreviewGrid
@@ -179,26 +178,6 @@ struct QuickCaptureSheet: View {
                 }
             }
         }
-    }
-
-    private var introCard: some View {
-        HStack(spacing: 12) {
-            BubuMascotBadge(size: 54, expression: .happy)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("这一刻想怎么留下？")
-                    .font(BubuTheme.Font.headline)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text("可以拍一张、写一句，也可以把声音直接留给未来的布布。")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .lineLimit(2)
-            }
-            Spacer()
-        }
-        .padding()
-        .background(BubuTheme.Color.card.opacity(0.58), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .bubuGlassSurface(cornerRadius: BubuTheme.Radius.card, tint: theme)
-        .bubuCardShadow()
     }
 
     private var naturalCaptureEntry: some View {

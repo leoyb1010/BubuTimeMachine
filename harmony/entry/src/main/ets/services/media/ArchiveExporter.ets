@@ -177,10 +177,15 @@ export class ArchiveExporter {
   }
 
   async exportZip(input: ExportInput): Promise<string> {
+    try {
     const folder = await this.export(input);
     const zipPath = `${folder}.zip`;
     await zlib.compressFile(folder, zipPath, {});
     return zipPath;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ArchiveExporter.exportZip 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // MARK: HTML
@@ -304,6 +309,8 @@ ${cards}</div><footer>这是布布的时光机 · 永久离线可读</footer></b
   }
 
   private static async sha256File(path: string): Promise<string> {
+    try {
+      if (canIUse('SystemCapability.Security.CryptoFramework.MessageDigest')) {
     const md = cryptoFramework.createMd('SHA256');
     const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
     try {
@@ -320,6 +327,14 @@ ${cards}</div><footer>这是布布的时光机 · 永久离线可读</footer></b
       return Array.from(digest.data).map((value: number): string => value.toString(16).padStart(2, '0')).join('');
     } finally {
       fileIo.closeSync(file);
+    }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ArchiveExporter.sha256File 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 

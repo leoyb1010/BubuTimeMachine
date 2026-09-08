@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { ChildProfile, Entry, Media } from '../models/Models';
 import { Mood, SyncState, moodEmoji, FamilyRole, MediaType } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
@@ -31,6 +32,7 @@ import { SyncEngine, SyncStatusSnapshot } from '../sync/SyncEngine';
 import { SyncCenterView } from './SyncCenterView';
 import { PhotoInboxView } from './PhotoInboxView';
 import { PhotoIntakeService } from '../services/PhotoIntakeService';
+import { schoolDayLabel } from '../models/SchoolDay';
 
 // MARK: - 首页 · 成长仪表盘（对照 iOS Features/Capture/CaptureHomeView.swift）
 // 专属布布的主屏：问候 → 身份卡 → 主操作（记录/相册/健康）→ 紧凑四宫格（里程碑/成长/故事/今日一问）
@@ -218,7 +220,7 @@ export struct HomeView {
     const entry = entries.find((item: Entry): boolean => item.id === id);
     AppStorage.setOrCreate('bubuOpenEntryId', '');
     if (!entry) {
-      this.getUIContext().getPromptAction().showToast({ message: '这条时光还没同步到本机' });
+      SafePrompt.toast(this.getUIContext(), { message: '这条时光还没同步到本机' });
       return;
     }
     this.route = HomeRoute.home;
@@ -355,6 +357,15 @@ export struct HomeView {
         Column({ space: this.isCompact() ? 10 : 12 }) {
           this.greetingRow()
           this.identityCardTop()
+          if (schoolDayLabel(this.profile?.schoolStartDate).length > 0) {
+            Row({ space: 10 }) {
+              Text('🎒').fontSize(26)
+              Text(schoolDayLabel(this.profile?.schoolStartDate)).fontSize(16).fontWeight(FontWeight.Bold)
+                .fontColor(BubuColor.warmBrown).layoutWeight(1)
+              Text('档案 ›').fontSize(13).fontColor(BubuColor.primary)
+            }.width('100%').padding(14).backgroundColor(BubuColor.card).borderRadius(16)
+              .onClick(() => { this.route = HomeRoute.profile; })
+          }
           this.ssdCandidateCard()
           this.backgroundQueueCards()
           this.primaryActionDock()

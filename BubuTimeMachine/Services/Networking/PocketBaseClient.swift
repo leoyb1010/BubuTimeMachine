@@ -681,8 +681,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
 
     /// 翻页拉增量：游标改用 PocketBase 服务器系统字段 `updated`（单一权威时钟），
     /// 而非各写入设备各自打的 clientUpdatedAt——后者在设备时钟偏移下会漏拉（S-P1-1）。
-    private func fetchRecords(collection: String, since: Date?, sort: String? = "updated") async throws -> [[String: Any]] {
-        let all = try await paginate(collection: collection, since: since, sort: sort, onlyDeleted: false)
+    private func fetchRecords(collection: String, since: Date?) async throws -> [[String: Any]] {
+        let all = try await paginate(collection: collection, since: since, onlyDeleted: false)
         return all.filter { ($0["isDeleted"] as? Bool) != true }
     }
 
@@ -694,44 +694,45 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     /// 于是第五、六页的边界处**恰好有一条被跳过**。而它的 updated 比本轮游标早，
     /// 下一轮的 `updated > 游标` 也不会再取到它：这台设备永远缺这一条，且没有任何提示。
     ///
-    /// keyset 的做法是每页把 `since` 推到本页最后一条的 `updated`，
-    /// 行怎么移动都不影响「从这个时间点之后继续取」这个语义。
-    /// 代价是同一毫秒内的并列记录要多带一条重叠（见下面的 seen 去重）。
-    private func paginate(collection: String, since: Date?, sort: String?,
+    /// 用 (updated, id) 联合游标处理同一毫秒超过 200 条的批量写入。
+    /// 残缺响应、游标停滞和轮数上限必须报错，不能把部分结果当作同步成功。
+    private func paginate(collection: String, since: Date?,
                           onlyDeleted: Bool) async throws -> [[String: Any]] {
-        var all: [[String: Any]] = []
-        var seen = Set<String>()
-        var cursor = since
-        // 同一毫秒的记录多到撑满一整页时，游标推不动会原地打转。
-        // 这个上限只是兜底，正常情况下循环会因为「取回空页」而结束。
-        let maxRounds = 500
-        for _ in 0..<maxRounds {
-            let (items, _) = try await fetchPage(collection: collection, since: cursor,
-                                                 sort: sort, page: 1, onlyDeleted: onlyDeleted)
-            if items.isEmpty { break }
-
-            var newest: Date?
-            var appended = 0
-            for item in items {
-                // id 去重：keyset 的边界会把「与游标同一时刻」的记录再取一次。
-                if let id = item["id"] as? String {
-                    guard seen.insert(id).inserted else { continue }
-                }
-                all.append(item)
-                appended += 1
-                if let updated = Self.serverUpdatedDate(item) {
-                    newest = newest.map { max($0, updated) } ?? updated
-                }
-            }
-
-            // 拿不到 updated（服务端格式变了）或者游标没往前走：
-            // 再循环下去就是无限重复同一页，停在这里，本轮当作取到这么多。
-            guard let newest, newest != cursor else { break }
-            // 整页都是重复的说明已经追平，不必再问。
-            if appended == 0 { break }
-            cursor = newest
+        try await Self.collectPages(since: since) { updated, id in
+            try await self.fetchPage(collection: collection, since: updated,
+                                     afterID: id, onlyDeleted: onlyDeleted)
         }
-        return all
+    }
+
+    // ponytail: 单轮约十万条封顶；接近此规模时改为逐页落盘和断点续拉。
+    static func collectPages(since: Date?, maxRounds: Int = 500,
+                             fetch: (Date?, String?) async throws -> [[String: Any]]) async throws -> [[String: Any]] {
+        var all: [[String: Any]] = []
+        var positions: [String: Int] = [:]
+        var cursor = since
+        var cursorID: String?
+        for _ in 0..<maxRounds {
+            try Task.checkCancellation()
+            let items = try await fetch(cursor, cursorID)
+            if items.isEmpty { return all }
+            for item in items {
+                guard let id = item["id"] as? String, !id.isEmpty,
+                      let updated = Self.serverUpdatedDate(item) else {
+                    throw APIError.server(500, "同步记录缺少有效的 id 或 updated，已保留原游标")
+                }
+                if let previous = cursor,
+                   !(updated > previous || (updated == previous && cursorID.map { id > $0 } == true)) {
+                    throw APIError.server(500, "同步分页顺序异常，已保留原游标")
+                }
+                // 翻页期间被编辑的记录可能再次出现，保留较新的响应。
+                if let index = positions[id] { all[index] = item }
+                else { positions[id] = all.count; all.append(item) }
+                cursor = updated
+                cursorID = id
+            }
+            if items.count < 200 { return all }
+        }
+        throw APIError.server(500, "同步分页超过安全上限，请稍后重试")
     }
 
     /// 拉取自 since 以来被删除记录的墓碑（localId + 服务器 updated）。
@@ -739,7 +740,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     /// 游标同样按服务器 `updated` 过滤/排序，并把每条墓碑的 updated 带回，让删除也能推进游标。
     func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone] {
         // 墓碑同样走 keyset：删除也参与游标推进，漏掉一条墓碑等于「别人删的照片在这台设备上复活」。
-        let all = try await paginate(collection: collection, since: since, sort: "updated", onlyDeleted: true)
+        let all = try await paginate(collection: collection, since: since, onlyDeleted: true)
         return all.compactMap { obj in
             guard let localId = obj["localId"] as? String else { return nil }
             return RemoteTombstone(localId: localId, serverUpdatedAt: Self.serverUpdatedDate(obj))
@@ -753,27 +754,29 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         return iso.date(from: s) ?? flexibleDate(s)
     }
 
-    private func fetchPage(collection: String, since: Date?, sort: String?,
-                           page: Int, onlyDeleted: Bool = false) async throws -> (items: [[String: Any]], totalPages: Int) {
+    private func fetchPage(collection: String, since: Date?, afterID: String?,
+                           onlyDeleted: Bool = false) async throws -> [[String: Any]] {
         try await withAuthRetry { token in
             var comps = URLComponents(
                 url: self.baseURL.appendingPathComponent("api/collections/\(collection)/records"),
                 resolvingAgainstBaseURL: false)!
-            comps.queryItems = Self.listRecordsQueryItems(since: since, sort: sort, page: page, onlyDeleted: onlyDeleted)
+            comps.queryItems = Self.listRecordsQueryItems(since: since, sort: "updated,id", page: 1,
+                                                        onlyDeleted: onlyDeleted, afterID: afterID)
             var req = URLRequest(url: comps.url!)
             req.timeoutInterval = Self.interactiveTimeout
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             let (data, resp) = try await URLSession.shared.data(for: req)
             try Self.check(resp, data)
             guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = obj["items"] as? [[String: Any]] else { return ([], 1) }
-            let totalPages = obj["totalPages"] as? Int ?? 1
-            return (items, totalPages)
+                  let items = obj["items"] as? [[String: Any]] else {
+                throw APIError.server(500, "同步分页响应异常，已保留原游标")
+            }
+            return items
         }
     }
 
     static func listRecordsQueryItems(since: Date?, sort: String?, page: Int,
-                                      onlyDeleted: Bool = false) -> [URLQueryItem] {
+                                      onlyDeleted: Bool = false, afterID: String? = nil) -> [URLQueryItem] {
         var query = [URLQueryItem(name: "perPage", value: "200"),
                      URLQueryItem(name: "page", value: "\(page)")]
         if let sort, !sort.isEmpty {
@@ -782,7 +785,14 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         var clauses: [String] = []
         // 游标过滤改用服务器权威时钟 `updated`（与游标推进同参照系），
         // 不再用写入设备各自的 clientUpdatedAt——避免读设备时钟偏移导致永久漏拉（S-P1-1）。
-        if let since { clauses.append("(updated>'\(syncTimestampString(since))')") }
+        if let since {
+            let timestamp = syncTimestampString(since)
+            if let afterID {
+                clauses.append("(updated>'\(timestamp)' || (updated='\(timestamp)' && id>'\(filterEscape(afterID))'))")
+            } else {
+                clauses.append("(updated>'\(timestamp)')")
+            }
+        }
         if onlyDeleted { clauses.append("(isDeleted=true)") }
         if !clauses.isEmpty {
             query.append(URLQueryItem(name: "filter", value: clauses.joined(separator: " && ")))

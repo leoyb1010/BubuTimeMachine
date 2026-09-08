@@ -1,5 +1,6 @@
 import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
+import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { AppDatabase } from '../data/AppDatabase';
 import { AgeCalculator } from '../models/AgeCalculator';
@@ -29,6 +30,9 @@ export class ReminderScheduler {
   private readonly daysAhead: number = 30;
 
   private constructor() {}
+  private context: common.UIAbilityContext | null = null;
+
+  initialize(context: common.UIAbilityContext): void { this.context = context; }
 
   // iOS: func update(enabled:context:) async
   // 开关变化时调用。开 → 申请授权后重排未来 7 天；关 → 撤销全部待发提醒。
@@ -47,16 +51,22 @@ export class ReminderScheduler {
   }
 
   async refreshAll(dailyEnabled: boolean): Promise<void> {
+    try {
     await reminderAgentManager.cancelAllReminders();
     if (!(await notificationManager.isNotificationEnabled())) return;
     if (dailyEnabled) await this.scheduleDailyMemories();
     await this.scheduleVaccineReminders();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ReminderScheduler.refreshAll 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // iOS: center.requestAuthorization(options: [.alert, .sound, .badge])
   private async requestAuthorization(): Promise<boolean> {
     try {
-      await notificationManager.requestEnableNotification();
+      if (!this.context) return false;
+      await notificationManager.requestEnableNotification(this.context);
       return await notificationManager.isNotificationEnabled();
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `通知授权失败: ${JSON.stringify(e)}`);

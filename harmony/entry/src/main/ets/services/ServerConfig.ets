@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { ALL_FAMILY_ROLES, FamilyRole, isElderRole } from '../models/Enums';
@@ -8,8 +9,8 @@ import { url } from '@kit.ArkTS';
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
 export class ServerConfig {
   static readonly shared = new ServerConfig();
-  static readonly versionName: string = '2.11.0';
-  static readonly versionCode: string = '2026081901';
+  static readonly versionName: string = '2.14.0';
+  static readonly versionCode: string = '2026090801';
   // 与 iOS 正式包使用同一家庭服务入口；新机只需登录，不再手填服务器。
   // 密码仍只进 Asset Store，服务器会根据 familyId 限制数据边界。
   static readonly defaultBaseURL: string = 'https://bubu-api.leoyuan.top';
@@ -42,6 +43,7 @@ export class ServerConfig {
   private constructor() {}
 
   async load(context: common.Context): Promise<void> {
+    try {
     await KeychainStore.migrateLegacyPreferences(context);
     this.store = await preferences.getPreferences(context, 'bubu_server_config');
     this.baseURLString = await this.getStr('baseURL', ServerConfig.defaultBaseURL);
@@ -66,6 +68,10 @@ export class ServerConfig {
     this.aiAPIKey = this.secureValue(ServerConfig.aiKeyAssetKey, legacyAIKey);
     await this.clearLegacySecrets();
     AppStorage.setOrCreate('bubuSimpleMode', this.simpleModeEnabled);
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.load 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   get currentRole(): FamilyRole {
@@ -141,10 +147,15 @@ export class ServerConfig {
   }
 
   async setSleepStartedAt(value: number): Promise<void> {
+    try {
     this.sleepStartedAt = value;
     if (!this.store) return;
     await this.store.put('sleepStartedAt', value);
     await this.store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.setSleepStartedAt 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   async setTimelineSortMode(value: string): Promise<void> {
@@ -153,11 +164,16 @@ export class ServerConfig {
   }
 
   async setPhotoFrameDwellSeconds(value: number): Promise<void> {
+    try {
     const allowed = [5, 8, 15, 30];
     this.photoFrameDwellSeconds = allowed.includes(value) ? value : 8;
     if (!this.store) return;
     await this.store.put('photoFrameDwellSeconds', this.photoFrameDwellSeconds);
     await this.store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.setPhotoFrameDwellSeconds 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // 持久化服务器配置（地址/账号/密码）。
@@ -192,33 +208,58 @@ export class ServerConfig {
   }
 
   private async getStr(key: string, def: string): Promise<string> {
+    try {
     if (!this.store) return def;
     const value = await this.store.get(key, def);
     return this.cleanString(value, def);
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.getStr 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async getBool(key: string, def: boolean): Promise<boolean> {
+    try {
     if (!this.store) return def;
     const value = await this.store.get(key, def);
     return typeof value === 'boolean' ? value : def;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.getBool 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async getNum(key: string, def: number): Promise<number> {
+    try {
     if (!this.store) return def;
     const value = await this.store.get(key, def);
     return typeof value === 'number' && Number.isFinite(value) ? value : def;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.getNum 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async put(key: string, value: string): Promise<void> {
+    try {
     if (!this.store) return;
     await this.store.put(key, this.cleanString(value));
     await this.store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.put 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async putBool(key: string, value: boolean): Promise<void> {
+    try {
     if (!this.store) return;
     await this.store.put(key, value);
     await this.store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.putBool 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private secureValue(assetKey: string, legacyValue: string): string {
@@ -239,10 +280,15 @@ export class ServerConfig {
   }
 
   private async clearLegacySecrets(): Promise<void> {
+    try {
     if (!this.store) return;
     await this.store.delete('password');
     await this.store.delete('aiAPIKey');
     await this.store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ServerConfig.clearLegacySecrets 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private cleanString(value: Object | string | null | undefined, def: string = ''): string {

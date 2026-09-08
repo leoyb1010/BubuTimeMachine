@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { asset } from '@kit.AssetStoreKit';
 import { util } from '@kit.ArkTS';
 import type { BusinessError } from '@kit.BasicServicesKit';
@@ -14,6 +15,7 @@ export class KeychainStore {
 
   // 从旧版 Preferences 伪钥匙串迁移胶囊恢复码。仅在安全写入成功后擦除旧明文。
   static async migrateLegacyPreferences(context: common.Context): Promise<void> {
+    try {
     const legacy = await preferences.getPreferences(context, KeychainStore.legacyStoreName);
     const legacyKey = KeychainStore.recoveryKey + '.icloud';
     const value = await legacy.get(legacyKey, '');
@@ -23,6 +25,10 @@ export class KeychainStore {
     }
     await legacy.delete(legacyKey);
     await legacy.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'KeychainStore.migrateLegacyPreferences 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   static string(key: string): string | null {
@@ -68,6 +74,7 @@ export class KeychainStore {
   }
 
   private static store(value: string, key: string, syncType: asset.SyncType): void {
+    try {
     const attributes: asset.AssetMap = new Map();
     attributes.set(asset.Tag.SECRET, KeychainStore.bytes(value));
     attributes.set(asset.Tag.ALIAS, KeychainStore.bytes(KeychainStore.alias(key)));
@@ -76,6 +83,10 @@ export class KeychainStore {
     attributes.set(asset.Tag.SYNC_TYPE, syncType);
     attributes.set(asset.Tag.CONFLICT_RESOLUTION, asset.ConflictResolution.OVERWRITE);
     asset.addSync(attributes);
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'KeychainStore.store 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static alias(key: string): string {

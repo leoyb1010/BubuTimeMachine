@@ -203,7 +203,7 @@ struct CaptureHomeView: View {
                             .frame(width: 44, height: 44)
                         Image(systemName: "externaldrive.badge.plus")
                             .font(BubuTheme.Font.scaled(19, weight: .bold))
-                            .foregroundStyle(BubuTheme.Color.primary)
+                            .foregroundStyle(BubuTheme.Color.primaryInk)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("移动硬盘有 \(ssdIntakeCandidates.count) 段待确认")
@@ -216,7 +216,7 @@ struct CaptureHomeView: View {
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .font(BubuTheme.Font.scaled(13, weight: .bold))
-                        .foregroundStyle(BubuTheme.Color.primary)
+                        .foregroundStyle(BubuTheme.Color.primaryInk)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity)
@@ -429,7 +429,7 @@ struct CaptureHomeView: View {
                         Circle().fill(BubuTheme.Color.primary.opacity(0.16)).frame(width: 44, height: 44)
                         Image(systemName: "photo.badge.plus.fill")
                             .font(BubuTheme.Font.scaled(19, weight: .bold))
-                            .foregroundStyle(BubuTheme.Color.primary)
+                            .foregroundStyle(BubuTheme.Color.primaryInk)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text("有 \(photoScanner.eventGroups.count) 段时光待收好")
@@ -446,7 +446,7 @@ struct CaptureHomeView: View {
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .font(BubuTheme.Font.scaled(13, weight: .bold))
-                        .foregroundStyle(BubuTheme.Color.primary)
+                        .foregroundStyle(BubuTheme.Color.primaryInk)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity)
@@ -494,7 +494,7 @@ struct CaptureHomeView: View {
                 Circle().fill(BubuTheme.Color.primary.opacity(0.16)).frame(width: 44, height: 44)
                 Image(systemName: "photo.stack.fill")
                     .font(BubuTheme.Font.scaled(18, weight: .bold))
-                    .foregroundStyle(BubuTheme.Color.primary)
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -741,7 +741,7 @@ struct CaptureHomeView: View {
                             .foregroundStyle(BubuTheme.Color.warmBrown)
                         Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
                             .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(theme.primary)
+                            .foregroundStyle(theme.textAccent)
                     }
                 }
             }
@@ -750,7 +750,7 @@ struct CaptureHomeView: View {
             NavigationLink { SettingsView() } label: {
                 Image(systemName: "gearshape.fill")
                     .font(BubuTheme.Font.scaled(18, weight: .bold))
-                    .foregroundStyle(BubuTheme.Color.primary)
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
                     .frame(width: 42, height: 42)
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().stroke(.white.opacity(0.62), lineWidth: 1))
@@ -1113,7 +1113,7 @@ struct CaptureHomeView: View {
                     Button { openTimeline?() } label: {
                         Text("查看全部 ›")
                             .font(BubuTheme.Font.scaled(12.5, weight: .semibold, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.primary)
+                            .foregroundStyle(BubuTheme.Color.primaryInk)
                     }
                 }
                 ForEach(entries.prefix(2)) { entry in
@@ -1141,7 +1141,7 @@ struct CaptureHomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(BubuDateFormat.monthDay(entry.happenedAt))
                     .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.primary)
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
                 Text(entry.note?.isEmpty == false ? entry.note! : "记录此刻")
                     .font(BubuTheme.Font.scaled(14.5, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -1211,7 +1211,7 @@ struct CaptureHomeView: View {
             if let profile {
                 Text(AgeCalculator.compactAge(birthday: profile.birthday, at: entry.happenedAt))
                     .font(BubuTheme.Font.scaled(13, weight: .semibold))
-                    .foregroundStyle(theme.primary)
+                    .foregroundStyle(theme.textAccent)
             }
             Text(yearsAgoText(entry.happenedAt))
                 .font(BubuTheme.Font.scaled(11)).foregroundStyle(BubuTheme.Color.secondaryText)
@@ -1395,7 +1395,7 @@ private struct SaveHealthStrip: View {
                 NavigationLink { SyncCenterView() } label: {
                     Text("查看")
                         .font(BubuTheme.Font.caption.weight(.semibold))
-                        .foregroundStyle(theme.primary)
+                        .foregroundStyle(theme.textAccent)
                 }
             }
 
@@ -1412,7 +1412,7 @@ private struct SaveHealthStrip: View {
             if let notice = env.syncEngine.lastLargeFileNotice {
                 Text(notice)
                     .font(BubuTheme.Font.scaled(11, weight: .regular, design: .rounded))
-                    .foregroundStyle(theme.primary)
+                    .foregroundStyle(theme.textAccent)
             } else if let soft = env.syncEngine.softNotice {
                 Text(soft)
                     .font(BubuTheme.Font.scaled(11, weight: .regular, design: .rounded))
@@ -1437,7 +1437,7 @@ private struct SaveHealthStrip: View {
                     } label: {
                         Text("重试")
                             .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
-                            .foregroundStyle(theme.primary)
+                            .foregroundStyle(theme.textAccent)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("立刻重试同步")

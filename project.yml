@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.13.0"
-    CURRENT_PROJECT_VERSION: "2026090401"
+    MARKETING_VERSION: "2.14.0"
+    CURRENT_PROJECT_VERSION: "2026090801"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -184,6 +184,9 @@ targets:
       - path: BubuTimeMachine/Models
       - path: BubuTimeMachine/App/BubuStorage.swift
       - path: BubuTimeMachine/App/BubuSchema.swift
+      - path: BubuTimeMachine/App/BubuSchemaV1Snapshot.swift
+      - path: BubuTimeMachine/App/StoreUpgradeBackup.swift
+      - path: BubuTimeMachine/App/BubuStoreLoader.swift
       - path: BubuTimeMachine/App/SharedModelContainer.swift
       - path: BubuTimeMachine/App/GrowthMeasurementExtractor.swift
       - path: BubuTimeMachine/App/SharedDefaults.swift
@@ -251,6 +254,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      environmentVariables:
+        BUBU_UNIT_TEST_HOST: "1"
       targets:
         - BubuTimeMachineTests
         - BubuTimeMachineUITests

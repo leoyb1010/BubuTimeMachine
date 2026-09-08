@@ -311,7 +311,7 @@ export struct CapsuleUnlockView {
     try {
       const recovery = CapsuleRecovery.current();
       const p = await CapsuleVault.shared.unseal(
-        blob, this.capsule.unlockAt, this.capsule.id, recovery ?? undefined);
+        blob, this.capsule.unlockAt, this.capsule.id, recovery ?? undefined, Date.now(), this.capsule.cryptoVersion ?? 0);
       this.payload = p;
       await this.markOpened();
     } catch (err) {

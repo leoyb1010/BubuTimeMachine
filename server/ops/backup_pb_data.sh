@@ -30,6 +30,7 @@ fail() {
 [[ "$PB_DATA_DIR" != "$MIRROR_DIR" ]] || fail "源目录与镜像目录不能相同"
 [[ "$MIRROR_DIR" != "/" && "$MIRROR_DIR" != "${HOME:-}" ]] || fail "镜像目录范围过大"
 [[ ! -L "$MIRROR_DIR" ]] || fail "镜像目录不能是符号链接"
+[[ ! -L "$MIRROR_DIR/storage" ]] || fail "镜像 storage 不能是符号链接"
 
 case "$REQUIRE_RESTIC_REPOSITORIES" in
   1|true|yes|on)
@@ -82,8 +83,17 @@ fi
 # 必须真的写入目标目录；只检查父目录 -w 会被 macOS 外置盘 TCC 误导。
 source_real="$(cd "$PB_DATA_DIR" && pwd -P)"
 mirror_real="$(cd "$MIRROR_DIR" && pwd -P)"
+storage_real="$(cd "$PB_DATA_DIR/storage" && pwd -P)"
 case "$mirror_real/" in
   "$source_real/"*) fail "镜像目录不能位于 PocketBase 数据目录内" ;;
+esac
+# 原片可能迁移到外接盘，再由 pb_data/storage 软链接指回。单独检查真实路径，
+# 不能把镜像写回原片目录，或递归复制到原片目录的子目录。
+case "$mirror_real/" in
+  "$storage_real/"*) fail "镜像目录不能位于原片 storage 目录内" ;;
+esac
+case "$storage_real/" in
+  "$mirror_real/"*) fail "原片 storage 不能位于镜像目录内" ;;
 esac
 
 # 本地仓库必须与镜像真正分离。远程 s3/rest/http 仓库没有本机路径，跳过路径判断；
@@ -135,11 +145,15 @@ sync_files() {
     --exclude '/data.db-*' \
     --exclude '/auxiliary.db' \
     --exclude '/auxiliary.db-*' \
+    --exclude '/storage' \
     --exclude '/backups/' \
     --exclude '/.last-success' \
     --exclude '/.bubu-pocketbase-backup-target' \
     --exclude '/.incomplete-*' \
     "$PB_DATA_DIR/" "$MIRROR_DIR/"
+  # 复制目录内容而不是 storage 软链接本身；保留镜像里已有的历史原片。
+  mkdir -p "$MIRROR_DIR/storage"
+  rsync -a "$storage_real/" "$MIRROR_DIR/storage/"
 }
 
 backup_sqlite() {

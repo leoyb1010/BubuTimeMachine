@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { formBindingData, FormExtensionAbility, formInfo, formProvider } from '@kit.FormKit';
 import type { Want } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
@@ -21,17 +22,25 @@ interface CardData {
 export default class BubuFormAbility extends FormExtensionAbility {
   onAddForm(want: Want): formBindingData.FormBindingData {
     const formId = want.parameters?.[formInfo.FormParam.IDENTITY_KEY]?.toString() ?? '';
-    WidgetRefresher.register(this.context, formId);
+    try { WidgetRefresher.register(this.context, formId); }
+    catch (error) { hilog.warn(0x0000, 'Bubu', '卡片注册未保存，仍显示已有快照'); }
     return formBindingData.createFormBindingData(this.buildData());
   }
 
   onUpdateForm(formId: string): void {
     const data = formBindingData.createFormBindingData(this.buildData());
-    formProvider.updateForm(formId, data);
+    try {
+      formProvider.updateForm(formId, data).catch((error: Error) => {
+        hilog.warn(0x0000, 'Bubu', '桌面卡片更新未完成，下次继续刷新');
+      });
+    } catch (error) {
+      hilog.warn(0x0000, 'Bubu', '桌面卡片暂时不可用');
+    }
   }
 
   onRemoveForm(formId: string): void {
-    WidgetRefresher.unregister(this.context, formId);
+    try { WidgetRefresher.unregister(this.context, formId); }
+    catch (error) { hilog.warn(0x0000, 'Bubu', '卡片注册清理稍后重试'); }
   }
 
   // 卡片数据：从 Preferences 读布布生日（首页保存档案时写入），算年龄/天数。

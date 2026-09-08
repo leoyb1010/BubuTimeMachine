@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { dataSharePredicates } from '@kit.ArkData';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -42,6 +43,7 @@ export class PhotoIntakeService {
   }
 
   async scanRecent(days: number = 14, requestPermission: boolean = true): Promise<PhotoEventGroup[]> {
+    try {
     const context = this.context;
     if (!context) throw new Error('照片收件箱还没有初始化');
     const granted = requestPermission
@@ -102,6 +104,10 @@ export class PhotoIntakeService {
       result.close();
     }
     return await this.cachedGroups();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'PhotoIntakeService.scanRecent 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   async accept(group: PhotoEventGroup): Promise<PhotoIntakeResult> {

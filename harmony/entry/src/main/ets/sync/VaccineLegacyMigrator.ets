@@ -60,6 +60,7 @@ export class VaccineLegacyMigrator {
 
   // 幂等迁移：migrated 标记防重入；旧键为 doseId 字符串数组（对照 iOS migrateIfNeeded）。
   static async migrateIfNeeded(context: common.UIAbilityContext): Promise<void> {
+    try {
     const store = await preferences.getPreferences(context, 'bubu_vaccine_migration');
     const migrated = await store.get(VaccineLegacyMigrator.migratedKey, false) as boolean;
     if (migrated) return;
@@ -113,6 +114,10 @@ export class VaccineLegacyMigrator {
       // defer：无论成败都打标记，防重入（对照 iOS defer { defaults.set(true) }）。
       await store.put(VaccineLegacyMigrator.migratedKey, true);
       await store.flush();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'VaccineLegacyMigrator.migrateIfNeeded 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 }

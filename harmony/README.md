@@ -1,14 +1,14 @@
 # 布布时光机 · HarmonyOS 手机端
 
-iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketBase + FastAPI 自托管后端。
+与 iOS 统一版本的鸿蒙原生客户端（2.14.0），使用 ArkTS / ArkUI，与 iOS 共用 PocketBase + FastAPI 自托管后端。
 
 本工程只支持 HarmonyOS 手机。平板、折叠屏、鸿蒙电脑和穿戴端不在本次范围，`module.json5` 仅声明 `phone`。
 
 ## 当前结论
 
 - API 26 手机端核心能力已实现，当前仍处于追平与真机验收阶段；逐项状态见 [`PARITY_MATRIX.md`](PARITY_MATRIX.md)。
-- 本地 `156` 个逻辑/契约测试通过，API 26 unsigned/signed HAP 构建通过。
-- 2026-08-19 已在 HUAWEI Pura X Max（HarmonyOS 7.0.0 / API 26）完成一次签名安装、前台启动和无崩溃日志验证；当前新增横滑与 2.11 信息架构仍待下次真机交互回归。
+- 本地 `183` 个逻辑/契约测试通过，API 26 unsigned/signed HAP 构建通过。
+- 2026-09-08 在现有手机覆盖升级；新增 RDB 保护副本、同事务迁移校验及记录数量回读。详细结果见 `../docs/RELEASE_2.14.0.md`。
 - Live View 使用 TIMER 原生实况窗；未获华为场景权益时自动降级为持续通知。
 
 ## 已实现能力
@@ -17,6 +17,7 @@ iOS 2.11.0 的鸿蒙原生实现，使用 ArkTS / ArkUI，与 iOS 共用 PocketB
 - 时光轴：拍摄/记录时间双排序、RDB 200 条触底分页、全文搜索和语义搜图。
 - 数据：RDB 事务迁移与关键列断言、家庭所有权/Token/文件同源隔离、LWW 远端立即合并、真实 pending 计数、非破坏全拉与安全重传。
 - 媒体：原片流式上传、真实进度、Harmony 本地 SHA/照片视频缩略图生产、下载哈希校验、真实格式嗅探、跨端缩略图优先、资源角色分组与失败保真。
+- 档案：入园日期、过敏信息与健康备注跨端同步，未编辑的新字段不会覆盖远端内容。
 - 成长：健康、持久哄睡计时、WHO 插值、成长曲线、疫苗、里程碑、第一次和旧数据迁移。
 - 创作：第一人称日记、用户收录式成长绘本、家人合奏、成长报告、周报、问答、声音年轮和服务端成长电影成片。
 - 传承：v3 E2E 时间胶囊（文字+语音）、24 词恢复码、包含胶囊密文/成长/疫苗和 SHA-256 manifest 的开放档案 ZIP、真实 PDF 年册、三版式分享卡。
@@ -47,7 +48,7 @@ NODE_OPTIONS=--no-warnings=MODULE_TYPELESS_PACKAGE_JSON node --test tests/*.test
 entry/build/default/outputs/default/entry-default-unsigned.hap
 ```
 
-工程默认不带签名。真机安装前在 DevEco Project Structure 配置本机自动签名；证书、私钥、口令和绝对路径不得提交。
+工程默认不带签名。真机安装前在独立本机目录配置 DevEco 签名，随后通过 `BUBU_HAP_PATH` 指定已签名包；证书、私钥、口令和绝对路径不得提交。
 
 ## 真机验收清单
 

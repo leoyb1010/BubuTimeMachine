@@ -63,7 +63,7 @@ struct BubuQAView: View {
                     Button { ask(s) } label: {
                         Text(s)
                             .font(BubuTheme.Font.scaled(13, weight: .semibold))
-                            .foregroundStyle(BubuTheme.Color.primary)
+                            .foregroundStyle(BubuTheme.Color.primaryInk)
                             .padding(.horizontal, 12).padding(.vertical, 8)
                             .background(BubuTheme.Color.primary.opacity(0.12), in: Capsule())
                     }

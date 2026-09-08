@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { formProvider, formBindingData } from '@kit.FormKit';
 import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
@@ -27,6 +28,7 @@ export class WidgetRefresher {
   }
 
   static register(context: common.Context, formId: string): void {
+    try {
     if (formId.length === 0) return;
     const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.formStore });
     const ids = WidgetRefresher.readFormIds(store);
@@ -35,16 +37,26 @@ export class WidgetRefresher {
       store.putSync('formIds', JSON.stringify(ids));
       store.flush();
     }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'WidgetRefresher.register 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   static unregister(context: common.Context, formId: string): void {
+    try {
     const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.formStore });
     const ids = WidgetRefresher.readFormIds(store).filter((id: string): boolean => id !== formId);
     store.putSync('formIds', JSON.stringify(ids));
     store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'WidgetRefresher.unregister 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   static async publishCurrentSnapshot(context: common.Context): Promise<void> {
+    try {
     const profile = await AppDatabase.shared.fetchChildProfile();
     const entries = await AppDatabase.shared.fetchEntries(false);
     const activeEntryIds = new Set<string>(entries.map((entry): string => entry.id));
@@ -86,13 +98,22 @@ export class WidgetRefresher {
     store.putSync('latestWeight', measurement?.weightKg ?? 0);
     store.putSync('nextMilestone', next?.title ?? '记录新的第一次');
     store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'WidgetRefresher.publishCurrentSnapshot 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   static reload(context: common.Context): void {
+    try {
     const store = preferences.getPreferencesSync(context, { name: WidgetRefresher.formStore });
     for (const id of WidgetRefresher.readFormIds(store)) {
       const empty = formBindingData.createFormBindingData({});
       formProvider.updateForm(id, empty).catch(() => {});
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'WidgetRefresher.reload 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 

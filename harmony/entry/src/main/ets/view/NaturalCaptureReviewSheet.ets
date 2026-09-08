@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { promptAction } from '@kit.ArkUI';
 import { BubuColor, BubuRadius, BubuFont, BubuShadow } from '../theme/BubuTheme';
 import { BubuMascotBadge } from '../components/BubuMascotBadge';
@@ -164,7 +165,7 @@ export struct NaturalCaptureReviewSheet {
   private onTapSave(): void {
     if (this.savableItems().length === 0) return;
     if (this.unconfirmedCount() > 0) {
-      this.getUIContext().getPromptAction().showDialog({
+      SafePrompt.dialog(this.getUIContext(), {
         title: `还有 ${this.unconfirmedCount()} 条需要确认`,
         message: '疫苗、症状等敏感记录需要逐条点「确认无误」才会保存；未确认的这次不会入库。',
         buttons: [
@@ -519,7 +520,7 @@ export struct NaturalCaptureReviewSheet {
     for (const item of this.savableItems()) {
       await router.save(item);
     }
-    this.getUIContext().getPromptAction().showToast({ message: '已经收好啦 🌟' });
+    SafePrompt.toast(this.getUIContext(), { message: '已经收好啦 🌟' });
     if (this.onSaved) this.onSaved();
     if (this.onDismiss) this.onDismiss();
   }

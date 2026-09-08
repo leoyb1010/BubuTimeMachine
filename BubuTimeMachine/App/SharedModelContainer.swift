@@ -9,8 +9,8 @@ import SwiftData
 enum SharedModelContainer {
     private static let log = Logger(subsystem: "com.bubu.timemachine", category: "SharedModelContainer")
 
-    /// 全实体 schema：来自版本化的 BubuSchemaV1（唯一真相源，App/Widget/Intent 共用）。
-    static let schema = Schema(versionedSchema: BubuSchemaV1.self)
+    /// 全实体 schema：来自版本化的 BubuSchemaV2（唯一真相源，App/Widget/Intent 共用）。
+    static let schema = Schema(versionedSchema: BubuSchemaV2.self)
 
     /// 主 App 进程启动后注入 App.init 建的容器（与 SwiftUI @Query/UI 同一个）。
     /// 注入后，进程内 App Intents / 通知回复 / 手表写入都经此拿到「同一个」容器：
@@ -26,10 +26,8 @@ enum SharedModelContainer {
     /// 仅在 `injected` 为 nil（即 extension 进程，或主 App 尚未完成注入）时启用。
     /// 共享库暂时打不开时返回 nil，避免直接崩溃成空白。
     private static let lazyShared: ModelContainer? = {
-        let config = ModelConfiguration(schema: schema, url: BubuStorage.storeURL)
         do {
-            return try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
-                                      configurations: [config])
+            return try BubuStoreLoader.open(at: BubuStorage.storeURL)
         } catch {
             log.error("无法创建共享 SwiftData 容器：\(error.localizedDescription, privacy: .public)")
             return nil

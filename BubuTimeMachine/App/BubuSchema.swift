@@ -1,87 +1,30 @@
 import Foundation
 import SwiftData
 
-// MARK: - 版本化 Schema 纪律（30 年家庭档案·最高底线：store 永远打得开）
-//
-// 这是全家 30 年数据的底座。历史上模型变更全是"就地改 V1"、versionIdentifier 还跟着
-// App 版本号乱涨（一路涨到 1.3.0），但始终只有一个 V1、stages 为空——旧 schema 定义已丢失，
-// 将来任何非轻量变更会直接打不开 store 且无法补迁移 stage。本文件把"当前实际模型形状"
-// 显式固化为一个稳定的 V1 快照，并立下三条铁律：
-//
-//   铁律 1 · schema 版本 ≠ App marketing 版本。App 可以发 1.4 / 2.0，schema 版本只在
-//           @Model 字段/结构真正变化时才动。versionIdentifier 不再跟随 App 版本号。
-//   铁律 2 · V1 的 versionIdentifier 冻结在 (1, 3, 0)——这正是现有用户 store 里已经戳好的
-//           版本号。绝不下调（下调 = 让 SwiftData 以为"store 来自更新的未来版本"，有拒绝打开
-//           的风险），也不空涨。它就是 V1 快照的永久编号。
-//   铁律 3 · 永不"就地改 V1"。任何 @Model 字段/结构变更 = 新增 BubuSchemaV2 + 迁移 stage
-//           （见文件底部模板），让 SwiftData 按计划迁移，而不是"轻量迁移碰运气、失败就打不开
-//           全家的数据"。
-//
-/// V1 快照：当前 on-disk schema 的显式命名。models 必须列全所有 @Model 实体。
+// 版本号属于持久化格式，不随 App 营销版本变化。
+// V1 的实体定义冻结在 BubuSchemaV1Snapshot.swift；不再引用当前活动模型。
 enum BubuSchemaV1: VersionedSchema {
-    /// 冻结在 (1,3,0)：现有 store 里已戳的版本号。见上方铁律 2——不下调、不空涨。
-    /// 与 App marketing 版本解耦：App 升级不改这里，只有新增 V2 时才出现新号。
     static let versionIdentifier = Schema.Version(1, 3, 0)
-
-    /// 全部 @Model 实体（16 个，与工程内 `@Model final class` 一一对应）。
-    /// 新增/删除 @Model 时，这里要同步——但那已属于"模型变更"，必须走 V2 流程（铁律 3）。
     static var models: [any PersistentModel.Type] {
-        [Entry.self, Media.self, Milestone.self, FirstTime.self,
-         TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self,
-         FamilyMember.self, ChildProfile.self, VoiceNote.self, HealthRecord.self,
-         FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self,
-         PendingDeletion.self]
+        [Entry.self, Media.self, Milestone.self, FirstTime.self, TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self, FamilyMember.self, ChildProfile.self, VoiceNote.self, HealthRecord.self, FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self, PendingDeletion.self]
     }
 }
 
-/// 迁移计划：当前只有 V1 一个版本，故 stages 为空。SharedModelContainer 与 App 均用它建容器。
-///
-/// 【2026-07-26 · Media 追加 remoteThumbURL / contentHash 的实践记录】
-/// 两个可选字段属纯 additive：SwiftData 按「类当前形状 vs store 形状」自动轻量迁移，
-/// 不需要（也不能）为此新增 VersionedSchema——V1/V2 引用同一批模型类时，
-/// 两个版本的实体形状完全相同而版本号不同，迁移器直接 abort（真机已验证）。
-/// 规范的 V2 需要把旧类定义快照进 V1 命名空间，而历史旧形状已不可考（见上方铁律注释）；
-/// 因此 additive 变更沿用「类上直接加可选字段 + 自动轻量迁移」，只有破坏性变更才起 V2。
+// V2 保留全部业务字段，新增可与业务数据一起提交的同步进度。
+// 今后的破坏性变更必须另立历史快照和迁移阶段，并验证已装机数据库。
+enum BubuSchemaV2: VersionedSchema {
+    static let versionIdentifier = Schema.Version(2, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [Entry.self, Media.self, Milestone.self, FirstTime.self, TimeCapsule.self, VoiceMemo.self, Comment.self, GrowthMovie.self, FamilyMember.self, ChildProfile.self, VoiceNote.self, HealthRecord.self, FeedEvent.self, VaccineRecord.self, GrowthMeasurement.self, PendingDeletion.self, SyncCheckpoint.self]
+    }
+}
+
 enum BubuMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] {
-        [BubuSchemaV1.self]
-    }
+    static var schemas: [any VersionedSchema.Type] { [BubuSchemaV1.self, BubuSchemaV2.self] }
     static var stages: [MigrationStage] {
-        []
+        [.lightweight(fromVersion: BubuSchemaV1.self, toVersion: BubuSchemaV2.self)]
     }
 }
-
-// MARK: - 【下一次改模型必读】
-//
-// ⚠️ 这一段以前放的是一份「照抄改名即可」的 V2 模板。**那份模板照抄必然失败**，
-// 原因就写在上面几行：V1/V2 引用同一批模型类时，两个版本的实体形状完全相同而版本号不同，
-// 迁移器直接 abort（真机已验证）。为了不让下一个会话踩这个坑，模板已删除，换成事实描述。
-//
-// 【现状的准确说法】
-// `BubuSchemaV1.models` 返回的是工程里**当前**的 16 个类，不是冻结快照——
-// 类改一个字段，所谓的「V1 历史快照」跟着变。`stages` 为空。
-// 也就是说：**目前实际生效的仍然是 SwiftData 的隐式轻量迁移**，
-// 版本化 schema 这套机制在这个工程里是装饰性的。
-//
-// 【在真正修好之前，允许做什么】
-// ✅ 加 optional 字段（`var foo: T?`）—— 纯 additive，自动轻量迁移，
-//    已被 Media 追加 remoteThumbURL / contentHash 实践验证过。
-// ✅ 加带默认值的非 optional 字段（`var flag: Bool = false`）—— 同理。
-// ✅ 加 `#Index` —— 2026-09-04 已用真实旧版 store 基线实测：加完索引后仍能无损打开。
-// ❌ 改名、改类型、Optional→非 Optional、删字段、删/加 @Model 实体 ——
-//    这些 SwiftData 推断不出来，会让 ModelContainer 构造抛错，
-//    全家所有设备升级后打开是空 App（降级到内存容器，磁盘数据还在但功能全损）。
-//
-// 【真正修好它要做什么】
-// 在 `BubuSchemaV1` 命名空间里**真正复制一份**当前 16 个类的定义，让 V1 冻结成快照；
-// V2 用活类；`stages` 填 `.lightweight(fromVersion:toVersion:)`；
-// App 侧用 `typealias Entry = BubuSchemaV2.Entry` 之类把引用指过去。
-// 这是一次涉及全工程模型引用的改动，必须单独排期、单独验证，不要顺手做。
-//
-// 【无论如何都要做的一件事】
-// 改任何模型之前，先跑 `BubuTimeMachineTests/StoreMigrationTests.swift`。
-// 它用一份**真实装机数据**（Fixtures/LegacyStore_v2.12.2.store）以生产同款配置去打开，
-// 是目前唯一能在发版前挡住「升级后全家打开是空 App」的东西。它红了就不要发版。
 
 // MARK: - 数据保护模式标志
 /// 容器打开失败时置位：App 以内存容器运行（不崩、不清数据），

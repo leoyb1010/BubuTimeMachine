@@ -89,7 +89,7 @@ struct OnboardingView: View {
             } label: {
                 Text("家里已经在用了？我是来加入的 →")
                     .font(BubuTheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(theme.primary)
+                    .foregroundStyle(theme.textAccent)
             }
             .buttonStyle(.plain)
         }
@@ -124,7 +124,7 @@ struct OnboardingView: View {
             // 实时年龄预览
             Text("现在的布布：\(AgeCalculator.ageDescription(birthday: birthday, at: .now))")
                 .font(BubuTheme.Font.headline)
-                .foregroundStyle(theme.primary)
+                .foregroundStyle(theme.textAccent)
         }
     }
 

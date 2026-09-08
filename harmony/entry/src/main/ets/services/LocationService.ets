@@ -71,6 +71,7 @@ export class LocationService {
   // CLLocationManager.requestLocation 一次性定位 → geoLocationManager.getCurrentLocation。
   private async requestOneShotLocation(): Promise<CapturedCoordinate | null> {
     try {
+      if (canIUse('SystemCapability.Location.Location.Core')) {
       // 对齐 iOS kCLLocationAccuracyHundredMeters：取低功耗、约百米精度的一次定位。
       const request: geoLocationManager.SingleLocationRequest = {
         locatingPriority: geoLocationManager.LocatingPriority.PRIORITY_LOCATING_SPEED,
@@ -79,6 +80,10 @@ export class LocationService {
       const location: geoLocationManager.Location =
         await geoLocationManager.getCurrentLocation(request);
       return { latitude: location.latitude, longitude: location.longitude };
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
     } catch (e) {
       // 定位失败（无信号 / 超时 / 权限关闭）：对齐 iOS didFailWithError，静默返回 nil。
       hilog.error(DOMAIN, 'Bubu', `单次定位失败: ${JSON.stringify(e)}`);
@@ -92,6 +97,7 @@ export class LocationService {
   // HarmonyOS GeoAddress 字段映射：placeName / subLocality / locality / administrativeArea / descriptions。
   private async reverseGeocode(lat: number, lon: number): Promise<string | undefined> {
     try {
+      if (canIUse('SystemCapability.Location.Location.Core')) {
       const req: geoLocationManager.ReverseGeoCodeRequest = {
         latitude: lat,
         longitude: lon,
@@ -114,6 +120,10 @@ export class LocationService {
         }
       }
       return undefined;
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
     } catch (e) {
       // 无网络 / 无权限 / API 不可用：静默跳过（对齐 iOS try? 降级）。
       hilog.error(DOMAIN, 'Bubu', `反向地理编码失败: ${JSON.stringify(e)}`);

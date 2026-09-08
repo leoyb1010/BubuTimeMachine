@@ -306,7 +306,7 @@ export class YearbookExporter {
     try {
       packer = image.createImagePacker();
       const opts: image.PackingOption = { format: 'image/png', quality: 100 };
-      const buf: ArrayBuffer = await packer.packing(ctx.pixelMap, opts);
+      const buf: ArrayBuffer = await packer.packToData(ctx.pixelMap, opts);
       const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       fileIo.writeSync(file.fd, buf);
       fileIo.closeSync(file);
@@ -322,6 +322,7 @@ export class YearbookExporter {
   }
 
   private static assemblePDF(dir: string, pageCount: number, pdfPath: string): void {
+    try {
     const document = new pdfService.PdfDocument();
     try {
       if (pageCount <= 0 || !document.createDocument(PAGE_W, PAGE_H)) {
@@ -343,6 +344,10 @@ export class YearbookExporter {
       fileIo.rmdirSync(dir);
     } finally {
       document.releaseDocument();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'YearbookExporter.assemblePDF 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 

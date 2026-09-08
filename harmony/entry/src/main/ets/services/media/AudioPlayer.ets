@@ -54,6 +54,7 @@ export class AudioPlayer {
 
   // iOS: func play(url:)
   async play(path: string): Promise<void> {
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
     await this.stop();
     try {
       const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
@@ -88,7 +89,11 @@ export class AudioPlayer {
       this.isPlayingFlag = false;
       this.emit();
     }
-  }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    }
 
   // iOS: func stop()
   async stop(): Promise<void> {

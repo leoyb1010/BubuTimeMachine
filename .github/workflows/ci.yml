@@ -131,3 +131,11 @@ jobs:
         # `python -m` 会把当前服务目录加入模块搜索路径；直接调用 pytest 的
         # console script 在 GitHub Python 3.9 环境下无法 import movie_render。
         run: python -m pytest tests -q
+
+      - name: PocketBase migration and isolation integration tests
+        # 与当前生产版本一致，独立临时数据库验证真实规则，不读取家庭数据。
+        run: |
+          curl -fsSL --retry 3 https://github.com/pocketbase/pocketbase/releases/download/v0.39.2/pocketbase_0.39.2_linux_amd64.zip -o /tmp/pocketbase.zip
+          echo '054cdf8c52712c4fcab1c515f0e4d9cc0e31d4f4f3bd81d8455b663178e2f146  /tmp/pocketbase.zip' | sha256sum -c -
+          unzip -q /tmp/pocketbase.zip -d /tmp/bubu-pocketbase
+          POCKETBASE_BIN=/tmp/bubu-pocketbase/pocketbase python -m unittest discover -s server/pocketbase/tests -v

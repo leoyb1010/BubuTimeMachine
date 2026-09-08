@@ -61,6 +61,7 @@ export class BubuSound {
   // NOTE: 以 AVPlayer 播放一次性短音效；用毕释放，避免泄漏。
   // ambient（不打断他人音乐、跟随静音）语义需配合 AudioSession，环境限制下从简。
   private static playRawfile(name: string): void {
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
     const context = BubuSound.context;
     if (!context) return;
     try {
@@ -83,5 +84,9 @@ export class BubuSound {
     } catch (e) {
       // 播放失败静默
     }
-  }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    }
 }

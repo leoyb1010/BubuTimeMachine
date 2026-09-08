@@ -130,7 +130,7 @@ private struct ShareCardView: View {
             HStack(spacing: 8) {
                 Text(content.dateText)
                     .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.primary)
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
                 if let age = content.ageText, !age.isEmpty {
                     Text(age)
                         .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -185,7 +185,7 @@ private struct ShareCardView: View {
             HStack(spacing: 8) {
                 Text(content.dateText)
                     .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.primary)
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
                 if let age = content.ageText, !age.isEmpty {
                     Text(age)
                         .font(.system(size: 12, weight: .bold, design: .rounded))

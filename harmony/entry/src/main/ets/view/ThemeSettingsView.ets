@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 // MARK: - 主题与外观（对照 iOS Features/Settings/ThemeSettingsView.swift）
 // 切换全局主题配色（马卡龙色卡网格），选择首页背景模式（主题背景 / 布布照片）。
 // iOS 用 LazyVGrid 两列 + segmented Picker；ArkUI 用 Grid 两列 + 自绘分段控件。
@@ -114,7 +115,7 @@ export struct ThemeSettingsView {
     .onClick(() => {
       this.manager.select(theme);
       this.tick += 1;
-      this.getUIContext().getPromptAction().showToast({ message: `已切换到「${theme.name}」` });
+      SafePrompt.toast(this.getUIContext(), { message: `已切换到「${theme.name}」` });
     })
   }
 

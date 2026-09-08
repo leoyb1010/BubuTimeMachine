@@ -14,7 +14,8 @@
 - **工程管理**：xcodegen（改 `project.yml` 后必须重跑 `xcodegen generate`）
 - **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 26.0、watchOS 11.0 部署目标
 - **规模**（2026-09-04 实测）：主 App 约 190 个 Swift 文件 / 4.2 万行；单元测试 170+ 项 / 31 套件，另有 5 项 iPhone+iPad XCUITest。
-- **当前版本**：v2.13.0
+- **当前版本**：v2.14.0
+- **本轮交付证据**：`docs/RELEASE_2.14.0.md`；审计基线见 `docs/AUDIT_AND_UPGRADE_PLAN_2026-09-08.md`。
 
 ---
 

@@ -7,7 +7,7 @@ SDK_DIR="${DEVECO_SDK_HOME:-$DEVECO_APP/Contents/sdk}"
 NODE_HOME="${NODE_HOME:-$DEVECO_APP/Contents/tools/node}"
 JAVA_HOME="${JAVA_HOME:-$DEVECO_APP/Contents/jbr/Contents/Home}"
 HDC="$SDK_DIR/default/openharmony/toolchains/hdc"
-HAP="$ROOT_DIR/entry/build/default/outputs/default/entry-default-unsigned.hap"
+HAP="${BUBU_HAP_PATH:-$ROOT_DIR/entry/build/default/outputs/default/entry-default-signed.hap}"
 TARGET="${1:-}"
 
 export NODE_HOME
@@ -23,7 +23,16 @@ fi
 cd "$ROOT_DIR"
 
 if [[ -z "$TARGET" ]]; then
-  TARGET="$("$HDC" list targets | awk 'NF && $0 != "[Empty]" { print $1; exit }')"
+  targets=()
+  while IFS= read -r item; do
+    item="${item%$'\r'}"
+    [[ -n "$item" && "$item" != "[Empty]" ]] && targets+=("$item")
+  done < <("$HDC" list targets)
+  if [[ "${#targets[@]}" -gt 1 ]]; then
+    echo "检测到多个设备，请明确传入目标设备标识。" >&2
+    exit 1
+  fi
+  TARGET="${targets[0]:-}"
 fi
 
 if [[ -z "$TARGET" ]]; then
@@ -31,7 +40,10 @@ if [[ -z "$TARGET" ]]; then
   exit 1
 fi
 
-./hvigorw assembleHap --mode module -p product=default --no-daemon
+if [[ ! -f "$HAP" || "$HAP" == *unsigned.hap ]]; then
+  echo "请先完成本机签名，并用 BUBU_HAP_PATH 指定签名 HAP；不会用无签名包覆盖手机。" >&2
+  exit 1
+fi
 "$HDC" -t "$TARGET" install -r "$HAP"
 "$HDC" -t "$TARGET" shell aa start -a EntryAbility -b com.bubu.timemachine
 

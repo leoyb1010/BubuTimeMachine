@@ -1,3 +1,5 @@
+import { capsuleVersion, requireCapsuleVersion } from './CapsuleVersion';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { util, buffer } from '@kit.ArkTS';
 import { CapsuleCrypto, CapsuleCryptoError } from './CapsuleCrypto';
@@ -48,6 +50,7 @@ export class CapsuleVault {
 
   // 把加密 blob 写盘，返回随机文件名。
   private saveBlob(data: Uint8Array, preferredExtension: string = 'btc'): string {
+    try {
     const name = `${util.generateRandomUUID(true)}.${preferredExtension}`;
     const path = this.blobPath(name);
     const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE);
@@ -57,6 +60,10 @@ export class CapsuleVault {
       fileIo.closeSync(file);
     }
     return name;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleVault.saveBlob 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // 读出 blob 字节；不存在/失败返回 null。
@@ -119,6 +126,7 @@ export class CapsuleVault {
 
   // 把语音原文件字节内嵌进载荷（对照 iOS：若有 voiceFileName 且未内嵌则读盘内嵌）。
   private embedVoiceIfNeeded(payload: CapsulePayload): CapsulePayload {
+    try {
     const out: CapsulePayload = {
       letter: payload.letter,
       voiceFileName: payload.voiceFileName,
@@ -138,17 +146,29 @@ export class CapsuleVault {
       }
     }
     return out;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleVault.embedVoiceIfNeeded 操作失败，已安全中止');
+      throw error as Error;
+    }
+  }
+
+  validateVersion(fileName: string, minimumVersion: number): number {
+    const cipher = this.readBlob(fileName);
+    if (!cipher) throw CapsuleCryptoError.decryptionFailed();
+    requireCapsuleVersion(cipher, minimumVersion);
+    return capsuleVersion(cipher);
   }
 
   // MARK: - 解封（到期解密读出）
   // 未到期抛 CapsuleCryptoError.stillLocked。
   // v3 blob 需提供 recoveryCode；v1/v2 自动按旧逻辑解。
   async unseal(fileName: string, unlockAtMs: number, salt: string,
-               recoveryCode?: string, nowMs: number = Date.now()): Promise<CapsulePayload> {
+               recoveryCode?: string, nowMs: number = Date.now(), minimumVersion: number = 0): Promise<CapsulePayload> {
     const cipher = this.readBlob(fileName);
     if (!cipher) {
       throw CapsuleCryptoError.decryptionFailed();
     }
+    requireCapsuleVersion(cipher, minimumVersion);
     let plainBytes: Uint8Array;
     if (CapsuleCrypto.isV3(cipher)) {
       if (!recoveryCode || recoveryCode.length === 0) {

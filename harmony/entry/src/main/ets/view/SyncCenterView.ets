@@ -18,11 +18,15 @@ export struct SyncCenterView {
   @State pendingCount: number = 0;
 
   async aboutToAppear(): Promise<void> {
+    try {
     this.refresh();
     const context = this.getUIContext().getHostContext() as common.Context;
     const store = await preferences.getPreferences(context, 'bubu_widget');
     const value = await store.get('bubu.lastExportAt', 0);
     this.lastExportAtSec = typeof value === 'number' ? value : 0;
+    } catch (error) {
+      this.lastExportAtSec = 0; this.failureReason = this.failureReason || '上次导出时间暂时无法读取';
+    }
   }
 
   build() {

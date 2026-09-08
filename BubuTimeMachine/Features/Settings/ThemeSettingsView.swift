@@ -64,7 +64,7 @@ struct ThemeSettingsView: View {
                 previewSwatch(theme)
                 HStack(spacing: 6) {
                     if selected {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.primary)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.textAccent)
                     }
                     Text(theme.name)
                         .font(BubuTheme.Font.body.weight(.medium))

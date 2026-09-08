@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { ServerConfig } from '../services/ServerConfig';
 import { AccountService } from '../services/AccountService';
 import { SyncEngine } from '../sync/SyncEngine';
@@ -607,26 +608,26 @@ export struct SettingsView {
     await c.persistServer();
     SyncEngine.shared.start();
     this.statusText = '已保存，正在同步';
-    this.getUIContext().getPromptAction().showToast({ message: '已保存，正在同步…' });
+    SafePrompt.toast(this.getUIContext(), { message: '已保存，正在同步…' });
   }
 
   private async updateDailyReminder(value: boolean): Promise<void> {
     this.dailyReminderEnabled = value;
     await ServerConfig.shared.setDailyReminderEnabled(value);
     await ReminderScheduler.shared.update(value);
-    this.getUIContext().getPromptAction().showToast({ message: value ? '每日回忆提醒已开启' : '每日回忆提醒已关闭' });
+    SafePrompt.toast(this.getUIContext(), { message: value ? '每日回忆提醒已开启' : '每日回忆提醒已关闭' });
   }
 
   private async updateSimpleMode(value: boolean): Promise<void> {
     this.simpleModeEnabled = value;
     await ServerConfig.shared.setSimpleModeEnabled(value);
-    this.getUIContext().getPromptAction().showToast({ message: value ? '已开启简洁长辈模式' : '已退出简洁长辈模式' });
+    SafePrompt.toast(this.getUIContext(), { message: value ? '已开启简洁长辈模式' : '已退出简洁长辈模式' });
   }
 
   private async updatePhotoInboxBackground(value: boolean): Promise<void> {
     this.photoInboxBackgroundEnabled = value;
     await ServerConfig.shared.setPhotoInboxBackgroundEnabled(value);
     BackgroundSyncScheduler.ensureScheduled();
-    this.getUIContext().getPromptAction().showToast({ message: value ? '已开启后台照片发现' : '已关闭后台照片发现' });
+    SafePrompt.toast(this.getUIContext(), { message: value ? '已开启后台照片发现' : '已关闭后台照片发现' });
   }
 }

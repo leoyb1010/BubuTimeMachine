@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { http } from '@kit.NetworkKit';
 import { FamilyRole } from '../models/Enums';
 import { ServerConfig } from './ServerConfig';
@@ -141,6 +142,7 @@ export class AccountService {
   }
 
   private async authorizedRequest(method: string, path: string, body: string, token: string): Promise<string> {
+    try {
     const req = http.createHttp();
     try {
       const methodEnum = method === 'POST' ? http.RequestMethod.POST
@@ -161,6 +163,10 @@ export class AccountService {
       return resp.result as string;
     } finally {
       req.destroy();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AccountService.authorizedRequest 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 

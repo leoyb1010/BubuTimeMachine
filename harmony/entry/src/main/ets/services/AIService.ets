@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { request } from '@kit.BasicServicesKit';
@@ -112,6 +113,7 @@ export class AIService {
 
   // 连通性探测（对照 ping）。服务端开启鉴权且 key 不对时返回 false。
   async ping(): Promise<boolean> {
+    try {
     const req = http.createHttp();
     try {
       const resp = await req.request(this.baseURL + '/health', {
@@ -129,6 +131,10 @@ export class AIService {
       return true;
     } finally {
       req.destroy();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.ping 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 
@@ -218,6 +224,7 @@ export class AIService {
   // NOTE: iOS 走 multipart/form-data 上传本地音频文件。HarmonyOS http 的 multipart 需手工拼包，
   // 此处保留 1:1 端点与返回字段语义，传入已可访问的本地文件路径并以表单上传。
   async transcribe(audioFilePath: string): Promise<string> {
+    try {
     const req = http.createHttp();
     try {
       const fileName = audioFilePath.split('/').pop() ?? 'audio';
@@ -248,6 +255,10 @@ export class AIService {
       return (obj['transcript'] as string | undefined) ?? '';
     } finally {
       req.destroy();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.transcribe 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 
@@ -368,6 +379,8 @@ export class AIService {
   }
 
   private async downloadProtectedFile(path: string, extension: string): Promise<string> {
+    try {
+      if (canIUse('SystemCapability.Request.FileTransferAgent')) {
     if (!this.appContext) throw new Error('缺少下载上下文');
     const fileName = `ai_${util.generateRandomUUID(true)}.${extension}`;
     const destination = MediaStore.shared.fullPath(fileName);
@@ -398,6 +411,14 @@ export class AIService {
         reject(new Error('文件下载超时'));
       }, 300000);
     });
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.downloadProtectedFile 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // MARK: - 自然语言解析
@@ -420,6 +441,7 @@ export class AIService {
   // 结构化解析（对照 iOS parseNaturalCapture(_:NaturalCaptureRequest)）。
   // 一句话自然语言 → 多条结构化记录（疫苗/成长/餐食/喝水/睡眠/不舒服/时光…）。
   async parseNaturalCaptureFull(request: NaturalCaptureRequest): Promise<NaturalCaptureParseResult> {
+    try {
     const req = http.createHttp();
     try {
       const body = JSON.stringify({
@@ -443,12 +465,17 @@ export class AIService {
     } finally {
       req.destroy();
     }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.parseNaturalCaptureFull 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // MARK: - 私有
 
   // 通用 JSON POST（对照 BubuAIService.post + check）。非 2xx 抛 APIError.server 等价错误。
   private async post(path: string, body: Record<string, Object>): Promise<Record<string, Object>> {
+    try {
     const req = http.createHttp();
     try {
       const resp = await req.request(this.baseURL + '/' + path, {
@@ -469,9 +496,14 @@ export class AIService {
     } finally {
       req.destroy();
     }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.post 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async getJSON(path: string, allowNotFound: boolean = false): Promise<Object | undefined> {
+    try {
     const req = http.createHttp();
     try {
       const resp = await req.request(this.baseURL + '/' + path, {
@@ -488,10 +520,15 @@ export class AIService {
     } finally {
       req.destroy();
     }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.getJSON 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async intakeRequest(method: 'GET' | 'POST', path: string,
                               body?: Record<string, Object>): Promise<Object> {
+    try {
     const token = await APIClient.shared.accessToken();
     if (token.length === 0) throw new Error('请先登录家庭服务器');
     const req = http.createHttp();
@@ -513,6 +550,10 @@ export class AIService {
       return JSON.parse(resp.result as string) as Object;
     } finally {
       req.destroy();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'AIService.intakeRequest 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 }

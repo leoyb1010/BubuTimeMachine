@@ -66,6 +66,8 @@ export class AudioRecorder {
 
   async start(): Promise<boolean> {
     try {
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
+      if (!(await PermissionService.isGranted('ohos.permission.MICROPHONE'))) return false;
       this.filePath = MediaStore.shared.newAudioPath();
       const file = fileIo.openSync(this.filePath, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE);
       this.fileFd = file.fd;
@@ -92,6 +94,10 @@ export class AudioRecorder {
       this.startTimer();
       BubuActivityController.shared.startVoiceRecording(ServerConfig.shared.childName);
       return true;
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
     } catch (e) {
       hilog.error(DOMAIN, 'Bubu', `录音启动失败: ${JSON.stringify(e)}`);
       this.cleanup();

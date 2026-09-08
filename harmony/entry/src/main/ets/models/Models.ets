@@ -61,6 +61,9 @@ export interface ChildProfile {
   heroBackgroundFileName?: string;
   syncState: SyncState;
   createdAt: number;
+  schoolStartDate?: number;
+  allergies?: string;
+  medicalNotes?: string;
 }
 
 // FamilyMember：家庭成员
@@ -106,6 +109,7 @@ export interface TimeCapsule {
   coverEmoji?: string;
   syncState: SyncState;
   createdAt: number;
+  cryptoVersion?: number;
 }
 
 // HealthRecord：健康记录（餐食/睡眠/营养/不舒服）

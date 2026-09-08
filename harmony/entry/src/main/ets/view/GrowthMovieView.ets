@@ -622,24 +622,36 @@ export struct GrowthMovieView {
   }
 
   private async pendingJob(year: number): Promise<string> {
+    try {
     const context = this.getUIContext().getHostContext() as common.Context;
     const store = await preferences.getPreferences(context, 'bubu_growth_movie_jobs');
     const value = await store.get(`job_${year}`, '');
     return typeof value === 'string' ? value : '';
+    } catch (error) {
+      this.renderError = '任务进度暂时无法保存或读取，已有作品仍保留'; throw error as Error;
+    }
   }
 
   private async savePendingJob(year: number, jobId: string): Promise<void> {
+    try {
     const context = this.getUIContext().getHostContext() as common.Context;
     const store = await preferences.getPreferences(context, 'bubu_growth_movie_jobs');
     await store.put(`job_${year}`, jobId);
     await store.flush();
+    } catch (error) {
+      this.renderError = '任务进度暂时无法保存或读取，已有作品仍保留'; throw error as Error;
+    }
   }
 
   private async clearPendingJob(year: number): Promise<void> {
+    try {
     const context = this.getUIContext().getHostContext() as common.Context;
     const store = await preferences.getPreferences(context, 'bubu_growth_movie_jobs');
     await store.delete(`job_${year}`);
     await store.flush();
+    } catch (error) {
+      this.renderError = '任务进度暂时无法保存或读取，已有作品仍保留'; throw error as Error;
+    }
   }
 
   // 草稿标题（对照 iOS draftTitle）。

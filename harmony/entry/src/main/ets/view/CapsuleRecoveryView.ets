@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 import { CapsuleRecovery } from '../services/security/CapsuleRecovery';
@@ -105,7 +106,7 @@ export struct CapsuleRecoveryView {
           .borderRadius(24)
           .onClick(() => {
             this.code = CapsuleRecovery.currentOrCreate();
-            this.getUIContext().getPromptAction().showToast({ message: '已生成，请务必抄下来 🔑' });
+            SafePrompt.toast(this.getUIContext(), { message: '已生成，请务必抄下来 🔑' });
           })
       }
       .width('100%')
@@ -267,7 +268,7 @@ export struct CapsuleRecoveryView {
     this.restoreInput = '';
     this.restoring = false;
     this.restoreError = '';
-    this.getUIContext().getPromptAction().showToast({ message: '恢复码已校验并更新 🔑' });
+    SafePrompt.toast(this.getUIContext(), { message: '恢复码已校验并更新 🔑' });
   }
 
   private numberedWords(): NumberedWord[] {
@@ -286,12 +287,16 @@ export struct CapsuleRecoveryView {
     return rows * 26;
   }
 
-  private copyCode(): void {
-    const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.code);
-    const sysPasteboard = pasteboard.getSystemPasteboard();
-    sysPasteboard.setData(data).then(() => {
+  private async copyCode(): Promise<void> {
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.code);
+      const sysPasteboard = pasteboard.getSystemPasteboard();
+      await sysPasteboard.setData(data);
       this.copied = true;
-      this.getUIContext().getPromptAction().showToast({ message: '已复制到剪贴板' });
-    });
+      SafePrompt.toast(this.getUIContext(), { message: '已复制到剪贴板' });
+    } catch (error) {
+      this.copied = false;
+      SafePrompt.toast(this.getUIContext(), { message: '复制未完成，请稍后重试或手工抄写恢复码' });
+    }
   }
 }

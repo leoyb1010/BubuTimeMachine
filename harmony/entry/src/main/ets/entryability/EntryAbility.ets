@@ -39,6 +39,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    MotionPreference.dispose();
+    SyncEngine.shared.stopPolling();
     hilog.info(DOMAIN, 'Bubu', 'EntryAbility onDestroy');
   }
 
@@ -112,6 +114,8 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // 回前台补一轮同步（对应 iOS scenePhase .active → syncEngine.start）。
     SyncEngine.shared.start();
+    ReminderScheduler.shared.initialize(this.context);
+    MotionPreference.initialize(this.context);
     ReminderScheduler.shared.refreshIfEnabled(ServerConfig.shared.dailyReminderEnabled).catch((error: Error) => {
       hilog.error(DOMAIN, 'Bubu', `刷新提醒失败: ${error.message}`);
     });
@@ -125,6 +129,7 @@ export default class EntryAbility extends UIAbility {
     SyncEngine.shared.stopPolling();
     BackgroundSyncScheduler.ensureScheduled();
   }
+
 
   private handleReminderWant(want: Want): void {
     const value = want.parameters?.['bubuReminderDraft'];

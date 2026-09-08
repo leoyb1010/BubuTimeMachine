@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { GrowthMeasurement, ChildProfile } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
@@ -365,7 +366,7 @@ export struct GrowthCurveView {
     const wv = parseFloat(this.weightStr);
     const hc = parseFloat(this.headStr);
     if (isNaN(hv) && isNaN(wv) && isNaN(hc)) {
-      this.getUIContext().getPromptAction().showToast({ message: '先填身高、体重或头围' });
+      SafePrompt.toast(this.getUIContext(), { message: '先填身高、体重或头围' });
       return;
     }
     const now = Date.now();
@@ -383,7 +384,7 @@ export struct GrowthCurveView {
     await AppDatabase.shared.insertGrowth(g);
     this.showAdd = false;
     await this.reload();
-    this.getUIContext().getPromptAction().showToast({ message: '已记录 📈' });
+    SafePrompt.toast(this.getUIContext(), { message: '已记录 📈' });
   }
 
   private dateText(ms: number): string {

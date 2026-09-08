@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { drawing, common2D } from '@kit.ArkGraphics2D';
 import { image } from '@kit.ImageKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -140,6 +141,7 @@ export class ShareCardExporter {
 
   private static drawImageCover(canvas: drawing.Canvas, pixelMap: image.PixelMap,
                                 x: number, y: number, width: number, height: number): void {
+    try {
     const info = pixelMap.getImageInfoSync();
     const sourceRatio = info.size.width / info.size.height;
     const targetRatio = width / height;
@@ -154,6 +156,10 @@ export class ShareCardExporter {
       source = { left: 0, top, right: info.size.width, bottom: top + sourceHeight };
     }
     canvas.drawImageRectWithSrc(pixelMap, source, { left: x, top: y, right: x + width, bottom: y + height });
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ShareCardExporter.drawImageCover 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static drawText(canvas: drawing.Canvas, text: string, x: number, y: number,
@@ -195,14 +201,19 @@ export class ShareCardExporter {
   }
 
   private static async savePNG(pixelMap: image.PixelMap, path: string): Promise<void> {
+    try {
     const packer = image.createImagePacker();
     try {
-      const data = await packer.packing(pixelMap, { format: 'image/png', quality: 100 });
+      const data = await packer.packToData(pixelMap, { format: 'image/png', quality: 100 });
       const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       fileIo.writeSync(file.fd, data);
       fileIo.closeSync(file);
     } finally {
       try { packer.release(); } catch (e) {}
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'ShareCardExporter.savePNG 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 

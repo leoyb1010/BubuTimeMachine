@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { Entry, ChildProfile, Media, FeedEvent } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
 import { MediaStore } from '../services/MediaStore';
@@ -57,7 +58,7 @@ export struct TimelineView {
 	  private undoTimer: number = -1;
 	  @State private pageIn: boolean = false;
 	  @StorageLink('bubuTabBarVisible') tabBarVisible: boolean = true;
-	
+
 	  aboutToAppear(): void {
 	    this.tabBarVisible = true;
 	    this.syncBackHandler();
@@ -584,7 +585,7 @@ export struct TimelineView {
 
   // 删除确认（对照 iOS alert「删除这条记录？」+ deletePendingEntry）。
   private confirmDelete(entry: Entry): void {
-    this.getUIContext().getPromptAction().showDialog({
+    SafePrompt.dialog(this.getUIContext(), {
       title: '删除这条记录？',
       message: '删除后会从时光轴隐藏，本地记录会标记为待同步删除。',
       buttons: [

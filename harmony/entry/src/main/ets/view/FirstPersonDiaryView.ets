@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { Entry, Media } from '../models/Models';
 import { MediaType, SyncState } from '../models/Enums';
 import { AppDatabase } from '../data/AppDatabase';
@@ -341,6 +342,6 @@ export struct FirstPersonDiaryView {
       editedAt: Date.now(),
       syncState: SyncState.local
     });
-    this.getUIContext().getPromptAction().showToast({ message: '已保存到这条记录' });
+    SafePrompt.toast(this.getUIContext(), { message: '已保存到这条记录' });
   }
 }

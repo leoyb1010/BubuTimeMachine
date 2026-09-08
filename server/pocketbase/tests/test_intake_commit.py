@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import socket
 import sqlite3
 import subprocess
@@ -58,6 +59,16 @@ class IntakeCommitIntegrationTests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+            )
+
+            # PocketBase 空库首次 serve 会自动打开浏览器安装页。测试先建立临时超管，
+            # 让验证始终在后台进行；账号只存在于本次临时目录，结束后一起销毁。
+            subprocess.run(
+                [str(binary), "superuser", "upsert", "intake-test@example.invalid",
+                 secrets.token_urlsafe(32), "--dir", str(data_dir),
+                 "--migrationsDir", str(ROOT / "server/pocketbase/migrations"),
+                 "--hooksDir", str(ROOT / "server/pocketbase/pb_hooks")],
+                check=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             )
 
             port = self._free_port()

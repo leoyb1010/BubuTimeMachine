@@ -2,6 +2,7 @@ import { relationalStore } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
+import { fileIo } from '@kit.CoreFileKit';
 import { Entry, ChildProfile, Media, Milestone, TimeCapsule, HealthRecord, VoiceNote, FamilyMember, GrowthMeasurement, VaccineRecord, Comment, VoiceMemo, FirstTime, GrowthMovie, PendingDeletion, FeedEvent } from '../models/Models';
 import { SyncState } from '../models/Enums';
 import { PhotoIntakeCandidate, PhotoIntakeState } from '../models/PhotoIntake';
@@ -20,25 +21,64 @@ export class AppDatabase {
   private constructor() {}
 
   async initialize(context: common.Context): Promise<void> {
+    try {
     if (this.store) return;
     const config: relationalStore.StoreConfig = {
       name: 'BubuTimeMachine.db',
       securityLevel: relationalStore.SecurityLevel.S2
     };
     this.store = await relationalStore.getRdbStore(context, config);
+    const before = await this.upgradeCounts();
+    const backupName = 'BubuTimeMachine-pre-2.14.db';
+    const destination = context.databaseDir + '/rdb/' + backupName;
+    let protectedCopy = fileIo.accessSync(destination);
+    if (before.length > 0 && !(await this.hasColumn('time_capsule', 'cryptoVersion'))) {
+      if (!fileIo.accessSync(destination)) await this.store.backup(backupName);
+      protectedCopy = fileIo.accessSync(destination);
+      if (!protectedCopy) throw new Error('无法建立升级保护副本，已停止数据库升级');
+    }
     await this.createTables();
+    const after = await this.upgradeCounts();
+    if (before.length > 0 && before !== after) throw new Error('升级前后记录数量不一致，已停止正常启动');
+    hilog.info(DOMAIN, 'Bubu', 'BUBU_UPGRADE_DATA before=%{public}s after=%{public}s backup=%{public}s', before, after, String(protectedCopy));
     this.store.on('dataChange', relationalStore.SubscribeType.SUBSCRIBE_TYPE_LOCAL_DETAILS,
       (_changes: relationalStore.ChangeInfo[]): void => {
         if (this.dataChangeListener) this.dataChangeListener();
       });
     hilog.info(DOMAIN, 'Bubu', '数据库初始化完成');
+    } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 initialize 失败，已中止本次操作: %{public}s', (error as Error).message);
+      const failed = this.store;
+      this.store = null;
+      if (failed) { try { failed.close(); } catch (closeError) {} }
+      throw error as Error;
+    }
   }
 
   setDataChangeListener(listener: (() => void) | null): void {
     this.dataChangeListener = listener;
   }
 
+  private async upgradeCounts(): Promise<string> {
+    try {
+      const names = await this.store!.querySql("SELECT name FROM sqlite_master WHERE type='table' AND name='entry'");
+      const exists = names.goToNextRow();
+      names.close();
+      if (!exists) return '';
+      const counts: number[] = [];
+      for (const table of ['entry', 'media', 'child_profile', 'time_capsule']) {
+        const rows = await this.store!.querySql(`SELECT count(*) AS n FROM ${table}`);
+        try {
+          if (!rows.goToNextRow()) throw new Error('无法读取升级前的记录数量');
+          counts.push(rows.getLong(0));
+        } finally { rows.close(); }
+      }
+      return JSON.stringify(counts);
+    } catch (error) { throw error as Error; }
+  }
+
   private async createTables(): Promise<void> {
+    try {
     const s = this.store!;
     // Entry
     await s.executeSql(`CREATE TABLE IF NOT EXISTS entry (
@@ -131,168 +171,189 @@ export class AppDatabase {
       height INTEGER NOT NULL, duration REAL NOT NULL, subtype INTEGER NOT NULL,
       burstKey TEXT, isLikelyChild INTEGER NOT NULL DEFAULT 0, lastSeenAt INTEGER NOT NULL)`);
     await this.runSchemaMigrations();
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 createTables 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   private async runSchemaMigrations(): Promise<void> {
+    try {
     // Fresh installs already have these columns through CREATE TABLE. Existing testers may
     // carry older local tables, so keep every migration idempotent.
     const store = this.store!;
-    store.beginTransaction();
+    const transaction = await store.createTransaction();
     try {
-    await this.addColumnIfMissing('entry', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('entry', 'firstPersonNote', 'TEXT');
-    await this.addColumnIfMissing('entry', 'locationName', 'TEXT');
-    await this.addColumnIfMissing('entry', 'latitude', 'REAL');
-    await this.addColumnIfMissing('entry', 'longitude', 'REAL');
-    await this.addColumnIfMissing('entry', 'moodRaw', 'TEXT');
-    await this.addColumnIfMissing('entry', 'isArchived', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('entry', 'inStorybook', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('entry', 'editedAt', 'INTEGER');
+    await this.addColumnIfMissing('entry', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('entry', 'firstPersonNote', 'TEXT', transaction);
+    await this.addColumnIfMissing('entry', 'locationName', 'TEXT', transaction);
+    await this.addColumnIfMissing('entry', 'latitude', 'REAL', transaction);
+    await this.addColumnIfMissing('entry', 'longitude', 'REAL', transaction);
+    await this.addColumnIfMissing('entry', 'moodRaw', 'TEXT', transaction);
+    await this.addColumnIfMissing('entry', 'isArchived', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('entry', 'inStorybook', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('entry', 'editedAt', 'INTEGER', transaction);
 
-    await this.addColumnIfMissing('media', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('media', 'entryId', 'TEXT');
-    await this.addColumnIfMissing('media', 'typeRaw', "TEXT NOT NULL DEFAULT 'photo'");
-    await this.addColumnIfMissing('media', 'localFileName', 'TEXT');
-    await this.addColumnIfMissing('media', 'remoteURL', 'TEXT');
-    await this.addColumnIfMissing('media', 'thumbnailFileName', 'TEXT');
-    await this.addColumnIfMissing('media', 'remoteThumbURL', 'TEXT');
-    await this.addColumnIfMissing('media', 'contentHash', 'TEXT');
-    await this.addColumnIfMissing('media', 'resourceRoleRaw', 'TEXT');
-    await this.addColumnIfMissing('media', 'assetGroupID', 'TEXT');
-    await this.addColumnIfMissing('media', 'durationSeconds', 'REAL');
-    await this.addColumnIfMissing('media', 'width', 'INTEGER');
-    await this.addColumnIfMissing('media', 'height', 'INTEGER');
-    await this.addColumnIfMissing('media', 'uploadProgress', 'REAL NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('media', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('media', 'syncFailureReason', 'TEXT');
-    await this.addColumnIfMissing('media', 'aiTags', 'TEXT');
-    await this.addColumnIfMissing('media', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('photo_intake_asset', 'isLikelyChild', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('media', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'entryId', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'typeRaw', "TEXT NOT NULL DEFAULT 'photo'", transaction);
+    await this.addColumnIfMissing('media', 'localFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'remoteURL', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'thumbnailFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'remoteThumbURL', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'contentHash', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'resourceRoleRaw', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'assetGroupID', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'durationSeconds', 'REAL', transaction);
+    await this.addColumnIfMissing('media', 'width', 'INTEGER', transaction);
+    await this.addColumnIfMissing('media', 'height', 'INTEGER', transaction);
+    await this.addColumnIfMissing('media', 'uploadProgress', 'REAL NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('media', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('media', 'syncFailureReason', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'aiTags', 'TEXT', transaction);
+    await this.addColumnIfMissing('media', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('photo_intake_asset', 'isLikelyChild', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('child_profile', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'gender', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'bloodType', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'birthPlace', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'avatarMediaFileName', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'avatarRemoteURL', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'heroBackgroundFileName', 'TEXT');
-    await this.addColumnIfMissing('child_profile', 'syncState', "TEXT NOT NULL DEFAULT 'synced'");
-    await this.addColumnIfMissing('child_profile', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('child_profile', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'gender', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'bloodType', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'birthPlace', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'avatarMediaFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'avatarRemoteURL', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'heroBackgroundFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'syncState', "TEXT NOT NULL DEFAULT 'synced'", transaction);
+    await this.addColumnIfMissing('child_profile', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('child_profile', 'schoolStartDate', 'INTEGER', transaction);
+    await this.addColumnIfMissing('child_profile', 'allergies', 'TEXT', transaction);
+    await this.addColumnIfMissing('child_profile', 'medicalNotes', 'TEXT', transaction);
 
-    await this.addColumnIfMissing('milestone', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('milestone', 'detail', 'TEXT');
-    await this.addColumnIfMissing('milestone', 'happenedAt', 'INTEGER');
-    await this.addColumnIfMissing('milestone', 'ageDescription', 'TEXT');
-    await this.addColumnIfMissing('milestone', 'isCustom', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('milestone', 'ceremonyPlayed', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('milestone', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('milestone', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('milestone', 'entryId', 'TEXT');
+    await this.addColumnIfMissing('milestone', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('milestone', 'detail', 'TEXT', transaction);
+    await this.addColumnIfMissing('milestone', 'happenedAt', 'INTEGER', transaction);
+    await this.addColumnIfMissing('milestone', 'ageDescription', 'TEXT', transaction);
+    await this.addColumnIfMissing('milestone', 'isCustom', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('milestone', 'ceremonyPlayed', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('milestone', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('milestone', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('milestone', 'entryId', 'TEXT', transaction);
 
-    await this.addColumnIfMissing('time_capsule', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('time_capsule', 'letterText', 'TEXT');
-    await this.addColumnIfMissing('time_capsule', 'encryptedBlobFileName', 'TEXT');
-    await this.addColumnIfMissing('time_capsule', 'coverEmoji', 'TEXT');
-    await this.addColumnIfMissing('time_capsule', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('time_capsule', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('time_capsule', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('time_capsule', 'letterText', 'TEXT', transaction);
+    await this.addColumnIfMissing('time_capsule', 'encryptedBlobFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('time_capsule', 'cryptoVersion', 'INTEGER', transaction);
+    await this.addColumnIfMissing('time_capsule', 'coverEmoji', 'TEXT', transaction);
+    await this.addColumnIfMissing('time_capsule', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('time_capsule', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('health_record', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'detail', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'amountText', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'reaction', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'amountValue', 'REAL');
-    await this.addColumnIfMissing('health_record', 'amountUnit', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'startAt', 'INTEGER');
-    await this.addColumnIfMissing('health_record', 'endAt', 'INTEGER');
-    await this.addColumnIfMissing('health_record', 'severity', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'temperatureCelsius', 'REAL');
-    await this.addColumnIfMissing('health_record', 'tags', 'TEXT');
-    await this.addColumnIfMissing('health_record', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('health_record', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('health_record', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'detail', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'amountText', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'reaction', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'amountValue', 'REAL', transaction);
+    await this.addColumnIfMissing('health_record', 'amountUnit', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'startAt', 'INTEGER', transaction);
+    await this.addColumnIfMissing('health_record', 'endAt', 'INTEGER', transaction);
+    await this.addColumnIfMissing('health_record', 'severity', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'temperatureCelsius', 'REAL', transaction);
+    await this.addColumnIfMissing('health_record', 'tags', 'TEXT', transaction);
+    await this.addColumnIfMissing('health_record', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('health_record', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('voice_note', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('voice_note', 'localFileName', 'TEXT');
-    await this.addColumnIfMissing('voice_note', 'remoteURL', 'TEXT');
-    await this.addColumnIfMissing('voice_note', 'transcript', 'TEXT');
-    await this.addColumnIfMissing('voice_note', 'waveformSamples', 'TEXT');
-    await this.addColumnIfMissing('voice_note', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('voice_note', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('voice_note', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_note', 'localFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_note', 'remoteURL', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_note', 'transcript', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_note', 'waveformSamples', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_note', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('voice_note', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('family_member', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('family_member', 'avatarEmoji', "TEXT NOT NULL DEFAULT ''");
-    await this.addColumnIfMissing('family_member', 'themeColorHex', "TEXT NOT NULL DEFAULT ''");
-    await this.addColumnIfMissing('family_member', 'isPrimary', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('family_member', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('family_member', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('family_member', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('family_member', 'avatarEmoji', "TEXT NOT NULL DEFAULT ''", transaction);
+    await this.addColumnIfMissing('family_member', 'themeColorHex', "TEXT NOT NULL DEFAULT ''", transaction);
+    await this.addColumnIfMissing('family_member', 'isPrimary', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('family_member', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('family_member', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('growth_measurement', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('growth_measurement', 'heightCm', 'REAL');
-    await this.addColumnIfMissing('growth_measurement', 'weightKg', 'REAL');
-    await this.addColumnIfMissing('growth_measurement', 'headCircumferenceCm', 'REAL');
-    await this.addColumnIfMissing('growth_measurement', 'note', 'TEXT');
-    await this.addColumnIfMissing('growth_measurement', 'source', "TEXT NOT NULL DEFAULT 'manual'");
-    await this.addColumnIfMissing('growth_measurement', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('growth_measurement', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('growth_measurement', 'updatedAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('growth_measurement', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('growth_measurement', 'heightCm', 'REAL', transaction);
+    await this.addColumnIfMissing('growth_measurement', 'weightKg', 'REAL', transaction);
+    await this.addColumnIfMissing('growth_measurement', 'headCircumferenceCm', 'REAL', transaction);
+    await this.addColumnIfMissing('growth_measurement', 'note', 'TEXT', transaction);
+    await this.addColumnIfMissing('growth_measurement', 'source', "TEXT NOT NULL DEFAULT 'manual'", transaction);
+    await this.addColumnIfMissing('growth_measurement', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('growth_measurement', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('growth_measurement', 'updatedAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('vaccine_record', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'doseId', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'doseLabel', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'injectedAt', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('vaccine_record', 'hospital', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'injectionSite', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'reaction', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'note', 'TEXT');
-    await this.addColumnIfMissing('vaccine_record', 'source', "TEXT NOT NULL DEFAULT 'manual'");
-    await this.addColumnIfMissing('vaccine_record', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('vaccine_record', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('vaccine_record', 'updatedAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('vaccine_record', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'doseId', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'doseLabel', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'injectedAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'hospital', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'injectionSite', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'reaction', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'note', 'TEXT', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'source', "TEXT NOT NULL DEFAULT 'manual'", transaction);
+    await this.addColumnIfMissing('vaccine_record', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('vaccine_record', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('vaccine_record', 'updatedAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('comment', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('comment', 'voiceFileName', 'TEXT');
-    await this.addColumnIfMissing('comment', 'remoteURL', 'TEXT');
-    await this.addColumnIfMissing('comment', 'voiceDuration', 'REAL NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('comment', 'voiceWaveform', 'TEXT');
-    await this.addColumnIfMissing('comment', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('comment', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('comment', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('comment', 'voiceFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('comment', 'remoteURL', 'TEXT', transaction);
+    await this.addColumnIfMissing('comment', 'voiceDuration', 'REAL NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('comment', 'voiceWaveform', 'TEXT', transaction);
+    await this.addColumnIfMissing('comment', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('comment', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('voice_memo', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('voice_memo', 'localFileName', 'TEXT');
-    await this.addColumnIfMissing('voice_memo', 'remoteURL', 'TEXT');
-    await this.addColumnIfMissing('voice_memo', 'transcript', 'TEXT');
-    await this.addColumnIfMissing('voice_memo', 'ageYears', 'INTEGER');
-    await this.addColumnIfMissing('voice_memo', 'durationSeconds', 'REAL');
-    await this.addColumnIfMissing('voice_memo', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('voice_memo', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
+    await this.addColumnIfMissing('voice_memo', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_memo', 'localFileName', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_memo', 'remoteURL', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_memo', 'transcript', 'TEXT', transaction);
+    await this.addColumnIfMissing('voice_memo', 'ageYears', 'INTEGER', transaction);
+    await this.addColumnIfMissing('voice_memo', 'durationSeconds', 'REAL', transaction);
+    await this.addColumnIfMissing('voice_memo', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('voice_memo', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
 
-    await this.addColumnIfMissing('first_time', 'remoteId', 'TEXT');
-    await this.addColumnIfMissing('first_time', 'detectedByAI', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('first_time', 'confirmedByParent', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('first_time', 'ceremonyPlayed', 'INTEGER NOT NULL DEFAULT 0');
-    await this.addColumnIfMissing('first_time', 'entryId', 'TEXT');
-    await this.addColumnIfMissing('first_time', 'syncState', "TEXT NOT NULL DEFAULT 'local'");
-    await this.addColumnIfMissing('first_time', 'createdAt', 'INTEGER NOT NULL DEFAULT 0');
-      await this.assertRequiredColumns();
-      store.commit();
+    await this.addColumnIfMissing('first_time', 'remoteId', 'TEXT', transaction);
+    await this.addColumnIfMissing('first_time', 'detectedByAI', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('first_time', 'confirmedByParent', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('first_time', 'ceremonyPlayed', 'INTEGER NOT NULL DEFAULT 0', transaction);
+    await this.addColumnIfMissing('first_time', 'entryId', 'TEXT', transaction);
+    await this.addColumnIfMissing('first_time', 'syncState', "TEXT NOT NULL DEFAULT 'local'", transaction);
+    await this.addColumnIfMissing('first_time', 'createdAt', 'INTEGER NOT NULL DEFAULT 0', transaction);
+      await this.assertRequiredColumns(transaction);
+      await transaction.commit();
     } catch (error) {
-      try { store.rollBack(); } catch (rollbackError) {}
+      try { await transaction.rollback(); } catch (rollbackError) {}
       throw error instanceof Error ? error : new Error(JSON.stringify(error));
     }
-  }
-
-  private async addColumnIfMissing(table: string, column: string, type: string): Promise<void> {
-    if (await this.hasColumn(table, column)) return;
-    await this.store!.executeSql(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    if (!(await this.hasColumn(table, column))) {
-      throw new Error(`数据库迁移失败：${table}.${column} 未创建`);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 runSchemaMigrations 失败，已中止本次操作');
+      throw error as Error;
     }
   }
 
-  private async hasColumn(table: string, column: string): Promise<boolean> {
+  private async addColumnIfMissing(table: string, column: string, type: string, transaction: relationalStore.Transaction): Promise<void> {
+    try {
+    if (await this.hasColumn(table, column, transaction)) return;
+    await transaction.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    if (!(await this.hasColumn(table, column, transaction))) {
+      throw new Error(`数据库迁移失败：${table}.${column} 未创建`);
+    }
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 addColumnIfMissing 失败，已中止本次操作');
+      throw error as Error;
+    }
+  }
+
+  private async hasColumn(table: string, column: string, transaction?: relationalStore.Transaction): Promise<boolean> {
+    try {
     if (!/^[a-z_]+$/.test(table) || !/^[A-Za-z][A-Za-z0-9_]*$/.test(column)) {
       throw new Error('数据库迁移标识非法');
     }
-    const result = await this.store!.querySql(`PRAGMA table_info(${table})`);
+    const result = transaction
+      ? await transaction.querySql(`PRAGMA table_info(${table})`)
+      : await this.store!.querySql(`PRAGMA table_info(${table})`);
     try {
       const nameIndex = result.getColumnIndex('name');
       while (result.goToNextRow()) {
@@ -302,17 +363,21 @@ export class AppDatabase {
     } finally {
       result.close();
     }
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 hasColumn 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
-  private async assertRequiredColumns(): Promise<void> {
+  private async assertRequiredColumns(transaction: relationalStore.Transaction): Promise<void> {
     const required: Array<[string, string]> = [
       ['entry', 'editedAt'], ['media', 'remoteThumbURL'], ['media', 'contentHash'],
       ['media', 'resourceRoleRaw'], ['media', 'syncFailureReason'],
-      ['time_capsule', 'encryptedBlobFileName'], ['growth_measurement', 'updatedAt'],
+      ['time_capsule', 'encryptedBlobFileName'], ['time_capsule', 'cryptoVersion'], ['child_profile', 'schoolStartDate'], ['child_profile', 'allergies'], ['child_profile', 'medicalNotes'], ['growth_measurement', 'updatedAt'],
       ['vaccine_record', 'updatedAt'], ['comment', 'syncState'], ['voice_note', 'syncState']
     ];
     for (const pair of required) {
-      if (!(await this.hasColumn(pair[0], pair[1]))) {
+      if (!(await this.hasColumn(pair[0], pair[1], transaction))) {
         throw new Error(`数据库结构不完整：缺少 ${pair[0]}.${pair[1]}`);
       }
     }
@@ -320,6 +385,7 @@ export class AppDatabase {
 
   // —— GrowthMeasurement ——
   async insertGrowth(g: GrowthMeasurement): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: g.id, remoteId: g.remoteId ?? null, measuredAt: g.measuredAt,
       heightCm: g.heightCm ?? null, weightKg: g.weightKg ?? null,
@@ -327,9 +393,14 @@ export class AppDatabase {
       syncState: g.syncState, createdAt: g.createdAt, updatedAt: g.updatedAt
     };
     await this.store!.insert('growth_measurement', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertGrowth 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchGrowth(): Promise<GrowthMeasurement[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('growth_measurement');
     pred.orderByAsc('measuredAt');
     const rs = await this.store!.query(pred);
@@ -351,10 +422,15 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchGrowth 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— VaccineRecord ——
   async insertVaccine(v: VaccineRecord): Promise<void> {
+    try {
     const bucket: relationalStore.ValuesBucket = {
       id: v.id, remoteId: v.remoteId ?? null, doseId: v.doseId ?? null, vaccineName: v.vaccineName,
       doseLabel: v.doseLabel ?? null, injectedAt: v.injectedAt, hospital: v.hospital ?? null,
@@ -362,9 +438,14 @@ export class AppDatabase {
       source: v.source, syncState: v.syncState, createdAt: v.createdAt, updatedAt: v.updatedAt
     };
     await this.store!.insert('vaccine_record', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertVaccine 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchVaccines(): Promise<VaccineRecord[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('vaccine_record');
     pred.orderByAsc('injectedAt');
     const rs = await this.store!.query(pred);
@@ -389,22 +470,37 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchVaccines 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteVaccine(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('vaccine_record');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteVaccine 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteGrowth(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('growth_measurement');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteGrowth 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— VoiceNote ——
   async insertVoiceNote(v: VoiceNote): Promise<void> {
+    try {
     const bucket: relationalStore.ValuesBucket = {
       id: v.id, remoteId: v.remoteId ?? null, entryId: v.entryId, localFileName: v.localFileName ?? null,
       remoteURL: v.remoteURL ?? null, durationSeconds: v.durationSeconds, transcript: v.transcript ?? null,
@@ -412,9 +508,14 @@ export class AppDatabase {
       syncState: v.syncState, createdAt: v.createdAt
     };
     await this.store!.insert('voice_note', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertVoiceNote 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchVoiceForEntry(entryId: string): Promise<VoiceNote[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('voice_note');
     pred.equalTo('entryId', entryId);
     const rs = await this.store!.query(pred);
@@ -437,19 +538,29 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchVoiceForEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— FamilyMember ——
   async upsertMember(m: FamilyMember): Promise<void> {
+    try {
     const bucket: relationalStore.ValuesBucket = {
       id: m.id, remoteId: m.remoteId ?? null, name: m.name, relation: m.relation,
       avatarEmoji: m.avatarEmoji, themeColorHex: m.themeColorHex, isPrimary: m.isPrimary ? 1 : 0,
       syncState: m.syncState, createdAt: m.createdAt
     };
     await this.store!.insert('family_member', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 upsertMember 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchMembers(): Promise<FamilyMember[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('family_member');
     pred.orderByAsc('createdAt');
     const rs = await this.store!.query(pred);
@@ -469,16 +580,26 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchMembers 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteMember(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('family_member');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteMember 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— Entry ——
   async insertEntry(e: Entry): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: e.id, remoteId: e.remoteId ?? null, title: e.title ?? null, note: e.note ?? null,
       firstPersonNote: e.firstPersonNote ?? null, happenedAt: e.happenedAt,
@@ -488,11 +609,16 @@ export class AppDatabase {
       editedAt: e.editedAt ?? null, createdAt: e.createdAt
     };
     await this.store!.insert('entry', v);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // 核心记录聚合原子写入：Entry + Media + Voice + Feed 任一步失败则全部回滚。
   async insertEntryAggregate(entry: Entry, mediaItems: Media[], voice: VoiceNote | null,
                              feed: FeedEvent): Promise<void> {
+    try {
     const store = this.store!;
     const transaction = await store.createTransaction();
     try {
@@ -538,9 +664,14 @@ export class AppDatabase {
       try { await transaction.rollback(); } catch (rollbackError) {}
       throw error instanceof Error ? error : new Error(JSON.stringify(error));
     }
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertEntryAggregate 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchEntries(includeArchived: boolean = false): Promise<Entry[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('entry');
     if (!includeArchived) pred.equalTo('isArchived', 0);
     pred.orderByDesc('happenedAt');
@@ -551,9 +682,14 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchEntries 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchEntriesPage(limit: number, offset: number, byCreatedAt: boolean): Promise<Entry[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('entry');
     pred.equalTo('isArchived', 0);
     pred.orderByDesc(byCreatedAt ? 'createdAt' : 'happenedAt');
@@ -564,9 +700,14 @@ export class AppDatabase {
     while (rs.goToNextRow()) out.push(AppDatabase.rowToEntry(rs));
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchEntriesPage 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   private static rowToEntry(rs: relationalStore.ResultSet): Entry {
+    try {
     return {
       id: rs.getString(rs.getColumnIndex('id')),
       remoteId: AppDatabase.optStr(rs, 'remoteId'),
@@ -583,10 +724,15 @@ export class AppDatabase {
       editedAt: AppDatabase.optNum(rs, 'editedAt'),
       createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
     };
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 rowToEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— Media ——
   async insertMedia(m: Media): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: m.id, remoteId: m.remoteId ?? null, entryId: m.entryId, typeRaw: m.typeRaw,
       localFileName: m.localFileName ?? null, remoteURL: m.remoteURL ?? null,
@@ -598,10 +744,15 @@ export class AppDatabase {
       aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
     };
     await this.store!.insert('media', v);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertMedia 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async updateMediaDerivedFields(id: string, thumbnailFileName?: string, contentHash?: string,
                                  resourceRoleRaw?: string, assetGroupID?: string): Promise<void> {
+    try {
     const values: relationalStore.ValuesBucket = { syncState: SyncState.local };
     if (thumbnailFileName !== undefined) values['thumbnailFileName'] = thumbnailFileName;
     if (contentHash !== undefined) values['contentHash'] = contentHash;
@@ -610,9 +761,14 @@ export class AppDatabase {
     const predicates = new relationalStore.RdbPredicates('media');
     predicates.equalTo('id', id);
     await this.store!.update(values, predicates);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 updateMediaDerivedFields 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   private static rowToMedia(rs: relationalStore.ResultSet): Media {
+    try {
     const tagsStr = AppDatabase.optStr(rs, 'aiTags');
     return {
       id: rs.getString(rs.getColumnIndex('id')),
@@ -635,9 +791,14 @@ export class AppDatabase {
       aiTags: tagsStr ? JSON.parse(tagsStr) as string[] : [],
       createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
     };
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 rowToMedia 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchMediaForEntry(entryId: string): Promise<Media[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('media');
     pred.equalTo('entryId', entryId);
     const rs = await this.store!.query(pred);
@@ -645,9 +806,14 @@ export class AppDatabase {
     while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchMediaForEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchMediaForEntries(entryIds: string[]): Promise<Media[]> {
+    try {
     if (entryIds.length === 0) return [];
     const pred = new relationalStore.RdbPredicates('media');
     pred.in('entryId', entryIds);
@@ -657,10 +823,15 @@ export class AppDatabase {
     while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchMediaForEntries 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // 取所有照片（相册用）
   async fetchAllPhotos(): Promise<Media[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('media');
     pred.equalTo('typeRaw', 'photo');
     pred.orderByDesc('createdAt');
@@ -669,9 +840,14 @@ export class AppDatabase {
     while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchAllPhotos 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchAllMedia(): Promise<Media[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('media');
     pred.orderByDesc('createdAt');
     const rs = await this.store!.query(pred);
@@ -679,34 +855,55 @@ export class AppDatabase {
     while (rs.goToNextRow()) out.push(AppDatabase.rowToMedia(rs));
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchAllMedia 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // 软删除（归档）一条记录
   async archiveEntry(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('entry');
     pred.equalTo('id', id);
     await this.store!.update({ isArchived: 1, editedAt: Date.now(), syncState: SyncState.local }, pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 archiveEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async restoreEntry(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('entry');
     pred.equalTo('id', id);
     await this.store!.update({ isArchived: 0, editedAt: Date.now(), syncState: SyncState.local }, pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 restoreEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— ChildProfile ——
   async upsertChildProfile(p: ChildProfile): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: p.id, remoteId: p.remoteId ?? null, name: p.name, birthday: p.birthday,
       gender: p.gender ?? null, bloodType: p.bloodType ?? null, birthPlace: p.birthPlace ?? null,
       avatarMediaFileName: p.avatarMediaFileName ?? null, avatarRemoteURL: p.avatarRemoteURL ?? null,
+      schoolStartDate: p.schoolStartDate ?? null, allergies: p.allergies ?? null, medicalNotes: p.medicalNotes ?? null,
       heroBackgroundFileName: p.heroBackgroundFileName ?? null, syncState: p.syncState, createdAt: p.createdAt
     };
     await this.store!.insert('child_profile', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 upsertChildProfile 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // ChildProfile 在端上是单例；恢复家庭档案时原子替换，不保留新机占位行。
   async replaceChildProfile(p: ChildProfile): Promise<void> {
+    try {
     const transaction = await this.store!.createTransaction();
     try {
       await transaction.delete(new relationalStore.RdbPredicates('child_profile'));
@@ -714,16 +911,22 @@ export class AppDatabase {
         id: p.id, remoteId: p.remoteId ?? null, name: p.name, birthday: p.birthday,
         gender: p.gender ?? null, bloodType: p.bloodType ?? null, birthPlace: p.birthPlace ?? null,
         avatarMediaFileName: p.avatarMediaFileName ?? null, avatarRemoteURL: p.avatarRemoteURL ?? null,
-        heroBackgroundFileName: p.heroBackgroundFileName ?? null, syncState: p.syncState, createdAt: p.createdAt
+        schoolStartDate: p.schoolStartDate ?? null, allergies: p.allergies ?? null, medicalNotes: p.medicalNotes ?? null,
+      heroBackgroundFileName: p.heroBackgroundFileName ?? null, syncState: p.syncState, createdAt: p.createdAt
       });
       await transaction.commit();
     } catch (e) {
       try { await transaction.rollback(); } catch (rollbackError) {}
       throw e instanceof Error ? e : new Error(JSON.stringify(e));
     }
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 replaceChildProfile 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchChildProfile(): Promise<ChildProfile | null> {
+    try {
     const pred = new relationalStore.RdbPredicates('child_profile');
     const rs = await this.store!.query(pred);
     let p: ChildProfile | null = null;
@@ -739,12 +942,19 @@ export class AppDatabase {
         avatarMediaFileName: AppDatabase.optStr(rs, 'avatarMediaFileName'),
         avatarRemoteURL: AppDatabase.optStr(rs, 'avatarRemoteURL'),
         heroBackgroundFileName: AppDatabase.optStr(rs, 'heroBackgroundFileName'),
+        schoolStartDate: AppDatabase.optNum(rs, 'schoolStartDate'),
+        allergies: AppDatabase.optStr(rs, 'allergies'),
+        medicalNotes: AppDatabase.optStr(rs, 'medicalNotes'),
         syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
         createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
       };
     }
     rs.close();
     return p;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchChildProfile 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async normalizeChildBirthday(): Promise<boolean> {
@@ -760,6 +970,7 @@ export class AppDatabase {
 
   // —— HealthRecord ——
   async insertHealth(h: HealthRecord): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: h.id, remoteId: h.remoteId ?? null, kind: h.kind, title: h.title, detail: h.detail ?? null,
       recordedAt: h.recordedAt, amountText: h.amountText ?? null, reaction: h.reaction ?? null,
@@ -769,9 +980,14 @@ export class AppDatabase {
       syncState: h.syncState, createdAt: h.createdAt
     };
     await this.store!.insert('health_record', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertHealth 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchHealth(): Promise<HealthRecord[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('health_record');
     pred.orderByDesc('recordedAt');
     const rs = await this.store!.query(pred);
@@ -800,10 +1016,15 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchHealth 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— Milestone ——
   async upsertMilestone(m: Milestone): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: m.id, remoteId: m.remoteId ?? null, title: m.title, category: m.category, emoji: m.emoji,
       detail: m.detail ?? null, happenedAt: m.happenedAt ?? null, ageDescription: m.ageDescription ?? null,
@@ -811,9 +1032,14 @@ export class AppDatabase {
       syncState: m.syncState, createdAt: m.createdAt, entryId: m.entryId ?? null
     };
     await this.store!.insert('milestone', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 upsertMilestone 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchMilestones(): Promise<Milestone[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('milestone');
     pred.orderByDesc('createdAt');
     const rs = await this.store!.query(pred);
@@ -837,6 +1063,10 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchMilestones 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async normalizeMilestonesByTitle(): Promise<number> {
@@ -883,15 +1113,21 @@ export class AppDatabase {
 
   // —— TimeCapsule ——
   async insertCapsule(c: TimeCapsule): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: c.id, remoteId: c.remoteId ?? null, title: c.title, letterText: c.letterText ?? null, fromRole: c.fromRole,
       unlockAt: c.unlockAt, isLocked: c.isLocked ? 1 : 0, encryptedBlobFileName: c.encryptedBlobFileName ?? null,
-      coverEmoji: c.coverEmoji ?? null, syncState: c.syncState, createdAt: c.createdAt
+      coverEmoji: c.coverEmoji ?? null, cryptoVersion: c.cryptoVersion ?? null, syncState: c.syncState, createdAt: c.createdAt
     };
     await this.store!.insert('time_capsule', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertCapsule 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchCapsules(): Promise<TimeCapsule[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('time_capsule');
     pred.orderByAsc('unlockAt');
     const rs = await this.store!.query(pred);
@@ -906,6 +1142,7 @@ export class AppDatabase {
         unlockAt: rs.getLong(rs.getColumnIndex('unlockAt')),
         isLocked: rs.getLong(rs.getColumnIndex('isLocked')) === 1,
         encryptedBlobFileName: AppDatabase.optStr(rs, 'encryptedBlobFileName'),
+        cryptoVersion: AppDatabase.optNum(rs, 'cryptoVersion'),
         coverEmoji: AppDatabase.optStr(rs, 'coverEmoji'),
         syncState: rs.getString(rs.getColumnIndex('syncState')) as SyncState,
         createdAt: rs.getLong(rs.getColumnIndex('createdAt'))
@@ -913,10 +1150,15 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchCapsules 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— Comment（家人合奏）——
   async insertComment(c: Comment): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: c.id, remoteId: c.remoteId ?? null, entryId: c.entryId, authorRole: c.authorRole,
       text: c.text ?? null, voiceFileName: c.voiceFileName ?? null, remoteURL: c.remoteURL ?? null,
@@ -924,9 +1166,14 @@ export class AppDatabase {
       syncState: c.syncState, createdAt: c.createdAt
     };
     await this.store!.insert('comment', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertComment 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchCommentsForEntry(entryId: string): Promise<Comment[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('comment');
     pred.equalTo('entryId', entryId);
     pred.orderByAsc('createdAt');
@@ -950,10 +1197,15 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchCommentsForEntry 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— VoiceMemo（成长之声）——
   async insertVoiceMemo(m: VoiceMemo): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: m.id, remoteId: m.remoteId ?? null, kindRaw: m.kindRaw, localFileName: m.localFileName ?? null,
       remoteURL: m.remoteURL ?? null, transcript: m.transcript ?? null, ageYears: m.ageYears ?? null,
@@ -961,9 +1213,14 @@ export class AppDatabase {
       syncState: m.syncState, createdAt: m.createdAt
     };
     await this.store!.insert('voice_memo', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertVoiceMemo 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchVoiceMemos(): Promise<VoiceMemo[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('voice_memo');
     pred.orderByDesc('recordedAt');
     const rs = await this.store!.query(pred);
@@ -985,19 +1242,29 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchVoiceMemos 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— FirstTime（人生第一次）——
   async insertFirstTime(f: FirstTime): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: f.id, remoteId: f.remoteId ?? null, what: f.what, detectedByAI: f.detectedByAI ? 1 : 0,
       confirmedByParent: f.confirmedByParent ? 1 : 0, ceremonyPlayed: f.ceremonyPlayed ? 1 : 0,
       happenedAt: f.happenedAt, entryId: f.entryId ?? null, syncState: f.syncState, createdAt: f.createdAt
     };
     await this.store!.insert('first_time', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertFirstTime 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchFirstTimes(): Promise<FirstTime[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('first_time');
     pred.orderByDesc('happenedAt');
     const rs = await this.store!.query(pred);
@@ -1018,18 +1285,28 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchFirstTimes 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— GrowthMovie（年度成长电影）——
   async upsertGrowthMovie(g: GrowthMovie): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: g.id, remoteId: g.remoteId ?? null, year: g.year, remoteURL: g.remoteURL ?? null,
       status: g.status, narrationScript: g.narrationScript ?? null, createdAt: g.createdAt
     };
     await this.store!.insert('growth_movie', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 upsertGrowthMovie 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchGrowthMovies(): Promise<GrowthMovie[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('growth_movie');
     pred.orderByDesc('year');
     const rs = await this.store!.query(pred);
@@ -1047,10 +1324,15 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchGrowthMovies 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— PendingDeletion（待同步删除队列）——
   async enqueueDeletion(d: PendingDeletion): Promise<void> {
+    try {
     const existing = await this.fetchPendingDeletions();
     if (existing.some((item: PendingDeletion): boolean => item.collection === d.collection && item.remoteId === d.remoteId)) {
       return;
@@ -1059,6 +1341,10 @@ export class AppDatabase {
       id: d.id, collection: d.collection, remoteId: d.remoteId, createdAt: d.createdAt
     };
     await this.store!.insert('pending_deletion', v);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 enqueueDeletion 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async enqueueRemoteDeletion(collection: string, remoteId?: string): Promise<void> {
@@ -1072,6 +1358,7 @@ export class AppDatabase {
   }
 
   async fetchPendingDeletions(): Promise<PendingDeletion[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('pending_deletion');
     pred.orderByAsc('createdAt');
     const rs = await this.store!.query(pred);
@@ -1086,24 +1373,39 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchPendingDeletions 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async dequeueDeletion(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('pending_deletion');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 dequeueDeletion 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— FeedEvent（家庭动态）——
   async insertFeedEvent(f: FeedEvent): Promise<void> {
+    try {
     const v: relationalStore.ValuesBucket = {
       id: f.id, kind: f.kind, actorRole: f.actorRole, summary: f.summary,
       targetLocalId: f.targetLocalId ?? null, happenedAt: f.happenedAt
     };
     await this.store!.insert('feed_event', v);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 insertFeedEvent 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchFeedEvents(limit: number = 100): Promise<FeedEvent[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('feed_event');
     pred.orderByDesc('happenedAt');
     pred.limitAs(limit);
@@ -1123,86 +1425,182 @@ export class AppDatabase {
     }
     rs.close();
     return out;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchFeedEvents 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— 通用：更新 Entry 任意字段 / 删除 ——
   async updateEntryFields(id: string, fields: relationalStore.ValuesBucket): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('entry');
     pred.equalTo('id', id);
     await this.store!.update(fields, pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 updateEntryFields 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteEntryHard(id: string): Promise<void> {
+    try {
     await this.deleteRowsByColumn('media', 'entryId', id);
     await this.deleteRowsByColumn('comment', 'entryId', id);
     await this.deleteRowsByColumn('voice_note', 'entryId', id);
     const pred = new relationalStore.RdbPredicates('entry');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteEntryHard 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteMedia(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('media');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteMedia 失败，已中止本次操作');
+      throw error as Error;
+    }
+  }
+
+  // 删除意图、子记录删除、父记录变更一次提交；磁盘失败时不提前删除原片。
+  async deleteEntryResource(table: string, collection: string, id: string, remoteId: string | undefined,
+                            entryId: string): Promise<void> {
+    if (!((table === 'media' && collection === 'media') ||
+      (table === 'voice_note' && collection === 'voicenotes') ||
+      (table === 'comment' && collection === 'comments'))) throw new Error('不支持的删除类型');
+    try {
+      const transaction = await this.store!.createTransaction();
+      try {
+        if (remoteId) {
+          await transaction.insert('pending_deletion', {
+            id: util.generateRandomUUID(true), collection: collection, remoteId: remoteId, createdAt: Date.now()
+          });
+        }
+        const predicate = new relationalStore.RdbPredicates(table);
+        predicate.equalTo('id', id);
+        await transaction.delete(predicate);
+        const parent = new relationalStore.RdbPredicates('entry');
+        parent.equalTo('id', entryId);
+        await transaction.update({ editedAt: Date.now(), syncState: SyncState.local }, parent);
+        await transaction.commit();
+      } catch (error) {
+        try { await transaction.rollback(); } catch (rollbackError) {}
+        throw error as Error;
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '删除未能提交，原片和本地记录仍保留');
+      throw error as Error;
+    }
   }
 
   async updateMilestoneFields(id: string, fields: relationalStore.ValuesBucket): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('milestone');
     pred.equalTo('id', id);
     await this.store!.update(fields, pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 updateMilestoneFields 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteMilestone(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('milestone');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteMilestone 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteCapsule(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('time_capsule');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteCapsule 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteHealth(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('health_record');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteHealth 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteFirstTime(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('first_time');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteFirstTime 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteComment(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('comment');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteComment 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteVoiceNote(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('voice_note');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteVoiceNote 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteVoiceMemo(id: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('voice_memo');
     pred.equalTo('id', id);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteVoiceMemo 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async deleteFeedEventsForTarget(localId: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates('feed_event');
     pred.equalTo('targetLocalId', localId);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteFeedEventsForTarget 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // —— 智能照片收件箱（可重建派生状态，不进入家庭同步）——
   async upsertPhotoIntakeCandidates(candidates: PhotoIntakeCandidate[]): Promise<void> {
+    try {
     if (candidates.length === 0) return;
     const sql = `INSERT INTO photo_intake_asset(
       assetUri,state,displayName,createdAt,mediaType,width,height,duration,subtype,burstKey,isLikelyChild,lastSeenAt
@@ -1227,9 +1625,14 @@ export class AppDatabase {
       await this.store!.executeSql('ROLLBACK');
       throw e instanceof Error ? e : new Error(JSON.stringify(e));
     }
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 upsertPhotoIntakeCandidates 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async fetchPhotoIntakePending(limit: number = 150): Promise<PhotoIntakeCandidate[]> {
+    try {
     const pred = new relationalStore.RdbPredicates('photo_intake_asset');
     pred.in('state', [PhotoIntakeState.discovered, PhotoIntakeState.failed]);
     pred.orderByDesc('createdAt');
@@ -1253,17 +1656,27 @@ export class AppDatabase {
     }
     rs.close();
     return items;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 fetchPhotoIntakePending 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async markPhotoIntake(assetUris: string[], state: string): Promise<void> {
+    try {
     if (assetUris.length === 0) return;
     const pred = new relationalStore.RdbPredicates('photo_intake_asset');
     pred.in('assetUri', assetUris);
     await this.store!.update({ state }, pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 markPhotoIntake 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   // 安全全量重传：只重置同步状态，不删数据、不改业务时间；服务端较新版本仍由 LWW 保护。
   async markAllServerBackedDataDirty(): Promise<void> {
+    try {
     const tables: string[] = [
       'entry', 'milestone', 'first_time', 'family_member', 'child_profile', 'health_record',
       'vaccine_record', 'growth_measurement', 'comment', 'voice_note', 'voice_memo', 'time_capsule'
@@ -1274,9 +1687,14 @@ export class AppDatabase {
     await this.store!.update(
       { syncState: SyncState.local, uploadProgress: 0, syncFailureReason: '' },
       new relationalStore.RdbPredicates('media'));
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 markAllServerBackedDataDirty 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   async countPendingSync(): Promise<number> {
+    try {
     const tables: string[] = [
       'entry', 'media', 'milestone', 'first_time', 'family_member', 'child_profile',
       'health_record', 'vaccine_record', 'growth_measurement', 'comment', 'voice_note',
@@ -1294,12 +1712,21 @@ export class AppDatabase {
     total += deletions.rowCount;
     deletions.close();
     return total;
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 countPendingSync 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   private async deleteRowsByColumn(table: string, column: string, value: string): Promise<void> {
+    try {
     const pred = new relationalStore.RdbPredicates(table);
     pred.equalTo(column, value);
     await this.store!.delete(pred);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 deleteRowsByColumn 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   get raw(): relationalStore.RdbStore | null {
@@ -1308,12 +1735,22 @@ export class AppDatabase {
 
   // —— 取可空列工具 ——
   private static optStr(rs: relationalStore.ResultSet, col: string): string | undefined {
+    try {
     const i = rs.getColumnIndex(col);
     return rs.isColumnNull(i) ? undefined : rs.getString(i);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 optStr 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 
   private static optNum(rs: relationalStore.ResultSet, col: string): number | undefined {
+    try {
     const i = rs.getColumnIndex(col);
     return rs.isColumnNull(i) ? undefined : rs.getDouble(i);
+      } catch (error) {
+      hilog.error(DOMAIN, 'Bubu', '数据库 optNum 失败，已中止本次操作');
+      throw error as Error;
+    }
   }
 }

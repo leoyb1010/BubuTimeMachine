@@ -28,6 +28,7 @@ struct SyncCenterView: View {
             VStack(spacing: BubuTheme.Spacing.section) {
                 statusCard
                 detailCard
+                if !engine.collectionProgress.isEmpty { collectionDetails }
                 actionCard
                 backupCard
                 Text("同步只在你自己的服务器和家人设备之间进行，不经过任何第三方。")
@@ -132,12 +133,14 @@ struct SyncCenterView: View {
     }
 
     private var statusIcon: String {
+        if engine.lastFailureReason != nil { return "exclamationmark.icloud.fill" }
         if engine.connectionState == .offline { return "icloud.slash.fill" }
         if engine.connectionState == .connecting { return "arrow.triangle.2.circlepath.icloud.fill" }
         return engine.pendingCount == 0 ? "checkmark.icloud.fill" : "arrow.up.circle.fill"
     }
 
     private var statusTint: Color {
+        if engine.lastFailureReason != nil { return BubuTheme.Color.danger }
         switch engine.connectionState {
         case .offline:    return BubuTheme.Color.secondaryText
         case .connecting: return theme
@@ -153,6 +156,7 @@ struct SyncCenterView: View {
             // 有硬失败时绝不说「全部同步好了」。连得上不等于同步成功：
             // 拉取全线 400 的时候待同步数正好是 0，旧逻辑照样显示绿勾。
             if engine.lastFailureReason != nil { return "同步没成功" }
+            if engine.isSyncing { return "正在核对与同步" }
             return engine.pendingCount == 0 ? "全部同步好了" : "正在同步"
         }
     }
@@ -184,7 +188,7 @@ struct SyncCenterView: View {
         VStack(spacing: 0) {
             detailRow("连接状态", value: statusTitle)
             Divider().padding(.leading, 16)
-            detailRow("等待同步", value: engine.pendingCount == 0 ? "都同步好啦" : "\(engine.pendingCount) 项",
+            detailRow("等待上传", value: engine.pendingCount == 0 ? "没有待上传内容" : "\(engine.pendingCount) 项",
                       warn: engine.pendingCount > 0)
             Divider().padding(.leading, 16)
             detailRow("上次同步", value: engine.lastSyncedAt.map { BubuDateFormat.shortDateTime($0) } ?? "还没同步过",
@@ -203,6 +207,42 @@ struct SyncCenterView: View {
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .bubuCardShadow()
     }
+
+    private var collectionDetails: some View {
+        DisclosureGroup("本轮核对明细") {
+            VStack(spacing: 0) {
+                ForEach(engine.collectionProgress.values.sorted { $0.id < $1.id }) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(Self.collectionNames[item.id] ?? "家庭记录")
+                            Spacer()
+                            Text(item.state)
+                                .foregroundStyle(item.state.contains("重试") ? BubuTheme.Color.danger : BubuTheme.Color.secondaryText)
+                        }
+                        if item.state == "已核对" {
+                            Text("核对 \(item.received) 条 · 删除标记 \(item.deleted) 条")
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                        }
+                    }
+                    .font(BubuTheme.Font.caption)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .font(BubuTheme.Font.body.weight(.medium))
+        .foregroundStyle(BubuTheme.Color.warmBrown)
+        .tint(env.theme.theme.textAccent)
+        .padding(16)
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card))
+        .accessibilityIdentifier("sync.collection-summary")
+    }
+
+    private static let collectionNames = [
+        "entries": "时光记录", "media": "照片与视频", "milestones": "里程碑", "firsttimes": "人生第一次",
+        "members": "家庭成员", "childprofile": "孩子档案", "healthrecords": "健康记录", "vaccinerecords": "疫苗",
+        "growthmeasurements": "成长测量", "comments": "家人回应", "voicenotes": "记录语音",
+        "voicememos": "成长之声", "timecapsules": "时间胶囊"
+    ]
 
     private func detailRow(_ title: String, value: String, warn: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {

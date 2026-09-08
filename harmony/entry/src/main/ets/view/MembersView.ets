@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { FamilyMember } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
@@ -151,7 +152,7 @@ export struct MembersView {
     this.showAdd = false;
     await this.reload();
     SyncEngine.shared.start();
-    this.getUIContext().getPromptAction().showToast({ message: existing ? '已更新 💛' : '已添加 💛' });
+    SafePrompt.toast(this.getUIContext(), { message: existing ? '已更新 💛' : '已添加 💛' });
   }
 
   private beginEdit(member: FamilyMember): void {
@@ -166,12 +167,12 @@ export struct MembersView {
 
   private async switchTo(member: FamilyMember): Promise<void> {
     await ServerConfig.shared.setRole(member.relation as FamilyRole);
-    this.getUIContext().getPromptAction().showToast({ message: `现在由${member.name}记录` });
+    SafePrompt.toast(this.getUIContext(), { message: `现在由${member.name}记录` });
   }
 
   private requestRemove(member: FamilyMember): void {
     if (this.memberList().length <= 1) {
-      this.getUIContext().getPromptAction().showToast({ message: '至少要留一位家人，请先添加新成员' });
+      SafePrompt.toast(this.getUIContext(), { message: '至少要留一位家人，请先添加新成员' });
       return;
     }
     this.getUIContext().showAlertDialog({

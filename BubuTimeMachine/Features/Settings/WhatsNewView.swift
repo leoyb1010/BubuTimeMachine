@@ -60,7 +60,7 @@ struct WhatsNewSheet: View {
                     ForEach(note.highlights, id: \.self) { item in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(BubuTheme.Color.primary)
+                                .foregroundStyle(BubuTheme.Color.primaryInk)
                                 .padding(.top, 2)
                             Text(item)
                                 .font(BubuTheme.Font.body)
@@ -111,11 +111,11 @@ struct WhatsNewListView: View {
                         }
                         Text(note.title)
                             .font(BubuTheme.Font.caption.weight(.semibold))
-                            .foregroundStyle(BubuTheme.Color.primary)
+                            .foregroundStyle(BubuTheme.Color.primaryInk)
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(note.highlights, id: \.self) { item in
                                 HStack(alignment: .top, spacing: 8) {
-                                    Text("·").foregroundStyle(BubuTheme.Color.primary)
+                                    Text("·").foregroundStyle(BubuTheme.Color.primaryInk)
                                     Text(item)
                                         .font(BubuTheme.Font.scaled(14))
                                         .foregroundStyle(BubuTheme.Color.warmBrown)

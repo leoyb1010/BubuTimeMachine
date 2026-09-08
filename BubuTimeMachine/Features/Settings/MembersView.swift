@@ -33,7 +33,7 @@ struct MembersView: View {
                     showingAdd = true
                 } label: {
                     Label("添加家庭成员", systemImage: "person.badge.plus")
-                        .foregroundStyle(theme.primary)
+                        .foregroundStyle(theme.textAccent)
                 }
             }
         }

@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { KeychainStore } from './KeychainStore';
 import { CapsuleCrypto } from './CapsuleCrypto';
@@ -42,12 +43,22 @@ export class CapsuleRecovery {
 
   // 无偏的密码学安全索引（拒绝采样，避免取模偏差）。
   private static secureRandomIndex(bound: number): number {
+    try {
+      if (canIUse('SystemCapability.Security.CryptoFramework.Rand')) {
     const rand = cryptoFramework.createRandom();
     const limit = Math.floor(0x100000000 / bound) * bound; // 2^32 对 bound 取整
     while (true) {
       const bytes = rand.generateRandomSync(4).data;
       const value = ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
       if (value < limit) return value % bound;
+    }
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'CapsuleRecovery.secureRandomIndex 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 

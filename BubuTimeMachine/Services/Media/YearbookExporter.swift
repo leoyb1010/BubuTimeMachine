@@ -170,7 +170,7 @@ private struct EntryPage: View {
             HStack {
                 Text(entry.ageText)
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(theme.primary)
+                    .foregroundStyle(theme.textAccent)
                 Spacer()
                 Text(BubuDateFormat.longDate(entry.date))
                     .font(.system(size: 15, design: .rounded))
@@ -217,7 +217,7 @@ private struct ListPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 10) {
-                Image(systemName: icon).foregroundStyle(theme.primary)
+                Image(systemName: icon).foregroundStyle(theme.textAccent)
                 Text(title).font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
             }

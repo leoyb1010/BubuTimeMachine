@@ -69,7 +69,7 @@ struct AccountView: View {
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             Text("当前署名：\(env.config.currentRole.displayName)")
                 .font(BubuTheme.Font.caption.weight(.semibold))
-                .foregroundStyle(env.theme.theme.primary)
+                .foregroundStyle(env.theme.theme.textAccent)
                 .padding(.horizontal, 12).padding(.vertical, 5)
                 .background(env.theme.theme.primary.opacity(0.12), in: Capsule())
 

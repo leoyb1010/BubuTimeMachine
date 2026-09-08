@@ -20,11 +20,12 @@ test('成长之声覆盖推送、拉取、文件下载、镜像清理和游标',
 
 test('增量同步使用服务器 updated 并传播软删除墓碑', () => {
   assert.ok(apiSource.includes('&sort=updated'));
-  assert.ok(apiSource.includes("clauses.push(`(updated>'"));
+  assert.ok(apiSource.includes('collectSyncPages(sinceISO'));
+  assert.ok(apiSource.includes('&sort=updated,id'));
   assert.ok(apiSource.includes("clauses.push('(isDeleted=true)')"));
   assert.ok(source.includes('fetchDeletedTombstones(collection, cursor)'));
   assert.ok(source.includes('removeRemoteTombstones(collection, tombstones)'));
-  assert.ok(source.includes('server_updated_cursor_migration_v1'));
+  assert.ok(source.includes('compound_pagination_cursor_migration_v2'));
   assert.ok(apiSource.includes('activeRecordBody(body, existing === null)'));
   assert.ok(apiSource.includes('activeRecordFields(fields, !isPatch)'));
 });

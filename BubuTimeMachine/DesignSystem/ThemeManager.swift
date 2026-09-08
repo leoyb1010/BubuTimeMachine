@@ -35,6 +35,44 @@ struct BubuThemeDefinition: Identifiable, Hashable, Sendable {
     }
 
     var primary: Color { Color(hex: primaryHex) }
+    /// 粉彩用于装饰；正文与操作单独计算可读色，避免浅粉字落在浅粉卡片上。
+    var textAccent: Color {
+        let hex = primaryHex
+        return Color(UIColor { traits in
+            let dark = traits.userInterfaceStyle == .dark
+            let backdrop = dark ? UIColor(white: 0.26, alpha: 1) : UIColor(red: 0.93, green: 0.82, blue: 0.85, alpha: 1)
+            return Self.readableAccent(hex: hex, against: backdrop, lighten: dark)
+        })
+    }
+    var actionFill: Color { Color(Self.readableAccent(hex: primaryHex, against: .white, lighten: false)) }
+
+    static func readableAccent(hex: String, against background: UIColor, lighten: Bool) -> UIColor {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        UIColor(Color(hex: hex)).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let target: CGFloat = lighten ? 1 : 0
+        for step in 0...20 {
+            let amount = CGFloat(step) / 20
+            let candidate = UIColor(red: red + (target - red) * amount,
+                                    green: green + (target - green) * amount,
+                                    blue: blue + (target - blue) * amount, alpha: 1)
+            if contrast(candidate, background) >= 4.5 { return candidate }
+        }
+        return lighten ? .white : .black
+    }
+
+    static func contrast(_ first: UIColor, _ second: UIColor) -> Double {
+        func luminance(_ color: UIColor) -> Double {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            func linear(_ value: CGFloat) -> Double {
+                let v = Double(value)
+                return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        }
+        let a = luminance(first), b = luminance(second)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
     var secondary: Color { Color(hex: secondaryHex) }
     var surfaceTint: Color { Color(hex: surfaceTintHex) }
     var meshColors: [Color] { meshPalette.map { Color(hex: $0) } }
@@ -42,7 +80,7 @@ struct BubuThemeDefinition: Identifiable, Hashable, Sendable {
         LinearGradient(colors: [Color(hex: accentStartHex), Color(hex: accentEndHex)],
                        startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    var tabTint: Color { tabTintHex.map { Color(hex: $0) } ?? primary }
+    var tabTint: Color { textAccent }
 
     static let all: [BubuThemeDefinition] = [
         .init(id: "coral", name: "珊瑚暖阳", primaryHex: "#F28C9E", secondaryHex: "#F2B705",

@@ -66,6 +66,7 @@ GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMa
   注：ChildProfile **没有身份证字段**，身份卡上的 `No.BUBU…` 是装饰性假号（2026-09-04 审计更正）
 - 数据外发（同步/AI）必须用户显式开启，默认全离线；人脸/图片分析一律端侧
 - **改任何 @Model 之前先跑 `BubuTimeMachineTests/StoreMigrationTests.swift`**：
-  它用一份真实装机数据验证「升级后全家的数据还打得开」。BubuSchemaV1 目前不是冻结快照、
-  stages 为空，破坏性变更没有可用迁移路径——现阶段只允许加可选字段、带默认值字段和 #Index。
-  详见 `BubuTimeMachine/App/BubuSchema.swift` 顶部与 `docs/AUDIT_AND_UPGRADE_PLAN_2026-09-04.md`
+  并同时运行 `HistoricalSchemaBridgeTests`、`StoreUpgradeBackupTests`、`SyncCheckpointTests`。
+  V1 已冻结在 `BubuSchemaV1Snapshot.swift`，不得原地修改；V2 使用活动模型和独立同步进度。
+  所有打开现有 store 的生产入口必须走 `BubuStoreLoader`，保留升级前快照和跨进程迁移锁。
+  破坏性变更仍须新增版本/迁移阶段并提供真实旧形状回归，不可跳过数据安全门禁。

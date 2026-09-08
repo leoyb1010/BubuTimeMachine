@@ -80,6 +80,9 @@ export interface ChildProfileDTO {
   birthPlace?: string;
   avatarRemoteURL?: string; // 由服务端 avatar file 字段派生，身份卡跨设备显示头像
   createdAt: string;
+  schoolStartDate?: string;
+  allergies?: string;
+  medicalNotes?: string;
 }
 
 export interface HealthRecordDTO {
@@ -174,6 +177,7 @@ export interface TimeCapsuleDTO {
   encryptedBlobRemoteURL?: string;
   coverEmoji?: string;
   createdAt: string;
+  cryptoVersion?: number;
 }
 
 // 鉴权（PocketBase password auth）

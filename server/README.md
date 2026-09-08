@@ -64,8 +64,21 @@ POCKETBASE_BIN=/absolute/path/pocketbase \
    - 创建**管理员账号**（你自己用）。
    - 在 `users` 集合里由超管创建每位家人的账号（如 `baba@bubu.family`、`mama@bubu.family`）。
      公开注册已由迁移关闭，App 端只负责登录。
-   - 可选：在 `families` 集合创建家庭记录，并把每个 `users.familyId` 填成该家庭记录 id。
-     老数据 `familyId` 为空时仍可读写，方便平滑升级；新客户端会自动写入 `authorUserId/familyId`。
+   - 必须在 `families` 集合创建家庭记录，并由管理员把每个 `users.familyId` 填成该家庭记录 id。
+     未分配家庭的账号不能访问业务资料；新客户端会自动写入 `authorUserId/familyId`。
+     迁移 0019 对新库也启用严格权限，并禁止普通账号更改记录归属。
+
+**升级旧库前必须先确认家庭归属。** 如果已有无归属记录且家庭数量为 0 或多于 1，0019 会
+拒绝迁移并保持旧数据，不会猜测记录属于谁。先备份、验证恢复，在隔离副本演练管理员分配后，
+再部署。只有唯一家庭时才允许回填历史无归属记录。PocketBase 0.39.2 的 `migrate up` 报错时
+可能仍返回退出码 0，因此必须核对输出、`_migrations` 和实际 API 权限；不能只看退出码。
+
+真实迁移与权限回归（使用全新临时数据库，不连接生产）：
+
+```bash
+POCKETBASE_BIN=/absolute/path/pocketbase \
+python3 -m unittest discover -s server/pocketbase/tests -v
+```
 
 集合一览（已由迁移自动创建）：
 `users / families / entries / media / comments / voicenotes / milestones / firsttimes / voicememos / members / childprofile / healthrecords / timecapsules / vaccinerecords / growthmeasurements / feed_events`
@@ -91,8 +104,9 @@ openssl rand -hex 24          # 生成一个 AI_API_KEY，填进 .env，App 设�
 ./start_ai.sh                 # 首次自动建 venv 装依赖并启动
 ```
 
-- **鉴权是必须的（fail-closed）**：`.env` 不配 `AI_API_KEY` 时所有业务接口直接返回 503，
-  防止把无鉴权服务误暴露到公网。所有请求需带 `X-API-Key` 头，App 端在设置页填写后自动携带。
+- **鉴权是必须的（fail-closed）**：App 使用 PocketBase Bearer 登录态，并受
+  `AI_ALLOWED_PB_USER_IDS` 白名单保护；`X-API-Key` 用于维护任务。没有有效凭证返回 401，
+  缺少白名单时不会接受任意已登录用户。家庭摄取另受 `INTAKE_ALLOWED_PB_USER_IDS` 约束。
 - 生产环境优先使用 `server/ai/requirements.lock.txt` 的锁定依赖重建 venv；`requirements.txt` 只作为宽松维护约束。
 - 内置按 IP 限流（默认 30 次/分钟，`AI_RATE_LIMIT_PER_MINUTE` 可调）；`/transcribe` 上限 50MB。
 - 默认模型：`deepseek-v4-flash`（首选）→ `deepseek-v4-pro`（兜底）。

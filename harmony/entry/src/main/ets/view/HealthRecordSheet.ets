@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { GrowthMeasurement, HealthRecord } from '../models/Models';
 import { AppDatabase } from '../data/AppDatabase';
@@ -657,7 +658,7 @@ export struct HealthRecordSheet {
       };
       await AppDatabase.shared.insertGrowth(measurement);
     }
-    this.getUIContext().getPromptAction().showToast({ message: '已经收好啦 🌟' });
+    SafePrompt.toast(this.getUIContext(), { message: '已经收好啦 🌟' });
     this.onDone();
   }
 }

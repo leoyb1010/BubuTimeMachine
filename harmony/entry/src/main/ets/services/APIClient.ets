@@ -7,6 +7,7 @@ import type { common } from '@kit.AbilityKit';
 import { ServerConfig } from './ServerConfig';
 import { remoteVersionIsNewer } from './SyncVersionModel';
 import { AuthResponse, UploadedFileResult } from './DTOs';
+import { collectSyncPages } from '../sync/SyncPagination';
 
 const DOMAIN = 0x0000;
 
@@ -157,6 +158,7 @@ export class APIClient {
   }
 
   private async realtimeOnce(generation: number, onEvent: () => void): Promise<void> {
+    try {
     const req = http.createHttp();
     this.realtimeRequest = req;
     let pending = '';
@@ -182,6 +184,10 @@ export class APIClient {
     } finally {
       if (this.realtimeRequest === req) this.realtimeRequest = null;
       try { req.destroy(); } catch (e) {}
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'APIClient.realtimeOnce 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 
@@ -296,29 +302,25 @@ export class APIClient {
 
   private async fetchRecordPages(collection: string, sinceISO: string | undefined,
                                  onlyDeleted: boolean): Promise<Record<string, Object>[]> {
-    const all: Record<string, Object>[] = [];
-    let page = 1;
-    while (true) {
-      let path = `/api/collections/${collection}/records?perPage=200&page=${page}&sort=updated`;
+    const all = await collectSyncPages(sinceISO, async (updated: string | undefined, afterID: string | undefined): Promise<Record<string, Object>[]> => {
+      let path = `/api/collections/${collection}/records?perPage=200&page=1&sort=updated,id`;
       const clauses: string[] = [];
-      if (sinceISO) {
-        const sinceFilter = APIClient.normalizeSyncTimestamp(sinceISO);
-        clauses.push(`(updated>'${APIClient.filterEscape(sinceFilter)}')`);
+      if (updated) {
+        const stamp = APIClient.filterEscape(APIClient.normalizeSyncTimestamp(updated));
+        clauses.push(afterID !== undefined
+          ? `(updated>'${stamp}' || (updated='${stamp}' && id>'${APIClient.filterEscape(afterID)}'))`
+          : `(updated>'${stamp}')`);
       }
       if (onlyDeleted) clauses.push('(isDeleted=true)');
       if (clauses.length > 0) path += `&filter=${encodeURIComponent(clauses.join(' && '))}`;
       const resp = await this.request('GET', path, undefined, true);
       const parsed = JSON.parse(resp) as Record<string, Object>;
-      const items = (parsed['items'] as Record<string, Object>[] | undefined) ?? [];
-      for (const it of items) {
-        if (!onlyDeleted && it['isDeleted'] === true) continue;
-        all.push(it);
+      if (!Array.isArray(parsed['items'])) {
+        throw new Error('同步分页响应异常，已保留原游标');
       }
-      const totalPages = (parsed['totalPages'] as number | undefined) ?? 1;
-      if (page >= totalPages || items.length === 0) break;
-      page += 1;
-    }
-    return all;
+      return parsed['items'] as Record<string, Object>[];
+    });
+    return onlyDeleted ? all : all.filter((item: Record<string, Object>) => item['isDeleted'] !== true);
   }
 
   // 删除一条记录：服务端保留 tombstone，不再物理删除。
@@ -420,6 +422,7 @@ export class APIClient {
     extraFilePath?: string,
     extraFileName?: string
   ): Promise<UploadedFileResult> {
+    try {
     const path = filePath.replace(/^file:\/\//, '');
     const parts: http.MultiFormData[] = [];
     for (const d of formData) {
@@ -469,6 +472,10 @@ export class APIClient {
     } finally {
       req.destroy();
     }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'APIClient.multipartViaHttp 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // MARK: 文件下载（对照 iOS downloadFile(from:)）-----------------------------
@@ -487,6 +494,8 @@ export class APIClient {
 
   private async downloadFileViaTask(accessURL: string, destPath: string,
                                     header: Record<string, string>): Promise<string> {
+    try {
+      if (canIUse('SystemCapability.Request.FileTransferAgent')) {
     if (!this.appContext) throw new Error('缺少下载上下文');
     try {
       if (fileIo.accessSync(destPath)) fileIo.unlinkSync(destPath);
@@ -529,6 +538,14 @@ export class APIClient {
         reject(new Error('下载任务超时'));
       }, 300000);
     });
+
+      } else {
+        throw new Error('当前设备暂不支持这项能力，原有资料不会改变');
+      }
+    } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'APIClient.downloadFileViaTask 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static errorText(e: Object): string {
@@ -646,6 +663,7 @@ export class APIClient {
 
   // 底层请求
   private async request(method: string, path: string, body: string | undefined, auth: boolean): Promise<string> {
+    try {
     const req = http.createHttp();
     try {
       const header: Record<string, string> = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
@@ -677,6 +695,10 @@ export class APIClient {
       return resp.result as string;
     } finally {
       req.destroy();
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'APIClient.request 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 }

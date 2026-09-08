@@ -1,3 +1,4 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { notificationManager } from '@kit.NotificationKit';
@@ -13,6 +14,7 @@ export class WeeklyReportNotifier {
   }
 
   static async notifyIfNew(context: common.Context, report: WeeklyReport): Promise<void> {
+    try {
     if (report.status !== 'ready' || !(await notificationManager.isNotificationEnabled())) return;
     const store = await preferences.getPreferences(context, 'bubu_weekly_report_notice');
     if ((await store.get('latestId', '') as string) === report.id) return;
@@ -30,6 +32,10 @@ export class WeeklyReportNotifier {
     await notificationManager.publish(request);
     await store.put('latestId', report.id);
     await store.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'WeeklyReportNotifier.notifyIfNew 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private static notificationId(id: string): number {

@@ -1,3 +1,5 @@
+import { CapsuleVault } from '../services/security/CapsuleVault';
+import { rememberCapsuleVersion } from '../services/security/CapsuleVersion';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences, relationalStore } from '@kit.ArkData';
 import type { common } from '@kit.AbilityKit';
@@ -80,6 +82,7 @@ export class SyncEngine {
 
   // 由 EntryAbility 注入上下文，打开游标用的 Preferences 实例（对照 iOS UserDefaults）。
   async initialize(context: common.Context): Promise<void> {
+    try {
     this.appContext = context;
     if (!this.cursorStore) {
       this.cursorStore = await preferences.getPreferences(context, 'bubu_sync_cursor');
@@ -87,6 +90,10 @@ export class SyncEngine {
     await this.migrateCursorsIfNeeded();
     await this.migrateLegacyHealthIfNeeded();
     await this.refreshPendingCount();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.initialize 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   // 回前台：立刻补一轮；之后按结果在 30s–8min 之间退避轮询。
@@ -358,6 +365,9 @@ export class SyncEngine {
     if (p.gender !== undefined) body['gender'] = p.gender;
     if (p.bloodType !== undefined) body['bloodType'] = p.bloodType; // 含血型同步（与 iOS 一致）
     if (p.birthPlace !== undefined) body['birthPlace'] = p.birthPlace;
+    if (p.schoolStartDate !== undefined) body['schoolStartDate'] = p.schoolStartDate > 0 ? new Date(p.schoolStartDate).toISOString() : '';
+    if (p.allergies !== undefined) body['allergies'] = p.allergies;
+    if (p.medicalNotes !== undefined) body['medicalNotes'] = p.medicalNotes;
     try {
       const saved = await APIClient.shared.upsert('childprofile', p.id, body);
       if (APIClient.remoteWasNewer(saved)) {
@@ -833,6 +843,7 @@ export class SyncEngine {
         'isLocked': c.isLocked, 'createdAt': new Date(c.createdAt).toISOString()
       };
       if (c.coverEmoji !== undefined) body['coverEmoji'] = c.coverEmoji;
+      if (c.cryptoVersion !== undefined) body['cryptoVersion'] = c.cryptoVersion;
       try {
         const saved = await APIClient.shared.upsert('timecapsules', c.id, body);
         if (APIClient.remoteWasNewer(saved)) {
@@ -851,6 +862,7 @@ export class SyncEngine {
             'unlockAt': new Date(c.unlockAt).toISOString(),
             'createdAt': new Date(c.createdAt).toISOString()
           };
+          if (c.cryptoVersion !== undefined) fields['cryptoVersion'] = String(c.cryptoVersion);
           const res: UploadedFileResult = await APIClient.shared.uploadFile(
             'timecapsules', c.id, fields, 'encryptedBlob', filePath, c.encryptedBlobFileName);
           c.remoteId = res.recordId;
@@ -1604,6 +1616,10 @@ export class SyncEngine {
     p.gender = SyncEngine.rStr(r, 'gender');
     p.bloodType = SyncEngine.rStr(r, 'bloodType');
     p.birthPlace = SyncEngine.rStr(r, 'birthPlace');
+    // 缺字段代表旧服务器，保留本地；空值代表明确清除。
+    if (r['schoolStartDate'] !== undefined) p.schoolStartDate = SyncEngine.rDate(r, 'schoolStartDate', 0);
+    if (r['allergies'] !== undefined) p.allergies = SyncEngine.rStr(r, 'allergies') ?? '';
+    if (r['medicalNotes'] !== undefined) p.medicalNotes = SyncEngine.rStr(r, 'medicalNotes') ?? '';
     const remote = SyncEngine.remoteFileURL(r, 'childprofile', 'avatar', 'avatarRemoteURL');
     if (remote !== undefined && remote !== p.avatarRemoteURL) {
       p.avatarRemoteURL = remote;
@@ -2052,6 +2068,7 @@ export class SyncEngine {
 
   // 不覆盖 unlockAt：封存后不可变，密钥派生依赖它（对照 iOS apply(TimeCapsuleDTO)）。
   private static applyCapsule(r: Record<string, Object>, c: TimeCapsule): void {
+    c.cryptoVersion = rememberCapsuleVersion(c.cryptoVersion, SyncEngine.rNum(r, 'cryptoVersion'));
     c.title = SyncEngine.rStr(r, 'title') ?? c.title;
     c.fromRole = SyncEngine.rStr(r, 'fromRole') ?? c.fromRole;
     c.isLocked = SyncEngine.rBool(r, 'isLocked');
@@ -2060,13 +2077,22 @@ export class SyncEngine {
   }
 
   private async ensureLocalCapsuleBlob(c: TimeCapsule, r: Record<string, Object>): Promise<void> {
-    if (c.encryptedBlobFileName !== undefined && MediaStore.shared.exists(c.encryptedBlobFileName)) return;
+    if (c.encryptedBlobFileName !== undefined && MediaStore.shared.exists(c.encryptedBlobFileName)) {
+      const version = CapsuleVault.shared.validateVersion(c.encryptedBlobFileName, c.cryptoVersion ?? 0);
+      if (version > (c.cryptoVersion ?? 0)) {
+        c.cryptoVersion = version;
+        await this.replaceCapsule(c);
+      }
+      return;
+    }
     const remoteURL = SyncEngine.remoteFileURL(r, 'timecapsules', 'encryptedBlob', 'encryptedBlobRemoteURL');
     if (remoteURL === undefined) return;
     try {
       const fileName = `${c.id}.capsule`;
       const destPath = MediaStore.shared.fullPath(fileName);
       await APIClient.shared.downloadFile(remoteURL, destPath);
+      const version = CapsuleVault.shared.validateVersion(fileName, c.cryptoVersion ?? 0);
+      c.cryptoVersion = rememberCapsuleVersion(c.cryptoVersion, version);
       c.encryptedBlobFileName = fileName;
       await this.replaceCapsule(c);
     } catch (e) {
@@ -2249,13 +2275,19 @@ export class SyncEngine {
   // MARK: - 游标存取（Preferences，对照 iOS UserDefaults cursor）
 
   private async getCursor(collection: string): Promise<string | undefined> {
+    try {
     await this.ensureCursorStore();
     if (!this.cursorStore) return undefined;
     const v = await this.cursorStore.get(`cursor_${collection}`, '') as string;
     return v.length > 0 ? v : undefined;
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.getCursor 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async setCursor(collection: string, serverUpdated: string): Promise<void> {
+    try {
     await this.ensureCursorStore();
     if (!this.cursorStore) return;
     const candidate = overlappedServerCursor(serverUpdated);
@@ -2264,26 +2296,42 @@ export class SyncEngine {
     if (next === undefined || next === existing) return;
     await this.cursorStore.put(`cursor_${collection}`, next);
     await this.cursorStore.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.setCursor 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async resetCursors(): Promise<void> {
+    try {
     await this.ensureCursorStore();
     if (!this.cursorStore) return;
     for (const c of SyncEngine.cursorCollections) {
       await this.cursorStore.put(`cursor_${c}`, '');
     }
     await this.cursorStore.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.resetCursors 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async ensureCursorStore(): Promise<void> {
+    try {
     if (!this.cursorStore && this.appContext) {
       this.cursorStore = await preferences.getPreferences(this.appContext, 'bubu_sync_cursor');
+    }
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.ensureCursorStore 操作失败，已安全中止');
+      throw error as Error;
     }
   }
 
   private async migrateCursorsIfNeeded(): Promise<void> {
+    try {
     if (!this.cursorStore) return;
-    const key = 'server_updated_cursor_migration_v1';
+    // 联合游标升级后全量补拉一次，恢复旧 offset 分页可能遗漏的记录和墓碑。
+    const key = 'compound_pagination_cursor_migration_v2';
     const migrated = await this.cursorStore.get(key, false) as boolean;
     if (migrated) return;
     for (const collection of SyncEngine.cursorCollections) {
@@ -2292,9 +2340,14 @@ export class SyncEngine {
     await this.cursorStore.put(key, true);
     await this.cursorStore.flush();
     hilog.info(DOMAIN, 'Bubu', '同步游标已迁移到服务器 updated 权威时钟');
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.migrateCursorsIfNeeded 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async migrateLegacyHealthIfNeeded(): Promise<void> {
+    try {
     if (!this.cursorStore) return;
     const key = 'legacy_health_structured_migration_v1';
     const migrated = await this.cursorStore.get(key, false) as boolean;
@@ -2307,20 +2360,34 @@ export class SyncEngine {
     await this.cursorStore.put(key, true);
     await this.cursorStore.flush();
     hilog.info(DOMAIN, 'Bubu', `旧健康记录结构化迁移完成 count=${records.length}`);
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.migrateLegacyHealthIfNeeded 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async isServerBaselineReady(): Promise<boolean> {
+    try {
     await this.ensureCursorStore();
     if (!this.cursorStore) return false;
     const saved = await this.cursorStore.get('server_baseline_identity_v4', '') as string;
     return saved === this.serverBaselineIdentity();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.isServerBaselineReady 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private async markServerBaselineReady(): Promise<void> {
+    try {
     await this.ensureCursorStore();
     if (!this.cursorStore) return;
     await this.cursorStore.put('server_baseline_identity_v4', this.serverBaselineIdentity());
     await this.cursorStore.flush();
+      } catch (error) {
+      hilog.error(0x0000, 'Bubu', 'SyncEngine.markServerBaselineReady 操作失败，已安全中止');
+      throw error as Error;
+    }
   }
 
   private serverBaselineIdentity(): string {

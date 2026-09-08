@@ -6,10 +6,13 @@ const app = await readFile(new URL('../AppScope/app.json5', import.meta.url), 'u
 const config = await readFile(new URL('../entry/src/main/ets/services/ServerConfig.ets', import.meta.url), 'utf8');
 const changelog = await readFile(new URL('../entry/src/main/ets/models/Changelog.ets', import.meta.url), 'utf8');
 
-test('鸿蒙安装清单、运行时版本和更新记录统一追平 iOS 2.11.0', () => {
-  assert.ok(app.includes('"versionCode": 2026081901'));
-  assert.ok(app.includes('"versionName": "2.11.0"'));
-  assert.ok(config.includes("versionName: string = '2.11.0'"));
-  assert.ok(config.includes("versionCode: string = '2026081901'"));
-  assert.ok(changelog.includes("version: '2.11.0'"));
+test('双端安装清单、运行时版本和更新记录保持一致', async () => {
+  const ios = await readFile(new URL('../../project.yml', import.meta.url), 'utf8');
+  const version = ios.match(/MARKETING_VERSION: "([^"]+)"/)[1];
+  const build = ios.match(/CURRENT_PROJECT_VERSION: "([^"]+)"/)[1];
+  assert.ok(app.includes(`"versionCode": ${build}`));
+  assert.ok(app.includes(`"versionName": "${version}"`));
+  assert.ok(config.includes(`versionName: string = '${version}'`));
+  assert.ok(config.includes(`versionCode: string = '${build}'`));
+  assert.ok(changelog.includes(`version: '${version}'`));
 });

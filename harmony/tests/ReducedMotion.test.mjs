@@ -8,8 +8,9 @@ const frame = await readFile(new URL('../entry/src/main/ets/view/PhotoFrameView.
 const ceremony = await readFile(new URL('../entry/src/main/ets/components/CeremonyAnimation.ets', import.meta.url), 'utf8');
 
 test('启动读取系统动画缩放并统一关闭循环和过渡动画', () => {
-  assert.ok(preference.includes('ANIMATOR_DURATION_SCALE'));
-  assert.ok(preference.includes('TRANSITION_ANIMATION_SCALE'));
+  assert.ok(preference.includes('isAnimationReduceEnabledSync'));
+  assert.ok(preference.includes('onAnimationReduceStateChange'));
+  assert.ok(preference.includes('offAnimationReduceStateChange'));
   assert.ok(preference.includes("AppStorage.setOrCreate('bubuReduceMotion', reduced)"));
   assert.ok(motion.includes('BubuMotion.reduced ? 1 : -1'));
 });

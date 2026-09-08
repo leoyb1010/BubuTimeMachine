@@ -20,6 +20,10 @@ nonisolated enum BubuTheme {
             light: UIColor(red: 0.949, green: 0.471, blue: 0.624, alpha: 1),   // #F2789F
             dark: UIColor(red: 1.00, green: 0.52, blue: 0.66, alpha: 1)
         )
+        static let primaryInk = dynamic(
+            light: UIColor(red: 0.58, green: 0.14, blue: 0.30, alpha: 1),
+            dark: UIColor(red: 1.0, green: 0.63, blue: 0.75, alpha: 1)
+        )
         /// 强调深色端 deeprose（#E15C86）：主按钮渐变尾色 / 凸起记录键。
         static let deepRose = dynamic(
             light: UIColor(red: 0.882, green: 0.361, blue: 0.525, alpha: 1),   // #E15C86

@@ -33,7 +33,7 @@ struct RootTabView: View {
             .tabViewSidebarHeader {
                 Label("布布时光机", systemImage: "book.pages.fill")
                     .font(BubuTheme.Font.headline)
-                    .foregroundStyle(env.theme.theme.primary)
+                    .foregroundStyle(env.theme.theme.textAccent)
                     .padding(.vertical, 8)
             }
             .tabViewSidebarBottomBar {
@@ -41,7 +41,7 @@ struct RootTabView: View {
                     Button(action: openQuickCapture) {
                         Label("记一笔", systemImage: "plus.circle.fill")
                             .font(BubuTheme.Font.body.weight(.semibold))
-                            .foregroundStyle(env.theme.theme.primary)
+                            .foregroundStyle(env.theme.theme.textAccent)
                     }
                     .buttonStyle(.plain)
                     .padding(.vertical, 8)

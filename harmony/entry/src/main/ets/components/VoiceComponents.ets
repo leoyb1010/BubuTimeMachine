@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { BubuColor, BubuRadius } from '../theme/BubuTheme';
 import { AudioPlayer } from '../services/media/AudioPlayer';
 import { AudioRecorder, RecorderState, RecordResult } from '../services/AudioRecorder';
@@ -149,7 +150,7 @@ export struct VoiceRecorderBar {
           this.startUITimer();
         }
       } else {
-        this.getUIContext().getPromptAction().showToast({ message: '请到系统设置里允许布布时光机使用麦克风。' });
+        SafePrompt.toast(this.getUIContext(), { message: '请到系统设置里允许布布时光机使用麦克风。' });
       }
     }
   }

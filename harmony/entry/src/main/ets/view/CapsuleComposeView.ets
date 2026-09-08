@@ -1,3 +1,4 @@
+import { SafePrompt } from '../theme/SafePrompt';
 import { util } from '@kit.ArkTS';
 import { promptAction } from '@kit.ArkUI';
 import { TimeCapsule, ChildProfile } from '../models/Models';
@@ -78,7 +79,7 @@ export struct CapsuleComposeView {
       try {
         const recovery = CapsuleRecovery.current();
         const payload = await CapsuleVault.shared.unseal(
-          blob, e.unlockAt, e.id, recovery ?? undefined);
+          blob, e.unlockAt, e.id, recovery ?? undefined, Date.now(), e.cryptoVersion ?? 0);
         this.loadedPayload = payload;
         this.letter = payload.letter;
         this.voiceFileName = payload.voiceFileName;
@@ -360,6 +361,7 @@ export struct CapsuleComposeView {
         unlockAt: sealedUnlockMs,
         isLocked: true,
         encryptedBlobFileName: blobName,
+        cryptoVersion: 3,
         coverEmoji: this.emoji,
         syncState: SyncState.local,
         createdAt: e !== null ? e.createdAt : now
@@ -368,13 +370,13 @@ export struct CapsuleComposeView {
       if (payload.voiceFileName) MediaStore.shared.deleteMedia(payload.voiceFileName);
       BubuActivityController.shared.startCapsuleCountdown(
         capsule.title, capsule.unlockAt, ServerConfig.shared.childName);
-      this.getUIContext().getPromptAction().showToast({ message: '已经封存啦 💌' });
+      SafePrompt.toast(this.getUIContext(), { message: '已经封存啦 💌' });
       BubuSound.play(SoundEffect.seal);
       this.onSaved();
       this.onBack();
     } catch (err) {
       const e = err as Error;
-      this.getUIContext().getPromptAction().showDialog({
+      SafePrompt.dialog(this.getUIContext(), {
         title: '封存失败',
         message: `这封信还没有封存成功：${e.message ?? '未知错误'}。可以稍后再试。`,
         buttons: [{ text: '好', color: BubuColor.primary }]
