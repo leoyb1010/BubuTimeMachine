@@ -38,12 +38,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         flipButton.tap()
         let flipped = NSPredicate(format: "label == %@", "翻回身份卡正面")
         expectation(for: flipped, evaluatedWith: flipButton)
-        waitForExpectations(timeout: 3)
+        // 云端 runner 的可访问性快照有额外延迟；仍验证真实翻面结果，给状态同步留足时间。
+        waitForExpectations(timeout: 10)
         attachScreenshot("identity-card-back", to: self)
         flipButton.tap()
         let restoredFront = NSPredicate(format: "label == %@", "翻看身份卡背面")
         expectation(for: restoredFront, evaluatedWith: flipButton)
-        waitForExpectations(timeout: 3)
+        waitForExpectations(timeout: 10)
         attachScreenshot("adaptive-root", to: self)
 
         record.tap()

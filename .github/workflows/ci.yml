@@ -68,6 +68,7 @@ jobs:
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
             -scheme BubuTimeMachine \
+            -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.iphone }}" \
             clean test 2>&1 | tee /tmp/build-iphone.log | tail -120
 
@@ -94,6 +95,7 @@ jobs:
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
             -scheme BubuTimeMachine \
+            -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.ipad }}" \
             -only-testing:BubuTimeMachineUITests \
             test 2>&1 | tee /tmp/ipad.log | tail -80 \
@@ -101,6 +103,7 @@ jobs:
             echo "iPad 回归第一次失败，重跑一次以排除 runner 资源抖动"
             xcodebuild -project BubuTimeMachine.xcodeproj \
               -scheme BubuTimeMachine \
+              -parallel-testing-enabled NO \
               -destination "id=${{ steps.sim.outputs.ipad }}" \
               -only-testing:BubuTimeMachineUITests \
               test 2>&1 | tee /tmp/ipad.log | tail -80
