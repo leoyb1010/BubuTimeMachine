@@ -10,12 +10,14 @@
 原生 iOS App（SwiftUI + SwiftData），为女儿「布布」记录成长、传承一生。
 离线优先、隐私至上、自托管。真正的用户是未来 18 岁的布布。
 
-- **仓库路径**：`/Users/leoyuan/Documents/Leo-布布时光机`
+- **仓库路径**：开发机 `/Users/leoyuan/Documents/Leo-布布时光机`（SSH 会话下请改用 `~/code/BubuTimeMachine` 克隆：Studio 上 Documents 受 TCC 拦截，MBP 上该目录的 git 会卡住）；
+  后端生产机（Mac mini，用户 `leo`）源码克隆在 `~/code/BubuTimeMachine`，生产 release 目录见 `docs/AUDIT_AND_RELEASE_2026-09-12.md` §4。
+- **拓扑提醒**：生产机没有 Xcode；iOS 编译/测试走 MBP（iPhone 已配对）；SSH 会话里 `codesign` 真机包必报 `errSecInternalComponent`，真机覆盖安装要在开发机图形终端跑 `scripts/install-iphone-wifi.sh`。
 - **工程管理**：xcodegen（改 `project.yml` 后必须重跑 `xcodegen generate`）
 - **环境**：Xcode 26 / Swift 6（严格并发，默认 MainActor 隔离）/ iOS 26.0、watchOS 11.0 部署目标
 - **规模**（2026-09-04 实测）：主 App 约 190 个 Swift 文件 / 4.2 万行；单元测试 170+ 项 / 31 套件，另有 5 项 iPhone+iPad XCUITest。
-- **当前版本**：v2.14.0
-- **本轮交付证据**：`docs/RELEASE_2.14.0.md`；审计基线见 `docs/AUDIT_AND_UPGRADE_PLAN_2026-09-08.md`。
+- **当前版本**：v2.15.0（2026091201）；后端 2.15.0 已上线（release `v2.15.0-20260912-r2`）
+- **本轮交付证据**：`docs/AUDIT_AND_RELEASE_2026-09-12.md`（三轮审计、修复、上线与线上回归）；上一版见 `docs/RELEASE_2.14.0.md`。
 
 ---
 
