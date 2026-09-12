@@ -844,7 +844,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     private func activeRecordJSON(_ json: [String: Any], defaultIsDeleted: Bool = true) async -> [String: Any] {
         var body = json
         if defaultIsDeleted, body["isDeleted"] == nil { body["isDeleted"] = false }
-        if body["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
+        // 作者只在新建（POST）时写入：PATCH 注入"当前用户"会把家人的编辑变成改写作者
+        //（服务端会钉住原作者，但客户端也不该发这个杂散值）。
+        if defaultIsDeleted, body["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
             body["authorUserId"] = userId
         }
         if body["familyId"] == nil, let familyId = await tokenBox.familyId(), !familyId.isEmpty {
@@ -861,7 +863,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                     defaultIsDeleted: Bool) async -> [String: String] {
         var result = fields
         if defaultIsDeleted, result["isDeleted"] == nil { result["isDeleted"] = "false" }
-        if result["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
+        if defaultIsDeleted, result["authorUserId"] == nil, let userId = await tokenBox.userId(), !userId.isEmpty {
             result["authorUserId"] = userId
         }
         if result["familyId"] == nil, let familyId = await tokenBox.familyId(), !familyId.isEmpty {

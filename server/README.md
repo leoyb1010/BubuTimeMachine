@@ -185,3 +185,13 @@ from="127.0.0.1,::1",command="/ABSOLUTE/PATH/run_scheduled_backup.sh",no-agent-f
   PocketBase 家庭账户、最好再加一层 Cloudflare Access。能用 Tailscale 内网就不要走公网。
 - DeepSeek API 走云端：只发送**文字**（记录摘要），从不上传照片；语音转写在你自己的服务器本地跑。
   若要完全不出家门，可把 `llm.py` 的 base_url 指向本地 Ollama。
+
+
+## 2026-09-12 运维补充
+
+- launchd 的 `backup`/`healthcheck` 任务执行的是 `~/BubuTimeMachineServer/scripts/g0/*.sh`，**不在 release 目录里**：改了 `server/ops/healthcheck.sh` 或 `run_scheduled_backup.sh` 后必须手工同步到 `scripts/g0`（保留 `.pre-*` 备份）。
+- 墓碑 GC 语义已变：墓碑行永久保留，只回收挂载文件；superuser 可 `POST /api/bubu/ops/tombstone-gc`（body 可带 `{"retentionDays": N}`）做演练。
+- 作者归属由 `pb_hooks/authorship.pb.js` 在服务端钉住原值，客户端 PATCH 带的 `authorUserId` 会被忽略而不是拒绝。
+- 认证限流 `*:auth` 30/3s、`/api/batch` 3/1s、`/api/files/token` 30/3s，按 `CF-Connecting-IP` 分桶；刻意不对 `/api/` 总量与 `*:create` 限流。
+- AI 服务默认每主体 60 次/分钟（`AI_RATE_LIMIT_PER_MINUTE`）。
+- launchd 用户会话可能带全局 `http_proxy`：所有回环调用必须 `--noproxy '*'` / `trust_env=False`，release plist 已注入 `NO_PROXY`。

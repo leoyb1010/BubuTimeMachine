@@ -161,13 +161,31 @@ class FamilyIsolationIntegrationTests(unittest.TestCase):
         status, row = self.call("PATCH", path, {"authorUserId": self.user_a["id"]}, self.token_a)
         self.assertEqual(status, 200, "历史空作者允许补齐")
         status, _ = self.call("PATCH", path, {"authorUserId": "someone-else"}, self.token_a)
-        self.assertGreaterEqual(status, 400, "作者归属不可改写")
+        status, row = self.call("PATCH", path, {"authorUserId": "someone-else", "note": "edit"}, self.token_a)
+        self.assertEqual(status, 200, "作者杂散值不能让编辑 404")
+        self.assertEqual(row["authorUserId"], self.user_a["id"], "作者由服务端钉住原值")
         status, _ = self.call("PATCH", path, {"isDeleted": True}, self.token_a)
         self.assertEqual(status, 200)
         status, _ = self.call("PATCH", path, {"isDeleted": False}, self.token_a)
         self.assertGreaterEqual(status, 400, "墓碑不能被翻活")
         status, _ = self.call("PATCH", path, {"note": "edit on tombstone"}, self.token_a)
         self.assertEqual(status, 200, "墓碑上的普通字段更新仍允许（保持 isDeleted=true）")
+
+    def test_family_member_can_edit_and_delete_another_members_record(self):
+        # 所有已发布客户端 PATCH 时都会把当前用户注入 authorUserId：妈妈改爸爸的记录必须仍然成功。
+        self.user_a2, token_a2 = self.user("a2", self.family_a)
+        path = "/api/collections/entries/records/" + self.entry_a["id"]
+        status, row = self.call("PATCH", path, {"authorUserId": self.user_a["id"], "note": "by a"}, self.token_a)
+        self.assertEqual(status, 200)
+        status, row = self.call("PATCH", path, {"note": "edited by a2", "authorUserId": self.user_a2["id"]}, token_a2)
+        self.assertEqual(status, 200, row)
+        self.assertEqual(row["note"], "edited by a2")
+        self.assertEqual(row["authorUserId"], self.user_a["id"], "家人编辑不改写作者")
+        status, row = self.call("PATCH", path, {"isDeleted": True, "deletedByUserId": self.user_a2["id"],
+                                                "authorUserId": self.user_a2["id"]}, token_a2)
+        self.assertEqual(status, 200, "家人删除（墓碑）必须成功")
+        self.assertTrue(row["isDeleted"])
+        self.assertEqual(row["authorUserId"], self.user_a["id"])
 
     def test_user_cannot_change_own_role(self):
         path = "/api/collections/users/records/" + self.user_a["id"]
@@ -181,9 +199,10 @@ class FamilyIsolationIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(settings["trustedProxy"]["headers"], ["CF-Connecting-IP"])
         self.assertTrue(settings["rateLimits"]["enabled"])
-        labels = {rule["label"] for rule in settings["rateLimits"]["rules"]}
-        self.assertIn("*:auth", labels)
-        self.assertNotIn("/api/", labels, "不能对同步/文件读取设总量限制")
+        rules = {rule["label"]: rule for rule in settings["rateLimits"]["rules"]}
+        self.assertIn("*:auth", rules)
+        self.assertGreaterEqual(rules["*:auth"]["maxRequests"], 30, "2.14 客户端 token 过期会并发登录 26 次")
+        self.assertNotIn("/api/", rules, "不能对同步/文件读取设总量限制")
 
     def test_semantic_queue_enqueues_once_per_content_change(self):
         media = self.create("media", {"localId": "m-1", "familyId": self.family_a, "entryLocalId": "a",

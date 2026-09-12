@@ -192,6 +192,9 @@ def _pocketbase_principal(
             )
     except httpx.HTTPError:
         return None
+    if response.status_code == 429:
+        # PocketBase 认证限流：这是服务端暂时忙，不是用户凭据失效，别让 App 提示"重新连接服务器"。
+        raise HTTPException(status_code=503, detail="服务器正忙，请稍后再试。")
     if response.status_code != 200:
         return None
     try:
