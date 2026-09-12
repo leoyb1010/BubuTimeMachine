@@ -293,6 +293,17 @@ def _pil_can_open(path: Path) -> bool:
         return False
 
 
+def _tool(name: str) -> Optional[str]:
+    """launchd 的 PATH 只有系统目录；Homebrew 的 ffmpeg 要按绝对路径兜底。"""
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/" + name, "/usr/local/bin/" + name, "/usr/bin/" + name):
+        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _run_quiet(cmd: list, timeout: int = 120) -> bool:
     try:
         return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False).returncode == 0
@@ -310,22 +321,24 @@ def prepare_visual_for_encoding(path: Path, media_type: str, force: bool = False
         return path
     output = path.with_name(path.name + ".decoded.jpg")
     if media_type == "video":
-        candidates = [
-            ["ffmpeg", "-y", "-loglevel", "error", "-ss", "1", "-i", str(path), "-frames:v", "1", "-q:v", "3", str(output)],
-        ]
-        for cmd in candidates:
-            if shutil.which(cmd[0]) and _run_quiet(cmd) and output.exists() and output.stat().st_size > 0:
+        ffmpeg = _tool("ffmpeg")
+        if ffmpeg:
+            cmd = [ffmpeg, "-y", "-loglevel", "error", "-ss", "1", "-i", str(path),
+                   "-frames:v", "1", "-q:v", "3", str(output)]
+            if _run_quiet(cmd) and output.exists() and output.stat().st_size > 0 and _pil_can_open(output):
                 return output
-        if shutil.which("qlmanage"):
+        qlmanage = _tool("qlmanage")
+        if qlmanage:
             thumb_dir = path.parent / "ql"
             thumb_dir.mkdir(exist_ok=True)
-            if _run_quiet(["qlmanage", "-t", "-s", "1024", "-o", str(thumb_dir), str(path)]):
+            if _run_quiet([qlmanage, "-t", "-s", "1024", "-o", str(thumb_dir), str(path)]):
                 produced = sorted(thumb_dir.glob("*.png"))
                 if produced and _pil_can_open(produced[0]):
                     return produced[0]
         raise RuntimeError("视频没有可用缩略图且无法抽帧（需要 ffmpeg 或 qlmanage）")
-    if shutil.which("sips"):
-        if _run_quiet(["sips", "-s", "format", "jpeg", str(path), "--out", str(output)]) \
+    sips = _tool("sips")
+    if sips:
+        if _run_quiet([sips, "-s", "format", "jpeg", str(path), "--out", str(output)]) \
                 and output.exists() and _pil_can_open(output):
             return output
     raise RuntimeError("图片格式无法解码（HEIC/HEIF 需要 macOS sips 或 pillow-heif）")
@@ -399,7 +412,14 @@ class SemanticWorker:
             tags = []
 
         with tempfile.TemporaryDirectory(prefix="bubu-semantic-") as temp_dir:
-            image_path = Path(temp_dir) / "visual"
+            # 带上原文件扩展名：qlmanage/sips 靠扩展名识别类型，无扩展名的 "visual" 会直接失败。
+            media_type_hint = str(media.get("mediaType") or "photo")
+            source_name = str((media.get("thumbnail") if media_type_hint == "video" else media.get("file"))
+                              or media.get("thumbnail") or media.get("file") or "")
+            suffix = Path(source_name).suffix.lower()
+            if not re.fullmatch(r"\.[a-z0-9]{1,5}", suffix or ""):
+                suffix = ""
+            image_path = Path(temp_dir) / ("visual" + suffix)
             self.client.download_media(media, image_path)
             # 生产死信全部来自 Pillow 打不开的文件：HEIC 原片（venv 无 pillow-heif）和没有服务端
             # 缩略图的视频原片。这里先转成 JPEG 再编码：mac 自带 sips 转 HEIC，ffmpeg/qlmanage 抽视频帧。

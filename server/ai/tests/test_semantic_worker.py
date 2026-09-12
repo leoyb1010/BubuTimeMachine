@@ -193,8 +193,26 @@ def test_prepare_visual_fails_with_clear_reason_when_nothing_can_decode(tmp_path
     import semantic_worker
     path = tmp_path / "visual"
     path.write_bytes(b"not an image at all")
-    monkeypatch.setattr(semantic_worker.shutil, "which", lambda name: None)
+    monkeypatch.setattr(semantic_worker, "_tool", lambda name: None)
     with pytest.raises(RuntimeError, match="无法解码|无法抽帧"):
         semantic_worker.prepare_visual_for_encoding(path, "photo")
     with pytest.raises(RuntimeError, match="无法抽帧"):
         semantic_worker.prepare_visual_for_encoding(path, "video")
+
+
+def test_video_frame_is_extracted_with_ffmpeg_or_qlmanage_when_available(tmp_path: Path):
+    import semantic_worker
+    if not (semantic_worker._tool("ffmpeg") or semantic_worker._tool("qlmanage")):
+        pytest.skip("no video tooling on this host")
+    ffmpeg = semantic_worker._tool("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("need ffmpeg to synthesize a test clip")
+    clip = tmp_path / "visual.mp4"
+    made = subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:d=2",
+                           "-pix_fmt", "yuv420p", str(clip)], capture_output=True)
+    if made.returncode != 0:
+        pytest.skip("ffmpeg cannot synthesize clip here")
+    frame = semantic_worker.prepare_visual_for_encoding(clip, "video", force=True)
+    from PIL import Image
+    with Image.open(frame) as image:
+        assert image.size == (64, 64)

@@ -104,7 +104,16 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     /// 真正的密码登录。
+    /// 所有登录合并成同一时刻只有一个在飞：token 过期时 26 个并发拉取 + 一批推送会同时 401，
+    /// 以前每个都各自 auth-with-password，一轮就是几十次密码登录——服务端认证限流一开就全被挡。
+    /// 凭据错误（非瞬时）在 30 秒内不再重复打服务器，直接复用上次的错误。
     private func login() async throws -> String {
+        try await tokenBox.coalescedLogin(isTransient: Self.isTransient) { [self] in
+            try await performLogin()
+        }
+    }
+
+    private func performLogin() async throws -> String {
         let url = baseURL.appendingPathComponent("api/collections/users/auth-with-password")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -152,7 +161,12 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             catch {
                 lastError = error
                 guard Self.isTransient(error), i < attempts - 1 else { throw error }
-                try? await Task.sleep(for: .milliseconds(400 * (i + 1)))
+                // 429 的限流窗口以秒计，退避要比网络抖动长一点。
+                if case APIError.server(429, _) = error {
+                    try? await Task.sleep(for: .milliseconds(1500 * (i + 1)))
+                } else {
+                    try? await Task.sleep(for: .milliseconds(400 * (i + 1)))
+                }
             }
         }
         throw lastError ?? APIError.network("请求失败")
@@ -169,8 +183,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             default: return false
             }
         }
-        if case APIError.server(let code, _) = error, (500...599).contains(code) {
-            return true   // 502/503/504：网关/隧道瞬时不可用
+        if case APIError.server(let code, _) = error, (500...599).contains(code) || code == 429 {
+            return true   // 502/503/504：网关/隧道瞬时不可用；429：服务端限流，退避后再试
         }
         if case APIError.network = error { return true }
         return false
@@ -1573,6 +1587,30 @@ private actor TokenBox {
         currentFamilyId = nil
         fileToken = nil
         fileTokenExpiresAt = nil
+    }
+
+    private var inFlightLogin: Task<String, Error>?
+    private var lastLoginFailure: (at: Date, error: Error)?
+
+    /// 合并并发登录：同一时刻只发一个 auth-with-password，其余等待同一个结果。
+    /// 非瞬时失败（凭据错误等）30 秒内直接复用上次错误，不再反复打认证接口。
+    func coalescedLogin(isTransient: @Sendable @escaping (Error) -> Bool,
+                        _ perform: @Sendable @escaping () async throws -> String) async throws -> String {
+        if let inFlightLogin { return try await inFlightLogin.value }
+        if let failure = lastLoginFailure, Date().timeIntervalSince(failure.at) < 30 {
+            throw failure.error
+        }
+        let task = Task { try await perform() }
+        inFlightLogin = task
+        defer { inFlightLogin = nil }
+        do {
+            let token = try await task.value
+            lastLoginFailure = nil
+            return token
+        } catch {
+            lastLoginFailure = isTransient(error) ? nil : (Date(), error)
+            throw error
+        }
     }
 
     func validFileToken(now: Date = .now) -> String? {
