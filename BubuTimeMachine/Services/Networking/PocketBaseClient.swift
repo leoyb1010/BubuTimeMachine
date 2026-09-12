@@ -1155,9 +1155,11 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             contentHash: nonEmpty("contentHash"),
             resourceRole: nonEmpty("resourceRole"),
             assetGroupId: nonEmpty("assetGroupId"),
-            durationSeconds: obj["durationSeconds"] as? Double,
-            width: obj["width"] as? Int,
-            height: obj["height"] as? Int,
+            // PocketBase number 字段 NOT NULL DEFAULT 0：没填过的宽高/时长回来是 0 不是 null，
+            // 必须当作"未知"，否则拉回时会把本机已知的值清成 0。
+            durationSeconds: (obj["durationSeconds"] as? Double).flatMap { $0 > 0 ? $0 : nil },
+            width: (obj["width"] as? Int).flatMap { $0 > 0 ? $0 : nil },
+            height: (obj["height"] as? Int).flatMap { $0 > 0 ? $0 : nil },
             aiTags: obj["aiTags"] as? [String] ?? [],
             createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? .now,
             serverUpdatedAt: Self.serverUpdatedDate(obj)

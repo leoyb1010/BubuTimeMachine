@@ -134,11 +134,14 @@ struct HealthRecordSheet: View {
                 insertedMeasurement = measurement
                 context.insert(measurement)
             }
-        } else if kind == .checkup, let linkedMeasurement {
-            // 编辑时把身高体重清空：连带删掉派生的测量，否则错误的 92cm 永远留在成长曲线上改不掉。
-            PendingDeletion.enqueue(collection: "growthmeasurements",
-                                    remoteId: linkedMeasurement.remoteId, in: context)
-            context.delete(linkedMeasurement)
+        }
+        // 编辑时把身高体重全部清空：派生测量要连带删掉，否则错误的 92cm 永远留在成长曲线上改不掉。
+        // 只处理显式关联（growthMeasurementId），不用同日启发式配对，避免误删别的体检的测量；
+        // 删除放到主保存成功之后再做，保存失败时不会留下悬着的删除等下一次无关保存带走。
+        var measurementToRemove: GrowthMeasurement?
+        if kind == .checkup, !draft.hasGrowthMeasurement, let linkedMeasurement,
+           existingRecord?.growthMeasurementId == linkedMeasurement.id {
+            measurementToRemove = linkedMeasurement
             record.growthMeasurementId = nil
         }
         if existingRecord == nil {
@@ -150,6 +153,12 @@ struct HealthRecordSheet: View {
         }
         do {
             try context.save()
+            if let measurementToRemove {
+                PendingDeletion.enqueue(collection: "growthmeasurements",
+                                        remoteId: measurementToRemove.remoteId, in: context)
+                context.delete(measurementToRemove)
+                try? context.save()
+            }
             env.refreshWidgetSnapshot(context: context)
             env.syncEngine.syncNow()
             dismiss()

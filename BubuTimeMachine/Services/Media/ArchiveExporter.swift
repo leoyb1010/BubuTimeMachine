@@ -182,7 +182,9 @@ nonisolated struct ArchiveExporter: Sendable {
             do {
                 // 导出件会经 AirDrop/网盘离开这台手机：静态图片先抹掉 GPS/IPTC 位置（与查看器分享一致），
                 // 原片仍在沙盒里原样保留。抹不动（视频/异常文件）就原样拷贝。
-                if MediaPrivacy.isStrippableImage(src), let clean = MediaPrivacy.strippingLocation(of: src) {
+                // 只对确实带位置的静态图重写，其余原样拷贝（保留 GIF/HEIC 的容器级元数据，也省时间）。
+                if MediaPrivacy.isStrippableImage(src), MediaPrivacy.hasLocation(src),
+                   let clean = MediaPrivacy.strippingLocation(of: src) {
                     defer { try? fm.removeItem(at: clean) }
                     try fm.copyItem(at: clean, to: dest)
                 } else {

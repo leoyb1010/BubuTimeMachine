@@ -949,6 +949,8 @@ final class SyncEngine {
         }
     }
 
+    private var loggedPlaceholderMediaHold = false
+
     private func pushUnsyncedMedia(_ context: ModelContext) async {
         let mediaItems = pendingBatch(context, Media.self, predicate: #Predicate {
             $0.syncStateRaw == "local" || $0.syncStateRaw == "failed" || $0.syncStateRaw == "uploading"
@@ -967,7 +969,12 @@ final class SyncEngine {
             // 否则家人设备拉到孤儿媒体、补拉父记录得到"不存在"就跳过并推进游标，
             // 等父记录到了媒体的 updated 已落在游标之后，那张照片在那台设备上永远缺失。
             guard entry.remoteId != nil, entry.syncState == .synced else {
-                media.syncState = .local
+                // 保持原状态（.local/.failed 都不改写），只是这一轮先不传；不覆盖已有的失败原因。
+                if entry.syncState == .synced, entry.remoteId == nil, !loggedPlaceholderMediaHold {
+                    // 占位记录（服务端摄取钩子稍后才创建）暂时没有 remoteId：只记一次日志，避免静默卡住。
+                    loggedPlaceholderMediaHold = true
+                    recordFailure(APIError.network("这条记录还在等服务器确认，照片稍后自动补传"), item: "媒体")
+                }
                 finishItem()
                 saveAndRefresh(context)
                 continue
@@ -1750,7 +1757,9 @@ final class SyncEngine {
                    let entryId = UUID(uuidString: entryLocalId) {
                     let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
                     existing.entry = try context.fetch(entryDescriptor).first
-                    if existing.entry == nil { holdCursorForCurrentPull = true }
+                    if existing.entry == nil {
+                        await holdIfParentEntryStillExists(localId: entryLocalId)
+                    }
                 }
             }
             else { return false }
@@ -1762,12 +1771,25 @@ final class SyncEngine {
                 item.entry = try context.fetch(entryDescriptor).first
                 // 父 Entry 还没到：先落库保住「第一次」这条事实本身，但扣住游标，
                 // 下一轮父记录到了会重新走 merge 把关联补上。不扣游标就永远补不上了。
-                if item.entry == nil { holdCursorForCurrentPull = true }
+                if item.entry == nil { await holdIfParentEntryStillExists(localId: entryLocalId) }
             }
             context.insert(item)
         }
         saveAndRefresh(context)
         return true
+    }
+
+    /// 父 Entry 本地缺失时决定要不要扣游标：服务器上父记录仍在（只是本轮没到）→ 扣住等下一轮；
+    /// 服务器上已删/不存在（Entry→FirstTime 是 nullify，删记录后「第一次」合法地成为孤儿）→ 不扣，
+    /// 否则同一窗口会每 30 秒永久重拉；网络失败 → 扣住，下一轮再判。
+    private func holdIfParentEntryStillExists(localId: String) async {
+        do {
+            if try await apiClient.fetchEntry(localId: localId) != nil {
+                holdCursorForCurrentPull = true
+            }
+        } catch {
+            holdCursorForCurrentPull = true
+        }
     }
 
     private func mergeRemoteMember(_ dto: FamilyMemberDTO) async throws -> Bool {

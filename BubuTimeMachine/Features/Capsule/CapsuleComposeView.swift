@@ -160,7 +160,8 @@ struct CapsuleComposeView: View {
                     }
                 }
             }
-            DatePicker("精确到天", selection: $unlockAt, in: Date.now..., displayedComponents: .date)
+            // 已到期的信保留历史开启日期：下限跟着放到该日期，否则选择器会把值夹回"今天"。
+            DatePicker("精确到天", selection: $unlockAt, in: min(unlockAt, Date.now)..., displayedComponents: .date)
                 .disabled(editing != nil && !canRewritePayload)
                 .padding()
                 .background(BubuTheme.Color.card.opacity(0.70), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))

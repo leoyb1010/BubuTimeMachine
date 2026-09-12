@@ -52,11 +52,16 @@ nonisolated enum MediaPrivacy {
         return type.conforms(to: .image)
     }
 
-    /// 这张图里到底有没有位置信息。没有就不用多此一举拷一份。
+    /// 这张图里到底有没有位置信息（GPS，或 IPTC 里的城市/省/国家）。没有就不用多此一举拷一份。
     static func hasLocation(_ url: URL) -> Bool {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         else { return false }
-        return props[kCGImagePropertyGPSDictionary] != nil
+        if props[kCGImagePropertyGPSDictionary] != nil { return true }
+        guard let iptc = props[kCGImagePropertyIPTCDictionary] as? [CFString: Any] else { return false }
+        return iptc[kCGImagePropertyIPTCCity] != nil
+            || iptc[kCGImagePropertyIPTCProvinceState] != nil
+            || iptc[kCGImagePropertyIPTCCountryPrimaryLocationName] != nil
+            || iptc[kCGImagePropertyIPTCSubLocation] != nil
     }
 }
