@@ -290,8 +290,8 @@ def test_memory_query_keeps_family_window_and_traceable_sources():
     for _, filter_value, _, _ in store.calls:
         assert "familyId='family\\'quoted'" in filter_value
         assert "isDeleted=false" in filter_value
-        assert ">='2026-07-27T00:00:00+00:00'" in filter_value
-        assert "<'2026-08-03T00:00:00+00:00'" in filter_value
+        assert ">='2026-07-27 00:00:00.000Z'" in filter_value  # PocketBase 存储文本格式，带 T 的 ISO 会错比
+        assert "<'2026-08-03 00:00:00.000Z'" in filter_value
 
 
 def test_legacy_single_family_reads_empty_fact_family_without_rewriting(monkeypatch):

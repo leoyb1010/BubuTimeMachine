@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import os
+import time
 import logging
 import hashlib
+import base64
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -15,6 +17,8 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import httpx
+
+logger = logging.getLogger("bubu.memory")
 
 
 UTC = timezone.utc
@@ -64,11 +68,44 @@ def sound_source_revision(record: dict[str, Any]) -> str:
     return "fallback:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def pb_base_url() -> str:
+    """launchd/start 脚本 `set -a; source .env` 会把空行 `PB_BASE_URL=` 变成空字符串，
+    dict.get 的默认值不会生效；这里统一兜底，避免所有 PB 客户端拼出无协议 URL。"""
+    return (os.environ.get("PB_BASE_URL", "") or "").strip().rstrip("/") or "http://127.0.0.1:8090"
+
+
+def pb_filter_datetime(value: datetime) -> str:
+    """PocketBase 日期字段以 `YYYY-MM-DD HH:MM:SS.mmmZ` 文本存储，过滤字面量按字符串比较：
+    带 `T`/`+00:00` 的 ISO 形式会因为 ' ' < 'T' 整体错位（实测 happenedAt >= '…T16:00:00+00:00'
+    漏掉当天所有记录）。所有进 filter 的时间都必须走这里。"""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    value = value.astimezone(UTC)
+    return value.strftime("%Y-%m-%d %H:%M:%S.") + "%03dZ" % (value.microsecond // 1000)
+
+
+def token_expires_at(token: str) -> float:
+    """解析 PocketBase JWT 的 exp（秒）；解析不了返回 0 表示未知。"""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
+        return float(data.get("exp") or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+# PocketBase 对过期/无效 token 不回 401，而是当匿名请求走规则判定：
+# 只允许 superuser 的集合会回 403。两种状态都必须触发一次重新认证。
+AUTH_RETRY_STATUSES = frozenset({401, 403})
+TOKEN_REFRESH_MARGIN_SECONDS = 300
+
+
 class PocketBaseMemoryStore:
     """使用服务账户读取 PocketBase，家庭客户端无法直接访问派生产物。"""
 
     def __init__(self) -> None:
-        self.base_url = os.environ.get("PB_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+        self.base_url = pb_base_url()
         self.api_token = os.environ.get("PB_WORKER_TOKEN", "").strip()
         self.identity = os.environ.get("PB_WORKER_EMAIL", "").strip()
         self.password = os.environ.get("PB_WORKER_PASSWORD", "")
@@ -87,9 +124,15 @@ class PocketBaseMemoryStore:
         self.close()
 
     def _headers(self) -> dict[str, str]:
-        if not self._token:
+        if not self._token or self._token_is_expiring():
             self.authenticate()
         return {"Authorization": self._token}
+
+    def _token_is_expiring(self) -> bool:
+        if self.api_token:
+            return False
+        expires_at = token_expires_at(self._token)
+        return bool(expires_at) and expires_at - time.time() < TOKEN_REFRESH_MARGIN_SECONDS
 
     def authenticate(self) -> None:
         if self.api_token:
@@ -108,7 +151,8 @@ class PocketBaseMemoryStore:
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         response = self._client.request(method, path, headers=self._headers(), **kwargs)
-        if response.status_code == 401 and not self.api_token:
+        if response.status_code in AUTH_RETRY_STATUSES and not self.api_token:
+            logger.warning("pocketbase auth rejected status=%s, re-authenticating", response.status_code)
             self._token = ""
             response = self._client.request(method, path, headers=self._headers(), **kwargs)
         response.raise_for_status()
@@ -621,6 +665,4 @@ def fact_record_belongs_to_family(
 
 
 def _pb_date(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).isoformat()
+    return pb_filter_datetime(value)

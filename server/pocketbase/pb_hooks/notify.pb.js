@@ -4,7 +4,10 @@
 // 配置：BUBU_NTFY_URL=http://127.0.0.1:8095/bubu-ops，BUBU_NTFY_TOKEN=tk_xxx
 
 onRecordAfterUpdateSuccess((e) => {
-    if (e.record.getString("state") === "dead_letter") {
+    // 只在“进入死信”这一次转换时通知；此后管理员再改 lastError 等字段不重复打扰。
+    let previous = "";
+    try { previous = e.record.original().getString("state"); } catch (_) { previous = ""; }
+    if (e.record.getString("state") === "dead_letter" && previous !== "dead_letter") {
         const url = $os.getenv("BUBU_NTFY_URL");
         if (url) {
             const token = $os.getenv("BUBU_NTFY_TOKEN");

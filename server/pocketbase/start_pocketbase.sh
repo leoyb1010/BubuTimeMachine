@@ -16,11 +16,20 @@ BUBU_SERVER_ENV_FILE="${BUBU_SERVER_ENV_FILE:-../ai/.env}"
 
 # PocketBase intake hook 与 AI staging 必须读到同一套本机密钥；launchd 只保存
 # 这个 0600 文件的路径，不把 secret 明文复制进 plist。
+# 只导出 hook 真正需要的键：PocketBase 进程（及其 hooks 目录里的任何脚本）不应拿到
+# DeepSeek key、worker 密码、上传签名密钥等与它无关的机密。
+PB_ENV_KEYS=(INTAKE_COMMIT_KEY INTAKE_STAGING_ROOT BUBU_NTFY_URL BUBU_NTFY_TOKEN
+  BUBU_GC_RETENTION_DAYS BUBU_GC_BATCH SEMANTIC_MODEL_VERSION PB_ENCRYPTION_KEY)
 if [[ -f "$BUBU_SERVER_ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$BUBU_SERVER_ENV_FILE"
-  set +a
+  eval "$(
+    set -a
+    # shellcheck disable=SC1090
+    source "$BUBU_SERVER_ENV_FILE" >/dev/null 2>&1
+    set +a
+    for key in "${PB_ENV_KEYS[@]}"; do
+      if [[ -n "${!key:-}" ]]; then printf 'export %s=%q\n' "$key" "${!key}"; fi
+    done
+  )"
 fi
 
 if [ ! -x "$PB_BIN" ]; then

@@ -40,14 +40,14 @@ from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from llm import LLMClient, LLMError
 from artifact_workflow import ArtifactUnavailable
 import movie_render
 from semantic_index import SemanticIndex
 from semantic_model import MobileCLIPEncoder, SemanticModelUnavailable
-from memory_query import PocketBaseMemoryStore
+from memory_query import PocketBaseMemoryStore, pb_base_url
 from weekly_report import WeeklyReportService, WeeklyReportUnavailable
 from sound_ring import SoundRingService, SoundRingUnavailable
 from intake_staging import (
@@ -118,7 +118,7 @@ def _commit_staged_batch(
     commit_key = os.environ.get("INTAKE_COMMIT_KEY", "").strip()
     if len(commit_key) < 32:
         raise IntakeError("commit key is not configured")
-    base_url = os.environ.get("PB_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+    base_url = pb_base_url()
     with httpx.Client(timeout=300, trust_env=False) as client:
         response = client.post(
             base_url + "/api/bubu/intake/commit",
@@ -182,7 +182,7 @@ def _pocketbase_principal(
     # 只有未命中合法 token 缓存、确实要打到 PocketBase 时才计数，避免伪造 Bearer
     # 把公网一次请求放大成一次本机 auth-refresh；缓存内的家庭正常请求不占该桶。
     _check_rate(preauth_bucket, _PREAUTH_RATE_LIMIT)
-    base_url = os.environ.get("PB_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+    base_url = pb_base_url()
     try:
         with httpx.Client(timeout=5, trust_env=False) as client:
             response = client.post(
@@ -217,7 +217,10 @@ def _pocketbase_principal(
 def _authorized_principal(
     x_api_key: Optional[str], authorization: Optional[str], preauth_bucket: str
 ) -> Optional[str]:
-    if _API_KEY and secrets.compare_digest(x_api_key or "", _API_KEY):
+    # 按字节比较：请求头可能带非 ASCII 字节，str 版 compare_digest 会抛 TypeError 变成 500。
+    if _API_KEY and secrets.compare_digest(
+        (x_api_key or "").encode("utf-8", "surrogateescape"), _API_KEY.encode("utf-8")
+    ):
         return "service:" + hashlib.sha256(_API_KEY.encode("utf-8")).hexdigest()
     return _pocketbase_principal(authorization, preauth_bucket)
 
@@ -365,6 +368,14 @@ class IntakeBatchCreateReq(BaseModel):
     batch_id: str = Field(..., min_length=8, max_length=128)
     entry: dict[str, Any]
     items: list[IntakeBatchItemReq] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("entry")
+    @classmethod
+    def _bounded_entry(cls, value: dict[str, Any]) -> dict[str, Any]:
+        # entry 会整份进 sqlite 再 POST 给 PocketBase；不设上限会被塞进数十 MB 的 JSON。
+        if len(json.dumps(value, ensure_ascii=False)) > 16 * 1024:
+            raise ValueError("entry 内容过大（上限 16KB）")
+        return value
 
 
 class IntakeBatchCommitReq(BaseModel):
@@ -735,6 +746,12 @@ async def intake_upload(
                     result = await asyncio.to_thread(
                         _commit_staged_batch, store, batch_id, owner
                     )
+                except IntakeConflict as exc:
+                    # 另一路（显式 /intake/commit 或并发的最后一片上传）已在提交：
+                    # 绝不能 reset 把对方的 committing 翻回 staged 造成双重提交。上传本身已成功。
+                    logger.info("intake auto-commit skipped batch=%s reason=%s",
+                                batch_id, type(exc).__name__)
+                    result = store.batch(batch_id, owner)
                 except (IntakeError, httpx.HTTPError, ValueError) as exc:
                     store.reset_commit(batch_id, owner, type(exc).__name__)
                     logger.warning(
@@ -819,7 +836,7 @@ def classify(req: ClassifyReq):
     )
     user = f"标签:{req.tags}\n文字:{req.note or ''}\n地点:{req.location_name or ''}"
     try:
-        data = llm.complete_json(sys, user, max_tokens=300)
+        data = llm.complete_json(sys, user, max_tokens=800)
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return ClassifyResp(
@@ -840,7 +857,7 @@ def detect_first_time(req: DetectFirstReq):
     )
     user = f"标签:{req.tags}\n文字:{req.note or ''}"
     try:
-        data = llm.complete_json(sys, user, max_tokens=200)
+        data = llm.complete_json(sys, user, max_tokens=600)
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
     return DetectFirstResp(
@@ -1370,7 +1387,9 @@ async def transcribe(request: Request, file: UploadFile = File(...)):
         chunks.append(chunk)
     data = b"".join(chunks)
     try:
-        text = transcribe_audio(data, file.filename or "audio.m4a")
+        # Whisper 推理是同步 CPU 任务，放线程池，否则整个事件循环（上传流、轮询）都会停摆。
+        text = await asyncio.to_thread(transcribe_audio, data, file.filename or "audio.m4a")
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"转写失败：{e}")
+        logger.warning("transcribe failed type=%s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="转写失败，请稍后重试。")
     return {"transcript": text}

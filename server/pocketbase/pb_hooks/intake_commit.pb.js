@@ -9,11 +9,19 @@ routerAdd('POST', '/api/bubu/intake/commit', (e) => {
     }
     const configuredKey = ($os.getenv('INTAKE_COMMIT_KEY') || '').trim()
     const providedKey = (e.request.header.get('X-Bubu-Intake-Key') || '').trim()
-    if (configuredKey.length < 32 || providedKey !== configuredKey) {
+    if (configuredKey.length < 32 || !$security.equal(providedKey, configuredKey)) {
         throw new UnauthorizedError('invalid intake service key')
     }
-    const remote = e.realIP()
-    if (remote !== '127.0.0.1' && remote !== '::1') {
+    // 只接受本机 AI 服务的直连：看 socket 对端地址而不是 realIP()（Cloudflare 隧道也从
+    // 127.0.0.1 进来，且 realIP 可被 trustedProxy 头影响）。隧道/反代流量一定带转发头，
+    // 本机 AI 服务从不带，因此“回环 socket 且无任何转发头”才算本机。
+    const remote = String(e.request.remoteAddr || '')
+    const loopback = remote.startsWith('127.0.0.1:') || remote.startsWith('[::1]:')
+        || remote === '127.0.0.1' || remote === '::1'
+    const forwardedHeaders = ['CF-Connecting-IP', 'Cf-Ray', 'X-Forwarded-For', 'X-Real-IP',
+        'Forwarded', 'True-Client-IP', 'X-Forwarded-Host']
+    const forwarded = forwardedHeaders.some((name) => !!e.request.header.get(name))
+    if (!loopback || forwarded) {
         throw new ForbiddenError('intake commit is loopback only')
     }
 

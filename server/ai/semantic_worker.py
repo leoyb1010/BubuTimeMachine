@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ from urllib.parse import quote
 
 import httpx
 
+from memory_query import pb_base_url, pb_filter_datetime
 from semantic_index import SemanticAsset, SemanticIndex
 from semantic_model import MobileCLIPEncoder
 
@@ -30,7 +32,14 @@ UTC = timezone.utc
 
 
 def iso_now(offset_seconds: int = 0) -> str:
+    """写入记录字段用；PocketBase 保存时会归一化。"""
     return (datetime.now(UTC) + timedelta(seconds=offset_seconds)).isoformat()
+
+
+def filter_now(offset_seconds: int = 0) -> str:
+    """进 filter 字面量用：必须是 PocketBase 的存储文本格式，否则 availableAt/leaseUntil
+    的退避与租约比较在同一天内全部失效（失败任务会被立刻重领、三次即进死信）。"""
+    return pb_filter_datetime(datetime.now(UTC) + timedelta(seconds=offset_seconds))
 
 
 def retry_delay_seconds(attempts: int) -> int:
@@ -57,9 +66,26 @@ class ClaimedJob:
     attempts: int
 
 
+def token_expires_at(token: str) -> float:
+    """解析 PocketBase JWT 的 exp（秒）；解析不了返回 0 表示未知。"""
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
+        return float(data.get("exp") or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+# PocketBase 对过期/无效 token 不回 401，而是当匿名请求走规则判定：
+# 只允许 superuser 的集合会回 403。两种状态都必须触发一次重新认证。
+AUTH_RETRY_STATUSES = frozenset({401, 403})
+TOKEN_REFRESH_MARGIN_SECONDS = 300
+
+
 class PocketBaseWorkerClient:
     def __init__(self) -> None:
-        self.base_url = os.environ.get("PB_BASE_URL", "http://127.0.0.1:8090").rstrip("/")
+        self.base_url = pb_base_url()
         # 长期 superuser token 比在常驻 worker 中保存账户密码更合适；
         # 兼容旧部署，未提供 token 时才回退到邮箱 + 密码认证。
         self.api_token = os.environ.get("PB_WORKER_TOKEN", "").strip()
@@ -79,9 +105,15 @@ class PocketBaseWorkerClient:
         self._client.close()
 
     def _headers(self) -> dict[str, str]:
-        if not self._token:
+        if not self._token or self._token_is_expiring():
             self.authenticate()
         return {"Authorization": self._token}
+
+    def _token_is_expiring(self) -> bool:
+        if self.api_token:
+            return False
+        expires_at = token_expires_at(self._token)
+        return bool(expires_at) and expires_at - time.time() < TOKEN_REFRESH_MARGIN_SECONDS
 
     def authenticate(self) -> None:
         if self.api_token:
@@ -98,9 +130,10 @@ class PocketBaseWorkerClient:
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         response = self._client.request(method, path, headers=self._headers(), **kwargs)
-        if response.status_code == 401:
+        if response.status_code in AUTH_RETRY_STATUSES:
             if self.api_token:
                 raise RuntimeError("PB_WORKER_TOKEN 已失效或无权限")
+            logger.warning("pocketbase auth rejected status=%s, re-authenticating", response.status_code)
             self._token = ""
             response = self._client.request(method, path, headers=self._headers(), **kwargs)
         response.raise_for_status()
@@ -109,7 +142,7 @@ class PocketBaseWorkerClient:
     def claim(self, limit: int = 1, lease_seconds: int = 300) -> list[ClaimedJob]:
         # 单 mini 单 worker 串行领取：同一照片的更新/删除按队列顺序最终收敛。
         with self._claim_lock:
-            now = iso_now()
+            now = filter_now()
             filter_value = (
                 "(state='queued' && availableAt<='%s') || "
                 "(state='running' && leaseUntil<'%s')" % (now, now)
@@ -365,9 +398,19 @@ def main() -> None:
         raise SystemExit("已有语义 worker 在运行，拒绝启动第二实例") from exc
     worker = build_worker()
     poll_seconds = max(2, int(os.environ.get("SEMANTIC_WORKER_POLL_SECONDS", "10")))
+    failures = 0
     try:
         while True:
-            processed = worker.run_once()
+            try:
+                processed = worker.run_once()
+                failures = 0
+            except Exception as exc:  # noqa: BLE001
+                # 领取/认证阶段的瞬时故障（PB 重启、token 失效、网络抖动）不应让
+                # 常驻 worker 退出；记录后退避重试，launchd 无需反复拉起。
+                failures += 1
+                logger.error("semantic worker loop error=%s", safe_error_summary(exc))
+                time.sleep(min(300, poll_seconds * (2 ** min(failures, 5))))
+                continue
             if not processed:
                 time.sleep(poll_seconds)
     finally:

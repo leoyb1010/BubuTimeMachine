@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -18,6 +19,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
+
+logger = logging.getLogger("bubu.intake")
 
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
@@ -388,7 +391,46 @@ class IntakeStagingStore:
                 raise IntakeConflict("batch is not fully staged")
             db.execute("UPDATE batches SET state='committing',updated_at=? WHERE id=?", (time.time(), batch_id))
             db.execute("COMMIT")
-        return self.commit_manifest(batch_id, owner)
+        try:
+            return self.commit_manifest(batch_id, owner)
+        except IntakeConflict as exc:
+            # 校验失败（文件被改/损坏/逃逸）以前会把批次永久留在 committing：
+            # 不能提交、不能取消、不能重传。现在退回并把坏素材标记为失败，允许重传。
+            self.reset_commit(batch_id, owner, type(exc).__name__)
+            asset_key = getattr(exc, "asset_key", "")
+            if asset_key:
+                self.invalidate_staged_item(batch_id, asset_key, str(exc))
+            raise
+        except Exception:
+            self.reset_commit(batch_id, owner, "verification_error")
+            raise
+
+    def invalidate_staged_item(self, batch_id: str, asset_key: str, reason: str) -> None:
+        """已暂存素材在提交前被发现损坏：作废其暂存结果，让客户端重新上传该素材。"""
+        with self._connect() as db:
+            now = time.time()
+            row = db.execute(
+                "SELECT stored_path FROM items WHERE batch_id=? AND asset_key=? AND state='staged'",
+                (batch_id, asset_key),
+            ).fetchone()
+            if row and row["stored_path"]:
+                # 坏文件必须一并清掉，否则同哈希重传会撞上 staging path collision。
+                try:
+                    Path(str(row["stored_path"])).unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning("intake invalidate: cannot remove staged file batch=%s", batch_id)
+            changed = db.execute(
+                "UPDATE items SET state='failed',content_hash=NULL,actual_size=NULL,stored_path=NULL,"
+                "last_error=?,updated_at=? WHERE batch_id=? AND asset_key=? AND state='staged'",
+                (reason[:200], now, batch_id, asset_key),
+            ).rowcount
+            if changed:
+                db.execute(
+                    "UPDATE batches SET state='failed',updated_at=? WHERE id=? AND state='staged'",
+                    (now, batch_id),
+                )
 
     def family_batches(self, family_id: str, states: Iterable[str]) -> list[dict[str, Any]]:
         wanted = [state for state in states if state in _STATES]
@@ -504,6 +546,7 @@ class IntakeStagingStore:
         allowed = (self.files / batch_id).resolve()
         for item in stored:
             value = dict(item)
+            asset_key = str(value.get("asset_key") or "")
             path_text = str(value.get("stored_path") or "")
             path = Path(path_text)
             try:
@@ -511,13 +554,20 @@ class IntakeStagingStore:
                     raise IntakeConflict("staged file cannot be a symlink")
                 canonical = path.resolve(strict=True)
                 canonical.relative_to(allowed)
+            except IntakeConflict as exc:
+                exc.asset_key = asset_key  # type: ignore[attr-defined]
+                raise
             except (OSError, ValueError) as exc:
-                raise IntakeConflict("staged file escaped its batch directory") from exc
+                conflict = IntakeConflict("staged file escaped its batch directory")
+                conflict.asset_key = asset_key  # type: ignore[attr-defined]
+                raise conflict from exc
             actual_size = canonical.stat().st_size
             actual_hash = _sha256(canonical)
             if (actual_size != int(value.get("actual_size") or -1)
                     or actual_hash != str(value.get("content_hash") or "")):
-                raise IntakeConflict("staged file changed before commit")
+                conflict = IntakeConflict("staged file changed before commit")
+                conflict.asset_key = asset_key  # type: ignore[attr-defined]
+                raise conflict
             value["stored_path"] = str(canonical)
             verified.append(value)
         result["items"] = verified

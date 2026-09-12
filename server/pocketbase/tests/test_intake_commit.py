@@ -191,6 +191,56 @@ class IntakeCommitIntegrationTests(unittest.TestCase):
             self.assertEqual(len(stored), 1)
             self.assertEqual(stored[0].read_bytes(), content)
 
+    def test_forwarded_requests_are_rejected_even_with_valid_key(self) -> None:
+        binary_value = os.environ.get("POCKETBASE_BIN", "").strip()
+        if not binary_value:
+            self.skipTest("POCKETBASE_BIN is not configured")
+        binary = Path(binary_value).expanduser().resolve()
+        with tempfile.TemporaryDirectory(prefix="bubu-pb-intake-fwd-") as raw:
+            sandbox = Path(raw)
+            key = "integration-test-intake-key-0000000000000002"
+            env = os.environ.copy()
+            env.update({"INTAKE_COMMIT_KEY": key, "INTAKE_STAGING_ROOT": str(sandbox / "staging")})
+            args = ["--dir", str(sandbox / "pb_data"),
+                    "--migrationsDir", str(ROOT / "server/pocketbase/migrations"),
+                    "--hooksDir", str(ROOT / "server/pocketbase/pb_hooks")]
+            subprocess.run([str(binary), "migrate", "up", *args], check=True, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            port = self._free_port()
+            process = subprocess.Popen([str(binary), "serve", f"--http=127.0.0.1:{port}", "--hooksWatch=false", *args],
+                                       env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            try:
+                self._wait_until_ready(port, process)
+                manifest = {"id": "batch-fwd-0001", "family_id": "family-fwd-0001", "state": "committing",
+                            "entry": {}, "items": [{"content_hash": "0" * 64}]}
+                # 隧道/反代流量一定带转发头：带头即拒绝，即使 key 正确、socket 也是回环。
+                for header in ("X-Forwarded-For", "CF-Connecting-IP", "Cf-Ray", "X-Real-IP"):
+                    self.assertEqual(self._status_with_headers(port, key, manifest, {header: "203.0.113.9"}), 403, header)
+                # 不带转发头的本机直连会通过守卫，进入正文校验（这里 manifest 不合法 → 400 而非 403）。
+                self.assertEqual(self._status_with_headers(port, key, manifest, {}), 400)
+                self.assertEqual(self._status_with_headers(port, "wrong-key", manifest, {}), 401)
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                if process.stdout:
+                    process.stdout.close()
+
+    @staticmethod
+    def _status_with_headers(port: int, key: str, manifest: dict, extra: dict) -> int:
+        headers = {"Content-Type": "application/json", "X-Bubu-Intake-Key": key}
+        headers.update(extra)
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/api/bubu/intake/commit",
+                                         data=json.dumps(manifest).encode("utf-8"), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            error.read()
+            return error.code
+
     @staticmethod
     def _free_port() -> int:
         with socket.socket() as sock:

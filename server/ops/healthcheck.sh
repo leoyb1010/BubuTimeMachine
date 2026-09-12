@@ -17,14 +17,29 @@ fi
 
 failures=()
 
-if ! curl -fsS --max-time 8 "$PB_URL/api/health" >/dev/null; then
+# 回环请求绝不能走 launchd 继承的系统代理（曾导致告警链路连续五周 502 而无人知晓）。
+if ! curl --noproxy "*" -fsS --max-time 8 "$PB_URL/api/health" >/dev/null; then
   failures+=("PocketBase health failed: $PB_URL/api/health")
 fi
 
-if ! curl -fsS --max-time 8 "$AI_URL/health" >/dev/null; then
+if ! curl --noproxy "*" -fsS --max-time 8 "$AI_URL/health" >/dev/null; then
   failures+=("AI health failed: $AI_URL/health")
 fi
 
+# 原片 storage 通常是指向外接盘的软链接：盘掉了 PocketBase /api/health 仍 200、文件全 404，
+# 必须单独检查链接目标存在并对该卷做剩余空间检查。
+storage_path="$DATA_PATH/storage"
+if [[ -L "$storage_path" ]]; then
+  storage_target="$(readlink "$storage_path")"
+  if [[ ! -d "$storage_target" ]]; then
+    failures+=("Storage volume not mounted: $storage_path -> $storage_target")
+  else
+    storage_available_gb=$(( $(df -Pk "$storage_target" | awk 'NR==2 {print $4}') / 1024 / 1024 ))
+    if (( storage_available_gb < MIN_FREE_GB )); then
+      failures+=("Low disk space on storage volume $storage_target: ${storage_available_gb}GB < ${MIN_FREE_GB}GB")
+    fi
+  fi
+fi
 if [[ -d "$DATA_PATH" ]]; then
   available_kb="$(df -Pk "$DATA_PATH" | awk 'NR==2 {print $4}')"
   available_gb="$((available_kb / 1024 / 1024))"
@@ -52,7 +67,7 @@ if (( ${#failures[@]} > 0 )); then
   printf '%s\n' "${failures[@]}" >&2
   if [[ -n "$NTFY_URL" ]]; then
     alert_body="$(printf '%s\n' "${failures[@]}")"
-    curl_args=(--fail --silent --show-error --max-time 8 -H "Title: 布布服务器告警" -H "Tags: warning,computer")
+    curl_args=(--noproxy "*" --fail --silent --show-error --max-time 8 -H "Title: 布布服务器告警" -H "Tags: warning,computer")
     if [[ -n "$NTFY_TOKEN" ]]; then
       curl_args+=(-H "Authorization: Bearer $NTFY_TOKEN")
     fi

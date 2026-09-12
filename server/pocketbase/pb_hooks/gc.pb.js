@@ -1,52 +1,105 @@
 /// <reference path="../pb_data/types.d.ts" />
-// 布布时光机 · 墓碑回收（GC）
-// 客户端删除走软删除（isDeleted=true 的墓碑），保证删除能跨设备传播；
-// 但 PocketBase 的文件生命周期绑定 record——record 永不真删，删掉的照片/视频
-// 会永远占着服务器磁盘。本 cron 每天凌晨把「已软删且超过保留期」的墓碑真删，
-// PocketBase 级联删除其文件，磁盘得以回收。
-//
-// 保留期 30 天：给全家所有设备留足同步窗口（墓碑被拉走并本地删除后即无用）；
-// 30 天没开过 App 的设备重新上线时走全量拉取，不依赖墓碑，因此真删是安全的。
+// 布布时光机 · 墓碑文件回收（GC）
+// 客户端删除走软删除（isDeleted=true 的墓碑），保证删除能跨设备传播。
+// 以前 GC 把超过保留期的墓碑整行真删，但客户端并没有“离线超期就全量对账”的逻辑：
+// 一台 30 天没开的手机上线后编辑/重传，会把全家已删除的照片 POST 回来（复活）。
+// 现在墓碑行永久保留（几百字节），只回收其挂载的文件（照片/视频/音频/封面）释放磁盘。
+// 没有文件字段的集合墓碑本身就不占空间，不再处理。
 //
 // 配置（环境变量，可选）：
-//   BUBU_GC_RETENTION_DAYS  保留天数，默认 30
-//   BUBU_GC_BATCH           单次最多删除条数，默认 200（分批温和回收，不冲击磁盘 IO）
+//   BUBU_GC_RETENTION_DAYS  文件保留天数，默认 30（给全家设备留足下载/同步窗口）
+//   BUBU_GC_BATCH           单次最多处理条数，默认 200
+// 运维入口：POST /api/bubu/ops/tombstone-gc（仅 superuser，body 可带 {"retentionDays":N}）用于演练与测试。
 
 cronAdd("bubu_tombstone_gc", "0 4 * * *", () => {
     const retentionDays = parseInt($os.getenv("BUBU_GC_RETENTION_DAYS") || "30", 10);
     const batch = parseInt($os.getenv("BUBU_GC_BATCH") || "200", 10);
     const cutoff = new Date(Date.now() - retentionDays * 24 * 3600 * 1000)
         .toISOString().replace("T", " ");
-
     const collections = [
         "entries", "media", "comments", "voicenotes", "milestones",
         "firsttimes", "voicememos", "members", "childprofile",
-        "healthrecords", "timecapsules", "vaccinerecords", "growthmeasurements",
+        "healthrecords", "timecapsules", "vaccinerecords", "growthmeasurements", "feed_events",
     ];
-
-    let removed = 0;
+    let purged = 0;
     for (const name of collections) {
         try {
+            const collection = $app.findCollectionByNameOrId(name);
+            const fileFields = [];
+            for (let i = 0; i < collection.fields.length; i++) {
+                const field = collection.fields[i];
+                if (field.type() === "file") fileFields.push(field.name);
+            }
+            if (fileFields.length === 0) continue;
+            const hasFile = fileFields.map((f) => f + " != ''").join(" || ");
             const stale = $app.findRecordsByFilter(
                 name,
-                `isDeleted = true && updated < "${cutoff}"`,
-                "updated",
-                batch,
-                0
+                `isDeleted = true && updated < "${cutoff}" && (${hasFile})`,
+                "updated", batch, 0
             );
             for (const record of stale) {
                 try {
-                    $app.delete(record);   // 级联删除挂载的文件（file/thumbnail）
-                    removed++;
+                    for (const f of fileFields) { record.set(f, null); }
+                    $app.save(record);   // 保留墓碑行，PocketBase 删除卸下的文件
+                    purged++;
                 } catch (err) {
-                    console.log(`[bubu-gc] delete failed ${name}/${record.id}:`, err);
+                    console.log(`[bubu-gc] purge failed ${name}/${record.id}:`, err);
                 }
             }
         } catch (err) {
-            // 集合不存在（老库）或查询失败：跳过，不影响其它集合
+            console.log(`[bubu-gc] skipped ${name}:`, err);
         }
     }
-    if (removed > 0) {
-        console.log(`[bubu-gc] reclaimed ${removed} tombstones older than ${retentionDays}d`);
+    if (purged > 0) {
+        console.log(`[bubu-gc] purged files of ${purged} tombstones older than ${retentionDays}d`);
     }
+});
+
+routerAdd("POST", "/api/bubu/ops/tombstone-gc", (e) => {
+    if (!e.auth || !e.auth.isSuperuser()) {
+        throw new ForbiddenError("superuser only");
+    }
+    const body = new DynamicModel({ retentionDays: -1 });
+    try { e.bindBody(body); } catch (_) { /* 空 body 使用默认 */ }
+    const envDays = parseInt($os.getenv("BUBU_GC_RETENTION_DAYS") || "30", 10);
+    const retentionDays = body.retentionDays >= 0 ? Number(body.retentionDays) : envDays;
+    const batch = parseInt($os.getenv("BUBU_GC_BATCH") || "200", 10);
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 3600 * 1000)
+        .toISOString().replace("T", " ");
+    const collections = [
+        "entries", "media", "comments", "voicenotes", "milestones",
+        "firsttimes", "voicememos", "members", "childprofile",
+        "healthrecords", "timecapsules", "vaccinerecords", "growthmeasurements", "feed_events",
+    ];
+    let purged = 0;
+    const errors = [];
+    for (const name of collections) {
+        try {
+            const collection = $app.findCollectionByNameOrId(name);
+            const fileFields = [];
+            for (let i = 0; i < collection.fields.length; i++) {
+                const field = collection.fields[i];
+                if (field.type() === "file") fileFields.push(field.name);
+            }
+            if (fileFields.length === 0) continue;
+            const hasFile = fileFields.map((f) => f + " != ''").join(" || ");
+            const stale = $app.findRecordsByFilter(
+                name,
+                `isDeleted = true && updated < "${cutoff}" && (${hasFile})`,
+                "updated", batch, 0
+            );
+            for (const record of stale) {
+                try {
+                    for (const f of fileFields) { record.set(f, null); }
+                    $app.save(record);
+                    purged++;
+                } catch (err) {
+                    errors.push(name + "/" + record.id);
+                }
+            }
+        } catch (err) {
+            errors.push(name + ": " + String(err));
+        }
+    }
+    return e.json(200, { purged: purged, retentionDays: retentionDays, errors: errors });
 });

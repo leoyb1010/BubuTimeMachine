@@ -9,6 +9,14 @@ import shutil
 from pathlib import Path
 
 
+# launchd 用户会话可能带全局 http_proxy/https_proxy（如本机代理软件写入 launchctl setenv），
+# 而 NO_PROXY 为空会让所有回环请求（健康检查、ntfy 通知、PB 调用）被送进代理。
+LOOPBACK_NO_PROXY = {
+    "NO_PROXY": "localhost,127.0.0.1,::1",
+    "no_proxy": "localhost,127.0.0.1,::1",
+}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-root", required=True, type=Path)
@@ -47,6 +55,7 @@ def main() -> int:
                 str(server / "pocketbase/pb_data"),
             ],
             "EnvironmentVariables": {
+                **LOOPBACK_NO_PROXY,
                 "PB_BIN": str(server / "pocketbase/pocketbase"),
                 "PB_HTTP_ADDR": "0.0.0.0:8090",
                 "PB_MIGRATIONS_DIR": "./migrations",
@@ -68,6 +77,7 @@ def main() -> int:
         "top.leoyuan.bubu.weekly-report": {
             "Label": "top.leoyuan.bubu.weekly-report",
             "ProgramArguments": [str(ai / "start_weekly_report.sh")],
+            "EnvironmentVariables": dict(LOOPBACK_NO_PROXY),
             "WorkingDirectory": str(ai),
             "ProcessType": "Background",
             "StartCalendarInterval": {"Weekday": 2, "Hour": 0, "Minute": 5},
@@ -77,6 +87,7 @@ def main() -> int:
         "top.leoyuan.bubu.ssd-intake": {
             "Label": "top.leoyuan.bubu.ssd-intake",
             "ProgramArguments": [str(ai / "start_ssd_intake.sh")],
+            "EnvironmentVariables": dict(LOOPBACK_NO_PROXY),
             "WorkingDirectory": str(ai),
             "ProcessType": "Background",
             "RunAtLoad": True,
@@ -106,6 +117,7 @@ def keep_alive_job(
     return {
         "Label": label,
         "ProgramArguments": [str(program)],
+        "EnvironmentVariables": dict(LOOPBACK_NO_PROXY),
         "WorkingDirectory": str(working),
         "RunAtLoad": True,
         "KeepAlive": True,

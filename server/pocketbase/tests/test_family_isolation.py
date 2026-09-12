@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -127,6 +128,100 @@ class FamilyIsolationIntegrationTests(unittest.TestCase):
         status, row = self.call("PATCH", path, {"title": "updated"}, self.token_a)
         self.assertEqual(status, 200)
         self.assertEqual(row["cryptoVersion"], 3)
+
+    # ---------- 2026-09-12 第一轮加固回归 ----------
+
+    def multipart(self, path, fields, file_field, file_name, content, token):
+        boundary = "----bubu-audit-boundary"
+        body = b""
+        for key, value in fields.items():
+            body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n").encode()
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{file_name}\"\r\n"
+                 f"Content-Type: image/jpeg\r\n\r\n").encode() + content + b"\r\n"
+        body += f"--{boundary}--\r\n".encode()
+        request = urllib.request.Request(self.base + path, method="POST", data=body, headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}", "Authorization": "Bearer " + token})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.load(response)
+        except urllib.error.HTTPError as error:
+            return error.code, json.load(error)
+
+    def jobs_for(self, media_id):
+        query = urllib.parse.quote(f"sourceRecordId='{media_id}'")
+        status, listing = self.call("GET", f"/api/collections/automation_jobs/records?filter={query}&perPage=50",
+                                    token=self.admin)
+        self.assertEqual(status, 200)
+        return listing["items"]
+
+    def test_tombstone_cannot_be_revived_and_author_is_immutable(self):
+        path = "/api/collections/entries/records/" + self.entry_a["id"]
+        status, row = self.call("PATCH", path, {"note": "still alive", "isDeleted": False}, self.token_a)
+        self.assertEqual(status, 200, "对活记录重发 isDeleted=false 必须仍然允许（客户端 DTO 会带该字段）")
+        status, row = self.call("PATCH", path, {"authorUserId": self.user_a["id"]}, self.token_a)
+        self.assertEqual(status, 200, "历史空作者允许补齐")
+        status, _ = self.call("PATCH", path, {"authorUserId": "someone-else"}, self.token_a)
+        self.assertGreaterEqual(status, 400, "作者归属不可改写")
+        status, _ = self.call("PATCH", path, {"isDeleted": True}, self.token_a)
+        self.assertEqual(status, 200)
+        status, _ = self.call("PATCH", path, {"isDeleted": False}, self.token_a)
+        self.assertGreaterEqual(status, 400, "墓碑不能被翻活")
+        status, _ = self.call("PATCH", path, {"note": "edit on tombstone"}, self.token_a)
+        self.assertEqual(status, 200, "墓碑上的普通字段更新仍允许（保持 isDeleted=true）")
+
+    def test_user_cannot_change_own_role(self):
+        path = "/api/collections/users/records/" + self.user_a["id"]
+        status, _ = self.call("PATCH", path, {"role": "admin"}, self.token_a)
+        self.assertGreaterEqual(status, 400)
+        status, _ = self.call("PATCH", path, {"name": "renamed"}, self.token_a)
+        self.assertEqual(status, 200)
+
+    def test_hardened_settings_are_applied_by_migration(self):
+        status, settings = self.call("GET", "/api/settings", token=self.admin)
+        self.assertEqual(status, 200)
+        self.assertEqual(settings["trustedProxy"]["headers"], ["CF-Connecting-IP"])
+        self.assertTrue(settings["rateLimits"]["enabled"])
+        labels = {rule["label"] for rule in settings["rateLimits"]["rules"]}
+        self.assertIn("*:auth", labels)
+        self.assertNotIn("/api/", labels, "不能对同步/文件读取设总量限制")
+
+    def test_semantic_queue_enqueues_once_per_content_change(self):
+        media = self.create("media", {"localId": "m-1", "familyId": self.family_a, "entryLocalId": "a",
+                                      "mediaType": "photo"})
+        self.assertEqual(len(self.jobs_for(media["id"])), 1)
+        for patch in ({"width": 100}, {"height": 200}, {"clientUpdatedAt": "2026-09-12 00:00:00.000Z"}):
+            status, _ = self.call("PATCH", "/api/collections/media/records/" + media["id"], patch, self.admin)
+            self.assertEqual(status, 200)
+        self.assertEqual(len(self.jobs_for(media["id"])), 1, "无关字段更新不得重复入队")
+        status, _ = self.call("PATCH", "/api/collections/media/records/" + media["id"], {"isDeleted": True}, self.admin)
+        self.assertEqual(status, 200)
+        jobs = self.jobs_for(media["id"])
+        self.assertEqual(sorted(job["kind"] for job in jobs), ["semantic_media_delete", "semantic_media_upsert"])
+
+    def test_gc_purges_files_but_keeps_tombstone_row(self):
+        status, media = self.multipart("/api/collections/media/records",
+                                       {"localId": "m-gc", "familyId": self.family_a, "entryLocalId": "a",
+                                        "mediaType": "photo"}, "file", "photo.jpg", b"\xff\xd8bytes", self.admin)
+        self.assertEqual(status, 200, media)
+        self.assertTrue(media["file"])
+        status, _ = self.call("PATCH", "/api/collections/media/records/" + media["id"], {"isDeleted": True}, self.admin)
+        self.assertEqual(status, 200)
+        status, _ = self.call("POST", "/api/bubu/ops/tombstone-gc", {"retentionDays": 0}, self.token_a)
+        self.assertEqual(status, 403, "GC 演练入口仅 superuser")
+        status, summary = self.call("POST", "/api/bubu/ops/tombstone-gc", {"retentionDays": 0}, self.admin)
+        self.assertEqual(status, 200, summary)
+        self.assertEqual(summary["errors"], [])
+        self.assertEqual(summary["purged"], 1)
+        status, row = self.call("GET", "/api/collections/media/records/" + media["id"], token=self.admin)
+        self.assertEqual(status, 200, "墓碑行必须保留，否则离线设备会把已删照片复活")
+        self.assertTrue(row["isDeleted"])
+        self.assertEqual(row["file"], "")
+        status, again = self.call("POST", "/api/bubu/ops/tombstone-gc", {"retentionDays": 0}, self.admin)
+        self.assertEqual(again["purged"], 0, "已清理的墓碑不重复处理")
+        status, _ = self.call("POST", "/api/collections/media/records",
+                              {"localId": "m-gc", "familyId": self.family_a, "entryLocalId": "a",
+                               "mediaType": "photo"}, self.token_a)
+        self.assertGreaterEqual(status, 400, "同 localId 不能再次创建（墓碑仍在，唯一索引拦截）")
 
 
 class LegacyFamilyMigrationTests(unittest.TestCase):

@@ -25,8 +25,9 @@ def notify_ready(report_id: str) -> None:
     if token:
         headers["Authorization"] = "Bearer %s" % token
     # 不发送家庭正文、姓名、生日或来源摘要，通知只说明有新派生产物。
+    # 本机 ntfy 回环地址不能走 launchd 继承的系统代理，否则通知被代理 502 吞掉。
     response = httpx.post(url, content="新一周的家庭周报已经生成，请在 App 内查看。",
-                          headers=headers, timeout=15)
+                          headers=headers, timeout=15, trust_env=False)
     response.raise_for_status()
 
 

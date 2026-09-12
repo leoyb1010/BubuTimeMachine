@@ -43,7 +43,7 @@ fi
 # 只发送故障类型，不发送数据路径、文件名或家庭内容。告警失败不能掩盖备份失败码。
 if [[ -n "${NTFY_URL:-}" && -f "${NTFY_TOKEN_FILE:-}" ]]; then
   ntfy_token="$(cat "$NTFY_TOKEN_FILE")"
-  curl -fsS --max-time 8 \
+  curl --noproxy "*" -fsS --max-time 8 \
     -H "Authorization: Bearer $ntfy_token" \
     -H "Title: 布布服务器 · 自动备份失败" \
     -H "Tags: warning,computer" \

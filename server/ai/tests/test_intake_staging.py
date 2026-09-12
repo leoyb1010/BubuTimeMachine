@@ -170,14 +170,21 @@ def test_commit_revalidates_hash_size_and_rejects_symlink(tmp_path: Path):
     with pytest.raises(IntakeConflict):
         store.begin_commit("batch-id-0001", "pb:family-user")
 
-    # reset the state left by begin_commit, then prove symlink escape is rejected too.
-    store.reset_commit("batch-id-0001", "pb:family-user", "test")
+    # 校验失败后批次不再卡在 committing：坏素材被作废（文件已清、状态 failed），允许重传。
+    batch = store.batch("batch-id-0001", "pb:family-user")
+    assert batch["state"] == "failed" and batch["items"][0]["state"] == "failed"
+    assert not path.exists()
+    store.stage_file(
+        "batch-id-0001", "asset-key-0001", temporary(tmp_path, data), digest, len(data)
+    )
+    path = next((store.files / "batch-id-0001").iterdir())
     path.unlink()
     outside = tmp_path / "outside.heic"
     outside.write_bytes(data)
     path.symlink_to(outside)
     with pytest.raises(IntakeConflict):
         store.begin_commit("batch-id-0001", "pb:family-user")
+    assert store.batch("batch-id-0001", "pb:family-user")["state"] != "committing"
 
 
 def test_stale_committing_batch_is_recoverable_and_retry_safe(tmp_path: Path):
