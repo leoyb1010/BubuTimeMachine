@@ -17,12 +17,14 @@ class SemanticModelUnavailable(RuntimeError):
 
 
 class MobileCLIPEncoder:
+    @staticmethod
+    def default_model_version() -> str:
+        return "mobileclip-s0-datacompdr-1b"
+
     def __init__(self) -> None:
         self.model_name = os.environ.get("SEMANTIC_MODEL_NAME", "mobileclip_s0")
         self.checkpoint = Path(os.environ.get("SEMANTIC_MODEL_PATH", "")).expanduser()
-        self.model_version = os.environ.get(
-            "SEMANTIC_MODEL_VERSION", "mobileclip-s0-datacompdr-1b"
-        )
+        self.model_version = os.environ.get("SEMANTIC_MODEL_VERSION", self.default_model_version())
         self._lock = Lock()
         self._inference_lock = Lock()
         self._loaded = False

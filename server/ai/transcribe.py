@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from functools import lru_cache
+
+# Whisper 在 mini 上并发推理会互相拖慢并双份加载模型；/transcribe 已放线程池，这里串行化。
+_inference_lock = threading.Lock()
 
 
 @lru_cache(maxsize=1)
@@ -24,5 +28,6 @@ def transcribe_audio(data: bytes, filename: str) -> str:
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as f:
         f.write(data)
         f.flush()
-        segments, _info = _model().transcribe(f.name, language="zh", beam_size=5)
-        return "".join(seg.text for seg in segments).strip()
+        with _inference_lock:
+            segments, _info = _model().transcribe(f.name, language="zh", beam_size=5)
+            return "".join(seg.text for seg in segments).strip()

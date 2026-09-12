@@ -31,6 +31,7 @@ fi
 storage_path="$DATA_PATH/storage"
 if [[ -L "$storage_path" ]]; then
   storage_target="$(readlink "$storage_path")"
+  [[ "$storage_target" = /* ]] || storage_target="$(dirname "$storage_path")/$storage_target"
   if [[ ! -d "$storage_target" ]]; then
     failures+=("Storage volume not mounted: $storage_path -> $storage_target")
   else

@@ -15,6 +15,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+from pathlib import Path
 import urllib.parse
 import re
 import shutil
@@ -272,6 +273,19 @@ def pocketbase_file_reference(url: str) -> Optional[tuple]:
     return collection, record_id, urllib.parse.unquote(file_name)
 
 
+def _normalize_for_ffmpeg(dest: str) -> bool:
+    """HEIC/HEIF 原片 ffmpeg 的 -loop 输入打不开：统一转成 JPEG 再进 Ken Burns。"""
+    try:
+        from visual_transcode import prepare_visual_for_encoding
+        decoded = prepare_visual_for_encoding(Path(dest), "photo")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("movie: cannot normalize image (%s)", type(exc).__name__)
+        return False
+    if str(decoded) != dest:
+        os.replace(str(decoded), dest)
+    return True
+
+
 def _download(url: str, dest: str, store: Any = None) -> bool:
     reference = pocketbase_file_reference(url)
     if reference is not None and store is not None:
@@ -279,7 +293,7 @@ def _download(url: str, dest: str, store: Any = None) -> bool:
         try:
             store.download_record_file(collection, record_id, file_name, dest,
                                        max_bytes=_MAX_BYTES)
-            return os.path.getsize(dest) > 0
+            return os.path.getsize(dest) > 0 and _normalize_for_ffmpeg(dest)
         except Exception as exc:  # noqa: BLE001 单张失败跳过，不炸整片
             logger.warning("movie: protected download failed %s/%s (%s)",
                            collection, record_id, type(exc).__name__)
@@ -295,7 +309,7 @@ def _download(url: str, dest: str, store: Any = None) -> bool:
             return False
         with open(dest, "wb") as f:
             f.write(data)
-        return True
+        return _normalize_for_ffmpeg(dest)
     except Exception as exc:  # 网络/超时/坏 URL 都跳过该图，不炸整片
         logger.warning("movie: download failed %s (%s)", url[:80], exc)
         return False

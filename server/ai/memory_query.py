@@ -99,6 +99,7 @@ def token_expires_at(token: str) -> float:
 # 只允许 superuser 的集合会回 403。两种状态都必须触发一次重新认证。
 AUTH_RETRY_STATUSES = frozenset({401, 403})
 TOKEN_REFRESH_MARGIN_SECONDS = 300
+REAUTH_MIN_INTERVAL_SECONDS = 5
 
 
 class PocketBaseMemoryStore:
@@ -110,6 +111,7 @@ class PocketBaseMemoryStore:
         self.identity = os.environ.get("PB_WORKER_EMAIL", "").strip()
         self.password = os.environ.get("PB_WORKER_PASSWORD", "")
         self._token = self.api_token
+        self._last_reauth_at = 0.0
         self._file_token_value = ""
         # PocketBase 永远是本机/家庭内服务；不得被系统 HTTP_PROXY 转发到代理进程。
         self._client = httpx.Client(base_url=self.base_url, timeout=30, trust_env=False)
@@ -151,9 +153,12 @@ class PocketBaseMemoryStore:
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         response = self._client.request(method, path, headers=self._headers(), **kwargs)
-        if response.status_code in AUTH_RETRY_STATUSES and not self.api_token:
+        if response.status_code in AUTH_RETRY_STATUSES and not self.api_token \
+                and time.time() - self._last_reauth_at > REAUTH_MIN_INTERVAL_SECONDS:
+            # 真正的 403（规则拒绝）不是 token 过期：重认证最多每几秒一次，避免撞认证限流。
             logger.warning("pocketbase auth rejected status=%s, re-authenticating", response.status_code)
             self._token = ""
+            self._last_reauth_at = time.time()
             response = self._client.request(method, path, headers=self._headers(), **kwargs)
         response.raise_for_status()
         return response

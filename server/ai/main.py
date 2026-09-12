@@ -485,6 +485,30 @@ def _semantic_min_score() -> float:
     return value
 
 
+def _semantic_index_path() -> Path:
+    configured = os.environ.get("SEMANTIC_INDEX_PATH", "../derived/memory_index.sqlite")
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parent / path
+    return path.resolve()
+
+
+def _semantic_indexed_count() -> int:
+    """健康页只需要条数：直接开索引文件，不要为此加载模型（此前首次搜索前一直报 0）。"""
+    if not _semantic_enabled():
+        return 0
+    try:
+        if _semantic_index is not None:
+            return _semantic_index.active_count()
+        version = os.environ.get("SEMANTIC_MODEL_VERSION", "").strip() or MobileCLIPEncoder.default_model_version()
+        path = _semantic_index_path()
+        if not path.exists():
+            return 0
+        return SemanticIndex(path, version).active_count()
+    except Exception:  # noqa: BLE001 健康页不能因为索引文件问题而 500
+        return 0
+
+
 def _semantic_components() -> tuple[SemanticIndex, MobileCLIPEncoder]:
     global _semantic_index, _semantic_encoder
     if not _semantic_enabled():
@@ -493,11 +517,7 @@ def _semantic_components() -> tuple[SemanticIndex, MobileCLIPEncoder]:
         if _semantic_encoder is None:
             _semantic_encoder = MobileCLIPEncoder()
         if _semantic_index is None:
-            configured = os.environ.get("SEMANTIC_INDEX_PATH", "../derived/memory_index.sqlite")
-            path = Path(configured).expanduser()
-            if not path.is_absolute():
-                path = Path(__file__).resolve().parent / path
-            _semantic_index = SemanticIndex(path.resolve(), _semantic_encoder.model_version)
+            _semantic_index = SemanticIndex(_semantic_index_path(), _semantic_encoder.model_version)
     return _semantic_index, _semantic_encoder
 
 
@@ -561,7 +581,7 @@ def health(
     ) is not None:
         with _parse_stats_lock:
             stats = dict(_parse_stats)
-        semantic_count = _semantic_index.active_count() if _semantic_index is not None else 0
+        semantic_count = _semantic_indexed_count()
         return {"ok": True, "model": llm.model, "configured": llm.is_configured,
                 "auth": True, "parse_stats": stats,
                 "semantic_search": {"enabled": _semantic_enabled(), "indexed": semantic_count}}

@@ -42,10 +42,18 @@ class LLMClient:
         # 否则排障时会被“首选与兜底模型均调用失败”抹平。
         errors: list[str] = []
         for model in (self.model, self.fallback_model):
+            budget = max_tokens
             try:
-                return self._chat(model, system, user, max_tokens, temperature)
+                return self._chat(model, system, user, budget, temperature)
             except LLMError as exc:
                 message = str(exc)
+                if message.startswith("LLM 输出被截断"):
+                    # 推理模型的思考会吃掉预算：先给同一模型加倍预算再试一次，再考虑换模型。
+                    budget = min(max_tokens * 2, 4000)
+                    try:
+                        return self._chat(model, system, user, budget, temperature)
+                    except LLMError as retry_exc:
+                        message = str(retry_exc)
                 errors.append(f"{model}: {message}")
                 if not _can_try_fallback(message):
                     raise

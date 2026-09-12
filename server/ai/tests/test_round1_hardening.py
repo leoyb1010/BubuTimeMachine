@@ -56,12 +56,15 @@ def test_truncated_output_is_not_silently_accepted(monkeypatch):
     seen = []
 
     def handler(request):
-        seen.append(json.loads(request.content)["model"])
+        payload = json.loads(request.content)
+        seen.append((payload["model"], payload["max_tokens"]))
         return httpx.Response(200, json={"choices": [{"finish_reason": "length",
                                                       "message": {"content": "{\"partial\": "}}]})
     with pytest.raises(llm_module.LLMError, match="截断"):
         _llm_with(handler, monkeypatch).complete("s", "u", max_tokens=50)
-    assert len(seen) == 2  # 首选截断后尝试了兜底模型
+    # 同模型先加倍预算重试一次，再换兜底模型（同样两次）
+    assert [m for m, _ in seen] == ["deepseek-v4-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-pro"]
+    assert [b for _, b in seen] == [50, 100, 50, 100]
 
 
 def test_upstream_error_body_never_reaches_client_message(monkeypatch):

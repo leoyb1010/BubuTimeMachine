@@ -146,11 +146,11 @@ def test_download_uses_service_account_for_protected_media(tmp_path):
         calls = []
 
         def download_record_file(self, collection, record_id, file_name, destination, *, max_bytes):
+            from PIL import Image
             Store.calls.append((collection, record_id, file_name))
-            with open(destination, "wb") as handle:
-                handle.write(b"jpeg")
+            Image.new("RGB", (4, 4), "red").save(destination, format="JPEG")
 
     dest = tmp_path / "img.jpg"
     assert _download("https://public.example/api/files/media/rec1/a.jpg", str(dest), Store())
     assert Store.calls == [("media", "rec1", "a.jpg")]
-    assert dest.read_bytes() == b"jpeg"
+    assert dest.read_bytes()[:2] == b"\xff\xd8"
