@@ -140,6 +140,7 @@ def test_pocketbase_file_reference_is_extracted_regardless_of_host():
 
 
 def test_download_uses_service_account_for_protected_media(tmp_path):
+    pytest.importorskip("PIL.Image")
     from movie_render import _download
 
     class Store:

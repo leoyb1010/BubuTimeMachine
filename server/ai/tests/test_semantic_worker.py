@@ -161,7 +161,7 @@ def test_http_error_summary_never_contains_protected_file_token():
 
 
 def test_prepare_visual_returns_decodable_images_untouched(tmp_path: Path):
-    from PIL import Image
+    Image = pytest.importorskip("PIL.Image")
     from visual_transcode import prepare_visual_for_encoding
     path = tmp_path / "visual"
     Image.new("RGB", (4, 4), "red").save(path, format="JPEG")
@@ -170,7 +170,7 @@ def test_prepare_visual_returns_decodable_images_untouched(tmp_path: Path):
 
 def test_prepare_visual_transcodes_heic_via_sips_when_available(tmp_path: Path, monkeypatch):
     import shutil as _shutil
-    from PIL import Image
+    Image = pytest.importorskip("PIL.Image")
     from visual_transcode import prepare_visual_for_encoding
     if not _shutil.which("sips"):
         pytest.skip("sips only exists on macOS")
@@ -190,6 +190,7 @@ def test_prepare_visual_transcodes_heic_via_sips_when_available(tmp_path: Path, 
 
 
 def test_prepare_visual_fails_with_clear_reason_when_nothing_can_decode(tmp_path: Path, monkeypatch):
+    pytest.importorskip("PIL.Image")  # 没有 Pillow 时 _pil_can_open 视为可解码（交给 encoder 报错）
     import visual_transcode
     path = tmp_path / "visual"
     path.write_bytes(b"not an image at all")
@@ -213,6 +214,6 @@ def test_video_frame_is_extracted_with_ffmpeg_or_qlmanage_when_available(tmp_pat
     if made.returncode != 0:
         pytest.skip("ffmpeg cannot synthesize clip here")
     frame = visual_transcode.prepare_visual_for_encoding(clip, "video", force=True)
-    from PIL import Image
+    Image = pytest.importorskip("PIL.Image")
     with Image.open(frame) as image:
         assert image.size == (64, 64)

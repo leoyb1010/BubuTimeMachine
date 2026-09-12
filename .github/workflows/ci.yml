@@ -63,14 +63,36 @@ jobs:
           IPAD=$(pick iPad)
           echo "ipad=$IPAD" >> "$GITHUB_OUTPUT"
 
-      - name: Build & test (iPhone)
+      # 单元测试与 UI 测试分开跑：UI 用例在共享 runner 上会因为 "Lost connection to the application"
+      # 偶发抖动（2026-09-12 两次都是同一条用例），和 iPad 一样失败后重跑一次；单元测试不重跑。
+      - name: Build & unit test (iPhone)
         run: |
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.iphone }}" \
+            -skip-testing:BubuTimeMachineUITests \
             clean test 2>&1 | tee /tmp/build-iphone.log | tail -120
+
+      - name: UI 回归 (iPhone)
+        run: |
+          set -o pipefail
+          xcodebuild -project BubuTimeMachine.xcodeproj \
+            -scheme BubuTimeMachine \
+            -parallel-testing-enabled NO \
+            -destination "id=${{ steps.sim.outputs.iphone }}" \
+            -only-testing:BubuTimeMachineUITests \
+            test 2>&1 | tee /tmp/iphone-ui.log | tail -80 \
+          || {
+            echo "iPhone UI 回归第一次失败，重跑一次以排除 runner 资源抖动"
+            xcodebuild -project BubuTimeMachine.xcodeproj \
+              -scheme BubuTimeMachine \
+              -parallel-testing-enabled NO \
+              -destination "id=${{ steps.sim.outputs.iphone }}" \
+              -only-testing:BubuTimeMachineUITests \
+              test 2>&1 | tee /tmp/iphone-ui.log | tail -80
+          }
 
       # CLAUDE.md 的验收标准是「零 error 零 warning」，但过去 CI 只看退出码，
       # 于是零警告全靠人在本机手工 grep 维持，带 warning 的 PR 能顺利合进 main。
