@@ -12,7 +12,8 @@ import UniformTypeIdentifiers
 ///
 /// 这里只做一件事：拷一份、抹掉位置相关的字段、其它原样保留。
 /// 不动原文件——原片是家庭档案的一部分，EXIF 里的时间和相机信息以后还有用。
-enum MediaPrivacy {
+// 纯 ImageIO 工具，导出器在后台线程调用：显式 nonisolated，不能跟着默认 MainActor 隔离。
+nonisolated enum MediaPrivacy {
 
     /// 会被抹掉的字段：GPS 字典，以及 TIFF/IPTC 里同样会泄漏位置的几项。
     /// 拍摄时间、相机型号、方向等一律保留——它们不暴露「家在哪」。
@@ -27,8 +28,11 @@ enum MediaPrivacy {
             destURL as CFURL, type, CGImageSourceGetCount(source), nil) else { return nil }
 
         // kCFNull 表示「删掉这一项」，只传 nil 是「不修改」。
+        // IPTC 的 City/ProvinceState/Country* 同样是"家在哪"，整组一起抹掉（标题/关键词
+        // 这类文案对分享出去的照片没有保留价值）；EXIF/TIFF 的时间与相机信息保留。
         let removals: [CFString: Any] = [
             kCGImagePropertyGPSDictionary: kCFNull as Any,
+            kCGImagePropertyIPTCDictionary: kCFNull as Any,
         ]
         for index in 0..<CGImageSourceGetCount(source) {
             CGImageDestinationAddImageFromSource(destination, source, index, removals as CFDictionary)

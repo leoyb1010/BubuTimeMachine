@@ -936,6 +936,16 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         if let contentHash = file.contentHash { fields["contentHash"] = contentHash }
         if let resourceRole = file.resourceRole { fields["resourceRole"] = resourceRole }
         if let assetGroupId = file.assetGroupId { fields["assetGroupId"] = assetGroupId }
+        // 宽高/时长/端侧标签以前从不上传，却在下一轮 pull 被远端空值覆盖：
+        // 上传方自己的视频时长会消失、aiTags 归零。服务端字段早已就绪。
+        if let width = file.width { fields["width"] = String(width) }
+        if let height = file.height { fields["height"] = String(height) }
+        if let duration = file.durationSeconds { fields["durationSeconds"] = String(duration) }
+        if !file.aiTags.isEmpty,
+           let data = try? JSONSerialization.data(withJSONObject: file.aiTags),
+           let json = String(data: data, encoding: .utf8) {
+            fields["aiTags"] = json
+        }
         Self.addSyncTimestamp(to: &fields)
         fields = await activeRecordFields(fields, defaultIsDeleted: existingId == nil)
         // 缩略图随原文件一并上传（服务端 thumbnail 字段早已就绪）：
@@ -1228,6 +1238,11 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "bloodType": jsonValue(dto.bloodType),
             "birthPlace": jsonValue(dto.birthPlace)
         ]
+        // 入园日期/过敏/健康备注是家庭事实（服务端 0016 已建字段），必须随档案同步。
+        // 只在本地确有值时才带上，避免老值被 nil 清空（apply 侧同样只增不清）。
+        if let schoolStart = dto.schoolStartDate { body["schoolStartDate"] = iso.string(from: schoolStart) }
+        if let allergies = dto.allergies { body["allergies"] = allergies }
+        if let notes = dto.medicalNotes { body["medicalNotes"] = notes }
         addSyncTimestamp(to: &body)
         return body
     }
@@ -1245,6 +1260,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                bloodType: obj["bloodType"] as? String ?? fallback?.bloodType,
                                birthPlace: obj["birthPlace"] as? String ?? fallback?.birthPlace,
                                avatarRemoteURL: avatarRemoteURL ?? fallback?.avatarRemoteURL,
+                               schoolStartDate: date("schoolStartDate") ?? fallback?.schoolStartDate,
+                               allergies: Self.nonEmptyString(obj["allergies"]) ?? fallback?.allergies,
+                               medicalNotes: Self.nonEmptyString(obj["medicalNotes"]) ?? fallback?.medicalNotes,
                                createdAt: fallback?.createdAt ?? .now,
                                serverUpdatedAt: Self.serverUpdatedDate(obj))
     }
@@ -1441,6 +1459,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         }
         body["isLocked"] = dto.isLocked
         body["coverEmoji"] = jsonValue(dto.coverEmoji)
+        // 封存版本必须过网：否则第二台设备永远拿不到 v3 标记，只能从 blob 头部回填，
+        // 攻击者替换成 BTC2 blob 就会被当成 v2 接受并锁定——防降级形同虚设。
+        if let version = dto.cryptoVersion { body["cryptoVersion"] = version }
         return body
     }
 
@@ -1454,6 +1475,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "isLocked": dto.isLocked ? "true" : "false",
         ]
         if let emoji = dto.coverEmoji { fields["coverEmoji"] = emoji }
+        if let version = dto.cryptoVersion { fields["cryptoVersion"] = String(version) }
         addSyncTimestamp(to: &fields)
         return fields
     }
@@ -1473,9 +1495,23 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             isLocked: obj["isLocked"] as? Bool ?? fallback?.isLocked ?? true,
             encryptedBlobRemoteURL: remoteURL ?? fallback?.encryptedBlobRemoteURL,
             coverEmoji: obj["coverEmoji"] as? String ?? fallback?.coverEmoji,
+            cryptoVersion: Self.intValue(obj["cryptoVersion"]) ?? fallback?.cryptoVersion,
             createdAt: date("created") ?? fallback?.createdAt ?? .now,
             serverUpdatedAt: Self.serverUpdatedDate(obj)
         )
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let double = value as? Double { return Int(double) }
+        if let text = value as? String { return Int(text) }
+        return nil
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let text = value as? String,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return text
     }
 
     private func remoteFileURL(collection: String, recordId: String?, fileName: String) -> String? {

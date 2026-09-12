@@ -158,9 +158,13 @@ extension Dictionary where Key == String, Value == JSONValue {
     }
 
     func double(_ key: String) -> Double? {
-        if case .number(let value)? = self[key] { return value }
-        if case .string(let value)? = self[key] { return Double(value) }
-        return nil
+        // 模型输出不可信："inf"/"nan"/1e30 这类值一旦流到 Int(...) 会直接崩溃，且文本留在输入框里重试再崩。
+        let raw: Double?
+        if case .number(let value)? = self[key] { raw = value }
+        else if case .string(let value)? = self[key] { raw = Double(value) }
+        else { raw = nil }
+        guard let value = raw, value.isFinite, abs(value) < 1_000_000_000 else { return nil }
+        return value
     }
 
     func stringArray(_ key: String) -> [String] {

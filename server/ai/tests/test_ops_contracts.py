@@ -757,6 +757,10 @@ def test_semantic_queue_is_append_only_and_ignores_audio():
         encoding="utf-8"
     )
 
-    assert '$security.randomString(8)' in hook
+    # 2026-09-12：jobKey 不再随机——同一记录同一内容只排一次，无关字段更新不入队。
+    assert '$security.randomString' not in hook
+    assert '$security.sha256(content)' in hook
+    assert 'e.record.original()' in hook
+    assert '["file", "thumbnail", "isDeleted", "resourceRole", "mediaType"]' in hook
     assert 'findFirstRecordByFilter' not in hook
     assert 'mediaType !== "photo" && mediaType !== "video"' in hook

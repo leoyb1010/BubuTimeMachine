@@ -248,6 +248,11 @@ struct MediaUploadRequest: Sendable {
     var contentHash: String? = nil
     var resourceRole: String? = nil
     var assetGroupId: String? = nil
+    /// 媒体元数据随文件一起上行（服务端字段早已存在，此前从未发送）。
+    var width: Int? = nil
+    var height: Int? = nil
+    var durationSeconds: Double? = nil
+    var aiTags: [String] = []
 }
 
 /// 上传过程事件流。

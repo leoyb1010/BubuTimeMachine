@@ -27,6 +27,10 @@ struct MediaPrivacyTests {
         let dest = try #require(CGImageDestinationCreateWithURL(
             url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
         let metadata: [CFString: Any] = [
+            kCGImagePropertyIPTCDictionary: [
+                kCGImagePropertyIPTCCity: "北京",
+                kCGImagePropertyIPTCCountryPrimaryLocationName: "中国",
+            ],
             kCGImagePropertyGPSDictionary: [
                 kCGImagePropertyGPSLatitude: 39.9042,
                 kCGImagePropertyGPSLatitudeRef: "N",
@@ -62,6 +66,11 @@ struct MediaPrivacyTests {
 
         let cleanProps = properties(of: clean)
         #expect(cleanProps[kCGImagePropertyGPSDictionary] == nil, "位置没有被抹掉")
+        // ImageIO 会从 EXIF 时间重新合成 IPTC 的 DateCreated/TimeCreated，所以字典本身可能仍在；
+        // 要验的是位置类字段（城市/国家）确实没了。
+        let iptc = cleanProps[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
+        #expect(iptc[kCGImagePropertyIPTCCity] == nil, "IPTC 城市同样暴露住址，必须抹掉")
+        #expect(iptc[kCGImagePropertyIPTCCountryPrimaryLocationName] == nil, "IPTC 国家/地区必须抹掉")
         #expect(!MediaPrivacy.hasLocation(clean))
 
         // 拍摄时间不该被顺手删掉：它不暴露「家在哪」，而且是档案的一部分。

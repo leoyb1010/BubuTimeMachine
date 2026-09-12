@@ -9,8 +9,8 @@ import { url } from '@kit.ArkTS';
 // 存 Preferences：Base URL、当前身份、布布名字、账号。决定连真实 PocketBase 还是离线。
 export class ServerConfig {
   static readonly shared = new ServerConfig();
-  static readonly versionName: string = '2.14.0';
-  static readonly versionCode: string = '2026090801';
+  static readonly versionName: string = '2.15.0';
+  static readonly versionCode: string = '2026091201';
   // 与 iOS 正式包使用同一家庭服务入口；新机只需登录，不再手填服务器。
   // 密码仍只进 Asset Store，服务器会根据 familyId 限制数据边界。
   static readonly defaultBaseURL: string = 'https://bubu-api.leoyuan.top';

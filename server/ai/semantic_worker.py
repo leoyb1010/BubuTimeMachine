@@ -10,6 +10,8 @@ import logging
 import os
 import re
 import socket
+import subprocess
+import shutil
 import tempfile
 import time
 import fcntl
@@ -278,6 +280,57 @@ class PocketBaseWorkerClient:
         )
 
 
+def _pil_can_open(path: Path) -> bool:
+    try:
+        from PIL import Image
+    except ImportError:
+        return True  # 交给 encoder 自己报"未安装 Pillow"
+    try:
+        with Image.open(path) as image:
+            image.verify()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _run_quiet(cmd: list, timeout: int = 120) -> bool:
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def prepare_visual_for_encoding(path: Path, media_type: str, force: bool = False) -> Path:
+    """把下载下来的媒体转成 Pillow 一定能解的 JPEG。已可解则原样返回。
+
+    照片：sips（macOS 自带）转 HEIC/HEIF/AVIF；视频：ffmpeg 抽 1 秒处一帧，退回 qlmanage 缩略图。
+    都失败时抛 RuntimeError，让任务带明确原因失败，而不是 Pillow 的 UnidentifiedImageError。
+    """
+    if not force and _pil_can_open(path):
+        return path
+    output = path.with_name(path.name + ".decoded.jpg")
+    if media_type == "video":
+        candidates = [
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", "1", "-i", str(path), "-frames:v", "1", "-q:v", "3", str(output)],
+        ]
+        for cmd in candidates:
+            if shutil.which(cmd[0]) and _run_quiet(cmd) and output.exists() and output.stat().st_size > 0:
+                return output
+        if shutil.which("qlmanage"):
+            thumb_dir = path.parent / "ql"
+            thumb_dir.mkdir(exist_ok=True)
+            if _run_quiet(["qlmanage", "-t", "-s", "1024", "-o", str(thumb_dir), str(path)]):
+                produced = sorted(thumb_dir.glob("*.png"))
+                if produced and _pil_can_open(produced[0]):
+                    return produced[0]
+        raise RuntimeError("视频没有可用缩略图且无法抽帧（需要 ffmpeg 或 qlmanage）")
+    if shutil.which("sips"):
+        if _run_quiet(["sips", "-s", "format", "jpeg", str(path), "--out", str(output)]) \
+                and output.exists() and _pil_can_open(output):
+            return output
+    raise RuntimeError("图片格式无法解码（HEIC/HEIF 需要 macOS sips 或 pillow-heif）")
+
+
 class SemanticWorker:
     def __init__(
         self,
@@ -348,7 +401,17 @@ class SemanticWorker:
         with tempfile.TemporaryDirectory(prefix="bubu-semantic-") as temp_dir:
             image_path = Path(temp_dir) / "visual"
             self.client.download_media(media, image_path)
-            embedding = self.encoder.encode_image(image_path)
+            # 生产死信全部来自 Pillow 打不开的文件：HEIC 原片（venv 无 pillow-heif）和没有服务端
+            # 缩略图的视频原片。这里先转成 JPEG 再编码：mac 自带 sips 转 HEIC，ffmpeg/qlmanage 抽视频帧。
+            try:
+                embedding = self.encoder.encode_image(image_path)
+            except OSError as decode_error:  # PIL.UnidentifiedImageError 是 OSError 子类
+                decodable = prepare_visual_for_encoding(
+                    image_path, str(media.get("mediaType") or "photo"), force=True
+                )
+                logger.info("semantic job %s transcoded undecodable media (%s)",
+                            job.id, type(decode_error).__name__)
+                embedding = self.encoder.encode_image(decodable)
         self.index.upsert(
             SemanticAsset(
                 asset_id=job.source_record_id,

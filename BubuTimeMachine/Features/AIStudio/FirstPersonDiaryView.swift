@@ -214,6 +214,12 @@ struct FirstPersonDiaryView: View {
         errorText = nil
         defer { generating = false }
         let note = entry.note ?? ""
+        // AI 未配置时 env.aiService 是 Mock，会返回一段模板日记；它一旦被"存回记录"就成了布布的正文并同步全家。
+        guard env.config.isAIConfigured else {
+            output = ""
+            errorText = "先在设置里连接家里的 AI 服务，再来写第一人称日记。"
+            return
+        }
         do {
             let text = try await env.aiService.rewriteFirstPerson(
                 note: note, childName: env.config.childName)
@@ -239,6 +245,7 @@ struct FirstPersonDiaryView: View {
     }
 
     private func saveBack() {
+        guard !output.isEmpty else { return }
         selected?.firstPersonNote = output
         selected?.editedAt = .now
         selected?.syncState = .local

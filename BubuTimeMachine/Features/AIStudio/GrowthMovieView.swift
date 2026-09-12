@@ -317,7 +317,8 @@ struct GrowthMovieView: View {
         var status = try await env.aiService.movieRenderStatus(jobId: jobId)
         serverProgress = status.progress
         while !status.ready && status.status != "failed" && polls < 300 {
-            try await Task.sleep(for: .seconds(2))
+            // 服务端按主体限流（全家共用一个账号）：2 秒一轮自己就顶满 30 次/分钟，三次 429 就放弃。
+            try await Task.sleep(for: .seconds(6))
             do {
                 status = try await env.aiService.movieRenderStatus(jobId: jobId)
                 consecutiveFailures = 0
@@ -382,10 +383,11 @@ struct GrowthMovieView: View {
     /// 已同步（有远端 URL）的照片 + 对齐的文案，供服务端合成。
     private var remoteMoviePhotos: [MovieRenderPhoto] {
         let caps = buildCaptions()
-        return zip(selectedPreviewMedia, caps).compactMap { media, cap in
+        // 服务端合同：最多 60 张、文案 120 字，超出会被 422 整体拒绝而不是截断。
+        return Array(zip(selectedPreviewMedia, caps).compactMap { media, cap in
             guard let u = media.remoteURL, !u.isEmpty else { return nil }
-            return MovieRenderPhoto(url: u, caption: cap)
-        }
+            return MovieRenderPhoto(url: u, caption: String(cap.prefix(120)))
+        }.prefix(60))
     }
 
     private func sectionTitle(_ title: String, icon: String) -> some View {

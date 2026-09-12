@@ -204,7 +204,8 @@ struct CapsuleComposeView: View {
         guard let editing, title.isEmpty else { return }
         title = editing.title
         emoji = editing.coverEmoji ?? "💌"
-        unlockAt = max(editing.unlockAt, .now)
+        // 已到期的信保留它历史上的开启日期（比如"18 岁生日"），不能被编辑一次就改写成"现在"并重新上锁。
+        unlockAt = editing.unlockAt <= .now ? editing.unlockAt : max(editing.unlockAt, .now)
         if let blob = editing.encryptedBlobFileName, editing.unlockAt <= .now {
             if let payload = try? env.vault.unseal(fileName: blob, unlockAt: editing.unlockAt,
                                                    salt: editing.id.uuidString,
@@ -248,6 +249,12 @@ struct CapsuleComposeView: View {
         // 照片、内嵌语音等不在本页编辑的内容原样保留，不会因"换个封面"而丢。
         var payload = loadedPayload ?? CapsulePayload()
         payload.letter = letter
+        // 语音被换掉或删掉时必须清空旧的内嵌音频：sealV3 只在 embeddedVoiceData == nil 时才嵌入新文件，
+        // 否则新录音永远进不了 blob、下一步又把它唯一的明文副本删掉，再次打开听到的还是旧语音。
+        if pendingVoice?.fileName != loadedPayload?.voiceFileName {
+            payload.embeddedVoiceData = nil
+            payload.embeddedVoiceFileExtension = nil
+        }
         payload.voiceFileName = pendingVoice?.fileName
         payload.voiceDuration = pendingVoice?.duration ?? 0
         payload.voiceWaveform = pendingVoice?.waveform ?? []
@@ -261,7 +268,8 @@ struct CapsuleComposeView: View {
                 env.mediaStore.deleteMedia(named: plainVoice)
             }
             capsule.encryptedBlobFileName = blobName
-            capsule.isLocked = true
+            // 编辑一封已到期的信不重新上锁；只有开启日期在未来才是锁着的。
+            capsule.isLocked = sealedUnlockAt > .now
             // 新信一律是 v3。记下版本号之后，这封信永远不再接受 v1/v2 的 blob——
             // 那两版的密钥只由随记录同步的明文字段派生，可被持库者伪造。
             capsule.cryptoVersion = 3

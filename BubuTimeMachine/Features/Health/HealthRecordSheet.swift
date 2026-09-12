@@ -134,6 +134,12 @@ struct HealthRecordSheet: View {
                 insertedMeasurement = measurement
                 context.insert(measurement)
             }
+        } else if kind == .checkup, let linkedMeasurement {
+            // 编辑时把身高体重清空：连带删掉派生的测量，否则错误的 92cm 永远留在成长曲线上改不掉。
+            PendingDeletion.enqueue(collection: "growthmeasurements",
+                                    remoteId: linkedMeasurement.remoteId, in: context)
+            context.delete(linkedMeasurement)
+            record.growthMeasurementId = nil
         }
         if existingRecord == nil {
             let event = FeedEvent(kind: .healthRecorded,

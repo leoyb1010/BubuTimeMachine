@@ -1629,16 +1629,21 @@ private struct BubuAccessoryView: View {
             .widgetURL(BubuWidgetStyle.identity.deepLink)
 
         case .accessoryRectangular:
+            // 锁屏上任何人拿起手机都能看到：真名 + 精确年龄 + 生日倒计时 = 出生日期。
+            // 标为隐私敏感，锁定时系统自动打码，解锁后照常显示。
             VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.name)
                     .font(.system(size: 15, weight: .black, design: .rounded))
                     .widgetAccentable()
+                    .privacySensitive()
                 Text(snapshot.hasProfile ? "\(snapshot.ageText) · 第 \(snapshot.daysSinceBirth) 天" : "打开 App 建立档案")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .privacySensitive()
                 if snapshot.hasProfile {
                     Text("🎂 还有 \(snapshot.daysUntilBirthday) 天生日")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
+                        .privacySensitive()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1649,6 +1654,7 @@ private struct BubuAccessoryView: View {
             Group {
                 if snapshot.hasProfile {
                     Label("\(snapshot.name) \(snapshot.ageText) · 生日 \(snapshot.daysUntilBirthday) 天", systemImage: "sparkles")
+                        .privacySensitive()
                 } else {
                     Label("打开布布时光机建立档案", systemImage: "sparkles")
                 }

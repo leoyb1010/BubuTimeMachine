@@ -171,6 +171,11 @@ struct NaturalCaptureBar: View {
         errorText = nil
         defer { isTranscribing = false }
         do {
+            // AI 未配置时 env.aiService 是 Mock：它会返回一句固定的"示例转写"，绝不能当成布布的话。
+            guard env.config.isAIConfigured else {
+                errorText = "还没连接家里的 AI 服务，这次请直接打字记录。"
+                return
+            }
             let transcript = try await env.aiService.transcribe(audioURL: url)
             guard !transcript.bubuTrimmed.isEmpty else {
                 errorText = "没听清，可以再说一次或直接打字。"
@@ -220,6 +225,10 @@ struct NaturalCaptureBar: View {
         )
         let result: NaturalCaptureResult
         do {
+            // AI 未配置（默认状态）时 env.aiService 是 MockAIService：它会按关键词编出
+            // 身高 82cm / 体重 10.6kg / 体温 37.8℃ 且置信 0.88 不需确认——一键就存进成长曲线并同步全家。
+            // 这里直接走降级链（端上模型 → 纯文本时光），Mock 只留给预览与自动化测试。
+            guard env.config.isAIConfigured else { throw APIError.notConfigured }
             result = try await env.aiService.parseNaturalCapture(request)
         } catch {
             // 降级链：服务器不可用 → ① iOS 26 端上大模型（不出设备、结果强制确认）

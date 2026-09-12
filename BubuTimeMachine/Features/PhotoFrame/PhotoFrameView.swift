@@ -253,6 +253,8 @@ struct PhotoFrameView: View {
         guard !slides.isEmpty else { return }
         let nextIdx = (index + 1) % slides.count
         for i in [index, nextIdx] {
+            // 每次 await 之后 slides 都可能被 buildSlides() 重建/缩短（家人远程归档照片、日期翻天）。
+            guard slides.indices.contains(i) else { return }
             let s = slides[i]
             if images[s.id] == nil {
                 let img = await env.thumbnails.image(
@@ -261,8 +263,10 @@ struct PhotoFrameView: View {
                 if let img { images[s.id] = img }
             }
         }
+        guard !slides.isEmpty else { images = [:]; return }
         // 只保留当前±1 附近，避免整册常驻内存
-        let keep = Set([index, nextIdx, (index - 1 + slides.count) % slides.count].map { slides[$0].id })
+        let keep = Set([index, nextIdx, (index - 1 + slides.count) % slides.count]
+            .filter { slides.indices.contains($0) }.map { slides[$0].id })
         images = images.filter { keep.contains($0.key) }
     }
 }

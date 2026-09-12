@@ -60,7 +60,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="2.14.0")
+app = FastAPI(title="布布时光机 AI 服务", version="2.15.0")
 
 llm = LLMClient()
 
@@ -136,7 +136,8 @@ def _commit_staged_batch(
 # 客户端是原生 App，无需 CORS；浏览器跨域一律不放行（不挂 CORSMiddleware 即默认拒绝）。
 
 _API_KEY = os.environ.get("AI_API_KEY", "")
-_RATE_LIMIT = int(os.environ.get("AI_RATE_LIMIT_PER_MINUTE", "30"))
+# 全家共用一个 PocketBase 账号即同一主体：两个进度轮询 + 正常操作很容易撞 30 次/分钟。
+_RATE_LIMIT = int(os.environ.get("AI_RATE_LIMIT_PER_MINUTE", "60"))
 _PREAUTH_RATE_LIMIT = int(os.environ.get("AI_PREAUTH_RATE_LIMIT_PER_MINUTE", "120"))
 _rate_lock = Lock()
 _rate_buckets: dict[str, deque] = defaultdict(deque)

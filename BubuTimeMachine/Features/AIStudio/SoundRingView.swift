@@ -700,7 +700,8 @@ struct SoundRingView: View {
             var failures = 0
             for _ in 0..<300 {
                 do {
-                    try await Task.sleep(for: .seconds(2))
+                    // 见 GrowthMovieView：服务端按主体限流，轮询放慢到 6 秒。
+                    try await Task.sleep(for: .seconds(6))
                     let value = try await service.soundRingStatus(id: id)
                     guard !Task.isCancelled, env.aiServiceRevision == revision else { return }
                     guard ring?.id == id else { return }

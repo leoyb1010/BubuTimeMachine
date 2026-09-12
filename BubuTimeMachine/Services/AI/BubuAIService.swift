@@ -439,6 +439,9 @@ final class BubuAIService: AIService, @unchecked Sendable {
     private static func check(_ resp: URLResponse, _ data: Data) throws {
         guard let http = resp as? HTTPURLResponse else { return }
         guard (200..<300).contains(http.statusCode) else {
+            // 401/403 映射成明确的鉴权错误：上层文案能指向"重新连接服务器"，而不是笼统的服务器错误。
+            if http.statusCode == 401 { throw APIError.unauthorized }
+            if http.statusCode == 403 { throw APIError.forbidden }
             let msg = String(data: data, encoding: .utf8)?.prefix(200) ?? ""
             throw APIError.server(http.statusCode, String(msg))
         }

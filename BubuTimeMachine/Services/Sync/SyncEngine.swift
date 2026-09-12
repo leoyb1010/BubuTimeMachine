@@ -225,7 +225,13 @@ final class SyncEngine {
         let capsules = try context.fetch(FetchDescriptor<TimeCapsule>())
 
         entries.forEach { $0.syncState = .local }
-        media.forEach { $0.syncState = .local; $0.uploadProgress = 0 }
+        // 只重传本机确实持有文件的媒体：家人上传、本机尚未下载的那些没有本地文件，
+        // 标成 .local 只会立刻变成永久 .failed，还会让远端更新/删除被当作"本地有未推改动"而拒收。
+        let uploadableMedia = media.filter { item in
+            guard let fileName = item.localFileName else { return false }
+            return FileManager.default.fileExists(atPath: mediaStore.mediaURL(for: fileName).path)
+        }
+        uploadableMedia.forEach { $0.syncState = .local; $0.uploadProgress = 0 }
         firstTimes.forEach { $0.syncState = .local }
         members.forEach { $0.syncState = .local }
         profiles.forEach { $0.syncState = .local }
@@ -239,7 +245,7 @@ final class SyncEngine {
 
         guard saveAndRefresh(context) else { return "BUBU_FORCE_UPLOAD_FAILED save" }
         await connectAndSync()
-        return "BUBU_FORCE_UPLOAD_DONE entries=\(entries.count) media=\(media.count) firstTimes=\(firstTimes.count) members=\(members.count) profiles=\(profiles.count) health=\(health.count) vaccines=\(vaccines.count) growth=\(growth.count) comments=\(comments.count) voiceNotes=\(notes.count) voiceMemos=\(memos.count) capsules=\(capsules.count) failure=\(lastFailureReason ?? "none") at=\(Date())"
+        return "BUBU_FORCE_UPLOAD_DONE entries=\(entries.count) media=\(uploadableMedia.count) firstTimes=\(firstTimes.count) members=\(members.count) profiles=\(profiles.count) health=\(health.count) vaccines=\(vaccines.count) growth=\(growth.count) comments=\(comments.count) voiceNotes=\(notes.count) voiceMemos=\(memos.count) capsules=\(capsules.count) failure=\(lastFailureReason ?? "none") at=\(Date())"
         } catch {
             recordFailure(error, item: "准备重传")
             return "BUBU_FORCE_UPLOAD_FAILED read"
@@ -572,6 +578,8 @@ final class SyncEngine {
             return "文件太大，建议压缩到 \(max(1, limit / 1_048_576))MB 以内后再传。"
         case APIError.unauthorized:
             return "账号状态需要重新确认，请到设置里重新连接服务器。"
+        case APIError.forbidden:
+            return "服务器拒绝了这次同步，请到设置里查看连接配置。"
         case APIError.notConfigured:
             return "还没有连接家里的服务器。"
         case APIError.server(let code, _):
@@ -650,7 +658,19 @@ final class SyncEngine {
         for item in localMilestones where !Self.isLocalPresetPlaceholder(item) {
             guard !Task.isCancelled else { return }
             beginItem("同步里程碑")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertMilestone(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            do {
+                item.syncState = .uploading; saveAndRefresh(context)
+                let saved = try await apiClient.upsertMilestone(Self.makeDTO(item))
+                let itemId = item.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<Milestone>(predicate: #Predicate { $0.id == itemId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "milestones", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
+                item.remoteId = saved.id; item.syncState = .synced
+            }
             catch { item.syncState = .failed; recordFailure(error, item: "里程碑") }
             finishItem()
             saveAndRefresh(context)
@@ -659,7 +679,19 @@ final class SyncEngine {
         for item in localFirstTimes {
             guard !Task.isCancelled else { return }
             beginItem("同步第一次")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertFirstTime(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            do {
+                item.syncState = .uploading; saveAndRefresh(context)
+                let saved = try await apiClient.upsertFirstTime(Self.makeDTO(item))
+                let itemId = item.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == itemId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "firsttimes", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
+                item.remoteId = saved.id; item.syncState = .synced
+            }
             catch { item.syncState = .failed; recordFailure(error, item: "第一次") }
             finishItem()
             saveAndRefresh(context)
@@ -668,7 +700,19 @@ final class SyncEngine {
         for item in localMembers {
             guard !Task.isCancelled else { return }
             beginItem("同步家庭成员")
-            do { item.syncState = .uploading; saveAndRefresh(context); let saved = try await apiClient.upsertFamilyMember(Self.makeDTO(item)); item.remoteId = saved.id; item.syncState = .synced }
+            do {
+                item.syncState = .uploading; saveAndRefresh(context)
+                let saved = try await apiClient.upsertFamilyMember(Self.makeDTO(item))
+                let itemId = item.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.id == itemId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "members", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
+                item.remoteId = saved.id; item.syncState = .synced
+            }
             catch { item.syncState = .failed; recordFailure(error, item: "家庭成员") }
             finishItem()
             saveAndRefresh(context)
@@ -815,6 +859,14 @@ final class SyncEngine {
                 comment.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertComment(Self.makeDTO(comment))
+                let commentId = comment.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<Comment>(predicate: #Predicate { $0.id == commentId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "comments", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
                 if let fileName = comment.voiceFileName, let entryId = comment.entry?.id {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
@@ -839,6 +891,14 @@ final class SyncEngine {
                 note.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertVoiceNote(Self.makeDTO(note))
+                let noteId = note.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == noteId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "voicenotes", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
                 if let fileName = note.localFileName, let entryId = note.entry?.id {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
@@ -863,6 +923,14 @@ final class SyncEngine {
                 memo.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertVoiceMemo(Self.makeDTO(memo))
+                let memoId = memo.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.id == memoId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "voicememos", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
                 if let fileName = memo.localFileName {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
@@ -891,6 +959,15 @@ final class SyncEngine {
             guard let entry = media.entry else {
                 media.syncState = .failed
                 recordFailure(APIError.network("找不到这条媒体对应的记录"), item: "媒体")
+                finishItem()
+                saveAndRefresh(context)
+                continue
+            }
+            // 父记录还没在服务器上落地（本轮 POST 失败/尚未轮到）时不先传媒体：
+            // 否则家人设备拉到孤儿媒体、补拉父记录得到"不存在"就跳过并推进游标，
+            // 等父记录到了媒体的 updated 已落在游标之后，那张照片在那台设备上永远缺失。
+            guard entry.remoteId != nil, entry.syncState == .synced else {
+                media.syncState = .local
                 finishItem()
                 saveAndRefresh(context)
                 continue
@@ -925,7 +1002,11 @@ final class SyncEngine {
             thumbnailFileName: media.thumbnailFileName,
             contentHash: media.contentHash,
             resourceRole: media.resourceRoleRaw,
-            assetGroupId: media.assetGroupID)
+            assetGroupId: media.assetGroupID,
+            width: media.width,
+            height: media.height,
+            durationSeconds: media.durationSeconds,
+            aiTags: media.aiTags)
         do {
             for try await event in apiClient.uploadMedia(request) {
                 switch event {
@@ -956,6 +1037,14 @@ final class SyncEngine {
                 capsule.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertTimeCapsule(Self.makeDTO(capsule))
+                let capsuleId = capsule.id
+                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
+                guard try context.fetchCount(FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == capsuleId })) > 0 else {
+                    PendingDeletion.enqueue(collection: "timecapsules", remoteId: saved.id, in: context)
+                    finishItem()
+                    saveAndRefresh(context)
+                    continue
+                }
                 if let fileName = capsule.encryptedBlobFileName {
                     let url = mediaStore.mediaURL(for: fileName)
                     if FileManager.default.fileExists(atPath: url.path) {
@@ -1653,7 +1742,17 @@ final class SyncEngine {
         if try isPendingDeletion(collection: "firsttimes", remoteId: dto.id, context: context) { return true }
         let descriptor = FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == localId })
         if let existing = try context.fetch(descriptor).first {
-            if existing.syncState == .synced { Self.apply(dto, to: existing); existing.remoteId = dto.id }
+            if existing.syncState == .synced {
+                Self.apply(dto, to: existing); existing.remoteId = dto.id
+                // 上一轮父 Entry 还没到时先落了这条"第一次"；现在父记录到了要把关联补上，
+                // 否则它永远是孤儿（apply 不负责 entry 关系）。
+                if existing.entry == nil, let entryLocalId = dto.entryLocalId,
+                   let entryId = UUID(uuidString: entryLocalId) {
+                    let entryDescriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId })
+                    existing.entry = try context.fetch(entryDescriptor).first
+                    if existing.entry == nil { holdCursorForCurrentPull = true }
+                }
+            }
             else { return false }
         } else {
             let item = FirstTime(what: dto.what, happenedAt: dto.happenedAt)
@@ -1881,10 +1980,11 @@ final class SyncEngine {
         if let hash = dto.contentHash { media.contentHash = hash }
         if let role = dto.resourceRole { media.resourceRoleRaw = role }
         if let group = dto.assetGroupId { media.assetGroupID = group }
-        media.durationSeconds = dto.durationSeconds
-        media.width = dto.width
-        media.height = dto.height
-        media.aiTags = dto.aiTags
+        // 只增不清：老客户端/老记录没有这些字段时，不能把本机已知的时长、尺寸和端侧标签抹掉。
+        if let duration = dto.durationSeconds { media.durationSeconds = duration }
+        if let width = dto.width { media.width = width }
+        if let height = dto.height { media.height = height }
+        if !dto.aiTags.isEmpty { media.aiTags = dto.aiTags }
     }
 
     private static func makeDTO(_ item: Milestone) -> MilestoneDTO {

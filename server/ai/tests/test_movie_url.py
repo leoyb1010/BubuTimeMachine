@@ -128,3 +128,29 @@ class _DummyReq:
     origin_req_host = "127.0.0.1"
     unverifiable = True
     timeout = None
+
+
+def test_pocketbase_file_reference_is_extracted_regardless_of_host():
+    from movie_render import pocketbase_file_reference
+    ref = pocketbase_file_reference("https://bubu-api.example.com/api/files/media/abc123XYZ/photo%20a.jpg")
+    assert ref == ("media", "abc123XYZ", "photo a.jpg")
+    assert pocketbase_file_reference("https://bubu-api.example.com/api/files/users/abc/x.jpg") is None
+    assert pocketbase_file_reference("file:///etc/passwd") is None
+    assert pocketbase_file_reference("https://x/api/files/media/../../x.jpg") is None
+
+
+def test_download_uses_service_account_for_protected_media(tmp_path):
+    from movie_render import _download
+
+    class Store:
+        calls = []
+
+        def download_record_file(self, collection, record_id, file_name, destination, *, max_bytes):
+            Store.calls.append((collection, record_id, file_name))
+            with open(destination, "wb") as handle:
+                handle.write(b"jpeg")
+
+    dest = tmp_path / "img.jpg"
+    assert _download("https://public.example/api/files/media/rec1/a.jpg", str(dest), Store())
+    assert Store.calls == [("media", "rec1", "a.jpg")]
+    assert dest.read_bytes() == b"jpeg"

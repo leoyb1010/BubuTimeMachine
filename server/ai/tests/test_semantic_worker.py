@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import httpx
+import subprocess
+import pytest
 
 from semantic_index import SemanticIndex
 from semantic_worker import (
@@ -156,3 +158,43 @@ def test_http_error_summary_never_contains_protected_file_token():
 
     assert summary == "HTTPStatusError: status=403"
     assert "secret-value" not in summary
+
+
+def test_prepare_visual_returns_decodable_images_untouched(tmp_path: Path):
+    from PIL import Image
+    from semantic_worker import prepare_visual_for_encoding
+    path = tmp_path / "visual"
+    Image.new("RGB", (4, 4), "red").save(path, format="JPEG")
+    assert prepare_visual_for_encoding(path, "photo") == path
+
+
+def test_prepare_visual_transcodes_heic_via_sips_when_available(tmp_path: Path, monkeypatch):
+    import shutil as _shutil
+    from PIL import Image
+    from semantic_worker import prepare_visual_for_encoding
+    if not _shutil.which("sips"):
+        pytest.skip("sips only exists on macOS")
+    # 用 sips 先造一张真 HEIC，再验证 worker 能把它转回可解码 JPEG
+    source = tmp_path / "src.jpg"
+    Image.new("RGB", (8, 8), "blue").save(source, format="JPEG")
+    heic = tmp_path / "visual"
+    result = subprocess.run(["sips", "-s", "format", "heic", str(source), "--out", str(tmp_path / "x.heic")],
+                            capture_output=True)
+    if result.returncode != 0:
+        pytest.skip("this macOS cannot encode HEIC")
+    (tmp_path / "x.heic").rename(heic)
+    decoded = prepare_visual_for_encoding(heic, "photo")
+    assert decoded != heic
+    with Image.open(decoded) as image:
+        assert image.size == (8, 8)
+
+
+def test_prepare_visual_fails_with_clear_reason_when_nothing_can_decode(tmp_path: Path, monkeypatch):
+    import semantic_worker
+    path = tmp_path / "visual"
+    path.write_bytes(b"not an image at all")
+    monkeypatch.setattr(semantic_worker.shutil, "which", lambda name: None)
+    with pytest.raises(RuntimeError, match="无法解码|无法抽帧"):
+        semantic_worker.prepare_visual_for_encoding(path, "photo")
+    with pytest.raises(RuntimeError, match="无法抽帧"):
+        semantic_worker.prepare_visual_for_encoding(path, "video")

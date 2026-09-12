@@ -15,6 +15,8 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import urllib.parse
+import re
 import shutil
 import socket
 import subprocess
@@ -24,7 +26,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Any
 from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, build_opener
@@ -250,7 +252,38 @@ def _prune_locked() -> None:
         pass
 
 
-def _download(url: str, dest: str) -> bool:
+_PB_FILE_PATH = re.compile(r"^/api/files/(media)/([A-Za-z0-9]+)/([^/?#]+)$")
+
+
+def pocketbase_file_reference(url: str) -> Optional[tuple]:
+    """把客户端给的 PocketBase 文件 URL 解析成 (collection, record_id, file_name)。
+    App 传来的是它自己配置的主机（可能是公网域名）且不带 file token；media.file 又是
+    protected 字段——直接 GET 必 403。这里只取路径引用，由服务账户在本机 PB 上下载。"""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    match = _PB_FILE_PATH.match(parsed.path or "")
+    if not match:
+        return None
+    collection, record_id, file_name = match.groups()
+    return collection, record_id, urllib.parse.unquote(file_name)
+
+
+def _download(url: str, dest: str, store: Any = None) -> bool:
+    reference = pocketbase_file_reference(url)
+    if reference is not None and store is not None:
+        collection, record_id, file_name = reference
+        try:
+            store.download_record_file(collection, record_id, file_name, dest,
+                                       max_bytes=_MAX_BYTES)
+            return os.path.getsize(dest) > 0
+        except Exception as exc:  # noqa: BLE001 单张失败跳过，不炸整片
+            logger.warning("movie: protected download failed %s/%s (%s)",
+                           collection, record_id, type(exc).__name__)
+            return False
     # 下载前先过 SSRF/LFI 白名单校验，非法直接跳过该图（与坏 URL 一样不炸整片）
     if not _is_allowed_url(url):
         return False
@@ -347,10 +380,20 @@ def _run_render(job: RenderJob, template: str, photos: list[RenderPhoto], narrat
 
         # 1) 下载照片（坏图跳过）
         local_imgs: list[str] = []
-        for i, p in enumerate(photos):
-            dst = os.path.join(workdir, f"img_{i:03d}.jpg")
-            if _download(p.url, dst):
-                local_imgs.append(dst)
+        store = None
+        try:
+            from memory_query import PocketBaseMemoryStore
+            store = PocketBaseMemoryStore()
+        except Exception:  # noqa: BLE001 没有服务账户配置时退回白名单直连
+            store = None
+        try:
+            for i, p in enumerate(photos):
+                dst = os.path.join(workdir, f"img_{i:03d}.jpg")
+                if _download(p.url, dst, store):
+                    local_imgs.append(dst)
+        finally:
+            if store is not None:
+                store.close()
         if not local_imgs:
             _fail(job, "所有照片都无法读取")
             return
