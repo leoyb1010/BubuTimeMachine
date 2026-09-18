@@ -253,7 +253,7 @@ struct FirstPersonDiaryView: View {
     }
 }
 
-private struct DiaryBubbleTail: Shape {
+private nonisolated struct DiaryBubbleTail: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.maxX, y: rect.minY))

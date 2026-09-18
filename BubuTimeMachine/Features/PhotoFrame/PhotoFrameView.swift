@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import Combine
 
 // MARK: - 相框模式（家里的第二块屏）
 /// 把 iPad / 旧手机变成布布的数字相框：精选照片全屏轮播，缓慢的 Ken Burns 推拉 + 交叉淡入，

@@ -59,7 +59,7 @@ private struct BubuFloating: ViewModifier {
 }
 
 extension View {
-    nonisolated func bubuFloating() -> some View {
+    func bubuFloating() -> some View {
         modifier(BubuFloating())
     }
 }
@@ -90,7 +90,7 @@ private struct BubuEntranceEffect: ViewModifier {
 }
 
 extension View {
-    nonisolated func entranceEffect(index: Int) -> some View {
+    func entranceEffect(index: Int) -> some View {
         modifier(BubuEntranceEffect(index: index))
     }
 }
@@ -126,7 +126,7 @@ private struct BubuTabContentTransition: ViewModifier {
 
 extension View {
     /// 被选中时播一次轻入场。`isActive` 由 Tab selection 驱动。
-    nonisolated func bubuTabContentTransition(isActive: Bool) -> some View {
+    func bubuTabContentTransition(isActive: Bool) -> some View {
         modifier(BubuTabContentTransition(isActive: isActive))
     }
 }

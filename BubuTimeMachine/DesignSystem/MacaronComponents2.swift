@@ -54,7 +54,7 @@ struct BubuBurst: View {
 }
 
 /// 四角星形（迸发星点 / 通用）。
-struct BubuStarShape: Shape {
+nonisolated struct BubuStarShape: Shape {
     func path(in rect: CGRect) -> Path {
         let s = min(rect.width, rect.height)
         var p = Path()
