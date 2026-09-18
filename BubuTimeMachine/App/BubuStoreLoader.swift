@@ -17,6 +17,7 @@ enum BubuStoreLoader {
             guard Date() < deadline else { throw StoreUpgradeBackup.BackupError.cannotOpen }
             usleep(50_000)
         }
+        try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: url)
         if manager.fileExists(atPath: url.path) {
             let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
                 ofType: NSSQLiteStoreType, at: url, options: [NSReadOnlyPersistentStoreOption: true])

@@ -1,6 +1,8 @@
 import Testing
 import Foundation
 import SwiftData
+import CryptoKit
+import SQLite3
 @testable import BubuTimeMachine
 
 // MARK: - 「旧版 store 还打得开吗」回归
@@ -26,19 +28,35 @@ struct StoreMigrationTests {
 
     private static let fixtureName = "LegacyStore_v2.12.2"
 
-    /// 把 bundle 里的基线复制到临时目录再打开——绝不在 bundle 原件上跑迁移。
-    private func copyFixture() throws -> URL {
+    private func fixtureURL() throws -> URL {
         let bundle = Bundle(for: BundleToken.self)
-        // Fixtures 以 folder reference 进 bundle，所以要带 subdirectory 才找得到。
-        let source = try #require(
+        return try #require(
             bundle.url(forResource: Self.fixtureName, withExtension: "store", subdirectory: "Fixtures"),
             "测试 bundle 里找不到旧版 store 基线，检查 project.yml 的 resources 配置")
+    }
+
+    /// 把 bundle 里的基线复制到临时目录再打开——绝不在 bundle 原件上跑迁移。
+    private func copyFixture() throws -> URL {
+        // Fixtures 以 folder reference 进 bundle，所以要带 subdirectory 才找得到。
+        let source = try fixtureURL()
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("StoreMigration-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent("BubuTimeMachine.store")
         try FileManager.default.copyItem(at: source, to: dest)
         return dest
+    }
+
+    private func copyStandaloneFixture(to destination: URL) throws {
+        try FileManager.default.copyItem(at: fixtureURL(), to: destination)
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(destination.path, &database,
+                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
+              let database else { throw StoreUpgradeBackup.BackupError.cannotOpen }
+        defer { sqlite3_close(database) }
+        guard sqlite3_exec(database, "PRAGMA journal_mode=DELETE", nil, nil, nil) == SQLITE_OK else {
+            throw StoreUpgradeBackup.BackupError.cannotCopy
+        }
     }
 
     @Test("旧版装机 store 能被当前 schema 打开，且数据一条不少")
@@ -91,6 +109,77 @@ struct StoreMigrationTests {
         // 铁律 2：这是现有用户 store 里已经戳好的版本号。下调会让 SwiftData 以为
         // store 来自更新的版本而拒绝打开；空涨则会触发一次没有 stage 的迁移。
         #expect(BubuSchemaV1.versionIdentifier == Schema.Version(1, 3, 0))
+    }
+
+    @Test("换机恢复了儿童档案但丢失首启标记时直接进入主界面")
+    func restoredProfileCompletesOnboarding() {
+        #expect(AppEnvironment.resolvedOnboardingState(stored: false, childProfileCount: 1))
+        #expect(!AppEnvironment.resolvedOnboardingState(stored: false, childProfileCount: 0))
+        #expect(AppEnvironment.resolvedOnboardingState(stored: true, childProfileCount: 0))
+    }
+
+    @Test("换机只恢复 Documents 时，从保护副本自动找回空活动库")
+    func transferredBackupRestoresEmptyStore() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TransferredStore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = directory.appendingPathComponent("BubuTimeMachine.store")
+
+        // 先模拟换机后 App 第一次启动已创建的空 V2 活动库。
+        try autoreleasepool {
+            let schema = SharedModelContainer.schema
+            let container = try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
+                                               configurations: [ModelConfiguration(schema: schema, url: store)])
+            let context = ModelContext(container)
+            for template in MilestoneTemplate.presets {
+                context.insert(Milestone(title: template.title, category: template.category,
+                                         emoji: template.emoji))
+            }
+            try context.save()
+        }
+
+        let backup = StoreUpgradeBackup.destination(for: store)
+        try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try copyStandaloneFixture(to: backup)
+        // 模拟换机后 SQLite 逻辑内容完整、但文件级 hash 因头部变化而失配。
+        try "stale-before-device-transfer".write(
+            to: backup.appendingPathExtension("sha256"), atomically: true, encoding: .utf8)
+        let counts = try StoreUpgradeBackup.factCounts(backup)
+        let audit: [String: Any] = ["before": counts]
+        try JSONSerialization.data(withJSONObject: audit).write(
+            to: directory.appendingPathComponent("Documents/upgrade-audit-initial.json"), options: .atomic)
+
+        let container = try BubuStoreLoader.open(at: store)
+        let context = ModelContext(container)
+        #expect(try context.fetchCount(FetchDescriptor<ChildProfile>()) == 1)
+        #expect(try context.fetchCount(FetchDescriptor<Entry>()) == 4)
+        #expect(try context.fetchCount(FetchDescriptor<Media>()) == 4)
+        #expect(try context.fetchCount(FetchDescriptor<Milestone>()) == 130)
+        #expect(FileManager.default.fileExists(
+            atPath: backup.appendingPathExtension("sha256.before-device-transfer").path))
+    }
+
+    @Test("换机恢复绝不覆盖非空活动库")
+    func transferredBackupNeverOverwritesNonemptyStore() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NonemptyStore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = directory.appendingPathComponent("BubuTimeMachine.store")
+        try copyStandaloneFixture(to: store)
+        let original = try Data(contentsOf: store)
+        let backup = StoreUpgradeBackup.destination(for: store)
+        try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try copyStandaloneFixture(to: backup)
+        let digest = SHA256.hash(data: try Data(contentsOf: backup))
+            .map { String(format: "%02x", $0) }.joined()
+        try digest.write(to: backup.appendingPathExtension("sha256"), atomically: true, encoding: .utf8)
+
+        #expect(try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: store) == false)
+        #expect(try Data(contentsOf: store) == original)
     }
 }
 

@@ -40,6 +40,12 @@ final class AppEnvironment {
     private static let memberKey = "bubu.current.memberId"
     private static let onboardedKey = "bubu.onboarded"
 
+    /// 换机可能恢复 App Group 数据库，却不恢复主 App 私有 UserDefaults。
+    /// 只要事实库已有儿童档案，就必须直接进入主界面，不能诱导用户再建第二份档案。
+    nonisolated static func resolvedOnboardingState(stored: Bool, childProfileCount: Int) -> Bool {
+        stored || childProfileCount > 0
+    }
+
     init() {
         let config = ServerConfig()
         self.config = config

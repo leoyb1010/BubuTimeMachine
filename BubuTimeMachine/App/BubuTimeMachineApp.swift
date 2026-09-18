@@ -473,6 +473,7 @@ struct BubuTimeMachineApp: App {
 // MARK: - 根视图：首启引导 or 主界面
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
+    @Query private var childProfiles: [ChildProfile]
     @State private var showWhatsNew = false
     /// 引导里选了「加入已有家庭」：进主界面后立刻把登录页推到面前，
     /// 不让第二台设备停在一个空库上、再自己建出第二个布布。
@@ -482,7 +483,12 @@ struct RootView: View {
 
     var body: some View {
         rootContent
-            .onAppear { consumePendingFamilyLogin() }
+            .onAppear {
+                if resolvedOnboarding, !env.hasCompletedOnboarding {
+                    env.hasCompletedOnboarding = true
+                }
+                consumePendingFamilyLogin()
+            }
             .onChange(of: env.hasCompletedOnboarding) { _, done in
                 if done { consumePendingFamilyLogin() }
             }
@@ -522,7 +528,7 @@ struct RootView: View {
         if BubuStoreHealth.loadFailed, !storeRecoveryBypassed {
             BubuStoreRecoveryView { storeRecoveryBypassed = true }
                 .transition(.opacity)
-        } else if env.hasCompletedOnboarding {
+        } else if resolvedOnboarding {
             content
                 .transition(.opacity)
                 // 升级后首次启动：弹出本版更新内容（全新安装不弹；老用户升级会弹）。
@@ -547,6 +553,12 @@ struct RootView: View {
         } else {
             OnboardingView().transition(.opacity)
         }
+    }
+
+    private var resolvedOnboarding: Bool {
+        AppEnvironment.resolvedOnboardingState(
+            stored: env.hasCompletedOnboarding,
+            childProfileCount: childProfiles.count)
     }
 
     @ViewBuilder
