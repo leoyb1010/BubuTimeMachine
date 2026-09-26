@@ -131,20 +131,15 @@ struct StoreMigrationTests {
             let schema = SharedModelContainer.schema
             let container = try ModelContainer(for: schema, migrationPlan: BubuMigrationPlan.self,
                                                configurations: [ModelConfiguration(schema: schema, url: store)])
-            let context = ModelContext(container)
-            for template in MilestoneTemplate.presets {
-                context.insert(Milestone(title: template.title, category: template.category,
-                                         emoji: template.emoji))
-            }
-            try context.save()
+            try ModelContext(container).save()
         }
 
         let backup = StoreUpgradeBackup.destination(for: store)
         try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try copyStandaloneFixture(to: backup)
-        // 模拟换机后 SQLite 逻辑内容完整、但文件级 hash 因头部变化而失配。
-        try "stale-before-device-transfer".write(
+        let digest = SHA256.hash(data: try Data(contentsOf: backup)).map { String(format: "%02x", $0) }.joined()
+        try digest.write(
             to: backup.appendingPathExtension("sha256"), atomically: true, encoding: .utf8)
         let counts = try StoreUpgradeBackup.factCounts(backup)
         let audit: [String: Any] = ["before": counts]
@@ -157,8 +152,7 @@ struct StoreMigrationTests {
         #expect(try context.fetchCount(FetchDescriptor<Entry>()) == 4)
         #expect(try context.fetchCount(FetchDescriptor<Media>()) == 4)
         #expect(try context.fetchCount(FetchDescriptor<Milestone>()) == 130)
-        #expect(FileManager.default.fileExists(
-            atPath: backup.appendingPathExtension("sha256.before-device-transfer").path))
+        #expect(try String(contentsOf: backup.appendingPathExtension("sha256"), encoding: .utf8) == digest)
     }
 
     @Test("换机恢复绝不覆盖非空活动库")
@@ -178,6 +172,56 @@ struct StoreMigrationTests {
             .map { String(format: "%02x", $0) }.joined()
         try digest.write(to: backup.appendingPathExtension("sha256"), atomically: true, encoding: .utf8)
 
+        #expect(try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: store) == false)
+        #expect(try Data(contentsOf: store) == original)
+    }
+
+    @Test("行数一致不能绕过备份 SHA 校验，也不能重签损坏副本")
+    func matchingCountsDoNotOverrideChecksum() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = directory.appendingPathComponent("BubuTimeMachine.store")
+        let backup = StoreUpgradeBackup.destination(for: store)
+        try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try copyStandaloneFixture(to: backup)
+        try "mismatch".write(to: backup.appendingPathExtension("sha256"), atomically: true, encoding: .utf8)
+        let counts = try StoreUpgradeBackup.factCounts(backup)
+        try JSONSerialization.data(withJSONObject: ["before": counts]).write(to: directory.appendingPathComponent("Documents/upgrade-audit-initial.json"))
+        #expect(throws: (any Error).self) { try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: store) }
+        #expect(!FileManager.default.fileExists(atPath: store.path))
+        #expect(try String(contentsOf: backup.appendingPathExtension("sha256"), encoding: .utf8) == "mismatch")
+    }
+
+    @Test("旧备份损坏不阻断健康的非空活动库")
+    func damagedBackupDoesNotBlockCurrentStore() throws {
+        let store = try copyFixture()
+        defer { try? FileManager.default.removeItem(at: store.deletingLastPathComponent()) }
+        // Normalize WAL fixture before readonly inspection.
+        var db: OpaquePointer?
+        #expect(sqlite3_open(store.path, &db) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "PRAGMA journal_mode=DELETE", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+        let backup = StoreUpgradeBackup.destination(for: store)
+        try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("broken".utf8).write(to: backup)
+        #expect(try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: store) == false)
+        #expect(try StoreUpgradeBackup.factCounts(store)["ZENTRY"] == 4)
+    }
+
+    @Test("无法识别的活动库不能被判空覆盖")
+    func unrecognizedCurrentStoreIsNeverReplaced() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let store = directory.appendingPathComponent("archive.store")
+        var db: OpaquePointer?
+        #expect(sqlite3_open(store.path, &db) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "CREATE TABLE historic_fact (value TEXT); INSERT INTO historic_fact VALUES ('keep')", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+        let original = try Data(contentsOf: store)
+        let backup = StoreUpgradeBackup.destination(for: store)
+        try FileManager.default.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try copyStandaloneFixture(to: backup)
         #expect(try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: store) == false)
         #expect(try Data(contentsOf: store) == original)
     }

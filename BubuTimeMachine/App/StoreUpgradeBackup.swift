@@ -85,9 +85,35 @@ nonisolated enum StoreUpgradeBackup {
         let manager = FileManager.default
         let backup = destination(for: store)
         guard manager.fileExists(atPath: backup.path) else {
-            log.notice("换机恢复跳过：没有升级保护副本")
             writeRecoveryTrace(store: store, stage: "skipped-no-backup")
             return false
+        }
+        // A healthy active archive must never depend on an old backup's validity.
+        // Be conservative: even preset-only stores require explicit recovery rather than replacement.
+        if manager.fileExists(atPath: store.path) {
+            guard let counts = try? factCounts(store) else {
+                // Unknown historical schemas are not evidence of an empty archive.
+                // Let the normal store loader inspect/migrate it; never substitute a backup.
+                writeRecoveryTrace(store: store, stage: "skipped-unverified-current")
+                return false
+            }
+            if counts.values.contains(where: { $0 > 0 }) {
+                writeRecoveryTrace(store: store, stage: "skipped-nonempty-current", current: counts)
+                return false
+            }
+            // These additional tables hold user facts or pending deletions too.
+            var db: OpaquePointer?
+            defer { if let db { sqlite3_close(db) } }
+            guard sqlite3_open_v2(store.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+                  let db else { throw BackupError.cannotOpen }
+            for table in ["ZFIRSTTIME", "ZGROWTHMOVIE", "ZFEEDEVENT", "ZPENDINGDELETION"] {
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, "SELECT count(*) FROM \(table)", -1, &statement, nil) == SQLITE_OK,
+                      let statement else { return false }
+                defer { sqlite3_finalize(statement) }
+                guard sqlite3_step(statement) == SQLITE_ROW else { throw BackupError.invalidSnapshot }
+                if sqlite3_column_int64(statement, 0) > 0 { return false }
+            }
         }
         try validateDatabase(backup)
         let backupCounts = try factCounts(backup)
@@ -102,8 +128,8 @@ nonisolated enum StoreUpgradeBackup {
         writeRecoveryTrace(store: store, stage: "backup-validated", backup: backupCounts,
                            checksumMatches: originalChecksumMatches, auditMatches: auditMatches)
         log.notice("换机保护副本通过 SQLite 校验：sha=\(originalChecksumMatches) audit=\(auditMatches) entry=\(backupCounts["ZENTRY"] ?? -1) media=\(backupCounts["ZMEDIA"] ?? -1)")
-        guard originalChecksumMatches || auditMatches else {
-            log.error("换机恢复拒绝：SHA 与升级审计均不匹配")
+        guard originalChecksumMatches else {
+            log.error("换机自动恢复拒绝：SHA 不匹配，数量审计不能证明内容完整")
             throw BackupError.invalidSnapshot
         }
 
@@ -114,9 +140,7 @@ nonisolated enum StoreUpgradeBackup {
                                current: currentCounts, checksumMatches: originalChecksumMatches,
                                auditMatches: auditMatches)
             log.notice("换机活动库现状：profile=\(currentCounts["ZCHILDPROFILE"] ?? -1) entry=\(currentCounts["ZENTRY"] ?? -1) media=\(currentCounts["ZMEDIA"] ?? -1) milestone=\(currentCounts["ZMILESTONE"] ?? -1)")
-            // 首启空壳会自动写入 130 条未达成的系统里程碑；它们不是用户事实。
-            // 只要除此之外十一类事实全空，仍可安全恢复。任何真实记录/档案/健康数据存在都不覆盖。
-            guard currentCounts.allSatisfy({ $0.key == "ZMILESTONE" || $0.value == 0 }) else {
+            guard currentCounts.values.allSatisfy({ $0 == 0 }) else {
                 log.notice("换机恢复跳过：活动库已有用户事实")
                 writeRecoveryTrace(store: store, stage: "skipped-nonempty-current",
                                    backup: backupCounts, current: currentCounts)
@@ -136,16 +160,6 @@ nonisolated enum StoreUpgradeBackup {
         try snapshot(source: backup, destination: restored)
         guard try factCounts(restored) == backupCounts else { throw BackupError.invalidSnapshot }
 
-        // 换机过程可能改写 SQLite 头部而不改变逻辑内容。旧 hash 留档，再为已由审计数量
-        // 与 quick_check 双重确认的副本刷新 sidecar，保证中途崩溃后下一次仍能继续迁移。
-        if !originalChecksumMatches {
-            let checksum = backup.appendingPathExtension("sha256")
-            let transferred = checksum.appendingPathExtension("before-device-transfer")
-            if manager.fileExists(atPath: checksum.path), !manager.fileExists(atPath: transferred.path) {
-                try manager.copyItem(at: checksum, to: transferred)
-            }
-            try digest(of: backup).write(to: checksum, atomically: true, encoding: .utf8)
-        }
         try validate(backup)
 
         do {

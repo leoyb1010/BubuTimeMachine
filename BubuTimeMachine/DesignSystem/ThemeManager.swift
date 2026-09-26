@@ -37,12 +37,15 @@ struct BubuThemeDefinition: Identifiable, Hashable, Sendable {
     var primary: Color { Color(hex: primaryHex) }
     /// 粉彩用于装饰；正文与操作单独计算可读色，避免浅粉字落在浅粉卡片上。
     var textAccent: Color {
-        let hex = primaryHex
-        return Color(UIColor { traits in
-            let dark = traits.userInterfaceStyle == .dark
-            let backdrop = dark ? UIColor(white: 0.26, alpha: 1) : UIColor(red: 0.93, green: 0.82, blue: 0.85, alpha: 1)
-            return Self.readableAccent(hex: hex, against: backdrop, lighten: dark)
-        })
+        let light = Self.readableAccent(hex: primaryHex,
+            against: UIColor(red: 0.93, green: 0.82, blue: 0.85, alpha: 1), lighten: false)
+        let dark = Self.readableAccent(hex: primaryHex, against: UIColor(white: 0.26, alpha: 1), lighten: true)
+        return Color(Self.dynamicAccent(light: light, dark: dark))
+    }
+    // SwiftUI also resolves dynamic colors on AsyncRenderer. A provider created in a
+    // MainActor getter inherits its isolation and traps there under Swift 6.
+    nonisolated static func dynamicAccent(light: UIColor, dark: UIColor) -> UIColor {
+        UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light }
     }
     var actionFill: Color { Color(Self.readableAccent(hex: primaryHex, against: .white, lighten: false)) }
 
