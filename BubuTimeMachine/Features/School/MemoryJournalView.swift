@@ -99,10 +99,11 @@ struct JournalEntries: View {
 
     init(kind: MemoryJournalKind, search: String, limit: Int, more: @escaping () -> Void) {
         self.kind = kind; self.limit = limit; self.more = more
-        let marker = kind.marker + "\n"
+        let bareMarker = kind.marker
+        let marker = bareMarker + "\n"
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         var descriptor = FetchDescriptor<Entry>(predicate: #Predicate {
-            !$0.isArchived && ($0.note?.starts(with: marker) ?? false)
+            !$0.isArchived && ($0.note == bareMarker || ($0.note?.starts(with: marker) ?? false))
                 && (query.isEmpty || ($0.note?.localizedStandardContains(query) ?? false))
         }, sortBy: [SortDescriptor(\Entry.happenedAt, order: .reverse)])
         descriptor.fetchLimit = limit

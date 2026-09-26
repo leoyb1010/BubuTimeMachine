@@ -1,5 +1,21 @@
 import Foundation
 import SwiftData
+import os
+
+/// Ownership follows the composer state lifetime, not visibility behind a system picker.
+/// Releasing a covered view's lease would let another window delete its imported files.
+nonisolated final class JournalDraftLease: Sendable {
+    private static let owners = OSAllocatedUnfairLock(initialState: Set<MemoryJournalKind>())
+    private let kind: MemoryJournalKind
+    private init(kind: MemoryJournalKind) { self.kind = kind }
+    static func acquire(_ kind: MemoryJournalKind) -> JournalDraftLease? {
+        owners.withLock { active in
+            guard active.insert(kind).inserted else { return nil }
+            return JournalDraftLease(kind: kind)
+        }
+    }
+    deinit { Self.owners.withLock { _ = $0.remove(kind) } }
+}
 
 /// Readable markers keep new journals compatible with existing sync, export and old clients.
 nonisolated enum MemoryJournalKind: String, CaseIterable, Identifiable, Sendable, Codable {

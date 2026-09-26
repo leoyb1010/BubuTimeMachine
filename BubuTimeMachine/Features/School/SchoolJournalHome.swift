@@ -176,9 +176,11 @@ private struct SchoolDayEntries: View {
     init(day: Date) {
         let start = Calendar.current.startOfDay(for: day)
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
-        let marker = MemoryJournalKind.school.marker + "\n"
+        let bareMarker = MemoryJournalKind.school.marker
+        let marker = bareMarker + "\n"
         var descriptor = FetchDescriptor<Entry>(predicate: #Predicate {
-            !$0.isArchived && $0.happenedAt >= start && $0.happenedAt < end && ($0.note?.starts(with: marker) ?? false)
+            !$0.isArchived && $0.happenedAt >= start && $0.happenedAt < end
+                && ($0.note == bareMarker || ($0.note?.starts(with: marker) ?? false))
         }, sortBy: [SortDescriptor(\Entry.createdAt, order: .reverse)])
         descriptor.fetchLimit = 80
         _entries = Query(descriptor)

@@ -5,6 +5,18 @@ import UIKit
 @testable import BubuTimeMachine
 
 @MainActor struct MemoryJournalTests {
+    @Test func draftLeaseSurvivesCoverageAndReleasesWithItsOwner() {
+        var lease = JournalDraftLease.acquire(.school)
+        #expect(lease != nil)
+        #expect(JournalDraftLease.acquire(.school) == nil)
+        let otherKind = JournalDraftLease.acquire(.saying)
+        #expect(otherKind != nil)
+        withExtendedLifetime(lease) { #expect(JournalDraftLease.acquire(.school) == nil) }
+        lease = nil
+        #expect(JournalDraftLease.acquire(.school) != nil)
+        withExtendedLifetime(otherKind) {}
+    }
+
     @Test func draftRoundTripPreservesWordsAndOriginalReferences() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("journal-test-\(UUID()).json")
         defer { try? FileManager.default.removeItem(at: url) }

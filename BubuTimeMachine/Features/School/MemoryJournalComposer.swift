@@ -4,13 +4,13 @@ import PhotosUI
 import UniformTypeIdentifiers
 
 struct MemoryJournalComposer: View {
-    private static var activeDrafts: Set<MemoryJournalKind> = []
     let kind: MemoryJournalKind
     var initialDate: Date?
     var onSaved: ((Date) -> Void)?
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.isPresented) private var isPresented
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var id = UUID()
     @State private var date = Date.now
@@ -24,6 +24,7 @@ struct MemoryJournalComposer: View {
     @State private var selected: [PhotosPickerItem] = []
     @State private var reportItems: [PhotosPickerItem] = []
     @State private var showFiles = false
+    @State private var importingReportFile = false
     @State private var busy = false
     @State private var progress = ""
     @State private var message: String?
@@ -35,8 +36,10 @@ struct MemoryJournalComposer: View {
     @State private var recorder = AudioRecorder()
     @State private var voice: (fileName: String, duration: Double, waveform: [Float])?
     @State private var draftRecoveryFailed = false
-    @State private var ownsDraft = false
+    @State private var draftLease: JournalDraftLease?
+    private var ownsDraft: Bool { draftLease != nil }
     @State private var transcription: Task<Void, Never>?
+    @State private var importing: Task<Void, Never>?
 
     private var draft: MemoryJournalDraft {
         .init(id: id, kind: kind, date: date, words: words, context: scene,
@@ -118,16 +121,33 @@ struct MemoryJournalComposer: View {
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(kind == .school ? "记幼儿园的一天" : "留住一句童言")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                if schoolReport != nil {
+                    Toggle("已对照原表核对，未确认项留空", isOn: Binding(
+                        get: { schoolReport?.confirmed == true }, set: { schoolReport?.confirmed = $0 }))
+                        .font(BubuTheme.Font.caption).tint(env.theme.theme.actionFill)
+                        .foregroundStyle(BubuTheme.Color.warmBrown).frame(minHeight: 44)
+                        .accessibilityIdentifier("school.confirmed")
+                        .disabled(!ownsDraft || busy).padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(BubuTheme.Color.card)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(transcription == nil ? "以后再说" : "停止识别") {
-                        if let transcription {
+                    Button(importing != nil ? "停止导入" : (transcription == nil ? "以后再说" : "停止识别")) {
+                        if let importing {
+                            importing.cancel()
+                            self.importing = nil
+                            busy = false
+                            reportItems = []; selected = []
+                            message = "已停止等待，已导入的素材和填写内容保留，可以继续填写或收好。"
+                        } else if let transcription {
                             transcription.cancel()
                             self.transcription = nil
                             busy = false
                             message = "已停止等待识别，原声保留，可以直接收好。"
-                        } else if dirty { discard = true } else { dismiss() }
-                    }.disabled(busy && transcription == nil)
+                        } else if dirty { discard = true } else { closeComposer() }
+                    }.disabled(busy && transcription == nil && importing == nil)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("收好") { save() }.fontWeight(.bold)
@@ -142,10 +162,10 @@ struct MemoryJournalComposer: View {
                 if unimportedVoice == nil && !draftRecoveryFailed {
                     Button("留在草稿，下次继续") {
                         if let result = recorder.stop() { keepRecording(result) }
-                        if unimportedVoice == nil && persistDraft() { dismiss() }
+                        if unimportedVoice == nil && persistDraft() { closeComposer() }
                     }
                 }
-                Button("丢弃草稿", role: .destructive) { discarded = true; dismiss() }
+                Button("丢弃草稿", role: .destructive) { discarded = true; closeComposer() }
                 Button("继续记录", role: .cancel) {}
             }
             .onAppear { restoreDraft() }
@@ -156,30 +176,29 @@ struct MemoryJournalComposer: View {
                 catch { return }
                 persistDraft()
             }
-            .onChange(of: selected) { _, items in Task { await importPhotos(items, report: false) } }
-            .onChange(of: reportItems) { _, items in Task { await importPhotos(items, report: true) } }
+            .onChange(of: selected) { _, items in
+                guard !items.isEmpty, importing == nil else { return }
+                importing = Task { await importPhotos(items, report: false) }
+            }
+            .onChange(of: reportItems) { _, items in
+                guard !items.isEmpty, importing == nil else { return }
+                importing = Task { await importPhotos(items, report: true) }
+            }
             .onChange(of: recorder.state) { _, state in
                 if state == .finished, let result = recorder.consumeInterruptedResult() { keepRecording(result) }
             }
-            .fileImporter(isPresented: $showFiles, allowedContentTypes: [.image, .movie, .plainText], allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result { Task { await importFiles(urls) } }
+            .fileImporter(isPresented: $showFiles,
+                          allowedContentTypes: importingReportFile ? [.image] : [.image, .movie, .plainText],
+                          allowsMultipleSelection: !importingReportFile) { result in
+                if case .success(let urls) = result, importing == nil {
+                    let report = importingReportFile
+                    importing = Task { await importFiles(urls, report: report) }
+                }
                 else if case .failure(let error) = result { message = error.localizedDescription }
             }
             .onDisappear {
-                guard ownsDraft else { return }
-                if !discarded, !saved, let result = recorder.stop() { keepRecording(result) }
-                if !saved && !discarded { persistDraft() }
-                // A failed import still owns the recorder's source. Never delete it implicitly.
-                if unimportedVoice == nil || discarded { recorder.cancel() }
-                if discarded {
-                    for file in files { env.mediaStore.deleteLocalFiles(media: file.fileName, thumbnail: file.thumbnail) }
-                    if let voice { env.mediaStore.deleteMedia(named: voice.fileName) }
-                }
-                if (saved || discarded) && !draftRecoveryFailed {
-                    try? JournalDraftStore.remove(at: JournalDraftStore.file(for: kind))
-                }
-                Self.activeDrafts.remove(kind)
-                ownsDraft = false
+                if !isPresented { finishEditing() }
+                else if !saved && !discarded { persistDraft() }
             }
         }
     }
@@ -190,17 +209,22 @@ struct MemoryJournalComposer: View {
                 Label("亲子桥原表已加入", systemImage: "checkmark.circle.fill")
                     .font(BubuTheme.Font.body.weight(.semibold)).foregroundStyle(accent)
             } else {
-            PhotosPicker(selection: $reportItems, maxSelectionCount: 1, matching: .images) {
+            HStack(spacing: 8) {
+            PhotosPicker(selection: $reportItems, maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current) {
                 Label("读一张亲子桥", systemImage: "doc.text.viewfinder")
                     .frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.white)
             }.buttonStyle(.borderedProminent).tint(env.theme.theme.actionFill)
+            Button { importingReportFile = true; showFiles = true } label: {
+                Image(systemName: "folder").frame(minWidth: 44, minHeight: 44)
+            }.buttonStyle(.bordered).accessibilityLabel("从文件读取亲子桥")
+            }
             }
             HStack(alignment: .top) {
-            PhotosPicker(selection: $selected, maxSelectionCount: 50, matching: .any(of: [.images, .videos])) {
+            PhotosPicker(selection: $selected, maxSelectionCount: 50, matching: .any(of: [.images, .videos]), preferredItemEncoding: .current) {
                 Label("老师照片 / 视频", systemImage: "photo.stack")
             }
                 Spacer()
-                Button { showFiles = true } label: { Label("从文件导入", systemImage: "folder") }
+                Button { importingReportFile = false; showFiles = true } label: { Label("素材文件", systemImage: "folder") }
             }.font(BubuTheme.Font.body)
             if schoolReport == nil {
                 Button("没有图片，直接填亲子桥") { schoolReport = SchoolDailyReport() }
@@ -256,27 +280,55 @@ struct MemoryJournalComposer: View {
     private func importPhotos(_ items: [PhotosPickerItem], report: Bool) async {
         guard !items.isEmpty, !busy else { return }
         busy = true
-        defer { busy = false; if report { reportItems = [] } else { selected = [] } }
-        var failed = 0
-        for (index, item) in items.enumerated() {
-            progress = "整理 \(index + 1) / \(items.count)"
-            do {
-                guard files.count < 50 else { failed += 1; continue }
-                guard let transfer = try await item.loadTransferable(type: JournalPickedFile.self) else { failed += 1; continue }
-                defer { try? FileManager.default.removeItem(at: transfer.url) }
-                let result = try await JournalImport.prepare(url: transfer.url, report: report, store: env.mediaStore)
-                accept(result)
-            } catch { failed += 1 }
+        message = nil
+        defer {
+            if !Task.isCancelled {
+                busy = false; importing = nil
+                if report { reportItems = [] } else { selected = [] }
+            }
         }
-        if report && schoolReport == nil { suggestFields() }
-        message = failed > 0 ? "\(failed) 个素材未导入。原片仍在原处；请重新选择失败的素材。" : "已整理，请核对后收好。重复素材已跳过。"
+        var failures: [String] = []
+        var warnings: [String] = []
+        for (index, item) in items.enumerated() {
+            guard !Task.isCancelled else { return }
+            progress = "读取相册原件 \(index + 1) / \(items.count) · iCloud 素材需先下载"
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+                   ProcessInfo.processInfo.arguments.contains("-uitest-journal-slow-import") {
+                    try await Task.sleep(for: .seconds(20))
+                }
+                #endif
+                guard files.count < 50 else { failures.append("第\(index + 1)项：本条记录已达50个素材上限"); continue }
+                let transfer = try await JournalPickedFile.load(item)
+                defer { try? FileManager.default.removeItem(at: transfer.url) }
+                try Task.checkCancellation()
+                progress = report ? "已取得原图，正在识别亲子桥…" : "保存素材 \(index + 1) / \(items.count)…"
+                let result = try await JournalImport.prepare(url: transfer.url, report: report, store: env.mediaStore)
+                guard !Task.isCancelled else {
+                    env.mediaStore.deleteLocalFiles(media: result.file.fileName, thumbnail: result.file.thumbnail)
+                    return
+                }
+                if let warning = result.warning { warnings.append(warning) }
+                accept(result)
+            } catch {
+                guard !Task.isCancelled else { return }
+                failures.append("第\(index + 1)项：\(error.localizedDescription)")
+            }
+        }
+        let success = report ? "原图已加入，识别出 \(schoolReport?.candidates.count ?? 0) 项候选。点候选采用，或对照原图直接填写；核对后收好。" : "已导入，点右上角「收好」保存。重复素材已跳过。"
+        message = ([failures.isEmpty ? success : "\(failures.count) 个素材未导入，原片未改动。"] + warnings + failures.prefix(3)).joined(separator: "\n")
     }
-    private func importFiles(_ urls: [URL]) async {
+    private func importFiles(_ urls: [URL], report: Bool) async {
         guard !busy else { return }
         busy = true
-        defer { busy = false }
+        message = nil
+        progress = report ? "正在读取亲子桥文件…" : "正在读取素材文件…"
+        defer { if !Task.isCancelled { busy = false; importing = nil } }
         var failed = max(0, urls.count - 50)
+        var failureDetails: [String] = []
         for url in urls.prefix(50) {
+            guard !Task.isCancelled else { return }
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             do {
@@ -286,14 +338,26 @@ struct MemoryJournalComposer: View {
                         guard size <= 100_000 else { throw CocoaError(.fileReadTooLarge) }
                         return try String(contentsOf: url, encoding: .utf8)
                     }.value
+                    try Task.checkCancellation()
                     source += (source.isEmpty ? "" : "\n") + text
                 } else if files.count < 50 {
-                    accept(try await JournalImport.prepare(url: url, report: false, store: env.mediaStore))
+                    let result = try await JournalImport.prepare(url: url, report: report, store: env.mediaStore)
+                    guard !Task.isCancelled else {
+                        env.mediaStore.deleteLocalFiles(media: result.file.fileName, thumbnail: result.file.thumbnail)
+                        return
+                    }
+                    accept(result)
+                    if let warning = result.warning { message = warning }
                 } else { failed += 1 }
-            } catch { failed += 1 }
+            } catch {
+                if Task.isCancelled { return }
+                failed += 1
+                if failureDetails.count < 3 { failureDetails.append(error.localizedDescription) }
+            }
         }
-        suggestFields()
-        if failed > 0 { message = "\(failed) 个文件未导入，请检查格式或从相册重新选择。" }
+        if !report { suggestFields() }
+        else if message == nil { message = "原图已加入，请对照核对后收好。" }
+        if failed > 0 { message = "\(failed) 个文件未导入，原文件未改动。\n" + failureDetails.joined(separator: "\n") }
     }
     private func accept(_ result: JournalImport.Result) {
         if let incoming = result.schoolReport {
@@ -368,16 +432,17 @@ struct MemoryJournalComposer: View {
             env.syncEngine.syncNow()
             env.refreshWidgetSnapshot(context: context)
             BubuHaptics.success()
-            dismiss()
+            closeComposer()
         } catch { message = "没有保存成功，草稿和录音还在，请重试：\(error.localizedDescription)" }
     }
     private func restoreDraft() {
-        guard !loaded else { return }
-        guard Self.activeDrafts.insert(kind).inserted else {
+        guard !ownsDraft else { return }
+        guard let lease = JournalDraftLease.acquire(kind) else {
             message = "另一窗口正在编辑这一份草稿，请先在那里收好或退出。"
             return
         }
-        ownsDraft = true
+        draftLease = lease
+        guard !loaded else { return }
         if let initialDate { date = initialDate }
         defer { loaded = true }
         do {
@@ -398,6 +463,26 @@ struct MemoryJournalComposer: View {
             draftRecoveryFailed = true
             message = "旧草稿暂时打不开，原文件已保留。本次新记录可以收好，但暂不覆盖旧草稿。"
         }
+    }
+    private func closeComposer() {
+        finishEditing()
+        dismiss()
+    }
+    private func finishEditing() {
+        guard ownsDraft else { return }
+        importing?.cancel(); importing = nil
+        if !discarded, !saved, let result = recorder.stop() { keepRecording(result) }
+        if !saved && !discarded { persistDraft() }
+        // Failed recording imports keep their source until an explicit discard.
+        if unimportedVoice == nil || discarded { recorder.cancel() }
+        if discarded {
+            for file in files { env.mediaStore.deleteLocalFiles(media: file.fileName, thumbnail: file.thumbnail) }
+            if let voice { env.mediaStore.deleteMedia(named: voice.fileName) }
+        }
+        if (saved || discarded) && !draftRecoveryFailed {
+            try? JournalDraftStore.remove(at: JournalDraftStore.file(for: kind))
+        }
+        draftLease = nil
     }
     @discardableResult
     private func persistDraft() -> Bool {

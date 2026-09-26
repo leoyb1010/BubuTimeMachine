@@ -3,6 +3,86 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testSchoolImportCanBeStoppedWithoutLockingNextDraft() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-journal-slow-import"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        app.buttons["journal.primary"].tap()
+        app.buttons["老师照片 / 视频"].tap()
+        let asset = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        XCTAssertTrue(asset.waitForExistence(timeout: 15))
+        asset.tap(); app.buttons["Add"].tap()
+        XCTAssertTrue(app.buttons["停止导入"].waitForExistence(timeout: 5))
+        app.buttons["停止导入"].tap()
+        XCTAssertTrue(app.buttons["school.manual-report"].isEnabled)
+        XCTAssertFalse(app.staticTexts["已选 1 个素材"].exists)
+        app.buttons["以后再说"].tap()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
+        app.buttons["journal.primary"].tap()
+        XCTAssertTrue(app.buttons["school.manual-report"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["school.manual-report"].isEnabled, "取消的迟到任务不能锁住下一份草稿")
+        attachScreenshot("school-import-cancel-and-reopen", to: self)
+    }
+
+    @MainActor
+    func testSchoolSystemPhotoPickerImportsReport() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        app.buttons["journal.primary"].tap()
+        app.buttons["读一张亲子桥"].tap()
+        let photo = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 15))
+        attachScreenshot("school-system-picker-open", to: self)
+        photo.tap()
+        let original = app.buttons["school.original"]
+        let imported = original.waitForExistence(timeout: 20)
+        attachScreenshot("school-system-picker-return", to: self)
+        XCTAssertTrue(imported)
+        XCTAssertTrue(original.isEnabled, "从系统相册返回后必须保留草稿编辑权")
+        let amount = app.textFields["school.field.上午点心"]
+        revealSchoolControl(amount, in: app)
+        XCTAssertTrue(amount.isEnabled)
+        amount.tap(); amount.typeText("90%")
+        app.swipeDown()
+        let reviewed = app.switches["school.confirmed"]
+        revealSchoolControl(reviewed, in: app)
+        reviewed.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        attachScreenshot("school-system-confirmation-state", to: self)
+        XCTAssertTrue(app.buttons["journal.save"].isEnabled)
+        app.buttons["journal.save"].tap()
+        XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["90%"].exists)
+        XCTAssertTrue(app.buttons["school.saved-original"].exists)
+        attachScreenshot("school-system-import-saved", to: self)
+    }
+
+    @MainActor
+    func testSchoolSystemPhotoPickerImportsPhotoAndVideo() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        app.buttons["journal.primary"].tap()
+        app.buttons["老师照片 / 视频"].tap()
+        let asset = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        XCTAssertTrue(asset.waitForExistence(timeout: 15))
+        app.images.matching(identifier: "PXGGridLayout-Info").matching(NSPredicate(format: "label BEGINSWITH %@", "视频")).firstMatch.tap()
+        app.images.matching(identifier: "PXGGridLayout-Info").matching(NSPredicate(format: "label BEGINSWITH %@", "照片")).firstMatch.tap()
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.staticTexts["已选 2 个素材"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons["journal.save"].isEnabled)
+        attachScreenshot("school-system-mixed-import", to: self)
+        app.buttons["journal.save"].tap()
+        XCTAssertTrue(app.staticTexts["老师镜头里的她"].waitForExistence(timeout: 8), "只选照片视频、不填写文字的日记也必须出现在幼儿园")
+    }
+
+    @MainActor
     func testSchoolGraphicJournalDisplaysEveryReportGroup() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -73,7 +153,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         let reviewed = app.switches["school.confirmed"]
         revealSchoolControl(reviewed, in: app)
         XCTAssertTrue(reviewed.isHittable)
-        reviewed.tap()
+        reviewed.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["journal.save"].isEnabled)
         attachScreenshot("school-reviewed-form", to: self)
         app.buttons["journal.save"].tap()
@@ -295,6 +375,12 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     private func revealSchoolControl(_ element: XCUIElement, in app: XCUIApplication) {
+        let visibleTop = app.navigationBars["记幼儿园的一天"].frame.maxY + 12
+        let reviewBar = app.switches["school.confirmed"]
+        let isReviewBar = element.identifier == "school.confirmed"
+        let footerTop = !isReviewBar && reviewBar.exists ? reviewBar.frame.minY - 12 : app.frame.maxY
+        let visibleBottom = min(footerTop, app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY : app.frame.maxY)
+        if element.isHittable && element.frame.midY > visibleTop && element.frame.midY < visibleBottom { return }
         let scroll = app.scrollViews.containing(element.elementType, identifier: element.identifier).firstMatch
         XCTAssertTrue(scroll.exists)
         // Capture the sheet viewport before scrolling. A descendant-based query can
@@ -303,7 +389,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         for _ in 0..<18 {
             let navBottom = app.navigationBars["记幼儿园的一天"].frame.maxY
             let keyboard = app.keyboards.firstMatch
-            let bottom = min(bounds.maxY, keyboard.exists ? keyboard.frame.minY : bounds.maxY) - 24
+            let currentFooterTop = !isReviewBar && reviewBar.exists ? reviewBar.frame.minY - 12 : bounds.maxY
+            let bottom = min(currentFooterTop, min(bounds.maxY, keyboard.exists ? keyboard.frame.minY : bounds.maxY)) - 24
             let top = max(bounds.minY, navBottom) + 24
             let center = element.frame.midY
             if element.isHittable && center > top && center < bottom { return }

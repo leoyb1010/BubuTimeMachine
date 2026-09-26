@@ -50,11 +50,8 @@ struct SchoolReportEditor: View {
                     }
                 }
             }
-            Toggle("已核对姓名、日期和内容，未确认项留空", isOn: $report.confirmed)
-                .font(BubuTheme.Font.body).tint(env.theme.theme.actionFill)
-                .accessibilityIdentifier("school.confirmed")
             if !report.confirmed {
-                Text("核对后才能收好。修改内容或日期会重新要求确认。")
+                Text("核对后，在页面底部确认即可收好。修改内容或日期会重新要求确认。")
                     .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
