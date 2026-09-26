@@ -219,6 +219,18 @@ def _pocketbase_principal(
     return "pb:" + user_id
 
 
+def _school_vision_principal(authorization: Optional[str]) -> Optional[str]:
+    """Recognize a school-only capability; this does not grant general API access."""
+    configured = os.environ.get("SCHOOL_VISION_TOKEN", "").strip()
+    value = (authorization or "").strip()
+    if len(configured) < 32 or not value.lower().startswith("bearer "):
+        return None
+    supplied = value[7:].strip().encode("utf-8", "surrogateescape")
+    if not secrets.compare_digest(supplied, configured.encode("utf-8")):
+        return None
+    return "school-vision:" + hashlib.sha256(configured.encode("utf-8")).hexdigest()
+
+
 def _authorized_principal(
     x_api_key: Optional[str], authorization: Optional[str], preauth_bucket: str
 ) -> Optional[str]:
@@ -227,6 +239,10 @@ def _authorized_principal(
         (x_api_key or "").encode("utf-8", "surrogateescape"), _API_KEY.encode("utf-8")
     ):
         return "service:" + hashlib.sha256(_API_KEY.encode("utf-8")).hexdigest()
+    # Never forward this narrowly scoped credential to PocketBase or reinterpret
+    # it as a family login, including callers such as the detailed health route.
+    if _school_vision_principal(authorization) is not None:
+        return None
     return _pocketbase_principal(authorization, preauth_bucket)
 
 
@@ -235,11 +251,15 @@ def require_api_key(
     x_api_key: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
 ) -> str:
-    """业务路由接受服务账号 key 或 App 的 PocketBase 用户登录态；两者都没有时 fail-closed。"""
+    """PB/key remain general credentials; the school token has exactly one POST scope."""
     client_host = request.client.host if request.client else "unknown"
-    principal = _authorized_principal(
-        x_api_key, authorization, "preauth:" + client_host
-    )
+    principal = None
+    if request.method == "POST" and request.url.path == "/school-report/recognize":
+        principal = _school_vision_principal(authorization)
+    if principal is None:
+        principal = _authorized_principal(
+            x_api_key, authorization, "preauth:" + client_host
+        )
     if principal is None:
         logger.warning("unauthorized request path=%s ip=%s",
                        request.url.path, request.client.host if request.client else "unknown")

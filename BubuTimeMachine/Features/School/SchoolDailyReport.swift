@@ -105,10 +105,13 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
     var reviewNotes: [String]?
     var allowsOriginalDeduplication: Bool?
     var recognitionModel: String?
+    /// Includes explicitly cleared fields; an empty value is not necessarily a recognition gap.
+    var manuallyEditedFields: [String]?
 
     mutating func adoptRecognizedValues() {
         allowsOriginalDeduplication = (allowsOriginalDeduplication ?? true) && values.isEmpty
         for field in SchoolReportField.allCases {
+            guard manuallyEditedFields?.contains(field.rawValue) != true else { continue }
             guard let value = candidates[field.rawValue], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             if self[field].isEmpty { values[field.rawValue] = value }
             else if SchoolReportField.meals.contains(field) {
@@ -168,7 +171,9 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
         }
         let heading = confirmed ? Self.start : Self.automaticStart
         let modelLine = recognitionModel == "deepseek-flash" ? ["识别模型：deepseek-flash"] : []
-        let notes = modelLine + (reviewNotes ?? []).map { "识别提示：" + $0.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: Self.end, with: "［亲子桥结束］") }
+        let edits = (manuallyEditedFields ?? []).filter { SchoolReportField(rawValue: $0) != nil }.sorted()
+        let editLine = edits.isEmpty ? [] : ["手动修改栏目：" + edits.joined(separator: "｜")]
+        let notes = modelLine + editLine + (reviewNotes ?? []).map { "识别提示：" + $0.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: Self.end, with: "［亲子桥结束］") }
         return ([heading] + (lines.isEmpty ? ["未识别栏目以原表为准"] : lines) + notes + [Self.end]).joined(separator: "\n")
     }
     static func from(note: String?) -> Self? {
@@ -183,6 +188,10 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
         var report = Self()
         for line in note[start.upperBound..<end.lowerBound].components(separatedBy: .newlines) {
             if line == "识别模型：deepseek-flash" { report.recognitionModel = "deepseek-flash" }
+            if line.hasPrefix("手动修改栏目：") {
+                report.manuallyEditedFields = String(line.dropFirst("手动修改栏目：".count))
+                    .components(separatedBy: "｜").filter { SchoolReportField(rawValue: $0) != nil }
+            }
             if line.hasPrefix("识别提示：") {
                 if report.reviewNotes == nil { report.reviewNotes = [] }
                 report.reviewNotes?.append(String(line.dropFirst("识别提示：".count)))

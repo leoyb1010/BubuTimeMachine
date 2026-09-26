@@ -4,6 +4,7 @@ import SwiftData
 /// Corrections edit the same memory; the original photo, teacher text and attachments stay intact.
 struct SchoolReportCorrection: View {
     let entry: Entry
+    private let editingBaseline: SchoolDailyReport
     var onSaved: ((Date) -> Void)?
     @State private var report: SchoolDailyReport
     @State private var date: Date
@@ -14,6 +15,7 @@ struct SchoolReportCorrection: View {
 
     init(entry: Entry, report: SchoolDailyReport, onSaved: ((Date) -> Void)? = nil) {
         self.entry = entry
+        self.editingBaseline = report
         self.onSaved = onSaved
         _report = State(initialValue: report)
         _date = State(initialValue: entry.happenedAt)
@@ -43,7 +45,8 @@ struct SchoolReportCorrection: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存修改") {
                         do {
-                            try MemoryJournalWriter.updateReport(id: entry.id, date: date, report: report, container: context.container)
+                            try MemoryJournalWriter.updateReport(id: entry.id, date: date, report: report,
+                                                                 container: context.container, editingBaseline: editingBaseline)
                             env.syncEngine.syncNow()
                             env.refreshWidgetSnapshot(context: context)
                             onSaved?(date)

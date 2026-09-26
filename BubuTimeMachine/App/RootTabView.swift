@@ -25,6 +25,17 @@ struct RootTabView: View {
 
     var body: some View {
         tabsWithRecordAccessory
+            .toolbar(selection == 3 && !isWide ? .hidden : .visible, for: .tabBar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if selection == 3 && !isWide {
+                    HStack(spacing: 0) {
+                        schoolNavigationItem("首页", symbol: "house", tab: 0)
+                        schoolNavigationItem("时光", symbol: "photo", tab: 1)
+                        schoolNavigationItem("成长", symbol: "chart.bar", tab: 2)
+                        schoolNavigationItem("幼儿园", symbol: "house.fill", tab: 3)
+                    }.padding(.top, 7).background(BubuTheme.Color.cream)
+                }
+            }
             // 切 Tab 此前手上没有任何回音：内容过渡做了、记录按钮的轻触做了，
             // 唯独最高频的这个动作是哑的。bubuSensoryFeedback 全仓只用了 2 处，严重低用。
             .bubuSensoryFeedback(.selection, trigger: selection)
@@ -80,6 +91,17 @@ struct RootTabView: View {
             }
     }
 
+    private func schoolNavigationItem(_ title: String, symbol: String, tab: Int) -> some View {
+        Button { selection = tab } label: {
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 22, weight: .medium))
+                Text(title).font(.system(size: 11))
+            }.frame(maxWidth: .infinity, minHeight: 45)
+                .foregroundStyle(selection == tab ? SchoolPalette.coral : BubuTheme.Color.secondaryText)
+        }.buttonStyle(.plain).accessibilityLabel(title)
+            .accessibilityAddTraits(selection == tab ? .isSelected : [])
+    }
+
     @ViewBuilder
     private var tabsWithRecordAccessory: some View {
         if #available(iOS 26.1, *) {
@@ -118,8 +140,8 @@ struct RootTabView: View {
                     .bubuTabContentTransition(isActive: selection == 2)
             }
 
-            Tab("幼儿园", systemImage: "backpack.fill", value: 3) {
-                NavigationStack { MemoryJournalView() }
+            Tab("幼儿园", systemImage: "house.lodge.fill", value: 3) {
+                NavigationStack { MemoryJournalView().toolbar(isWide ? .visible : .hidden, for: .tabBar) }
                     .bubuTabContentTransition(isActive: selection == 3)
             }
 

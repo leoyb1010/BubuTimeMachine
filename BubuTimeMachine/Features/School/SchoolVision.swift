@@ -75,14 +75,40 @@ nonisolated enum SchoolVisionImage {
     }
 }
 
-/// A non-secret, one-shot setup receipt installed only on the owner's authorized devices.
-/// It never contains a provider key or changes where authenticated requests are sent.
+/// One-shot owner provisioning. Version 2 carries only a report-scoped family-server token,
+/// never the provider key or a credential granting access to family memories.
 nonisolated enum SchoolVisionSetup {
-    private struct Receipt: Decodable { let version: Int; let enabled: Bool; let service: String }
+    static let credentialKey = "bubu.school.vision.credential"
+    private struct Receipt: Decodable { let version: Int; let enabled: Bool; let service: String; let token: String? }
+    static func canUseCredential(_ token: String, service: URL, expectedService: String) -> Bool {
+        !token.isEmpty && service.scheme == "https" && service == URL(string: expectedService)
+    }
+    static func credential(in data: Data, expectedService: String) -> String? {
+        guard enabled(in: data, expectedService: expectedService) == true,
+              let receipt = try? JSONDecoder().decode(Receipt.self, from: data), receipt.version == 2,
+              let token = receipt.token, (32...256).contains(token.count),
+              token.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { return nil }
+        return token
+    }
     static func enabled(in data: Data, expectedService: String) -> Bool? {
         guard data.count <= 4096, let receipt = try? JSONDecoder().decode(Receipt.self, from: data),
-              receipt.version == 1, let actual = URL(string: receipt.service), let expected = URL(string: expectedService),
+              [1, 2].contains(receipt.version), let actual = URL(string: receipt.service), let expected = URL(string: expectedService),
               actual.scheme == "https", actual == expected else { return nil }
         return receipt.enabled
+    }
+}
+
+extension SchoolDailyReport {
+    /// Recognition may fill gaps, never erase a parent's correction or another section.
+    nonisolated mutating func mergeMissing(from incoming: SchoolDailyReport) {
+        let wasConfirmed = confirmed
+        let priorValues = values
+        candidates = incoming.values
+        adoptRecognizedValues()
+        recognitionModel = incoming.recognitionModel
+        reviewNotes = incoming.reviewNotes
+        if sourceHash == nil { sourceHash = incoming.sourceHash }
+        if dateEvidence.isEmpty { dateEvidence = incoming.dateEvidence }
+        confirmed = wasConfirmed && values == priorValues
     }
 }

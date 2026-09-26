@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import sys
@@ -105,6 +106,92 @@ def test_endpoint_auth_required(monkeypatch):
     with TestClient(main.app) as client:
         response = client.post("/school-report/recognize", json=payload())
     assert response.status_code == 401
+
+
+@pytest.fixture
+def scoped_auth(monkeypatch):
+    main.app.dependency_overrides.clear()
+    token = "school-vision-test-only-" + "a" * 40
+    monkeypatch.setenv("SCHOOL_VISION_TOKEN", token)
+    monkeypatch.setattr(main, "_API_KEY", "")
+    monkeypatch.setattr(main, "_pocketbase_principal", lambda *args: None)
+    monkeypatch.setattr(main.llm, "complete_vision_json", lambda *args, **kwargs: report())
+    with main._rate_lock:
+        main._rate_buckets.clear()
+    yield token
+    main.app.dependency_overrides.clear()
+    with main._rate_lock:
+        main._rate_buckets.clear()
+
+
+def test_scoped_token_authorizes_recognition_without_pocketbase_and_uses_digest_bucket(scoped_auth, monkeypatch):
+    pb_calls = []
+    def unexpected_pocketbase(*args):
+        pb_calls.append(args)
+        return None
+
+    monkeypatch.setattr(main, "_pocketbase_principal", unexpected_pocketbase)
+    with TestClient(main.app) as client:
+        response = client.post("/school-report/recognize", json=payload(),
+                               headers={"Authorization": "Bearer " + scoped_auth})
+    assert response.status_code == 200
+    assert not pb_calls
+    assert response.json()["fields"]["上午点心"].startswith("90%")
+    digest = hashlib.sha256(scoped_auth.encode()).hexdigest()
+    assert list(main._rate_buckets) == ["school-vision:" + digest]
+    assert scoped_auth not in repr(main._rate_buckets)
+
+
+@pytest.mark.parametrize("authorization", [None, "Bearer wrong-school-token", "Basic wrong-school-token"])
+def test_scoped_recognition_rejects_missing_or_wrong_token(scoped_auth, authorization):
+    headers = {} if authorization is None else {"Authorization": authorization}
+    with TestClient(main.app) as client:
+        response = client.post("/school-report/recognize", json=payload(), headers=headers)
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("method,path", [
+    ("POST", "/classify"), ("POST", "/parse-natural-capture"), ("GET", "/weekly-report/events"),
+])
+def test_school_token_cannot_authorize_other_business_routes(scoped_auth, monkeypatch, method, path):
+    pb_calls = []
+    def unexpected_pocketbase(*args):
+        pb_calls.append(args)
+        return None
+
+    monkeypatch.setattr(main, "_pocketbase_principal", unexpected_pocketbase)
+    with TestClient(main.app) as client:
+        response = client.request(method, path, json={}, headers={"Authorization": "Bearer " + scoped_auth})
+    assert response.status_code == 401
+    assert not pb_calls
+    assert not main._rate_buckets
+
+
+@pytest.mark.parametrize("configured", ["", "too-short"])
+def test_scoped_token_is_disabled_when_unconfigured_or_weak(scoped_auth, monkeypatch, configured):
+    monkeypatch.setenv("SCHOOL_VISION_TOKEN", configured)
+    with TestClient(main.app) as client:
+        response = client.post("/school-report/recognize", json=payload(),
+                               headers={"Authorization": "Bearer " + (configured or scoped_auth)})
+    assert response.status_code == 401
+
+
+def test_scoped_token_does_not_replace_existing_api_key_or_pb_auth(scoped_auth, monkeypatch):
+    monkeypatch.setattr(main, "_API_KEY", "legacy-service-test-key")
+    monkeypatch.setattr(main, "_pocketbase_principal", lambda authorization, bucket:
+                        "pb:family" if authorization == "Bearer existing-pb-test-login" else None)
+    with TestClient(main.app) as client:
+        for headers in ({"X-API-Key": "legacy-service-test-key"},
+                        {"Authorization": "Bearer existing-pb-test-login"}):
+            assert client.post("/school-report/recognize", json=payload(), headers=headers).status_code == 200
+
+
+def test_scoped_token_is_subject_to_principal_rate_limit(scoped_auth, monkeypatch):
+    monkeypatch.setattr(main, "_RATE_LIMIT", 1)
+    with TestClient(main.app) as client:
+        headers = {"Authorization": "Bearer " + scoped_auth}
+        assert client.post("/school-report/recognize", json=payload(), headers=headers).status_code == 200
+        assert client.post("/school-report/recognize", json=payload(), headers=headers).status_code == 429
 
 
 def test_endpoint_success_and_no_sensitive_validation_echo(client, monkeypatch):

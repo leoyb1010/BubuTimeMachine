@@ -248,6 +248,11 @@ final class ServerConfig {
               let data = try? Data(contentsOf: url),
               let enabled = SchoolVisionSetup.enabled(in: data, expectedService: Self.defaultAIBaseURL) else { return }
         do {
+            if let token = SchoolVisionSetup.credential(in: data, expectedService: Self.defaultAIBaseURL) {
+                KeychainStore.set(token, for: SchoolVisionSetup.credentialKey)
+                // Do not consume a credential we failed to retain (e.g. device still locked).
+                guard KeychainStore.string(for: SchoolVisionSetup.credentialKey) == token else { return }
+            }
             // Consume before persisting so a stale file cannot override a later switch-off.
             try FileManager.default.removeItem(at: url)
             aiBaseURLString = Self.defaultAIBaseURL

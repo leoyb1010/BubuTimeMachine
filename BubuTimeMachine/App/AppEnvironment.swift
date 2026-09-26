@@ -86,7 +86,16 @@ final class AppEnvironment {
 
     /// Report-image consent is independent of story writing; the provider key stays on the mini.
     func schoolVisionService() -> BubuAIService? {
-        guard config.schoolVisionEnabled, config.isConfigured, let url = config.aiBaseURL else { return nil }
+        #if DEBUG
+        if (ProcessInfo.processInfo.arguments.contains("-uitest-in-memory") || ProcessInfo.processInfo.environment["BUBU_UNIT_TEST_HOST"] == "1"),
+           !ProcessInfo.processInfo.arguments.contains("-uitest-school-live-vision") { return nil }
+        #endif
+        guard config.schoolVisionEnabled, let url = config.aiBaseURL else { return nil }
+        if let token = KeychainStore.string(for: SchoolVisionSetup.credentialKey),
+           SchoolVisionSetup.canUseCredential(token, service: url, expectedService: ServerConfig.defaultAIBaseURL) {
+            return BubuAIService(baseURL: url) { token }
+        }
+        guard config.isConfigured else { return nil }
         let client = apiClient
         return BubuAIService(baseURL: url) { try await client.authenticate(role: "ai").token }
     }

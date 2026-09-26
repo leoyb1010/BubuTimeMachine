@@ -4,6 +4,55 @@ import Testing
 @testable import BubuTimeMachine
 
 @MainActor struct SchoolAutoImportTests {
+    @Test func lateRecognitionRespectsAnExplicitlyClearedFieldAndStaleEditorKeepsEnrichment() throws {
+        let schema = SharedModelContainer.schema
+        let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+        var base = SchoolDailyReport()
+        base.candidates = ["精神": "佳", "中午午餐": "90%"]
+        base.adoptRecognizedValues()
+        var draft = MemoryJournalDraft(id: UUID(), kind: .school, date: .now); draft.schoolReport = base
+        let id = try MemoryJournalWriter.save(draft, files: [], voice: nil, role: .papa, container: container)
+        var edit = base; edit[.mood] = ""
+        try MemoryJournalWriter.updateReport(id: id, date: draft.date, report: edit, container: container, editingBaseline: base)
+        var cloud = base
+        cloud[.participation] = "主动"; cloud[.peers] = "佳"; cloud.recognitionModel = "deepseek-flash"
+        try MemoryJournalWriter.updateReport(id: id, date: draft.date, report: cloud, container: container, fillingMissingOnly: true)
+        var staleEdit = edit; staleEdit[.lunch] = "85%"
+        try MemoryJournalWriter.updateReport(id: id, date: draft.date, report: staleEdit, container: container, editingBaseline: edit)
+        let saved = try #require(try ModelContext(container).fetch(FetchDescriptor<Entry>()).first)
+        let result = try #require(SchoolDailyReport.from(note: saved.note))
+        #expect(result[.mood].isEmpty)
+        #expect(result[.participation] == "主动")
+        #expect(result[.peers] == "佳")
+        #expect(result[.lunch] == "85%")
+        #expect(result.recognitionModel == "deepseek-flash")
+    }
+
+    @Test func recognizingOriginalFillsBehaviorWithoutRevertingConcurrentCorrectionsOrDate() throws {
+        let schema = SharedModelContainer.schema
+        let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+        let originalDate = Date(timeIntervalSince1970: 1_790_000_000)
+        var report = SchoolDailyReport()
+        report.candidates[SchoolReportField.lunch.rawValue] = "90%"; report.adoptRecognizedValues()
+        var draft = MemoryJournalDraft(id: UUID(), kind: .school, date: originalDate, source: "老师的原话")
+        draft.schoolReport = report
+        let id = try MemoryJournalWriter.save(draft, files: [], voice: nil, role: .papa, container: container)
+        report[.lunch] = "85%"
+        let correctedDate = originalDate.addingTimeInterval(-86_400)
+        try MemoryJournalWriter.updateReport(id: id, date: correctedDate, report: report, container: container)
+        var incoming = SchoolDailyReport()
+        incoming.candidates = ["精神": "佳", "参与度": "主动", "同伴互动": "佳", "中午午餐": "90%"]
+        incoming.recognitionModel = "deepseek-flash"; incoming.adoptRecognizedValues()
+        try MemoryJournalWriter.updateReport(id: id, date: originalDate, report: incoming, container: container, fillingMissingOnly: true)
+        let saved = try #require(try ModelContext(container).fetch(FetchDescriptor<Entry>()).first)
+        let result = try #require(SchoolDailyReport.from(note: saved.note))
+        #expect(result[.mood] == "佳" && result[.participation] == "主动" && result[.peers] == "佳")
+        #expect(result[.lunch] == "85%")
+        #expect(saved.happenedAt == correctedDate)
+        #expect(saved.note?.contains("老师的原话") == true)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<Entry>()) == 1)
+    }
+
     @Test func originalDedupNeverDropsAddedTeacherTextOrManualValues() throws {
         let schema = SharedModelContainer.schema
         let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])

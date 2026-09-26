@@ -3,6 +3,18 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testSchoolReferenceHeaderCanOpenHistoryAndReturn() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-school-report"]
+        app.launch()
+        XCTAssertTrue(app.buttons["school.history"].waitForExistence(timeout: 12))
+        app.buttons["school.history"].tap()
+        XCTAssertTrue(app.navigationBars["幼儿园回忆"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testPreviouslyImportedSchoolDraftFinishesAutomaticallyAfterUpgrade() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -67,6 +79,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         amount.tap()
         amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (amount.value as? String ?? "").count) + "85%")
         app.buttons["school.correction-save"].tap()
+        attachScreenshot("school-after-correction", to: self)
         XCTAssertTrue(app.staticTexts["85%"].waitForExistence(timeout: 5))
         // Reimport the identical original: retain the correction and keep a single memory.
         app.buttons["journal.primary"].tap()

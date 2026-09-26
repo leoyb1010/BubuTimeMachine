@@ -218,7 +218,8 @@ enum MemoryJournalWriter {
         return id
     }
 
-    static func updateReport(id: UUID, date: Date, report: SchoolDailyReport, container: ModelContainer) throws {
+    static func updateReport(id: UUID, date: Date, report: SchoolDailyReport, container: ModelContainer,
+                             fillingMissingOnly: Bool = false, editingBaseline: SchoolDailyReport? = nil) throws {
         let context = ModelContext(container)
         context.autosaveEnabled = false
         guard let entry = try context.fetch(FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })).first,
@@ -226,6 +227,19 @@ enum MemoryJournalWriter {
             throw CocoaError(.fileReadNoSuchFile)
         }
         var corrected = report
+        if fillingMissingOnly, var latest = SchoolDailyReport.from(note: oldNote) {
+            latest.mergeMissing(from: report)
+            corrected = latest
+        } else if let editingBaseline, var latest = SchoolDailyReport.from(note: oldNote) {
+            var changed = Set(latest.manuallyEditedFields ?? [])
+            for field in SchoolReportField.allCases where editingBaseline[field] != report[field] {
+                latest[field] = report[field]
+                changed.insert(field.rawValue)
+            }
+            latest.manuallyEditedFields = changed.sorted()
+            latest.confirmed = report.confirmed
+            corrected = latest
+        }
         if corrected.automaticallyImported != true { corrected.confirmed = true }
         let evidenceStart = oldNote.range(of: "\n\n老师原文")?.lowerBound ?? oldNote.endIndex
         let editable = oldNote.startIndex..<evidenceStart
@@ -237,7 +251,7 @@ enum MemoryJournalWriter {
         let replacement = oldNote.replacingCharacters(in: begin.lowerBound..<end.upperBound, with: corrected.noteBlock)
         guard replacement.utf8.count <= 100_000 else { throw JournalDraftError.tooMuchText }
         entry.note = replacement
-        entry.happenedAt = date
+        if !fillingMissingOnly { entry.happenedAt = date }
         entry.editedAt = .now
         entry.syncState = .local
         do { try context.save() } catch { context.rollback(); throw error }

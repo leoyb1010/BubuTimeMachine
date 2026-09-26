@@ -414,7 +414,13 @@ struct MemoryJournalComposer: View {
     }
     private func prepareImport(url: URL, report: Bool) async throws -> JournalImport.Result {
         guard report, let service = env.schoolVisionService() else {
-            return try await JournalImport.prepare(url: url, report: report, store: env.mediaStore)
+            var result = try await JournalImport.prepare(url: url, report: report, store: env.mediaStore)
+            if report, env.config.schoolVisionEnabled, var recognized = result.schoolReport {
+                SchoolReportReading.addReview("DeepSeek 连接尚未配置，当前为本机识别；可在原记录中重新识别补齐", to: &recognized)
+                result.schoolReport = recognized
+                result.warning = "DeepSeek 未连接；原图已收好，本机识别可能漏读勾选项。"
+            }
+            return result
         }
         // Preserve the original before any network operation. Only this selected report is sent.
         let local = try await JournalImport.prepare(url: url, report: false, store: env.mediaStore)
@@ -610,7 +616,7 @@ struct MemoryJournalComposer: View {
         busy = true; progress = "整理亲子桥…"
         defer { busy = false }
         do {
-            let result = try await JournalImport.prepare(url: url, report: true, store: env.mediaStore)
+            let result = try await prepareImport(url: url, report: true)
             accept(result)
             if let report = result.schoolReport {
                 try JSONEncoder().encode(report).write(to: documents.appendingPathComponent("school-probe.json"), options: .atomic)

@@ -4,22 +4,39 @@ struct SchoolBehaviorPanel: View {
     let report: SchoolDailyReport
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dynamicTypeSize) private var typeSize
-    private let expressions: [BubuExpression] = [.happy, .playing, .love]
+    private let symbols = ["face.smiling.fill", "star.fill", "person.2.fill"]
+    private let colors = [SchoolPalette.coral, SchoolPalette.green, SchoolPalette.violet]
     var body: some View {
-        SchoolPanel(title: "在园表现", symbol: "face.smiling") {
+        SchoolPanel(title: "在园表现", symbol: "leaf.fill", subtitle: "用爱陪伴，见证每一次成长", accent: SchoolPalette.green) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: typeSize.isAccessibilitySize ? 1 : 3), spacing: 10) {
                 ForEach(Array([SchoolReportField.mood, .participation, .peers].enumerated()), id: \.offset) { index, field in
-                    VStack(spacing: 6) {
-                        BubuMascotBadge(size: 54, expression: expressions[index], isAlive: false).accessibilityHidden(true)
-                        Text(field.rawValue).font(.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                        Text(report[field].isEmpty ? "未记录" : report[field])
-                            .font(BubuTheme.Font.caption.weight(.semibold))
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(env.theme.theme.surfaceTint.opacity(0.12), in: Capsule())
-                    }.frame(maxWidth: .infinity)
+                    VStack(spacing: 8) {
+                        HStack(spacing: 7) {
+                            Image(systemName: symbols[index]).font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(.white).frame(width: 35, height: 35)
+                                .background(colors[index], in: Circle()).accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(["精神", "参与", "互动"][index]).font(.system(size: 10))
+                                Text(report[field].isEmpty ? "未记录" : report[field])
+                                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Text(meaning(field)).font(.system(size: 9)).foregroundStyle(SchoolPalette.secondary)
+                    }.frame(maxWidth: .infinity).padding(.vertical, 10).padding(.horizontal, 3)
+                        .background(colors[index].opacity(0.12), in: RoundedRectangle(cornerRadius: 17))
+                        .accessibilityElement(children: .combine).accessibilityIdentifier("school.behavior." + field.rawValue)
                 }
             }
-            SchoolObservationText(title: "特殊行为", value: report[.specialBehavior], symbol: "sparkle")
+            if !report[.specialBehavior].isEmpty { SchoolObservationText(title: "特殊行为", value: report[.specialBehavior], symbol: "sparkle") }
+        }
+    }
+    private func meaning(_ field: SchoolReportField) -> String {
+        switch (field, report[field]) {
+        case (.mood, "佳"): "精神状态不错"
+        case (.participation, "主动"): "主动参与各项活动"
+        case (.peers, "佳"): "和小伙伴互动良好"
+        default: report[field].isEmpty ? "等待老师的记录" : "按老师原表记录"
         }
     }
 }
@@ -91,7 +108,7 @@ struct SchoolTeacherPanel: View {
         SchoolPanel(title: "老师叮嘱", symbol: "backpack") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 10) {
-                    Text("🎒").font(.system(size: 30)).accessibilityHidden(true)
+                    Image(systemName: "backpack.fill").font(.system(size: 30)).foregroundStyle(SchoolPalette.coral).accessibilityHidden(true)
                     SchoolObservationText(title: "准备物品", value: report[.supplies], symbol: "bag")
                 }
                 Rectangle().fill(env.theme.theme.primary.opacity(0.16)).frame(height: 1)
