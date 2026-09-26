@@ -13,8 +13,8 @@ struct SchoolReportEditor: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "doc.text.image").font(.title2).foregroundStyle(env.theme.theme.textAccent)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("亲子桥 · 对照核对").font(BubuTheme.Font.headline)
-                    Text("候选不等于事实。勾选与手写时间请看原图，没确认的留空。")
+                    Text(report.automaticallyImported == true ? "亲子桥 · 数据调整" : "亲子桥 · 对照核对").font(BubuTheme.Font.headline)
+                    Text(report.automaticallyImported == true ? "读到的数据已经填好；有误直接修改，原图一直保留。" : "手工填写后收好，空白栏目可以留空。")
                         .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 }
             }
@@ -50,7 +50,7 @@ struct SchoolReportEditor: View {
                     }
                 }
             }
-            if !report.confirmed {
+            if !report.confirmed && report.automaticallyImported != true {
                 Text("核对后，在页面底部确认即可收好。修改内容或日期会重新要求确认。")
                     .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }

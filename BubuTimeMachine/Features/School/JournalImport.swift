@@ -110,6 +110,7 @@ nonisolated enum JournalImport {
                 } else if video {
                     thumbnail = await store.makeVideoThumbnail(fromVideo: fileName)
                 }
+                dailyReport?.adoptRecognizedValues()
                 try Task.checkCancellation()
                 return Result(file: .init(id: UUID(), fileName: fileName, thumbnail: thumbnail,
                                           hash: hash, isVideo: video, isSchoolReport: dailyReport != nil),
@@ -128,10 +129,23 @@ nonisolated enum JournalImport {
         request.customWords = ["亲子桥", "上午点心", "中午午餐", "水果", "下午点心", "午睡", "睡眠"]
         request.usesLanguageCorrection = true
         try VNImageRequestHandler(cgImage: image).perform([request])
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-uitest-school-import") {
+            let details: [[String: Any]] = (request.results ?? []).compactMap { observation in
+                guard let candidate = observation.topCandidates(1).first else { return nil }
+                return ["text": candidate.string, "scores": SchoolCheckboxReader.scores(in: candidate, image: image),
+                        "x": observation.boundingBox.minX, "y": 1 - observation.boundingBox.maxY]
+            }
+            let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("school-ocr-detail.json")
+            try? JSONSerialization.data(withJSONObject: details, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+        }
+        #endif
         return (request.results ?? []).compactMap { observation in
             guard let candidate = observation.topCandidates(1).first else { return nil }
             return SchoolOCRLine(text: candidate.string, x: observation.boundingBox.minX,
-                y: 1 - observation.boundingBox.maxY, confidence: candidate.confidence)
+                y: 1 - observation.boundingBox.maxY, confidence: candidate.confidence,
+                checkedOptions: SchoolCheckboxReader.selected(in: candidate, image: image),
+                width: observation.boundingBox.width, height: observation.boundingBox.height)
         }
     }
 }

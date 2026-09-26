@@ -58,6 +58,7 @@ nonisolated struct MemoryJournalDraft: Sendable, Codable, Equatable {
     var sleep = ""
     var source = ""
     var schoolReport: SchoolDailyReport?
+    var sourceWasUserEdited: Bool?
 
     var hasText: Bool {
         schoolReport?.hasContent == true || [words, context, meal, sleep, source].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -101,10 +102,12 @@ nonisolated struct JournalDraftSnapshot: Codable, Equatable, Sendable {
 nonisolated enum JournalDraftError: LocalizedError {
     case tooMuchText
     case reportNotConfirmed
+    case reportArchived
     var errorDescription: String? {
         switch self {
         case .tooMuchText: "这一笔的文字太多，请拆成几天记录。原草稿没有被覆盖。"
         case .reportNotConfirmed: "请先对照原表核对日期与亲子桥内容，再收好。"
+        case .reportArchived: "这张亲子桥已经在归档记录中，未重复创建。可以在归档中查看或恢复。"
         }
     }
 }
@@ -160,7 +163,34 @@ enum MemoryJournalWriter {
         }
         guard draft.hasText || !files.isEmpty || voice != nil else { throw EntryWriterError.emptyNote }
         guard draft.note.utf8.count <= 100_000 else { throw JournalDraftError.tooMuchText }
-        if let report = draft.schoolReport, !report.confirmed { throw JournalDraftError.reportNotConfirmed }
+        if let report = draft.schoolReport, !report.confirmed && report.automaticallyImported != true {
+            throw JournalDraftError.reportNotConfirmed
+        }
+        // A repeated one-photo automatic import returns the existing memory. Extra
+        // stories/media are never silently dropped by this narrow deduplication rule.
+        if draft.schoolReport?.automaticallyImported == true, draft.schoolReport?.allowsOriginalDeduplication == true,
+           files.count == 1, voice == nil, (draft.source.isEmpty || draft.sourceWasUserEdited == false),
+           [draft.words, draft.context, draft.meal, draft.sleep].allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
+           let hash = draft.schoolReport?.sourceHash, !hash.isEmpty, files[0].hash == hash {
+            let matches = try context.fetch(FetchDescriptor<Media>(predicate: #Predicate { $0.contentHash == hash }))
+            for media in matches where media.aiTags.contains("亲子桥原表") {
+                if let existing = media.entry, MemoryJournalKind.school.contains(existing.note) {
+                    if existing.isArchived { throw JournalDraftError.reportArchived }
+                    if let incoming = draft.schoolReport, incoming.recognitionModel == "deepseek-flash",
+                       var previous = SchoolDailyReport.from(note: existing.note) {
+                        let originalValues = previous.values
+                        previous.candidates = incoming.values
+                        previous.adoptRecognizedValues() // Fill missing pieces only; never overwrite a parent's correction.
+                        if previous.values != originalValues {
+                            previous.recognitionModel = incoming.recognitionModel
+                            previous.reviewNotes = incoming.reviewNotes
+                            try updateReport(id: existing.id, date: existing.happenedAt, report: previous, container: container)
+                        }
+                    }
+                    return existing.id
+                }
+            }
+        }
         let entry = Entry(happenedAt: draft.date, authorRole: role.rawValue, note: draft.note)
         entry.id = id
         entry.title = draft.kind == .school ? "幼儿园的一天" : "留住这句童言"
@@ -186,5 +216,30 @@ enum MemoryJournalWriter {
                                  targetLocalId: id.uuidString, happenedAt: draft.date))
         do { try context.save() } catch { context.rollback(); throw error }
         return id
+    }
+
+    static func updateReport(id: UUID, date: Date, report: SchoolDailyReport, container: ModelContainer) throws {
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        guard let entry = try context.fetch(FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })).first,
+              !entry.isArchived, let oldNote = entry.note, SchoolDailyReport.from(note: oldNote) != nil else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        var corrected = report
+        if corrected.automaticallyImported != true { corrected.confirmed = true }
+        let evidenceStart = oldNote.range(of: "\n\n老师原文")?.lowerBound ?? oldNote.endIndex
+        let editable = oldNote.startIndex..<evidenceStart
+        guard let begin = oldNote.range(of: SchoolDailyReport.start + "\n", range: editable)
+                ?? oldNote.range(of: SchoolDailyReport.automaticStart + "\n", range: editable),
+              let end = oldNote.range(of: "\n" + SchoolDailyReport.end, range: begin.upperBound..<evidenceStart) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let replacement = oldNote.replacingCharacters(in: begin.lowerBound..<end.upperBound, with: corrected.noteBlock)
+        guard replacement.utf8.count <= 100_000 else { throw JournalDraftError.tooMuchText }
+        entry.note = replacement
+        entry.happenedAt = date
+        entry.editedAt = .now
+        entry.syncState = .local
+        do { try context.save() } catch { context.rollback(); throw error }
     }
 }

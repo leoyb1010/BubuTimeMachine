@@ -69,9 +69,12 @@ struct AdvancedSettingsView: View {
                 Toggle("让 AI 帮忙写故事", isOn: $config.aiEnabled)
                 // 知情同意：这是全 App 唯一会把布布的记录正文发出家门的开关，
                 // 必须在开关旁边（而不是脚注深处）说清目的地。默认关闭，只有这里能打开。
-                Text("开启后，记录的文字会经家里的服务器转发给 DeepSeek 云端模型，用来写日记、旁白和周报。照片、语音文件本身不外发。关掉就完全不发。")
+                Text("开启后，记录文字经家里的服务器交给 DeepSeek 写日记、旁白和周报；此开关不发送照片或语音。")
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
+                Toggle("用 DeepSeek 自动读亲子桥", isOn: $config.schoolVisionEnabled)
+                Text("开启后，仅你主动导入的亲子桥图片经家里服务器发给 DeepSeek 多模态模型，自动填写并记录。老师照片、视频不会因此发给模型；关闭后只在本机识别。密钥由家里服务器保管。")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 if config.aiEnabled {
                     Toggle("搜索照片里的画面", isOn: $config.semanticSearchEnabled)
                     TextField(ServerConfig.aiBaseURLPlaceholder, text: $config.aiBaseURLString)
@@ -93,7 +96,7 @@ struct AdvancedSettingsView: View {
             } footer: {
                 Text(config.aiEnabled && !config.aiBaseURLString.isEmpty && config.aiBaseURL == nil
                      ? "为保护家庭服务器登录态，AI 地址必须是内置可信地址、与家庭服务器同源的 HTTPS 地址，或 Debug 本机回环地址。"
-                     : "AI 默认关闭，只有你在这里打开才会外发。照片搜索是另一个独立开关，开启后只把搜索词发给家中自托管服务做端侧比对，照片本身不出家门。AI 复用家庭服务器登录态，不需要在 App 保存共享密钥；服务不可用时自动回到本地文字搜索。")
+                     : "各项 AI 授权分别控制：文字写作、亲子桥图片识别和照片搜索互不代开。App 复用家庭服务器登录态，不保存 DeepSeek 密钥。")
             }
         }
         .navigationTitle("高级 · 自托管")

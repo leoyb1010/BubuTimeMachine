@@ -19,6 +19,7 @@ struct MemoryJournalComposer: View {
     @State private var meal = ""
     @State private var sleep = ""
     @State private var source = ""
+    @State private var sourceWasUserEdited = false
     @State private var schoolReport: SchoolDailyReport?
     @State private var files: [JournalMediaFile] = []
     @State private var selected: [PhotosPickerItem] = []
@@ -40,10 +41,11 @@ struct MemoryJournalComposer: View {
     private var ownsDraft: Bool { draftLease != nil }
     @State private var transcription: Task<Void, Never>?
     @State private var importing: Task<Void, Never>?
+    @State private var resumeAutomaticSave = false
 
     private var draft: MemoryJournalDraft {
         .init(id: id, kind: kind, date: date, words: words, context: scene,
-              meal: meal, sleep: sleep, source: source, schoolReport: schoolReport)
+              meal: meal, sleep: sleep, source: source, schoolReport: schoolReport, sourceWasUserEdited: sourceWasUserEdited)
     }
     private var dirty: Bool { draft.hasText || !files.isEmpty || voice != nil || unimportedVoice != nil || recorder.state == .recording }
     private var accent: Color { env.theme.theme.textAccent }
@@ -85,7 +87,8 @@ struct MemoryJournalComposer: View {
                             field("午睡怎么样", text: $sleep, prompt: "如 12:10–13:30，或老师的原话")
                         }
                         DisclosureGroup("老师消息与识别原文") {
-                            field("老师原文", text: $source, prompt: "粘贴老师的消息，或查看截图识别候选")
+                            field("老师原文", text: Binding(get: { source }, set: { source = $0; sourceWasUserEdited = true }),
+                                  prompt: "粘贴老师的消息，或查看截图识别原文")
                             if schoolReport == nil {
                                 Button("从原文整理餐睡草稿") { suggestFields() }
                                     .disabled(source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -122,7 +125,7 @@ struct MemoryJournalComposer: View {
             .navigationTitle(kind == .school ? "记幼儿园的一天" : "留住一句童言")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
-                if schoolReport != nil {
+                if schoolReport != nil && schoolReport?.automaticallyImported != true {
                     Toggle("已对照原表核对，未确认项留空", isOn: Binding(
                         get: { schoolReport?.confirmed == true }, set: { schoolReport?.confirmed = $0 }))
                         .font(BubuTheme.Font.caption).tint(env.theme.theme.actionFill)
@@ -152,7 +155,7 @@ struct MemoryJournalComposer: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("收好") { save() }.fontWeight(.bold)
                         .disabled(!ownsDraft || !dirty || busy || unimportedVoice != nil || recorder.state == .recording)
-                        .disabled(schoolReport?.confirmed == false)
+                        .disabled(schoolReport?.confirmed == false && schoolReport?.automaticallyImported != true)
                         .accessibilityIdentifier("journal.save")
                 }
             }
@@ -169,7 +172,15 @@ struct MemoryJournalComposer: View {
                 Button("继续记录", role: .cancel) {}
             }
             .onAppear { restoreDraft() }
-            .task { await importLocalReportProbeIfRequested() }
+            .task(id: resumeAutomaticSave) {
+                if resumeAutomaticSave {
+                    resumeAutomaticSave = false
+                    if env.schoolVisionService() != nil,
+                       let original = files.first(where: { $0.hash == schoolReport?.sourceHash }) {
+                        importing = Task { await refreshImportedReport(original) }
+                    } else { save(automatically: true) }
+                } else { await importLocalReportProbeIfRequested() }
+            }
             .onChange(of: date) { _, _ in schoolReport?.confirmed = false }
             .task(id: snapshot) {
                 do { try await Task.sleep(for: .milliseconds(350)) }
@@ -230,7 +241,9 @@ struct MemoryJournalComposer: View {
                 Button("没有图片，直接填亲子桥") { schoolReport = SchoolDailyReport() }
                     .font(BubuTheme.Font.caption).accessibilityIdentifier("school.manual-report")
             }
-            Text("亲子桥一张记一天，照片视频每批最多 50 个。识别仅在本机，确认后再保存。")
+            Text(env.config.schoolVisionEnabled
+                 ? "亲子桥交给 DeepSeek 读取手写与勾选，自动填写并记录。原图保留；老师照片和视频不会发给模型。"
+                 : "亲子桥在本机识别后自动记录。可在高级设置启用 DeepSeek 读取手写与勾选。")
                 .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
         }
     }
@@ -304,7 +317,7 @@ struct MemoryJournalComposer: View {
                 defer { try? FileManager.default.removeItem(at: transfer.url) }
                 try Task.checkCancellation()
                 progress = report ? "已取得原图，正在识别亲子桥…" : "保存素材 \(index + 1) / \(items.count)…"
-                let result = try await JournalImport.prepare(url: transfer.url, report: report, store: env.mediaStore)
+                let result = try await prepareImport(url: transfer.url, report: report)
                 guard !Task.isCancelled else {
                     env.mediaStore.deleteLocalFiles(media: result.file.fileName, thumbnail: result.file.thumbnail)
                     return
@@ -316,7 +329,11 @@ struct MemoryJournalComposer: View {
                 failures.append("第\(index + 1)项：\(error.localizedDescription)")
             }
         }
-        let success = report ? "原图已加入，识别出 \(schoolReport?.candidates.count ?? 0) 项候选。点候选采用，或对照原图直接填写；核对后收好。" : "已导入，点右上角「收好」保存。重复素材已跳过。"
+        if report && failures.isEmpty && schoolReport != nil {
+            save(automatically: true)
+            return
+        }
+        let success = "已导入，点右上角「收好」保存。重复素材已跳过。"
         message = ([failures.isEmpty ? success : "\(failures.count) 个素材未导入，原片未改动。"] + warnings + failures.prefix(3)).joined(separator: "\n")
     }
     private func importFiles(_ urls: [URL], report: Bool) async {
@@ -340,8 +357,9 @@ struct MemoryJournalComposer: View {
                     }.value
                     try Task.checkCancellation()
                     source += (source.isEmpty ? "" : "\n") + text
+                    sourceWasUserEdited = true
                 } else if files.count < 50 {
-                    let result = try await JournalImport.prepare(url: url, report: report, store: env.mediaStore)
+                    let result = try await prepareImport(url: url, report: report)
                     guard !Task.isCancelled else {
                         env.mediaStore.deleteLocalFiles(media: result.file.fileName, thumbnail: result.file.thumbnail)
                         return
@@ -355,8 +373,11 @@ struct MemoryJournalComposer: View {
                 if failureDetails.count < 3 { failureDetails.append(error.localizedDescription) }
             }
         }
+        if report && failed == 0 && schoolReport != nil {
+            save(automatically: true)
+            return
+        }
         if !report { suggestFields() }
-        else if message == nil { message = "原图已加入，请对照核对后收好。" }
         if failed > 0 { message = "\(failed) 个文件未导入，原文件未改动。\n" + failureDetails.joined(separator: "\n") }
     }
     private func accept(_ result: JournalImport.Result) {
@@ -365,9 +386,21 @@ struct MemoryJournalComposer: View {
                 existing.candidates = incoming.candidates
                 existing.dateEvidence = incoming.dateEvidence
                 existing.sourceHash = incoming.sourceHash
-                existing.confirmed = false
+                existing.reviewNotes = incoming.reviewNotes
+                existing.recognitionModel = incoming.recognitionModel
+                existing.adoptRecognizedValues()
                 schoolReport = existing
             } else { schoolReport = incoming }
+            if let reading = SchoolReportReading.date(from: incoming.dateEvidence, relativeTo: .now) {
+                date = reading.date
+                if reading.inferredYear, var report = schoolReport {
+                    SchoolReportReading.addReview("日期年份未读清，按当前年份归档", to: &report)
+                    schoolReport = report
+                }
+            } else if var report = schoolReport {
+                SchoolReportReading.addReview("原表日期未辨清，暂按所选日期归档", to: &report)
+                schoolReport = report
+            }
         }
         if files.contains(where: { $0.hash == result.file.hash }) {
             if result.file.isSchoolReport == true, let index = files.firstIndex(where: { $0.hash == result.file.hash }) {
@@ -378,6 +411,52 @@ struct MemoryJournalComposer: View {
         }
         files.append(result.file)
         if !result.recognizedText.isEmpty { source += (source.isEmpty ? "" : "\n") + result.recognizedText }
+    }
+    private func prepareImport(url: URL, report: Bool) async throws -> JournalImport.Result {
+        guard report, let service = env.schoolVisionService() else {
+            return try await JournalImport.prepare(url: url, report: report, store: env.mediaStore)
+        }
+        // Preserve the original before any network operation. Only this selected report is sent.
+        let local = try await JournalImport.prepare(url: url, report: false, store: env.mediaStore)
+        do {
+            try Task.checkCancellation()
+            progress = "DeepSeek 正在读取整张亲子桥…"
+            let image = try await SchoolVisionImage.data(from: url)
+            try Task.checkCancellation()
+            let result = try await service.recognizeSchoolReport(image: image, referenceDate: date)
+            try Task.checkCancellation()
+            let recognized = try result.report(sourceHash: local.file.hash)
+            var original = local.file
+            original.isSchoolReport = true
+            return .init(file: original, recognizedText: "", schoolReport: recognized)
+        } catch {
+            env.mediaStore.deleteLocalFiles(media: local.file.fileName, thumbnail: local.file.thumbnail)
+            try Task.checkCancellation()
+            var fallback = try await JournalImport.prepare(url: url, report: true, store: env.mediaStore)
+            if var report = fallback.schoolReport {
+                SchoolReportReading.addReview("DeepSeek 暂未完成，已保留原图并使用本机识别保底", to: &report)
+                fallback.schoolReport = report
+            }
+            fallback.warning = "DeepSeek 暂未完成，原图和本机已读到的数据仍会收好。"
+            return fallback
+        }
+    }
+    private func refreshImportedReport(_ original: JournalMediaFile) async {
+        guard !busy else { return }
+        busy = true
+        defer { if !Task.isCancelled { busy = false; importing = nil } }
+        do {
+            let result = try await prepareImport(url: env.mediaStore.mediaURL(for: original.fileName), report: true)
+            guard !Task.isCancelled else {
+                env.mediaStore.deleteLocalFiles(media: result.file.fileName, thumbnail: result.file.thumbnail)
+                return
+            }
+            accept(result)
+            save(automatically: true)
+        } catch {
+            guard !Task.isCancelled else { return }
+            message = "原图和已填写内容还在，识别暂未完成：\(error.localizedDescription)"
+        }
     }
     private func remove(_ file: JournalMediaFile) {
         if file.hash == schoolReport?.sourceHash {
@@ -417,18 +496,26 @@ struct MemoryJournalComposer: View {
             else { message = "识别结果：\(text)\n已保留你填写的原话。" }
         } else { message = "暂时没听清，原声已保留，可以直接收好或手动补文字。" }
     }
-    private func save() {
-        guard ownsDraft, !busy, unimportedVoice == nil, recorder.state != .recording else { return }
+    private func save(automatically: Bool = false) {
+        guard ownsDraft, (!busy || automatically), unimportedVoice == nil, recorder.state != .recording else { return }
         do {
             guard files.allSatisfy({ env.mediaStore.fileExists(forMedia: $0.fileName) }),
                   voice.map({ env.mediaStore.fileExists(forMedia: $0.fileName) }) ?? true else {
                 message = "有素材暂时找不到，请重新选择后再收好；不会保存缺失的原声或照片。"
                 return
             }
-            _ = try MemoryJournalWriter.save(draft, files: files, voice: voice, role: env.config.currentRole,
-                                              container: context.container)
+            let savedID = try MemoryJournalWriter.save(draft, files: files, voice: voice, role: env.config.currentRole,
+                                                      container: context.container)
+            var savedDate = date
+            if savedID != id {
+                if let existing = try context.fetch(FetchDescriptor<Entry>(predicate: #Predicate { $0.id == savedID })).first {
+                    savedDate = existing.happenedAt
+                }
+                for file in files { env.mediaStore.deleteLocalFiles(media: file.fileName, thumbnail: file.thumbnail) }
+                files = []
+            }
             saved = true
-            onSaved?(date)
+            onSaved?(savedDate)
             env.syncEngine.syncNow()
             env.refreshWidgetSnapshot(context: context)
             BubuHaptics.success()
@@ -455,10 +542,16 @@ struct MemoryJournalComposer: View {
             }
             id = value.draft.id; date = value.draft.date; words = value.draft.words
             scene = value.draft.context; meal = value.draft.meal; sleep = value.draft.sleep; source = value.draft.source
+            sourceWasUserEdited = value.draft.sourceWasUserEdited ?? !value.draft.source.isEmpty
             schoolReport = value.draft.schoolReport
             files = value.files
             voice = value.voice.map { ($0.fileName, $0.duration, $0.waveform) }
-            message = "上次没收好的草稿还在，接着记吧。"
+            if var report = schoolReport, report.sourceHash != nil, report.automaticallyImported != true {
+                report.adoptRecognizedValues()
+                schoolReport = report
+                resumeAutomaticSave = true
+                message = "正在把已导入的亲子桥自动收好…"
+            } else { message = "上次没收好的草稿还在，接着记吧。" }
         } catch {
             draftRecoveryFailed = true
             message = "旧草稿暂时打不开，原文件已保留。本次新记录可以收好，但暂不覆盖旧草稿。"
@@ -522,6 +615,7 @@ struct MemoryJournalComposer: View {
             if let report = result.schoolReport {
                 try JSONEncoder().encode(report).write(to: documents.appendingPathComponent("school-probe.json"), options: .atomic)
             }
+            save(automatically: true)
         } catch { message = "实样验证失败：\(error.localizedDescription)" }
         #endif
     }

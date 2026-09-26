@@ -29,7 +29,7 @@ nonisolated struct SSDIntakeCandidate: Decodable, Identifiable, Sendable {
 }
 
 // MARK: - BubuAIService（AIService 真实实现）
-/// 调用自托管 FastAPI（背后接 DeepSeek）。隐私：只发文字，不上传照片。
+/// 调用自托管 FastAPI（背后接 DeepSeek）。亲子桥图片仅在独立授权开关开启且用户选图时发送。
 /// 任意一步失败都抛错，UI 层各视图自行降级（保留 Mock 体验或提示稍后再试）。
 final class BubuAIService: AIService, @unchecked Sendable {
 
@@ -412,6 +412,31 @@ final class BubuAIService: AIService, @unchecked Sendable {
     }
 
     // MARK: - 私有
+
+    func recognizeSchoolReport(image: Data, referenceDate: Date) async throws -> SchoolVisionResult {
+        guard image.count <= 8 * 1024 * 1024 else { throw SchoolVisionError.invalidImage }
+        var req = URLRequest(url: baseURL.appendingPathComponent("school-report/recognize"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 150
+        try await applyAuth(&req)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        let date = formatter.string(from: referenceDate)
+        req.httpBody = try await Task.detached(priority: .utility) {
+            try JSONSerialization.data(withJSONObject: ["image_base64": image.base64EncodedString(),
+                                                       "content_type": "image/jpeg", "reference_date": date])
+        }.value
+        let connection = URLSession(configuration: .ephemeral, delegate: SchoolVisionRedirectGuard(), delegateQueue: nil)
+        defer { connection.finishTasksAndInvalidate() }
+        let (data, response) = try await connection.data(for: req)
+        try Self.check(response, data)
+        guard data.count <= 32 * 1024 else { throw SchoolVisionError.invalidResponse }
+        return try JSONDecoder().decode(SchoolVisionResult.self, from: data)
+    }
 
     private func get(_ path: String) async throws -> [String: Any] {
         let url = baseURL.appendingPathComponent(path)

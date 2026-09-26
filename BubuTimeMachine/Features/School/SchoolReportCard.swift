@@ -7,10 +7,12 @@ struct SchoolReportCard: View {
     var showsDetailLink = true
     var profileName: String?
     var profileBirthday: Date?
+    var onCorrectedDate: ((Date) -> Void)?
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var originalOpen = false
+    @State private var correctionOpen = false
     private var original: Media? { entry.sortedMedia.first { $0.aiTags.contains("亲子桥原表") } }
     private var classroomMedia: [Media] { entry.sortedMedia.filter { !$0.aiTags.contains("亲子桥原表") } }
 
@@ -22,14 +24,22 @@ struct SchoolReportCard: View {
                     Text(identityLine).font(.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 Spacer(minLength: 0)
+                Button { correctionOpen = true } label: { Image(systemName: "pencil").frame(width: 44, height: 44) }
+                    .accessibilityLabel("改一下亲子桥").accessibilityIdentifier("school.correct-report")
                 if original != nil {
                     Button { originalOpen = true } label: {
                         Label("原表", systemImage: "doc.viewfinder").font(.caption.weight(.semibold)).frame(minHeight: 44)
                     }.accessibilityLabel("看原表").accessibilityIdentifier("school.saved-original")
                 }
             }.padding(.horizontal, 4)
-            Label("已核对 · 留住她的一天", systemImage: "checkmark.seal")
+            Label(report.automaticallyImported == true && !report.confirmed ? "\(report.recognitionModel == "deepseek-flash" ? "DeepSeek" : "本机")自动记录 · 已填写 \(report.values.count) 项" : "已核对 · 留住她的一天",
+                  systemImage: report.automaticallyImported == true && !report.confirmed ? "doc.text.viewfinder" : "checkmark.seal")
                 .font(.caption2).foregroundStyle(env.theme.theme.textAccent).padding(.horizontal, 4)
+                .accessibilityIdentifier("school.record-status")
+            if let notes = report.reviewNotes, !notes.isEmpty {
+                Text("可稍后修正：" + notes.joined(separator: "；"))
+                    .font(.caption).foregroundStyle(BubuTheme.Color.secondaryText).padding(.horizontal, 4)
+            }
             if BubuAdaptive.isWide(sizeClass) && !typeSize.isAccessibilitySize {
                 HStack(alignment: .top, spacing: 12) {
                     lifeColumn.frame(maxWidth: .infinity, alignment: .topLeading)
@@ -65,6 +75,9 @@ struct SchoolReportCard: View {
         .foregroundStyle(BubuTheme.Color.warmBrown).tint(env.theme.theme.textAccent)
         .sheet(isPresented: $originalOpen) {
             if let original { SchoolOriginalSheet(fileID: original.id, fileName: original.localFileName, thumbnail: original.thumbnailFileName) }
+        }
+        .sheet(isPresented: $correctionOpen) {
+            SchoolReportCorrection(entry: entry, report: report, onSaved: onCorrectedDate)
         }
     }
 

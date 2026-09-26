@@ -84,6 +84,13 @@ final class AppEnvironment {
         }
     }
 
+    /// Report-image consent is independent of story writing; the provider key stays on the mini.
+    func schoolVisionService() -> BubuAIService? {
+        guard config.schoolVisionEnabled, config.isConfigured, let url = config.aiBaseURL else { return nil }
+        let client = apiClient
+        return BubuAIService(baseURL: url) { try await client.authenticate(role: "ai").token }
+    }
+
     /// 注册的一次性数据迁移。后续批次往这里追加即可。
     ///
     /// 【刻意不做】胶囊 v2→v3 自动迁移——不要"顺手"加进来。原因：

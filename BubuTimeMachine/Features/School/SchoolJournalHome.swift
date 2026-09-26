@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// A day in her kindergarten life, not a second generic timeline or a feature billboard.
 struct SchoolJournalHome: View {
@@ -40,7 +41,7 @@ struct SchoolJournalHome: View {
                         .disabled((week.last ?? day) >= Calendar.current.startOfDay(for: .now)).accessibilityLabel("下一周")
                 }
                 weekStrip
-                SchoolDayEntries(day: day)
+                SchoolDayEntries(day: day, onCorrectedDate: selectDay)
                 NavigationLink { MemoryJournalView(kind: .saying) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "quote.bubble.fill").foregroundStyle(env.theme.theme.textAccent)
@@ -91,6 +92,20 @@ struct SchoolJournalHome: View {
         .task {
             #if DEBUG && targetEnvironment(simulator)
             SchoolJournalFixture.insertIfRequested(into: modelContext)
+            if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+               ProcessInfo.processInfo.arguments.contains("-uitest-legacy-school-draft"),
+               let data = UIImage(named: "BubuPlaying")?.jpegData(compressionQuality: 0.9),
+               let fileName = try? env.mediaStore.savePhoto(data) {
+                let hash = MediaStore.sha256Hex(data)
+                var report = SchoolDailyReport()
+                report.candidates[SchoolReportField.morningSnack.rawValue] = "90%"
+                report.sourceHash = hash
+                var draft = MemoryJournalDraft(id: UUID(), kind: .school, date: .now, source: "旧版识别原文")
+                draft.schoolReport = report
+                let file = JournalMediaFile(id: UUID(), fileName: fileName, thumbnail: nil, hash: hash, isVideo: false, isSchoolReport: true)
+                try? JournalDraftStore.save(.init(draft: draft, files: [file], voice: nil), to: JournalDraftStore.file(for: .school))
+                composing = true
+            }
             if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
                ProcessInfo.processInfo.arguments.contains("-uitest-school-import") { composing = true }
             #endif
@@ -170,10 +185,12 @@ private enum SchoolJournalFixture {
 #endif
 
 private struct SchoolDayEntries: View {
+    let onCorrectedDate: (Date) -> Void
     @Query private var entries: [Entry]
     @Query private var profiles: [ChildProfile]
     @Environment(AppEnvironment.self) private var env
-    init(day: Date) {
+    init(day: Date, onCorrectedDate: @escaping (Date) -> Void) {
+        self.onCorrectedDate = onCorrectedDate
         let start = Calendar.current.startOfDay(for: day)
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         let bareMarker = MemoryJournalKind.school.marker
@@ -207,7 +224,8 @@ private struct SchoolDayEntries: View {
             }
             ForEach(entries) { entry in
                 if let report = SchoolDailyReport.from(note: entry.note) {
-                    SchoolReportCard(entry: entry, report: report, profileName: profiles.first?.name, profileBirthday: profiles.first?.birthday)
+                    SchoolReportCard(entry: entry, report: report, profileName: profiles.first?.name, profileBirthday: profiles.first?.birthday,
+                                     onCorrectedDate: onCorrectedDate)
                 } else {
                     NavigationLink { EntryDetailView(entry: entry) } label: {
                         VStack(alignment: .leading, spacing: 12) {

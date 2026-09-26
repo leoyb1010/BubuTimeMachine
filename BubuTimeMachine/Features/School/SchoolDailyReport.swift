@@ -61,6 +61,9 @@ nonisolated struct SchoolOCRLine: Sendable, Equatable {
     let x: Double
     let y: Double
     let confidence: Float
+    var checkedOptions: [String] = []
+    var width: Double = 0
+    var height: Double = 0
 }
 
 /// Each of the four meals has independent amount, rating and speed; keep other text losslessly.
@@ -73,8 +76,14 @@ nonisolated struct SchoolMeal: Equatable, Sendable {
         for part in text.replacingOccurrences(of: ";", with: "；").components(separatedBy: "；") {
             let part = part.trimmingCharacters(in: .whitespacesAndNewlines)
             if part.isEmpty { continue }
-            if ["食量佳", "食量普通", "食量不佳"].contains(part) { rating = String(part.dropFirst(2)) }
-            else if ["速度快", "速度普通", "速度慢"].contains(part) { speed = String(part.dropFirst(2)) }
+            let labelled = part.replacingOccurrences(of: "：", with: "").replacingOccurrences(of: ":", with: "").replacingOccurrences(of: " ", with: "")
+            if ["食量佳", "食量普通", "食量不佳"].contains(labelled) { rating = String(labelled.dropFirst(2)) }
+            else if ["速度快", "速度普通", "速度慢"].contains(labelled) { speed = String(labelled.dropFirst(2)) }
+            else if labelled.hasPrefix("食量"), SchoolVisualValue.fraction(String(labelled.dropFirst(2))) != nil {
+                let readAmount = String(labelled.dropFirst(2))
+                if amount.isEmpty { amount = readAmount }
+                else if amount != readAmount { notes.append(part) }
+            }
             else if amount.isEmpty { amount = part }
             else { notes.append(part) }
         }
@@ -92,6 +101,28 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
     var dateEvidence = ""
     var confirmed = false
     var sourceHash: String?
+    var automaticallyImported: Bool?
+    var reviewNotes: [String]?
+    var allowsOriginalDeduplication: Bool?
+    var recognitionModel: String?
+
+    mutating func adoptRecognizedValues() {
+        allowsOriginalDeduplication = (allowsOriginalDeduplication ?? true) && values.isEmpty
+        for field in SchoolReportField.allCases {
+            guard let value = candidates[field.rawValue], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if self[field].isEmpty { values[field.rawValue] = value }
+            else if SchoolReportField.meals.contains(field) {
+                var existing = SchoolMeal(self[field])
+                let incoming = SchoolMeal(value)
+                if existing.amount.isEmpty { existing.amount = incoming.amount }
+                if existing.rating.isEmpty { existing.rating = incoming.rating }
+                if existing.speed.isEmpty { existing.speed = incoming.speed }
+                values[field.rawValue] = existing.text
+            }
+        }
+        automaticallyImported = true
+        confirmed = false
+    }
 
     subscript(_ field: SchoolReportField) -> String {
         get { values[field.rawValue] ?? "" }
@@ -99,6 +130,7 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
             if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { values.removeValue(forKey: field.rawValue) }
             else { values[field.rawValue] = newValue }
             confirmed = false
+            allowsOriginalDeduplication = false
         }
     }
     var hasContent: Bool { values.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
@@ -123,9 +155,10 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
         self[field] = meal.text
     }
     static let start = "【亲子桥·已核对】"
+    static let automaticStart = "【亲子桥·自动识别】"
     static let end = "【亲子桥结束】"
     var noteBlock: String {
-        guard confirmed else { return "" }
+        guard confirmed || automaticallyImported == true else { return "" }
         let lines = SchoolReportField.allCases.compactMap { field -> String? in
             let value = self[field].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { return nil }
@@ -133,23 +166,33 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
                 .replacingOccurrences(of: Self.end, with: "［亲子桥结束］")
             return "\(field.rawValue)：\(singleLine)"
         }
-        return ([Self.start] + (lines.isEmpty ? ["未填写栏目以原表为准"] : lines) + [Self.end]).joined(separator: "\n")
+        let heading = confirmed ? Self.start : Self.automaticStart
+        let modelLine = recognitionModel == "deepseek-flash" ? ["识别模型：deepseek-flash"] : []
+        let notes = modelLine + (reviewNotes ?? []).map { "识别提示：" + $0.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: Self.end, with: "［亲子桥结束］") }
+        return ([heading] + (lines.isEmpty ? ["未识别栏目以原表为准"] : lines) + notes + [Self.end]).joined(separator: "\n")
     }
     static func from(note: String?) -> Self? {
         guard MemoryJournalKind.school.contains(note), let rawNote = note else { return nil }
         // OCR/source text is evidence, never authority to claim a reviewed structured record.
         let sourceStart = rawNote.range(of: "\n\n老师原文")?.lowerBound ?? rawNote.endIndex
         let note = String(rawNote[..<sourceStart])
+        let automatic = note.range(of: Self.automaticStart + "\n")
         guard
-              let start = note.range(of: Self.start + "\n"),
+              let start = note.range(of: Self.start + "\n") ?? automatic,
               let end = note.range(of: "\n" + Self.end, range: start.upperBound..<note.endIndex) else { return nil }
         var report = Self()
         for line in note[start.upperBound..<end.lowerBound].components(separatedBy: .newlines) {
+            if line == "识别模型：deepseek-flash" { report.recognitionModel = "deepseek-flash" }
+            if line.hasPrefix("识别提示：") {
+                if report.reviewNotes == nil { report.reviewNotes = [] }
+                report.reviewNotes?.append(String(line.dropFirst("识别提示：".count)))
+            }
             for field in SchoolReportField.allCases where line.hasPrefix(field.rawValue + "：") {
                 report[field] = String(line.dropFirst(field.rawValue.count + 1))
             }
         }
-        report.confirmed = true
+        report.confirmed = automatic == nil
+        report.automaticallyImported = automatic == nil ? nil : true
         return report
     }
 
@@ -171,10 +214,17 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
                 (.lunch, true, lunch.y, sleep.y), (.afternoonSnack, false, afternoon.y, sleep.y)
             ]
             for (field, left, top, bottom) in slots {
-                let percentages = lines.filter { $0.y > top + 0.01 && $0.y < bottom && ($0.x < divider) == left }
+                let cell = lines.filter { $0.y > top + 0.01 && $0.y < bottom && ($0.x < divider) == left }
+                let percentages = cell
                     .flatMap { matches(#"(?<!\d)(?:100|[0-9]{1,2})\s*[%％]"#, in: $0.text) }
                 // Two competing values are ambiguity, not permission to choose one.
-                if percentages.count == 1 { report.candidates[field.rawValue] = percentages[0] }
+                var meal = SchoolMeal("")
+                if percentages.count == 1 { meal.amount = percentages[0] }
+                let ratings = cell.filter { $0.text.contains("食量") }.flatMap(\.checkedOptions).filter { ["佳", "普通", "不佳"].contains($0) }
+                let speeds = cell.filter { $0.text.contains("速度") }.flatMap(\.checkedOptions).filter { ["快", "普通", "慢"].contains($0) }
+                if Set(ratings).count == 1 { meal.rating = ratings[0] }
+                if Set(speeds).count == 1 { meal.speed = speeds[0] }
+                if !meal.text.isEmpty { report.candidates[field.rawValue] = meal.text }
             }
         }
         for (field, label) in [(SchoolReportField.temperatureAM, "早上"), (.temperatureNoon, "中午"), (.temperaturePM, "晚上")] {
@@ -182,8 +232,7 @@ nonisolated struct SchoolDailyReport: Codable, Equatable, Sendable {
                 .flatMap { matches(#"(?<!\d)(?:3[0-9]|4[0-2])\.[0-9](?!\d)"#, in: $0.text) }
             if values.count == 1 { report.candidates[field.rawValue] = values[0] + "°C" }
         }
-        // Handwriting and time ranges in this form are unreliable in Vision. Retain the
-        // full OCR source separately; milk, naps, dates and checks are confirmed from the image.
+        SchoolReportReading.addDetails(lines, to: &report)
         return report
     }
 

@@ -89,6 +89,10 @@ final class ServerConfig {
     var aiEnabled: Bool {
         didSet { UserDefaults.standard.set(aiEnabled, forKey: Self.aiEnabledKey) }
     }
+    /// Separate, explicit consent: only the report selected for import may leave the device.
+    var schoolVisionEnabled: Bool {
+        didSet { UserDefaults.standard.set(schoolVisionEnabled, forKey: Self.schoolVisionKey) }
+    }
     /// 是否允许把搜索词发给家中自托管 AI 服务做照片画面检索。默认关闭，文字搜索始终本地可用。
     var semanticSearchEnabled: Bool {
         didSet { UserDefaults.standard.set(semanticSearchEnabled, forKey: Self.semanticSearchEnabledKey) }
@@ -174,6 +178,7 @@ final class ServerConfig {
     private static let aiURLKey = "bubu.ai.baseURL"
     private static let legacyAIKeyKey = "bubu.ai.apiKey"
     private static let aiEnabledKey = "bubu.ai.enabled"
+    private static let schoolVisionKey = "bubu.school.vision.enabled"
     private static let semanticSearchEnabledKey = "bubu.ai.semanticSearch.enabled"
     private static let reminderKey = "bubu.reminder.enabled"
     private static let simpleModeKey = "bubu.simpleMode.enabled"
@@ -222,6 +227,7 @@ final class ServerConfig {
         // 兜底值永不落盘 → 每次冷启动重新求值，关掉也可能被再次打开。
         // 结论：没存过就是关。开启入口只有设置页那个开关（旁边已写明外发目的地）。
         self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
+        self.schoolVisionEnabled = UserDefaults.standard.object(forKey: Self.schoolVisionKey) as? Bool ?? false
         self.semanticSearchEnabled = UserDefaults.standard.object(
             forKey: Self.semanticSearchEnabledKey
         ) as? Bool ?? false
@@ -232,5 +238,20 @@ final class ServerConfig {
         self.roleBeforeElderRaw = UserDefaults.standard.string(forKey: Self.roleBeforeElderKey)
         // didSet 不在 init 内触发，显式把身份/名字镜像到 App Group，供 Intent/Widget 首次即可读。
         SharedDefaults.mirror(role: FamilyRole(rawValue: currentRoleRaw) ?? .mama, childName: childName)
+        consumeSchoolVisionSetup()
+    }
+
+    private func consumeSchoolVisionSetup() {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BubuSchoolVisionSetup.json")
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 4096,
+              let data = try? Data(contentsOf: url),
+              let enabled = SchoolVisionSetup.enabled(in: data, expectedService: Self.defaultAIBaseURL) else { return }
+        do {
+            // Consume before persisting so a stale file cannot override a later switch-off.
+            try FileManager.default.removeItem(at: url)
+            aiBaseURLString = Self.defaultAIBaseURL
+            schoolVisionEnabled = enabled
+        } catch { return }
     }
 }

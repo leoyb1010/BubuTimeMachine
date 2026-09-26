@@ -3,6 +3,19 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testPreviouslyImportedSchoolDraftFinishesAutomaticallyAfterUpgrade() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-legacy-school-draft"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["90%"].exists)
+        XCTAssertTrue(app.staticTexts["school.record-status"].label.contains("自动记录"))
+        XCTAssertTrue(app.buttons["school.saved-original"].exists)
+        attachScreenshot("school-legacy-import-completed-automatically", to: self)
+    }
+
+    @MainActor
     func testSchoolImportCanBeStoppedWithoutLockingNextDraft() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -39,26 +52,31 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(photo.waitForExistence(timeout: 15))
         attachScreenshot("school-system-picker-open", to: self)
         photo.tap()
-        let original = app.buttons["school.original"]
-        let imported = original.waitForExistence(timeout: 20)
-        attachScreenshot("school-system-picker-return", to: self)
-        XCTAssertTrue(imported)
-        XCTAssertTrue(original.isEnabled, "从系统相册返回后必须保留草稿编辑权")
-        let amount = app.textFields["school.field.上午点心"]
-        revealSchoolControl(amount, in: app)
-        XCTAssertTrue(amount.isEnabled)
-        amount.tap(); amount.typeText("90%")
-        app.swipeDown()
-        let reviewed = app.switches["school.confirmed"]
-        revealSchoolControl(reviewed, in: app)
-        reviewed.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
-        attachScreenshot("school-system-confirmation-state", to: self)
-        XCTAssertTrue(app.buttons["journal.save"].isEnabled)
-        app.buttons["journal.save"].tap()
-        XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 8))
+        // No text entry, no candidate adoption, no review toggle, no save tap.
+        XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["school.record-status"].label.contains("自动记录"))
         XCTAssertTrue(app.staticTexts["90%"].exists)
+        XCTAssertTrue(app.staticTexts["100%"].exists)
+        XCTAssertTrue(app.staticTexts["80%"].exists)
+        XCTAssertTrue(app.staticTexts["70%"].exists)
         XCTAssertTrue(app.buttons["school.saved-original"].exists)
-        attachScreenshot("school-system-import-saved", to: self)
+        attachScreenshot("school-one-step-auto-filled-and-saved", to: self)
+        app.buttons["school.correct-report"].tap()
+        let amount = app.textFields["school.field.上午点心"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 5))
+        amount.tap()
+        amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (amount.value as? String ?? "").count) + "85%")
+        app.buttons["school.correction-save"].tap()
+        XCTAssertTrue(app.staticTexts["85%"].waitForExistence(timeout: 5))
+        // Reimport the identical original: retain the correction and keep a single memory.
+        app.buttons["journal.primary"].tap()
+        app.buttons["读一张亲子桥"].tap()
+        let samePhoto = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+        XCTAssertTrue(samePhoto.waitForExistence(timeout: 15))
+        samePhoto.tap()
+        XCTAssertTrue(app.staticTexts["85%"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "每日亲子桥").count, 1)
+        attachScreenshot("school-auto-correct-and-deduplicate", to: self)
     }
 
     @MainActor
@@ -103,12 +121,12 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
-    func testSchoolOriginalCanBeComparedWithoutLosingDraft() throws {
+    func testSchoolOriginalCanBeComparedAfterAutomaticSave() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-school-import"]
         app.launch()
-        let original = app.buttons["school.original"]
+        let original = app.buttons["school.saved-original"]
         XCTAssertTrue(original.waitForExistence(timeout: 20))
         for _ in 0..<4 where !original.isHittable { app.swipeUp() }
         XCTAssertTrue(original.isEnabled)
@@ -117,10 +135,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         attachScreenshot("school-original-comparison", to: self)
         app.buttons["看好了"].tap()
         XCTAssertTrue(original.waitForExistence(timeout: 5))
-        XCTAssertTrue(original.isEnabled, "查看原图不能解除草稿编辑所有权")
-        XCTAssertFalse(app.buttons["journal.save"].isEnabled)
-        app.buttons["以后再说"].tap()
-        app.buttons["丢弃草稿"].tap()
+        XCTAssertTrue(original.isEnabled, "原表随自动记录保存，可随时对照")
         XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
     }
 
