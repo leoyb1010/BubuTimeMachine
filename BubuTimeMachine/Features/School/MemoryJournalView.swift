@@ -11,6 +11,11 @@ struct MemoryJournalView: View {
     @State private var search = ""
 
     var body: some View {
+        if kind == .school { SchoolJournalHome() }
+        else { sayingsBody }
+    }
+
+    private var sayingsBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 hero
@@ -84,7 +89,7 @@ struct MemoryJournalView: View {
     }
 }
 
-private struct JournalEntries: View {
+struct JournalEntries: View {
     let kind: MemoryJournalKind
     let limit: Int
     let more: () -> Void

@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 struct MemoryJournalComposer: View {
     private static var activeDrafts: Set<MemoryJournalKind> = []
     let kind: MemoryJournalKind
+    var initialDate: Date?
+    var onSaved: ((Date) -> Void)?
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -17,6 +19,7 @@ struct MemoryJournalComposer: View {
     @State private var meal = ""
     @State private var sleep = ""
     @State private var source = ""
+    @State private var schoolReport: SchoolDailyReport?
     @State private var files: [JournalMediaFile] = []
     @State private var selected: [PhotosPickerItem] = []
     @State private var reportItems: [PhotosPickerItem] = []
@@ -37,7 +40,7 @@ struct MemoryJournalComposer: View {
 
     private var draft: MemoryJournalDraft {
         .init(id: id, kind: kind, date: date, words: words, context: scene,
-              meal: meal, sleep: sleep, source: source)
+              meal: meal, sleep: sleep, source: source, schoolReport: schoolReport)
     }
     private var dirty: Bool { draft.hasText || !files.isEmpty || voice != nil || unimportedVoice != nil || recorder.state == .recording }
     private var accent: Color { env.theme.theme.textAccent }
@@ -49,7 +52,7 @@ struct MemoryJournalComposer: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    (dynamicTypeSize.isAccessibilitySize
+                    if kind == .saying { (dynamicTypeSize.isAccessibilitySize
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                         : AnyLayout(HStackLayout(spacing: 14))) {
                         BubuMascotBadge(size: 64, expression: kind == .school ? .playing : .music)
@@ -59,19 +62,32 @@ struct MemoryJournalComposer: View {
                             Text(kind == .school ? "老师发来的日常，一起收进时光" : "原声留下，文字可以慢慢补")
                                 .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                         }
-                    }
+                    } }
                     DatePicker("发生在", selection: $date, in: ...Date.now,
                                displayedComponents: kind == .school ? [.date] : [.date, .hourAndMinute])
+                        .environment(\.locale, Locale(identifier: "zh_CN"))
+                    if busy { HStack { ProgressView(); Text(progress) }.font(BubuTheme.Font.caption) }
+                    if let message { Text(message).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) }
                     if kind == .school { importControls }
                     else { recordingControls }
+                    if schoolReport != nil {
+                        SchoolReportEditor(report: Binding(get: { schoolReport ?? SchoolDailyReport() }, set: { schoolReport = $0 }),
+                            sourceFile: files.first { $0.hash == schoolReport?.sourceHash })
+                    }
                     field(kind == .school ? "今天的小故事" : "她说了什么", text: $words,
                           prompt: kind == .school ? "今天和小伙伴一起……" : "原话是什么？也可以先只存声音")
                     if kind == .school {
-                        field("吃饭怎么样", text: $meal, prompt: "没提到就留空，不猜测食量")
-                        field("午睡怎么样", text: $sleep, prompt: "如 12:10–13:30，或老师的原话")
-                        field("老师原文", text: $source, prompt: "粘贴老师的消息，或导入日报截图")
-                        Button("从原文整理餐睡草稿") { suggestFields() }
-                            .disabled(source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if schoolReport == nil {
+                            field("吃饭怎么样", text: $meal, prompt: "没提到就留空，不猜测食量")
+                            field("午睡怎么样", text: $sleep, prompt: "如 12:10–13:30，或老师的原话")
+                        }
+                        DisclosureGroup("老师消息与识别原文") {
+                            field("老师原文", text: $source, prompt: "粘贴老师的消息，或查看截图识别候选")
+                            if schoolReport == nil {
+                                Button("从原文整理餐睡草稿") { suggestFields() }
+                                    .disabled(source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                        }
                         Text("识别可能有误，请核对日期、人物和餐睡内容。群发的班级信息不等于她的个人记录。")
                             .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                     } else {
@@ -91,8 +107,6 @@ struct MemoryJournalComposer: View {
                             }
                         }
                     }
-                    if busy { HStack { ProgressView(); Text(progress) }.font(BubuTheme.Font.caption) }
-                    if let message { Text(message).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText) }
                     Text("收好后会出现在时光里。开启家庭同步时，原声和素材会继续上传。")
                         .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 }
@@ -101,6 +115,7 @@ struct MemoryJournalComposer: View {
                 .padding().bubuContentColumn(700)
             }
             .background(BubuTheme.Color.background.ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(kind == .school ? "记幼儿园的一天" : "留住一句童言")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -117,6 +132,7 @@ struct MemoryJournalComposer: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("收好") { save() }.fontWeight(.bold)
                         .disabled(!ownsDraft || !dirty || busy || unimportedVoice != nil || recorder.state == .recording)
+                        .disabled(schoolReport?.confirmed == false)
                         .accessibilityIdentifier("journal.save")
                 }
             }
@@ -133,6 +149,8 @@ struct MemoryJournalComposer: View {
                 Button("继续记录", role: .cancel) {}
             }
             .onAppear { restoreDraft() }
+            .task { await importLocalReportProbeIfRequested() }
+            .onChange(of: date) { _, _ in schoolReport?.confirmed = false }
             .task(id: snapshot) {
                 do { try await Task.sleep(for: .milliseconds(350)) }
                 catch { return }
@@ -168,19 +186,27 @@ struct MemoryJournalComposer: View {
 
     private var importControls: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PhotosPicker(selection: $selected, maxSelectionCount: 50, matching: .any(of: [.images, .videos])) {
-                Label("批量选老师的照片 / 视频", systemImage: "photo.stack.fill")
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .foregroundStyle(.white)
+            if schoolReport?.sourceHash != nil {
+                Label("亲子桥原表已加入", systemImage: "checkmark.circle.fill")
+                    .font(BubuTheme.Font.body.weight(.semibold)).foregroundStyle(accent)
+            } else {
+            PhotosPicker(selection: $reportItems, maxSelectionCount: 1, matching: .images) {
+                Label("读一张亲子桥", systemImage: "doc.text.viewfinder")
+                    .frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.white)
             }.buttonStyle(.borderedProminent).tint(env.theme.theme.actionFill)
-            HStack {
-                PhotosPicker(selection: $reportItems, maxSelectionCount: 5, matching: .images) {
-                    Label("读日报截图", systemImage: "text.viewfinder")
-                }
+            }
+            HStack(alignment: .top) {
+            PhotosPicker(selection: $selected, maxSelectionCount: 50, matching: .any(of: [.images, .videos])) {
+                Label("老师照片 / 视频", systemImage: "photo.stack")
+            }
                 Spacer()
                 Button { showFiles = true } label: { Label("从文件导入", systemImage: "folder") }
             }.font(BubuTheme.Font.body)
-            Text("截图在本机识别，先整理成草稿。每批最多 50 个素材；大视频请保持 App 在前台直到收好。")
+            if schoolReport == nil {
+                Button("没有图片，直接填亲子桥") { schoolReport = SchoolDailyReport() }
+                    .font(BubuTheme.Font.caption).accessibilityIdentifier("school.manual-report")
+            }
+            Text("亲子桥一张记一天，照片视频每批最多 50 个。识别仅在本机，确认后再保存。")
                 .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
         }
     }
@@ -242,7 +268,7 @@ struct MemoryJournalComposer: View {
                 accept(result)
             } catch { failed += 1 }
         }
-        if report { suggestFields() }
+        if report && schoolReport == nil { suggestFields() }
         message = failed > 0 ? "\(failed) 个素材未导入。原片仍在原处；请重新选择失败的素材。" : "已整理，请核对后收好。重复素材已跳过。"
     }
     private func importFiles(_ urls: [URL]) async {
@@ -270,7 +296,19 @@ struct MemoryJournalComposer: View {
         if failed > 0 { message = "\(failed) 个文件未导入，请检查格式或从相册重新选择。" }
     }
     private func accept(_ result: JournalImport.Result) {
+        if let incoming = result.schoolReport {
+            if var existing = schoolReport {
+                existing.candidates = incoming.candidates
+                existing.dateEvidence = incoming.dateEvidence
+                existing.sourceHash = incoming.sourceHash
+                existing.confirmed = false
+                schoolReport = existing
+            } else { schoolReport = incoming }
+        }
         if files.contains(where: { $0.hash == result.file.hash }) {
+            if result.file.isSchoolReport == true, let index = files.firstIndex(where: { $0.hash == result.file.hash }) {
+                files[index].isSchoolReport = true
+            }
             env.mediaStore.deleteLocalFiles(media: result.file.fileName, thumbnail: result.file.thumbnail)
             return
         }
@@ -278,6 +316,12 @@ struct MemoryJournalComposer: View {
         if !result.recognizedText.isEmpty { source += (source.isEmpty ? "" : "\n") + result.recognizedText }
     }
     private func remove(_ file: JournalMediaFile) {
+        if file.hash == schoolReport?.sourceHash {
+            schoolReport?.sourceHash = nil
+            schoolReport?.candidates = [:]
+            schoolReport?.dateEvidence = ""
+            schoolReport?.confirmed = false
+        }
         files.removeAll { $0.id == file.id }
         env.mediaStore.deleteLocalFiles(media: file.fileName, thumbnail: file.thumbnail)
     }
@@ -320,6 +364,7 @@ struct MemoryJournalComposer: View {
             _ = try MemoryJournalWriter.save(draft, files: files, voice: voice, role: env.config.currentRole,
                                               container: context.container)
             saved = true
+            onSaved?(date)
             env.syncEngine.syncNow()
             env.refreshWidgetSnapshot(context: context)
             BubuHaptics.success()
@@ -333,6 +378,7 @@ struct MemoryJournalComposer: View {
             return
         }
         ownsDraft = true
+        if let initialDate { date = initialDate }
         defer { loaded = true }
         do {
             guard let value = try JournalDraftStore.load(from: JournalDraftStore.file(for: kind)), value.draft.kind == kind else { return }
@@ -344,6 +390,7 @@ struct MemoryJournalComposer: View {
             }
             id = value.draft.id; date = value.draft.date; words = value.draft.words
             scene = value.draft.context; meal = value.draft.meal; sleep = value.draft.sleep; source = value.draft.source
+            schoolReport = value.draft.schoolReport
             files = value.files
             voice = value.voice.map { ($0.fileName, $0.duration, $0.waveform) }
             message = "上次没收好的草稿还在，接着记吧。"
@@ -363,6 +410,35 @@ struct MemoryJournalComposer: View {
         catch let error as JournalDraftError { message = error.localizedDescription }
         catch { message = "草稿尚未写入磁盘，请保持页面并检查储存空间。" }
         return false
+    }
+
+    private func importLocalReportProbeIfRequested() async {
+        #if DEBUG && targetEnvironment(simulator)
+        guard kind == .school, schoolReport == nil,
+              ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+              ProcessInfo.processInfo.arguments.contains("-uitest-school-import") else { return }
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documents.appendingPathComponent("school-fixture.jpg")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            // Reproducible UI fixture on fresh CI simulators; a supplied local sample takes priority.
+            let sample = UIGraphicsImageRenderer(size: CGSize(width: 700, height: 900)).image { canvas in
+                UIColor.white.setFill(); canvas.fill(CGRect(x: 0, y: 0, width: 700, height: 900))
+                ("亲子桥\n仅模拟测试样本\n上午点心 90%\n午睡时间请对照原图" as NSString).draw(
+                    in: CGRect(x: 40, y: 60, width: 620, height: 700),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 32), .foregroundColor: UIColor.black])
+            }
+            try? sample.jpegData(compressionQuality: 0.95)?.write(to: url, options: .atomic)
+        }
+        busy = true; progress = "整理亲子桥…"
+        defer { busy = false }
+        do {
+            let result = try await JournalImport.prepare(url: url, report: true, store: env.mediaStore)
+            accept(result)
+            if let report = result.schoolReport {
+                try JSONEncoder().encode(report).write(to: documents.appendingPathComponent("school-probe.json"), options: .atomic)
+            }
+        } catch { message = "实样验证失败：\(error.localizedDescription)" }
+        #endif
     }
 }
 

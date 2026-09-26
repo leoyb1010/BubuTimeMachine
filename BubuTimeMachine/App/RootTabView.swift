@@ -83,10 +83,10 @@ struct RootTabView: View {
     @ViewBuilder
     private var tabsWithRecordAccessory: some View {
         if #available(iOS 26.1, *) {
-            tabs.tabViewBottomAccessory(isEnabled: !isWide) {
+            tabs.tabViewBottomAccessory(isEnabled: !isWide && selection != 3) {
                 BubuRecordAccessory { openQuickCapture() }
             }
-        } else if !isWide {
+        } else if !isWide && selection != 3 {
             tabs.tabViewBottomAccessory {
                 BubuRecordAccessory { openQuickCapture() }
             }

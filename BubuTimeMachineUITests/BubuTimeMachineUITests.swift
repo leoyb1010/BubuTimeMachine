@@ -3,6 +3,94 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testSchoolGraphicJournalDisplaysEveryReportGroup() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-school-report"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.staticTexts["100%"].exists)
+        attachScreenshot("school-graphic-life", to: self)
+        for name in ["午睡", "体温", "在园表现", "身体与外观", "排便", "老师叮嘱"] {
+            let section = app.staticTexts[name].firstMatch
+            for _ in 0..<8 where !section.isHittable { app.swipeUp() }
+            XCTAssertTrue(section.exists)
+            if name == "体温" { attachScreenshot("school-graphic-nap-temperature", to: self) }
+            if name == "身体与外观" { attachScreenshot("school-graphic-observations", to: self) }
+        }
+        XCTAssertTrue(app.staticTexts["明天带上替换衣物（验收样例）"].exists)
+        attachScreenshot("school-graphic-notes", to: self)
+    }
+
+    @MainActor
+    func testSchoolOriginalCanBeComparedWithoutLosingDraft() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-school-import"]
+        app.launch()
+        let original = app.buttons["school.original"]
+        XCTAssertTrue(original.waitForExistence(timeout: 20))
+        for _ in 0..<4 where !original.isHittable { app.swipeUp() }
+        XCTAssertTrue(original.isEnabled)
+        original.tap()
+        XCTAssertTrue(app.navigationBars["亲子桥原表"].waitForExistence(timeout: 5))
+        attachScreenshot("school-original-comparison", to: self)
+        app.buttons["看好了"].tap()
+        XCTAssertTrue(original.waitForExistence(timeout: 5))
+        XCTAssertTrue(original.isEnabled, "查看原图不能解除草稿编辑所有权")
+        XCTAssertFalse(app.buttons["journal.save"].isEnabled)
+        app.buttons["以后再说"].tap()
+        app.buttons["丢弃草稿"].tap()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSchoolReportRequiresReviewAndSavesReadableFields() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        attachScreenshot("school-journal-redesigned", to: self)
+        app.buttons["journal.primary"].tap()
+        XCTAssertTrue(app.buttons["school.manual-report"].waitForExistence(timeout: 5))
+        app.buttons["school.manual-report"].tap()
+        for (name, amount) in [("上午点心", "90%"), ("中午午餐", "90%"), ("水果", "100%"), ("下午点心", "90%")] {
+            let field = app.descendants(matching: .any).matching(identifier: "school.field.\(name)").firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            revealSchoolControl(field, in: app)
+            field.tap(); field.typeText(amount)
+            let appetite = app.segmentedControls["school.appetite.\(name)"]
+            revealSchoolControl(appetite, in: app)
+            appetite.buttons["佳"].tap()
+            let speed = app.segmentedControls["school.speed.\(name)"]
+            revealSchoolControl(speed, in: app)
+            speed.buttons[name == "水果" ? "快" : "普通"].tap()
+        }
+        XCTAssertFalse(app.buttons["journal.save"].isEnabled)
+        // Dismiss keyboard without changing the draft, then reach its explicit review gate.
+        app.swipeDown()
+        let reviewed = app.switches["school.confirmed"]
+        revealSchoolControl(reviewed, in: app)
+        XCTAssertTrue(reviewed.isHittable)
+        reviewed.tap()
+        XCTAssertTrue(app.buttons["journal.save"].isEnabled)
+        attachScreenshot("school-reviewed-form", to: self)
+        app.buttons["journal.save"].tap()
+        XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["一天四餐"].exists)
+        XCTAssertTrue(app.staticTexts["100%"].exists)
+        for name in ["上午点心", "中午午餐", "水果", "下午点心"] { XCTAssertTrue(app.staticTexts[name].exists) }
+        attachScreenshot("school-four-meals-saved", to: self)
+        for name in ["午睡", "体温", "在园表现", "身体与外观", "排便", "老师叮嘱"] {
+            let section = app.staticTexts[name].firstMatch
+            for _ in 0..<6 where !section.isHittable { app.swipeUp() }
+            XCTAssertTrue(section.exists, "原表栏目不能因为没有填值而消失：\(name)")
+        }
+        attachScreenshot("school-all-sections", to: self)
+    }
+
+    @MainActor
     func testSayingDraftCanBeResumedAndExplicitlyDiscarded() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -203,6 +291,30 @@ final class BubuTimeMachineUITests: XCTestCase {
         let scroll = XCUIApplication().scrollViews.firstMatch
         guard scroll.exists else { return }
         scroll.swipeUp()
+    }
+
+    @MainActor
+    private func revealSchoolControl(_ element: XCUIElement, in app: XCUIApplication) {
+        let scroll = app.scrollViews.containing(element.elementType, identifier: element.identifier).firstMatch
+        XCTAssertTrue(scroll.exists)
+        // Capture the sheet viewport before scrolling. A descendant-based query can
+        // stop matching mid-gesture when SwiftUI drops an offscreen AX descendant.
+        let bounds = scroll.frame
+        for _ in 0..<18 {
+            let navBottom = app.navigationBars["记幼儿园的一天"].frame.maxY
+            let keyboard = app.keyboards.firstMatch
+            let bottom = min(bounds.maxY, keyboard.exists ? keyboard.frame.minY : bounds.maxY) - 24
+            let top = max(bounds.minY, navBottom) + 24
+            let center = element.frame.midY
+            if element.isHittable && center > top && center < bottom { return }
+            // iPad sheets do not fill the screen. An app-wide fling can overshoot the
+            // field above the sheet's navigation bar even while AX reports it hittable.
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: bounds.maxX - 12, dy: (top + bottom) / 2))
+            let offset = max(-150, min(150, (top + bottom) / 2 - center))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: offset)))
+        }
+        XCTFail("表单控件未进入可见区域：\(element.identifier)")
     }
 
     @MainActor

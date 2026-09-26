@@ -41,9 +41,10 @@ nonisolated struct MemoryJournalDraft: Sendable, Codable, Equatable {
     var meal = ""
     var sleep = ""
     var source = ""
+    var schoolReport: SchoolDailyReport?
 
     var hasText: Bool {
-        [words, context, meal, sleep, source].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        schoolReport?.hasContent == true || [words, context, meal, sleep, source].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
     var note: String {
         var parts = [kind.marker]
@@ -55,7 +56,8 @@ nonisolated struct MemoryJournalDraft: Sendable, Codable, Equatable {
         append("当时：", context)
         append("餐食：", meal)
         append("午睡：", sleep)
-        append("老师原文（家长已核对）：\n", source)
+        if let schoolReport, !schoolReport.noteBlock.isEmpty { parts.append(schoolReport.noteBlock) }
+        append("老师原文 / OCR 候选（可能有误）：\n", source)
         return parts.joined(separator: "\n\n")
     }
 }
@@ -66,6 +68,7 @@ nonisolated struct JournalMediaFile: Identifiable, Sendable, Codable, Equatable 
     let thumbnail: String?
     let hash: String
     let isVideo: Bool
+    var isSchoolReport: Bool?
 }
 
 nonisolated struct JournalDraftSnapshot: Codable, Equatable, Sendable {
@@ -81,12 +84,26 @@ nonisolated struct JournalDraftSnapshot: Codable, Equatable, Sendable {
 
 nonisolated enum JournalDraftError: LocalizedError {
     case tooMuchText
-    var errorDescription: String? { "这一笔的文字太多，请拆成几天记录。原草稿没有被覆盖。" }
+    case reportNotConfirmed
+    var errorDescription: String? {
+        switch self {
+        case .tooMuchText: "这一笔的文字太多，请拆成几天记录。原草稿没有被覆盖。"
+        case .reportNotConfirmed: "请先对照原表核对日期与亲子桥内容，再收好。"
+        }
+    }
 }
 
 nonisolated enum JournalDraftStore {
+    #if DEBUG && targetEnvironment(simulator)
+    private static let testSession = UUID().uuidString
+    #endif
     static func file(for kind: MemoryJournalKind) -> URL {
-        BubuStorage.containerURL.appendingPathComponent("Documents/JournalDrafts/\(kind.rawValue).json")
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory") {
+            return FileManager.default.temporaryDirectory.appendingPathComponent("JournalDrafts-\(testSession)/\(kind.rawValue).json")
+        }
+        #endif
+        return BubuStorage.containerURL.appendingPathComponent("Documents/JournalDrafts/\(kind.rawValue).json")
     }
     static func save(_ snapshot: JournalDraftSnapshot, to url: URL) throws {
         let data = try JSONEncoder().encode(snapshot)
@@ -127,6 +144,7 @@ enum MemoryJournalWriter {
         }
         guard draft.hasText || !files.isEmpty || voice != nil else { throw EntryWriterError.emptyNote }
         guard draft.note.utf8.count <= 100_000 else { throw JournalDraftError.tooMuchText }
+        if let report = draft.schoolReport, !report.confirmed { throw JournalDraftError.reportNotConfirmed }
         let entry = Entry(happenedAt: draft.date, authorRole: role.rawValue, note: draft.note)
         entry.id = id
         entry.title = draft.kind == .school ? "幼儿园的一天" : "留住这句童言"
@@ -136,6 +154,7 @@ enum MemoryJournalWriter {
             let media = Media(type: file.isVideo ? .video : .photo, localFileName: file.fileName)
             media.contentHash = file.hash
             media.thumbnailFileName = file.thumbnail
+            if file.isSchoolReport == true { media.aiTags = ["亲子桥原表"] }
             media.entry = entry
             context.insert(media)
         }

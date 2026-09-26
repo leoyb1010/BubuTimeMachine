@@ -27,7 +27,11 @@ struct JournalPickedFile: Transferable, Sendable {
 }
 
 nonisolated enum JournalImport {
-    struct Result: Sendable { let file: JournalMediaFile; let recognizedText: String }
+    struct Result: Sendable {
+        let file: JournalMediaFile
+        let recognizedText: String
+        var schoolReport: SchoolDailyReport?
+    }
 
     /// Runs on the utility executor; returns value types only. The caller owns the resulting files.
     static func prepare(url: URL, report: Bool, store: MediaStore) async throws -> Result {
@@ -55,6 +59,7 @@ nonisolated enum JournalImport {
             do {
                 try Task.checkCancellation()
                 var text = ""
+                var dailyReport: SchoolDailyReport?
                 if !video, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
                    let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -69,6 +74,13 @@ nonisolated enum JournalImport {
                         request.customWords = ["午餐", "早餐", "晚餐", "午饭", "加餐", "午睡", "入睡", "起床"]
                         request.usesLanguageCorrection = true
                         try VNImageRequestHandler(cgImage: image).perform([request])
+                        let lines = (request.results ?? []).compactMap { observation -> SchoolOCRLine? in
+                            guard let candidate = observation.topCandidates(1).first else { return nil }
+                            return SchoolOCRLine(text: candidate.string, x: observation.boundingBox.minX,
+                                y: 1 - observation.boundingBox.maxY, confidence: candidate.confidence)
+                        }
+                        dailyReport = SchoolDailyReport.recognize(lines) ?? SchoolDailyReport()
+                        dailyReport?.sourceHash = hash
                         text = (request.results ?? []).compactMap { observation in
                             // Confidence is not calibrated across languages: a fixed 0.5
                             // threshold silently removed a readable Chinese meal line. Keep
@@ -82,7 +94,8 @@ nonisolated enum JournalImport {
                 }
                 try Task.checkCancellation()
                 return Result(file: .init(id: UUID(), fileName: fileName, thumbnail: thumbnail,
-                                          hash: hash, isVideo: video), recognizedText: text)
+                                          hash: hash, isVideo: video, isSchoolReport: dailyReport != nil),
+                              recognizedText: text, schoolReport: dailyReport)
             } catch {
                 store.deleteLocalFiles(media: fileName, thumbnail: thumbnail)
                 throw error

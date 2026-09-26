@@ -28,6 +28,7 @@ struct EntryDetailView: View {
     @State private var storybookToast: String?
 
     private var profile: ChildProfile? { profiles.first }
+    private var schoolReport: SchoolDailyReport? { SchoolDailyReport.from(note: entry.note) }
     private var sortedMedia: [Media] { entry.sortedMedia }
     private var theme: Color { env.theme.theme.primary }
     private var timePerspectivePrefix: String {
@@ -52,12 +53,19 @@ struct EntryDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ageBadge
+                if let schoolReport, !editing {
+                    SchoolReportCard(entry: entry, report: schoolReport, showsDetailLink: false, profileName: profile?.name, profileBirthday: profile?.birthday)
+                }
                 if let appendMediaStatus { mediaStatusRow(appendMediaStatus) }
                 mediaSection
                 reactionSection
                 appendPhotoButton
                 metaSection
-                if entry.note != nil || editing { noteSection }
+                if entry.note != nil || editing {
+                    if schoolReport != nil && !editing {
+                        DisclosureGroup("原文与识别候选") { noteSection }
+                    } else { noteSection }
+                }
                 voiceNotesSection
                 tagsSection
                 firstPersonPlaceholder
