@@ -108,7 +108,7 @@ enum VoiceTranscriber {
 
     private static func legacyRecognizer(url: URL) async -> DeviceOutcome {
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN")),
-              recognizer.isAvailable else { return .recognizerUnavailable }
+              recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return .recognizerUnavailable }
         let status = await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
         }
@@ -116,9 +116,7 @@ enum VoiceTranscriber {
 
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true   // 语音不出设备
-        }
+        request.requiresOnDeviceRecognition = true   // 不支持端侧时不静默发送至 Apple 服务器
         return await withCheckedContinuation { cont in
             var resumed = false
             recognizer.recognitionTask(with: request) { result, error in

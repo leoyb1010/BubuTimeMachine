@@ -16,9 +16,18 @@ struct AIStudioHomeView: View {
             VStack(alignment: .leading, spacing: 18) {
                 banner
 
-                askBubuCard        // 主位：问问布布（三年记录变成能对话的记忆）
                 storybookCard      // 成长绘本（把里程碑编织成翻页故事）
                 capsuleCard        // 时间胶囊收入魔法屋，底栏不再单独占位
+
+                DisclosureGroup("用 AI 整理回忆") {
+                    askBubuCard
+                    NavigationLink("第一人称日记") { FirstPersonDiaryView() }
+                    NavigationLink("家人合奏") { FamilyEnsembleView() }
+                    if !env.config.isAIConfigured {
+                        Text("需要在设置里启用家庭 AI 服务。原始记录始终保留。")
+                            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                }.tint(env.theme.theme.textAccent)
 
                 section("回顾", subtitle: "把已经发生的整理给你看") {
                     capabilityTile(icon: "newspaper.fill", title: "布布周报",
@@ -32,17 +41,6 @@ struct AIStudioHomeView: View {
                     capabilityTile(icon: "film.stack.fill", title: "成长电影",
                                    subtitle: "精选照片成短片", tint: BubuTheme.Color.sky) {
                         GrowthMovieView()
-                    }
-                }
-
-                section("创作", subtitle: "把素材改写成新的东西") {
-                    capabilityTile(icon: "quote.bubble.fill", title: "第一人称日记",
-                                   subtitle: "改写成布布的话", tint: BubuTheme.Color.pink) {
-                        FirstPersonDiaryView()
-                    }
-                    capabilityTile(icon: "person.3.sequence.fill", title: "家人合奏",
-                                   subtitle: "合成完整故事", tint: BubuTheme.Color.mint) {
-                        FamilyEnsembleView()
                     }
                 }
 
@@ -64,7 +62,7 @@ struct AIStudioHomeView: View {
             .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
         .background(background.ignoresSafeArea())
-        .navigationTitle("布布的魔法屋")
+        .navigationTitle("回忆与作品")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -78,7 +76,7 @@ struct AIStudioHomeView: View {
             HStack {
                 BubuMascotBadge(size: 58, expression: .drawing)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("布布的魔法屋").font(BubuTheme.Font.title)
+                    Text("回忆与作品").font(BubuTheme.Font.title)
                     Text("故事、电影、报告和未来胶囊")
                         .font(BubuTheme.Font.caption.weight(.semibold))
                         .lineLimit(1)

@@ -118,8 +118,8 @@ struct RootTabView: View {
                     .bubuTabContentTransition(isActive: selection == 2)
             }
 
-            Tab("魔法屋", systemImage: "wand.and.stars.inverse", value: 3) {
-                NavigationStack { AIStudioHomeView() }
+            Tab("幼儿园", systemImage: "backpack.fill", value: 3) {
+                NavigationStack { MemoryJournalView() }
                     .bubuTabContentTransition(isActive: selection == 3)
             }
 
@@ -206,6 +206,7 @@ struct RootTabView: View {
 /// 系统底部附件会在 Tab 展开/收缩间变形；内容跟随 placement 调整，避免压缩时塞两行文字。
 private struct BubuRecordAccessory: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(AppEnvironment.self) private var env
     let action: () -> Void
 
@@ -221,10 +222,13 @@ private struct BubuRecordAccessory: View {
                         Text("记录此刻")
                             .font(BubuTheme.Font.body.weight(.semibold))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text("照片、声音和一句话一起收好")
-                            .font(BubuTheme.Font.caption)
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
                             .lineLimit(1)
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Text("照片、声音和一句话一起收好")
+                                .font(BubuTheme.Font.caption)
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                                .lineLimit(1)
+                        }
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up")

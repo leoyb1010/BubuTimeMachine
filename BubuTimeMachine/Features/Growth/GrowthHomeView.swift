@@ -37,6 +37,12 @@ struct GrowthHomeView: View {
                     .entranceEffect(index: 0)
                 primaryLinks
                     .entranceEffect(index: 1)
+                NavigationLink { AIStudioHomeView() } label: {
+                    Label("回忆与作品 · 原魔法屋", systemImage: "book.pages.fill")
+                        .font(BubuTheme.Font.headline)
+                        .foregroundStyle(env.theme.theme.textAccent)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                }
                 firstTimesSection
                     .entranceEffect(index: 2)
                 recentGrowth

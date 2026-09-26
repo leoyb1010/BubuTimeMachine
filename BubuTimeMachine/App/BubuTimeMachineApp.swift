@@ -564,7 +564,9 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-uitest-simple") {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-sayings") {
+            NavigationStack { MemoryJournalView(kind: .saying) }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-simple") {
             SimpleModeView()
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-capture") {
             DebugQuickCapturePreviewView()

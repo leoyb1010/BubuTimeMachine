@@ -85,6 +85,18 @@ struct CaptureHomeView: View {
                     uploadQueueCard            // 后台原片必须可见、可重试，不能假装已经收好
                     todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
                     primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
+                    NavigationLink { MemoryJournalView(kind: .saying) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "quote.bubble.fill")
+                            Text("布布说").font(BubuTheme.Font.headline)
+                            Text("留住她刚说的那句话").font(BubuTheme.Font.caption)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .foregroundStyle(theme.textAccent)
+                        .padding(14)
+                        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md))
+                    }.buttonStyle(.plain).accessibilityIdentifier("home.sayings")
                     // 「功能搬家」提示卡已移除：那次信息架构调整是 2.11.0 的事，
                     // 早就不是新消息了，却还常驻在首屏最值钱的位置上。
                     // 项目已经接了 TipKit，真要做渐进引导用它，不用再自养一套常驻横幅。
@@ -732,15 +744,15 @@ struct CaptureHomeView: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(greetingText) 呀")
-                    .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 if let profile {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(profile.name)
-                            .font(BubuTheme.Font.scaled(28, weight: .heavy, design: .rounded))
+                            .font(BubuTheme.Font.scaled(28, weight: .heavy, design: .rounded, cap: .extraExtraExtraLarge))
                             .foregroundStyle(BubuTheme.Color.warmBrown)
                         Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
-                            .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded))
+                            .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
                             .foregroundStyle(theme.textAccent)
                     }
                 }
@@ -749,7 +761,7 @@ struct CaptureHomeView: View {
             todayStatusPill
             NavigationLink { SettingsView() } label: {
                 Image(systemName: "gearshape.fill")
-                    .font(BubuTheme.Font.scaled(18, weight: .bold))
+                    .font(BubuTheme.Font.scaled(18, weight: .bold, cap: .extraExtraExtraLarge))
                     .foregroundStyle(BubuTheme.Color.primaryInk)
                     .frame(width: 42, height: 42)
                     .background(.ultraThinMaterial, in: Circle())
@@ -769,15 +781,15 @@ struct CaptureHomeView: View {
         VStack(alignment: .trailing, spacing: 3) {
             HStack(spacing: 5) {
                 Image(systemName: "calendar")
-                    .font(BubuTheme.Font.scaled(10, weight: .bold))
+                    .font(BubuTheme.Font.scaled(10, weight: .bold, cap: .extraExtraExtraLarge))
                 Text(todayText)
-                    .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded, cap: .extraExtraExtraLarge))
             }
             HStack(spacing: 5) {
                 Image(systemName: weatherSymbol)
-                    .font(BubuTheme.Font.scaled(11, weight: .bold))
+                    .font(BubuTheme.Font.scaled(11, weight: .bold, cap: .extraExtraExtraLarge))
                 Text(weatherMoodText)
-                    .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
             }
         }
         .foregroundStyle(BubuTheme.Color.secondaryText)

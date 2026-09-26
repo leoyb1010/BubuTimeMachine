@@ -3,6 +3,68 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testSayingDraftCanBeResumedAndExplicitlyDiscarded() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-sayings"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        app.buttons["journal.primary"].tap()
+        let words = app.descendants(matching: .any).matching(identifier: "journal.words").firstMatch
+        XCTAssertTrue(words.waitForExistence(timeout: 5))
+        words.tap(); words.typeText("草稿里的小星星")
+        app.buttons["以后再说"].tap()
+        app.buttons["留在草稿，下次继续"].tap()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
+        app.buttons["journal.primary"].tap()
+        XCTAssertTrue(words.waitForExistence(timeout: 5))
+        XCTAssertEqual(words.value as? String, "草稿里的小星星")
+        app.buttons["以后再说"].tap()
+        app.buttons["丢弃草稿"].tap()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
+        app.buttons["journal.primary"].tap()
+        XCTAssertTrue(words.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(words.value as? String, "草稿里的小星星")
+        app.buttons["以后再说"].tap()
+    }
+
+    @MainActor
+    func testSchoolJournalSavesIntoTimelineAndKeepsIdentity() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        attachScreenshot("school-empty", to: self)
+        app.buttons["journal.primary"].tap()
+        let words = app.descendants(matching: .any).matching(identifier: "journal.words").firstMatch
+        XCTAssertTrue(words.waitForExistence(timeout: 5))
+        words.tap(); words.typeText("今天在幼儿园搭了小房子")
+        app.buttons["journal.save"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.waitForExistence(timeout: 8))
+        attachScreenshot("school-saved", to: self)
+        element(named: "时光", in: app).tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.waitForExistence(timeout: 8))
+    }
+
+    @MainActor
+    func testSayingsTextCanBeSavedWithoutMicrophone() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-sayings"]
+        app.launch()
+        XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
+        app.buttons["journal.primary"].tap()
+        let words = app.descendants(matching: .any).matching(identifier: "journal.words").firstMatch
+        XCTAssertTrue(words.waitForExistence(timeout: 5))
+        words.tap(); words.typeText("月亮也要睡觉吗？")
+        attachScreenshot("saying-compose", to: self)
+        app.buttons["journal.save"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "月亮也要睡觉吗")).firstMatch.waitForExistence(timeout: 8))
+        attachScreenshot("saying-saved", to: self)
+    }
+
+    @MainActor
     func testAdaptiveRootAndQuickCapture() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -29,7 +91,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(element(named: "首页", in: app).exists)
         XCTAssertTrue(element(named: "时光", in: app).exists)
         XCTAssertTrue(element(named: "成长", in: app).exists)
-        XCTAssertTrue(element(named: "魔法屋", in: app).exists)
+        XCTAssertTrue(element(named: "幼儿园", in: app).exists)
         let identityCard = element(named: "home.identity-card", in: app)
         XCTAssertTrue(identityCard.waitForExistence(timeout: 15),
                       "iPhone 首页必须展示完整布布身份卡，不能用简化封面替代")
@@ -94,7 +156,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(element(named: "首页", in: app).exists)
         XCTAssertTrue(element(named: "时光", in: app).exists)
         XCTAssertTrue(element(named: "成长", in: app).exists)
-        XCTAssertTrue(element(named: "魔法屋", in: app).exists)
+        XCTAssertTrue(element(named: "幼儿园", in: app).exists)
         attachScreenshot("ipad-landscape-root", to: self)
         XCUIDevice.shared.orientation = .portrait
     }
@@ -149,9 +211,9 @@ final class BubuTimeMachineUITests: XCTestCase {
     /// 而这个 helper 每条用例要调四五次。先走按类型的快路径（几乎都是按钮或静态文本），
     /// 找不到再回退到全树遍历，语义不变、代价小得多。
     private func element(named name: String, in app: XCUIApplication) -> XCUIElement {
-        let button = app.buttons[name]
+        let button = app.buttons.matching(identifier: name).firstMatch
         if button.exists { return button }
-        let text = app.staticTexts[name]
+        let text = app.staticTexts.matching(identifier: name).firstMatch
         if text.exists { return text }
         return app.descendants(matching: .any).matching(identifier: name).firstMatch
     }

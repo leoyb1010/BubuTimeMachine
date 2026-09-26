@@ -32,6 +32,10 @@ targets:
         excludes:
           - "Info.plist"
           - "BubuTimeMachine.entitlements"
+          # 本机保留的历史 UI 草稿未纳入当前产品；生成工程时不误编译，也不删除原文件。
+          - "DesignSystem/BigButton.swift"
+          - "DesignSystem/BubuGlassTabBar.swift"
+          - "Features/Timeline/TimelineEntryCard.swift"
       # 手表通信契约（与 watchOS target 共用）
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchPhotoBundle.swift
@@ -238,6 +242,8 @@ targets:
       - path: BubuTimeMachineUITests
     dependencies:
       - target: BubuTimeMachine
+      # Xcode 27 invokes the metadata extractor for test bundles as well.
+      - sdk: AppIntents.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bubu.timemachine.uitests
