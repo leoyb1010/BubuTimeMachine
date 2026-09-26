@@ -65,6 +65,54 @@ class LLMClient:
         # 模型偶尔回一个数组/字符串；调用方全部按 dict 取字段，这里统一收口避免 500。
         return data if isinstance(data, dict) else {}
 
+    def complete_vision_json(self, system: str, user: str, image_base64: str) -> dict[str, Any]:
+        """Explicit opt-in school image recognition; never fall back to a text model."""
+        if not self.is_configured:
+            raise LLMError("未配置 DEEPSEEK_API_KEY")
+        payload = {
+            "model": "deepseek-flash", "thinking": {"type": "disabled"},
+            "response_format": {"type": "json_object"}, "max_tokens": 3000,
+            "temperature": 0.1, "stream": False,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": [
+                    {"type": "text", "text": user},
+                    {"type": "image_url", "image_url": {
+                        "url": "data:image/jpeg;base64," + image_base64, "detail": "original",
+                    }},
+                ]},
+            ],
+        }
+        # Fixed official host: a text-only proxy/base URL must not silently receive child photos.
+        for attempt in range(2):
+            try:
+                with httpx.Client(timeout=min(self.timeout, 90), trust_env=False, follow_redirects=False) as client:
+                    response = client.post("https://api.deepseek.com/chat/completions", json=payload,
+                                           headers={"Authorization": "Bearer " + self.api_key})
+            except httpx.HTTPError as exc:
+                if attempt == 0:
+                    continue
+                raise LLMError("视觉识别网络错误，请稍后重试。") from exc
+            if response.status_code != 200:
+                # No upstream bodies, credentials, image bytes, or model text in logs/errors.
+                if attempt == 0 and (response.status_code == 429 or response.status_code >= 500):
+                    continue
+                raise LLMError(f"LLM {response.status_code}: 视觉识别服务暂时不可用")
+            try:
+                if len(response.content) > 128 * 1024:
+                    raise ValueError()
+                choice = response.json()["choices"][0]
+                content = choice["message"]["content"]
+                if choice.get("finish_reason") != "stop" or not isinstance(content, str) or len(content.encode("utf-8")) > 32 * 1024:
+                    raise ValueError()
+                result = json.loads(content)
+                if not isinstance(result, dict):
+                    raise ValueError()
+                return result
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                raise LLMError("视觉识别结果不完整，请重试。") from exc
+        raise LLMError("视觉识别服务暂时不可用。")
+
     def _chat(self, model: str, system: str, user: str,
               max_tokens: int, temperature: float) -> str:
         url = f"{self.base_url}/chat/completions"

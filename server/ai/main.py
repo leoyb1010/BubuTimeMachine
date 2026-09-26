@@ -40,9 +40,10 @@ from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from llm import LLMClient, LLMError
+import school_report
 from artifact_workflow import ArtifactUnavailable
 import movie_render
 from semantic_index import SemanticIndex
@@ -268,6 +269,27 @@ def require_intake_family_user(
 
 
 # ---------- 请求/响应模型 ----------
+
+@app.post("/school-report/recognize", response_model=school_report.SchoolReportResp)
+async def recognize_school_report(request: Request, _: str = Depends(require_api_key)):
+    # Bound streaming input before JSON decoding; never echo a Pydantic input containing a child photo.
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > school_report.MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="图片过大，请裁剪到亲子桥表格后重试。")
+        body.extend(chunk)
+    try:
+        req = school_report.SchoolReportReq.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="图片或日期格式无效，请重新选择。") from exc
+    try:
+        return await asyncio.to_thread(school_report.recognize, req, llm)
+    except school_report.SchoolReportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except school_report.SchoolReportUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail="亲子桥识别暂时失败，请稍后重试；原图仍保留。") from exc
 
 class RewriteReq(BaseModel):
     note: str = Field(..., max_length=4000)
