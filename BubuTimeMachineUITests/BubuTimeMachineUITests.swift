@@ -122,52 +122,82 @@ final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
     private func tapSystemPickerAsset(_ kind: SystemPickerAsset, in app: XCUIApplication) throws {
         let labels = kind.labels
-        // The app is Chinese, but the hosted simulator's system picker is English.
+        let navigation = systemPickerNavigation(in: app)
+        let content = app.scrollViews["photosView_content_scroll_view"].firstMatch
+        guard navigation.waitForExistence(timeout: 30), content.waitForExistence(timeout: 30) else {
+            throw systemPickerFailure("Photos picker did not become ready", in: app)
+        }
+        // Scope to the actual Photos grid, not unrelated or stale app images.
+        let grid = content.otherElements["PXGGridLayout-Group"].firstMatch
         let asset = NSPredicate(format: "identifier == %@ AND (label BEGINSWITH[c] %@ OR label BEGINSWITH %@)",
                                 "PXGGridLayout-Info", labels.english, labels.chinese)
-        let images = app.images.matching(asset)
-        guard images.firstMatch.waitForExistence(timeout: 15) else {
+        let image = grid.images.matching(asset).firstMatch
+        guard grid.waitForExistence(timeout: 30), image.waitForExistence(timeout: 30) else {
             throw systemPickerFailure("Missing synthetic \(labels.english) asset", in: app)
         }
-        // iOS 26 exposes PXGGridLayout-Info as an informational descendant: it can
-        // have a visible frame but no hit point. Tap its actual containing cell.
-        let cell = app.cells.containing(asset).firstMatch
-        if cell.waitForExistence(timeout: 3) {
-            guard cell.wait(for: \.isHittable, toEqual: true, timeout: 12) else {
-                throw systemPickerFailure("\(labels.english) picker cell never became hittable", in: app)
+        let confirmation = systemPickerConfirmation(in: app)
+        let requiresConfirmation = confirmation.exists
+        attachScreenshot("school-system-picker-before-\(labels.english)", to: self)
+        // The captured iPhone/iPad AX hierarchies have no asset Cells. These
+        // informational image leaves have valid frames but no computed hit point.
+        // Use only the fresh leaf center after bounding it to the active picker.
+        let appBounds = app.frame
+        let contentBounds = content.frame.intersection(appBounds)
+        let navigationBounds = navigation.frame
+        let pickerBounds = CGRect(x: contentBounds.minX,
+                                  y: max(contentBounds.minY, navigationBounds.maxY),
+                                  width: contentBounds.width,
+                                  height: max(0, contentBounds.maxY - max(contentBounds.minY, navigationBounds.maxY)))
+        let assetBounds = image.frame
+        guard navigation.exists, content.exists, image.exists,
+              !pickerBounds.isEmpty, !assetBounds.isEmpty,
+              pickerBounds.contains(assetBounds), grid.frame.contains(assetBounds) else {
+            throw systemPickerFailure("\(labels.english) asset is outside the active picker viewport: \(assetBounds)", in: app)
+        }
+        print("PhotosPicker selecting \(image.label), asset=\(assetBounds), viewport=\(pickerBounds)")
+        if image.isHittable {
+            image.tap()
+        } else {
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: assetBounds.midX - appBounds.minX,
+                dy: assetBounds.midY - appBounds.minY)).tap()
+        }
+        if requiresConfirmation {
+            guard confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 15) else {
+                throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add", in: app)
             }
-            cell.tap()
-            return
+        } else if !content.waitForNonExistence(timeout: 15) {
+            throw systemPickerFailure("Selecting \(labels.english) did not dismiss the single-selection picker", in: app)
         }
-        // Some picker versions expose the asset itself as the tappable element.
-        // This fallback still requires a real hit point; never tap coordinates
-        // derived from a nonhittable informational image.
-        let image = images.firstMatch
-        guard image.wait(for: \.isHittable, toEqual: true, timeout: 12) else {
-            throw systemPickerFailure("No hittable \(labels.english) picker asset or containing cell", in: app)
-        }
-        image.tap()
+    }
+
+    @MainActor
+    private func systemPickerNavigation(in app: XCUIApplication) -> XCUIElement {
+        app.navigationBars.matching(NSPredicate(
+            format: "identifier == %@ OR identifier == %@ OR label == %@ OR label == %@",
+            "Photos", "照片", "Photos", "照片")).firstMatch
+    }
+
+    @MainActor
+    private func systemPickerConfirmation(in app: XCUIApplication) -> XCUIElement {
+        systemPickerNavigation(in: app).buttons.matching(NSPredicate(
+            format: "label == %@ OR label == %@ OR label == %@ OR label == %@",
+            "Done", "完成", "Add", "添加")).firstMatch
     }
 
     @MainActor
     private func confirmSystemPickerSelection(in app: XCUIApplication,
                                               allowsAutomaticDismissal: Bool = false) throws {
-        let add = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add", "添加")).firstMatch
-        if allowsAutomaticDismissal && !add.waitForExistence(timeout: 2) {
-            // Single-selection pickers may close as soon as the asset is tapped.
-            // The caller still verifies the actual OCR/import/save result.
-            guard app.images.matching(identifier: "PXGGridLayout-Info").firstMatch.waitForNonExistence(timeout: 5) else {
-                throw systemPickerFailure("Single-selection picker neither dismissed nor offered Add", in: app)
-            }
-            return
+        let content = app.scrollViews["photosView_content_scroll_view"].firstMatch
+        if allowsAutomaticDismissal && !content.exists { return }
+        let confirmation = systemPickerConfirmation(in: app)
+        guard confirmation.waitForExistence(timeout: 10),
+              confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 10),
+              confirmation.wait(for: \.isHittable, toEqual: true, timeout: 10) else {
+            throw systemPickerFailure("Picker Done/Add button never became enabled and hittable", in: app)
         }
-        guard add.waitForExistence(timeout: 10),
-              add.wait(for: \.isEnabled, toEqual: true, timeout: 10),
-              add.wait(for: \.isHittable, toEqual: true, timeout: 10) else {
-            throw systemPickerFailure("Picker Add button never became enabled and hittable", in: app)
-        }
-        add.tap()
-        guard app.images.matching(identifier: "PXGGridLayout-Info").firstMatch.waitForNonExistence(timeout: 10) else {
+        confirmation.tap()
+        guard content.waitForNonExistence(timeout: 15) else {
             throw systemPickerFailure("Picker did not dismiss after confirming selection", in: app)
         }
     }
@@ -475,32 +505,60 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     private func revealSchoolControl(_ element: XCUIElement, in app: XCUIApplication) {
-        let visibleTop = app.navigationBars["记幼儿园的一天"].frame.maxY + 12
         let reviewBar = app.switches["school.confirmed"]
         let isReviewBar = element.identifier == "school.confirmed"
-        let footerTop = !isReviewBar && reviewBar.exists ? reviewBar.frame.minY - 12 : app.frame.maxY
-        let visibleBottom = min(footerTop, app.keyboards.firstMatch.exists ? app.keyboards.firstMatch.frame.minY : app.frame.maxY)
-        if element.isHittable && element.frame.midY > visibleTop && element.frame.midY < visibleBottom { return }
+        let isTextInput = element.elementType == .textField || element.elementType == .textView
         let scroll = app.scrollViews.containing(element.elementType, identifier: element.identifier).firstMatch
-        XCTAssertTrue(scroll.exists)
-        // Capture the sheet viewport before scrolling. A descendant-based query can
-        // stop matching mid-gesture when SwiftUI drops an offscreen AX descendant.
-        let bounds = scroll.frame
+        // Keep the last observed viewport only while AX drops an offscreen child;
+        // refresh it whenever available, since keyboard dismissal resizes sheets.
+        var lastScrollBounds: CGRect?
+        var attemptedKeyboardDismissal = false
         for _ in 0..<18 {
+            let appBounds = app.frame
+            if scroll.exists { lastScrollBounds = scroll.frame.intersection(appBounds) }
+            let bounds = lastScrollBounds ?? appBounds
             let navBottom = app.navigationBars["记幼儿园的一天"].frame.maxY
+            let top = max(bounds.minY, navBottom) + 16
+            var bottom = bounds.maxY - 16
             let keyboard = app.keyboards.firstMatch
-            let currentFooterTop = !isReviewBar && reviewBar.exists ? reviewBar.frame.minY - 12 : bounds.maxY
-            let bottom = min(currentFooterTop, min(bounds.maxY, keyboard.exists ? keyboard.frame.minY : bounds.maxY)) - 24
-            let top = max(bounds.minY, navBottom) + 24
-            let center = element.frame.midY
-            if element.isHittable && center > top && center < bottom { return }
-            // iPad sheets do not fill the screen. An app-wide fling can overshoot the
-            // field above the sheet's navigation bar even while AX reports it hittable.
-            let start = app.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: bounds.maxX - 12, dy: (top + bottom) / 2))
-            let offset = max(-150, min(150, (top + bottom) / 2 - center))
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: offset)))
+            if keyboard.exists, keyboard.frame.intersects(bounds), keyboard.frame.minY > top {
+                bottom = min(bottom, keyboard.frame.minY - 12)
+            }
+            if !isReviewBar, reviewBar.exists, !reviewBar.frame.isEmpty,
+               reviewBar.frame.intersects(bounds), reviewBar.frame.minY > top {
+                bottom = min(bottom, reviewBar.frame.minY - 12)
+            }
+            let target = element.frame
+            if element.isHittable && target.minY >= top && target.maxY <= bottom { return }
+            guard lastScrollBounds != nil, bottom - top > 60, bounds.width > 48 else { break }
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let x = bounds.maxX - 24 - appBounds.minX
+
+            if !isTextInput, keyboard.exists, !attemptedKeyboardDismissal {
+                // The form uses interactive keyboard dismissal. Do it inside the
+                // live sheet viewport before chasing controls around its animation.
+                attemptedKeyboardDismissal = true
+                let start = origin.withOffset(CGVector(dx: x, dy: top + 12 - appBounds.minY))
+                let end = origin.withOffset(CGVector(dx: x, dy: bottom - 12 - appBounds.minY))
+                start.press(forDuration: 0.05, thenDragTo: end)
+                _ = keyboard.waitForNonExistence(timeout: 3)
+                continue
+            }
+            if !element.isHittable, target.midY > top, target.midY < bottom,
+               element.wait(for: \.isHittable, toEqual: true, timeout: 1) { continue }
+
+            let middle = (top + bottom) / 2
+            let maximumStep = min(120, (bottom - top) * 0.45)
+            var offset = max(-maximumStep, min(maximumStep, middle - target.midY))
+            // A nonhittable centered control previously produced a zero-length
+            // gesture for all 18 retries. Always move, and keep both points visible.
+            if abs(offset) < 30 { offset = offset < 0 ? -30 : 30 }
+            let start = origin.withOffset(CGVector(dx: x, dy: middle - offset / 2 - appBounds.minY))
+            let end = origin.withOffset(CGVector(dx: x, dy: middle + offset / 2 - appBounds.minY))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
+        print("School control reveal failed: \(element.identifier)\n\(app.debugDescription)")
+        attachScreenshot("school-control-reveal-failure", to: self)
         XCTFail("表单控件未进入可见区域：\(element.identifier)")
     }
 
