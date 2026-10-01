@@ -53,7 +53,7 @@ struct SchoolJournalHome: View {
                         weekStrip.frame(width: 158)
                     }.padding(.bottom, 18)
                 }.frame(height: typeSize.isAccessibilitySize ? 140 : 52)
-                SchoolDayEntries(day: day, onCorrectedDate: selectDay)
+                SchoolDayEntries(day: day, onCorrectedDate: { value in selectDay(value) })
                 NavigationLink { MemoryJournalView(kind: .saying) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "quote.bubble.fill").foregroundStyle(env.theme.theme.textAccent)
@@ -81,11 +81,11 @@ struct SchoolJournalHome: View {
         .tint(env.theme.theme.textAccent)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $composing) {
-            MemoryJournalComposer(kind: .school, initialDate: day, onSaved: selectDay)
+            MemoryJournalComposer(kind: .school, initialDate: day, onSaved: { value in selectDay(value) })
         }
         .sheet(isPresented: $calendarOpen) {
             NavigationStack {
-                DatePicker("回看哪一天", selection: Binding(get: { day }, set: selectDay), in: ...Date.now, displayedComponents: .date)
+                DatePicker("回看哪一天", selection: Binding(get: { day }, set: { value in selectDay(value) }), in: ...Date.now, displayedComponents: .date)
                     .datePickerStyle(.graphical).padding()
                     .navigationTitle("翻到这一天").navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("看这天") { calendarOpen = false } } }
@@ -166,6 +166,8 @@ struct SchoolJournalHome: View {
             selectDay(min(next, Calendar.current.startOfDay(for: .now)))
         }
     }
+    // Explicit closure adapters above avoid an Xcode 26.6 IRGen crash when an
+    // actor-isolated Date method reference is converted into a SwiftUI callback.
     private func selectDay(_ value: Date) {
         withAnimation(reduceMotion ? nil : BubuMotion.quick) {
             day = Calendar.current.startOfDay(for: value)
