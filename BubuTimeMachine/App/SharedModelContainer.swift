@@ -25,14 +25,30 @@ enum SharedModelContainer {
     /// extension 进程惰性自建的共享容器，指向 App Group 共享 store。
     /// 仅在 `injected` 为 nil（即 extension 进程，或主 App 尚未完成注入）时启用。
     /// 共享库暂时打不开时返回 nil，避免直接崩溃成空白。
-    private static let lazyShared: ModelContainer? = {
+    @MainActor
+    final class ExistingStoreCache {
+        private var container: ModelContainer?
+
+        func open(at url: URL) throws -> ModelContainer {
+            if let container { return container }
+            let opened = try BubuStoreLoader.open(at: url, requiresExistingStore: true)
+            container = opened
+            return opened
+        }
+    }
+
+    @MainActor private static let extensionCache = ExistingStoreCache()
+
+    // Cache successful opens only. An extension may run before the app bootstraps its
+    // store; a missing/temporarily locked store must be retried on the next request.
+    @MainActor private static var lazyShared: ModelContainer? {
         do {
-            return try BubuStoreLoader.open(at: BubuStorage.storeURL)
+            return try extensionCache.open(at: BubuStorage.storeURL)
         } catch {
             log.error("无法创建共享 SwiftData 容器：\(error.localizedDescription, privacy: .public)")
             return nil
         }
-    }()
+    }
 
     /// 进程内统一入口：主 App 进程返回注入的 App 容器；extension 进程回退到自建共享容器。
     /// Widget/Intent 渲染层用它避免共享库暂时打不开时直接崩溃成空白。

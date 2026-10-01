@@ -5,7 +5,8 @@ import Darwin
 
 /// App 和 Widget 共用的升级入口。先保护、再规范旧的隐式模型，最后执行版本化迁移。
 enum BubuStoreLoader {
-    static func open(at url: URL, prepareStore: () throws -> Void = {}) throws -> ModelContainer {
+    static func open(at url: URL, requiresExistingStore: Bool = false,
+                     prepareStore: () throws -> Void = {}) throws -> ModelContainer {
         let manager = FileManager.default
         let directory = url.deletingLastPathComponent().appendingPathComponent("Documents/UpgradeBackups")
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -16,6 +17,12 @@ enum BubuStoreLoader {
         while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
             guard Date() < deadline else { throw StoreUpgradeBackup.BackupError.cannotOpen }
             usleep(50_000)
+        }
+        // An extension cannot inspect the app's legacy sandbox. If it creates an empty
+        // destination first, the app must preserve that database and cannot migrate safely.
+        // Check while holding the same lock as app publication, before any recovery/open.
+        guard !requiresExistingStore || manager.fileExists(atPath: url.path) else {
+            throw StoreUpgradeBackup.BackupError.cannotOpen
         }
         // Legacy sandbox publication must share the loader lock with extensions opening this store.
         try prepareStore()

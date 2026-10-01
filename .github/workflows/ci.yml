@@ -83,13 +83,6 @@ jobs:
           IPAD=$(pick iPad)
           echo "ipad=$IPAD" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare synthetic PhotosPicker assets
-        run: |
-          bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.iphone }}"
-          if [ -n "${{ steps.sim.outputs.ipad }}" ]; then
-            bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.ipad }}"
-          fi
-
       # 单元测试与 UI 测试分开跑：UI 用例在共享 runner 上会因为 "Lost connection to the application"
       # 偶发抖动（2026-09-12 两次都是同一条用例），和 iPad 一样失败后重跑一次；单元测试不重跑。
       - name: Build & unit test (iPhone)
@@ -103,6 +96,13 @@ jobs:
             -destination "id=${{ steps.sim.outputs.iphone }}" \
             -skip-testing:BubuTimeMachineUITests \
             clean test 2>&1 | tee /tmp/build-iphone.log
+
+      - name: Prepare synthetic PhotosPicker assets
+        run: |
+          bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.iphone }}"
+          if [ -n "${{ steps.sim.outputs.ipad }}" ]; then
+            bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.ipad }}"
+          fi
 
       - name: UI 回归 (iPhone)
         run: |

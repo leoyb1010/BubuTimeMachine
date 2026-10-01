@@ -98,7 +98,7 @@ struct SyncUploadCompletionTests {
                  title: nil, note: note, firstPersonNote: nil,
                  happenedAt: entry.happenedAt, locationName: nil, latitude: nil, longitude: nil,
                  authorRole: entry.authorRole, mood: nil, isArchived: false,
-                 editedAt: editedAt, createdAt: entry.createdAt)
+                 inStorybook: entry.inStorybook, editedAt: editedAt, createdAt: entry.createdAt)
     }
 
     @Test("旧上传回执不能把 await 期间的新编辑标为已同步")
@@ -116,7 +116,7 @@ struct SyncUploadCompletionTests {
         let delivery = AsyncStream<EntryDTO>.makeStream()
         let upload = Task { @MainActor in
             for await response in delivery.stream {
-                try SyncEngine.completeEntryUpload(response, localId: localId, in: context)
+                try SyncEngine.completeEntryUpload(response, sent: saved, localId: localId, in: context)
                 try context.save()
             }
         }
@@ -135,6 +135,42 @@ struct SyncUploadCompletionTests {
         #expect(try reopened.fetch(FetchDescriptor<Entry>()).first?.syncState == .local)
     }
 
+    @Test("正文直接绑定尚未标脏时，旧回执也不能确认正在输入的内容")
+    func deferredReplyKeepsUnmarkedTyping() async throws {
+        let context = try context()
+        let entry = Entry(authorRole: "audit", note: "请求发出时的正文")
+        let sentAt = Date(timeIntervalSince1970: 1_000)
+        entry.createdAt = sentAt
+        entry.editedAt = sentAt
+        entry.syncState = .uploading
+        context.insert(entry)
+        try context.save()
+        let localId = entry.id
+        let sent = reply(for: entry, note: "请求发出时的正文", editedAt: sentAt)
+        let delivery = AsyncStream<EntryDTO>.makeStream()
+        let upload = Task { @MainActor in
+            for await response in delivery.stream {
+                try SyncEngine.completeEntryUpload(response, sent: sent, localId: localId, in: context)
+                try context.save()
+            }
+        }
+        // 精确模拟 EntryDetailView 的 TextField：仅改 note，尚未点「完成」。
+        entry.note = "仍在输入，还没有点完成"
+        #expect(entry.syncState == .uploading)
+        #expect(entry.editedAt == sentAt)
+        delivery.continuation.yield(sent)
+        delivery.continuation.finish()
+        try await upload.value
+        #expect(entry.note == "仍在输入，还没有点完成")
+        #expect(entry.syncState == .local)
+        #expect((entry.editedAt ?? .distantPast) > sentAt)
+        #expect(entry.remoteId == "audit-entry")
+        let reopened = ModelContext(context.container)
+        let persisted = try reopened.fetch(FetchDescriptor<Entry>()).first
+        #expect(persisted?.note == "仍在输入，还没有点完成")
+        #expect(persisted?.syncState == .local)
+    }
+
     @Test("更晚的远端编辑仍按原有 LWW 规则收敛")
     func newerRemoteReplyWins() throws {
         let context = try context()
@@ -143,8 +179,9 @@ struct SyncUploadCompletionTests {
         entry.editedAt = entry.createdAt
         entry.syncState = .uploading
         context.insert(entry)
+        let sent = reply(for: entry, note: "旧内容", editedAt: entry.createdAt)
         let saved = reply(for: entry, note: "远端新内容", editedAt: entry.createdAt.addingTimeInterval(20))
-        try SyncEngine.completeEntryUpload(saved, localId: entry.id, in: context)
+        try SyncEngine.completeEntryUpload(saved, sent: sent, localId: entry.id, in: context)
         try context.save()
         #expect(entry.note == "远端新内容")
         #expect(entry.syncState == .synced)
@@ -189,7 +226,7 @@ struct SyncUploadCompletionTests {
         try context.save()
         context.delete(entry)
         try context.save()
-        try SyncEngine.completeEntryUpload(saved, localId: localId, in: context)
+        try SyncEngine.completeEntryUpload(saved, sent: saved, localId: localId, in: context)
         try context.save()
         #expect(try context.fetchCount(FetchDescriptor<Entry>()) == 0)
         #expect(try context.fetch(FetchDescriptor<PendingDeletion>()).first?.collection == "entries")

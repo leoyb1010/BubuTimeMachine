@@ -654,9 +654,10 @@ nonisolated struct WatchVoiceInbox: Sendable {
     }
 
     /// 每次尝试使用新 context；失败 rollback，下一次绝不能把未保存对象当成落盘去重证据。
-    /// save 参数仅作为故障注入点。生产调用总是显式 save；autosave 永远关闭。
+    /// copyAudio/save 参数仅作为故障注入点。生产调用总是显式 save；autosave 永远关闭。
     @MainActor
     func importVoice(_ voice: PendingVoice, into container: ModelContainer, mediaDirectory: URL,
+                     copyAudio: @MainActor (URL, URL) throws -> Void = { try FileManager.default.copyItem(at: $0, to: $1) },
                      save: @MainActor (ModelContext) throws -> Void = { try $0.save() }) throws {
         guard Self.isPersistent(container) else { throw ImportError.ephemeralStore }
         let context = ModelContext(container)
@@ -680,7 +681,17 @@ nonisolated struct WatchVoiceInbox: Sendable {
                         throw ImportError.audioConflict
                     }
                 } else {
-                    try fm.copyItem(at: voice.audio, to: destination)
+                    // 先完整拷入同目录临时文件，再原子改名发布。磁盘满/进程中断留下的
+                    // partial 不占用稳定文件名；重试可重新拷贝，不能永久卡在 audioConflict。
+                    let temporary = mediaDirectory.appendingPathComponent(
+                        ".watch-\(voice.deliveryId.uuidString)-\(UUID().uuidString).partial")
+                    defer { try? fm.removeItem(at: temporary) }
+                    try copyAudio(voice.audio, temporary)
+                    guard fm.contentsEqual(atPath: temporary.path, andPath: voice.audio.path) else {
+                        throw ImportError.audioConflict
+                    }
+                    // 同目录移动是原子发布；moveItem 拒绝已存在的目标，不覆盖冲突或已引用音频。
+                    try fm.moveItem(at: temporary, to: destination)
                 }
                 let role = FamilyRole(rawValue: voice.request.roleRaw) ?? .mama
                 let entry = Entry(happenedAt: voice.request.happenedAt, authorRole: role.rawValue, note: nil)

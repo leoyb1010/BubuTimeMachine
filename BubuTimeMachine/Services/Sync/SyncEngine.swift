@@ -416,7 +416,7 @@ final class SyncEngine {
             let entryId = entry.id
             do {
                 let saved = try await apiClient.createEntry(dto)
-                try Self.completeEntryUpload(saved, localId: entryId, in: context)
+                try Self.completeEntryUpload(saved, sent: dto, localId: entryId, in: context)
             } catch {
                 if let current = try? context.fetch(FetchDescriptor<Entry>(
                     predicate: #Predicate { $0.id == entryId })).first {
@@ -1090,19 +1090,42 @@ final class SyncEngine {
     }
 
     /// 回执落库前重新取当前模型；删除意图与补墓碑由调用者在同一次保存中提交。
-    static func completeEntryUpload(_ saved: EntryDTO, localId: UUID, in context: ModelContext) throws {
+    static func completeEntryUpload(_ saved: EntryDTO, sent: EntryDTO, localId: UUID, in context: ModelContext) throws {
         guard let entry = try context.fetch(FetchDescriptor<Entry>(
             predicate: #Predicate { $0.id == localId })).first else {
             PendingDeletion.enqueue(collection: "entries", remoteId: saved.id, in: context)
             return
         }
         entry.remoteId = saved.id
+        // TextField 等直接绑定可能先改正文，等「完成」才写 .local / editedAt。
+        // 因此不能只看状态：回执仅确认发出时的完整载荷，正在输入的内容必须继续留在本机。
+        guard entryUploadPayloadMatches(entry, sent: sent) else {
+            if entry.editedAt == sent.editedAt { entry.editedAt = .now }
+            entry.syncState = .local
+            return
+        }
         if remoteEntryWins(saved, over: entry) {
             apply(saved, to: entry)
             entry.syncState = .synced
         } else {
             entry.syncState = uploadCompletionState(entry.syncState)
         }
+    }
+
+    private static func entryUploadPayloadMatches(_ entry: Entry, sent: EntryDTO) -> Bool {
+        entry.title == sent.title &&
+        entry.note == sent.note &&
+        entry.firstPersonNote == sent.firstPersonNote &&
+        entry.happenedAt == sent.happenedAt &&
+        entry.locationName == sent.locationName &&
+        entry.latitude == sent.latitude &&
+        entry.longitude == sent.longitude &&
+        entry.authorRole == sent.authorRole &&
+        entry.moodRaw == sent.mood &&
+        entry.isArchived == sent.isArchived &&
+        entry.inStorybook == sent.inStorybook &&
+        entry.editedAt == sent.editedAt &&
+        entry.createdAt == sent.createdAt
     }
 
     static func completeMediaUpload(localId: UUID, remoteId: String, remoteURL: String,

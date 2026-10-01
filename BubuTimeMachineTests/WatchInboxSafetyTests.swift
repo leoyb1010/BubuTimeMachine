@@ -116,11 +116,11 @@ struct WatchInboxSafetyTests {
         let media = root.appendingPathComponent("media")
         var attemptedContext: ModelContext?
         #expect(throws: InjectedFailure.self) {
-            try inbox.importVoice(voice, into: disk, mediaDirectory: media) { context in
+            try inbox.importVoice(voice, into: disk, mediaDirectory: media, save: { context in
                 #expect(!context.autosaveEnabled)
                 attemptedContext = context
                 throw InjectedFailure.diskFull
-            }
+            })
         }
         let failedContext = try #require(attemptedContext)
         #expect(!failedContext.hasChanges)
@@ -143,6 +143,76 @@ struct WatchInboxSafetyTests {
         #expect(try Data(contentsOf: media.appendingPathComponent(name)) == Data("synthetic voice bytes".utf8))
     }
 
+    @Test("拷贝中途失败不占用最终文件名；遗留 partial 不阻止下一次完整导入")
+    func partialMediaCopyCanRetryWithoutOverwritingFinal() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
+        let package = try stage(request(), inbox: inbox, root: root)
+        let voice = try #require(try inbox.pendingVoices().first)
+        let disk = try container(at: root)
+        let media = root.appendingPathComponent("media")
+        let final = media.appendingPathComponent("watch-\(voice.deliveryId.uuidString).m4a")
+        var interruptedTemporary: URL?
+        #expect(throws: InjectedFailure.self) {
+            try inbox.importVoice(voice, into: disk, mediaDirectory: media, copyAudio: { _, temporary in
+                interruptedTemporary = temporary
+                try Data("truncated".utf8).write(to: temporary)
+                throw InjectedFailure.diskFull
+            })
+        }
+        #expect(!FileManager.default.fileExists(atPath: final.path))
+        #expect(try ModelContext(disk).fetchCount(FetchDescriptor<Entry>()) == 0)
+        #expect(try Data(contentsOf: voice.audio) == Data("synthetic voice bytes".utf8))
+        #expect(FileManager.default.fileExists(atPath: voice.metadata.path))
+        let leftover = try #require(interruptedTemporary)
+        #expect(leftover.deletingLastPathComponent().standardizedFileURL.path == media.standardizedFileURL.path)
+        #expect(leftover != final)
+        // Simulate process death before defer could remove a previous attempt's partial.
+        try Data("abandoned partial".utf8).write(to: leftover)
+        try inbox.importVoice(voice, into: disk, mediaDirectory: media)
+        #expect(try Data(contentsOf: final) == Data("synthetic voice bytes".utf8))
+        #expect(try Data(contentsOf: leftover) == Data("abandoned partial".utf8))
+        #expect(!FileManager.default.fileExists(atPath: package.path))
+        #expect(try ModelContext(disk).fetchCount(FetchDescriptor<VoiceNote>()) == 1)
+    }
+
+    @Test("不完整拷贝不能发布，既有冲突目标也绝不能被重试覆盖")
+    func truncatedCopyAndExistingFinalRemainSafe() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
+        let package = try stage(request(), inbox: inbox, root: root)
+        let voice = try #require(try inbox.pendingVoices().first)
+        let disk = try container(at: root)
+        let media = root.appendingPathComponent("media")
+        let final = media.appendingPathComponent("watch-\(voice.deliveryId.uuidString).m4a")
+        #expect(throws: WatchVoiceInbox.ImportError.self) {
+            try inbox.importVoice(voice, into: disk, mediaDirectory: media, copyAudio: { _, temporary in
+                try Data("truncated without throwing".utf8).write(to: temporary)
+            })
+        }
+        #expect(!FileManager.default.fileExists(atPath: final.path))
+        let existing = Data("existing conflicting audio must survive".utf8)
+        try existing.write(to: final)
+        #expect(throws: WatchVoiceInbox.ImportError.self) {
+            try inbox.importVoice(voice, into: disk, mediaDirectory: media)
+        }
+        #expect(try Data(contentsOf: final) == existing)
+        try FileManager.default.removeItem(at: final)
+        // Another writer publishes a conflicting final after our existence check.
+        #expect(throws: (any Error).self) {
+            try inbox.importVoice(voice, into: disk, mediaDirectory: media, copyAudio: { source, temporary in
+                try FileManager.default.copyItem(at: source, to: temporary)
+                try existing.write(to: final)
+            })
+        }
+        #expect(try Data(contentsOf: final) == existing)
+        #expect(FileManager.default.fileExists(atPath: package.path))
+        #expect(try Data(contentsOf: voice.audio) == Data("synthetic voice bytes".utf8))
+        #expect(try ModelContext(disk).fetchCount(FetchDescriptor<Entry>()) == 0)
+    }
+
     @Test("无真实提交时，不能用同 context 的脏对象伪造已落盘去重")
     func freshContextReadbackRequiredBeforeDeletingOriginal() throws {
         let root = try directory()
@@ -152,7 +222,7 @@ struct WatchInboxSafetyTests {
         let disk = try container(at: root)
         let voice = try #require(try inbox.pendingVoices().first)
         #expect(throws: WatchVoiceInbox.ImportError.self) {
-            try inbox.importVoice(voice, into: disk, mediaDirectory: root.appendingPathComponent("media")) { _ in }
+            try inbox.importVoice(voice, into: disk, mediaDirectory: root.appendingPathComponent("media"), save: { _ in })
         }
         #expect(FileManager.default.fileExists(atPath: package.appendingPathComponent("recording.m4a").path))
         #expect(try ModelContext(disk).fetchCount(FetchDescriptor<Entry>()) == 0)
