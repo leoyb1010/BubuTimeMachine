@@ -45,7 +45,8 @@ struct StoreBootstrapSafetyTests {
         // Production app sequence: acquire loader lock, publish a legacy snapshot, migrate.
         try autoreleasepool {
             let app = try BubuStoreLoader.open(at: destination) {
-                #expect(try StorageMigrator.copyStoreIfAbsent(from: source, to: destination))
+                let copied = try StorageMigrator.copyStoreIfAbsent(from: source, to: destination)
+                #expect(copied)
             }
             #expect(try ModelContext(app).fetchCount(FetchDescriptor<Entry>()) == 1)
         }

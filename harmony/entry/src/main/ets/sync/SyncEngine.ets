@@ -360,6 +360,7 @@ export class SyncEngine {
   private async pushChildProfile(): Promise<void> {
     const p: ChildProfile | null = await AppDatabase.shared.fetchChildProfile();
     if (!p || !SyncEngine.isDirty(p.syncState)) return;
+    const snapshot = AppDatabase.childProfileFields(p);
     const body: Record<string, Object> = {
       'name': p.name,
       'birthday': new Date(p.birthday).toISOString(),
@@ -377,7 +378,7 @@ export class SyncEngine {
         SyncEngine.applyChildProfile(saved, p);
         p.remoteId = SyncEngine.rStr(saved, 'id');
         p.syncState = SyncState.synced;
-        await AppDatabase.shared.upsertChildProfile(p);
+        await AppDatabase.shared.updateFieldsIfUnchanged('child_profile', snapshot, AppDatabase.childProfileFields(p));
         return;
       }
       p.remoteId = saved['id'] as string;
@@ -394,10 +395,10 @@ export class SyncEngine {
         }
       }
       p.syncState = SyncState.synced;
-      await AppDatabase.shared.upsertChildProfile(p);
+      await AppDatabase.shared.updateFieldsIfUnchanged('child_profile', snapshot, AppDatabase.childProfileFields(p));
     } catch (e) {
       p.syncState = SyncState.failed;
-      await AppDatabase.shared.upsertChildProfile(p);
+      await AppDatabase.shared.updateFieldsIfUnchanged('child_profile', snapshot, AppDatabase.childProfileFields(p));
     }
   }
 
@@ -406,9 +407,10 @@ export class SyncEngine {
     const items: Milestone[] = await AppDatabase.shared.fetchMilestones();
     for (const m of items) {
       if (!SyncEngine.isDirty(m.syncState)) continue;
+      const snapshot = AppDatabase.milestoneFields(m);
       if (SyncEngine.isLocalPresetPlaceholder(m)) {
         m.syncState = SyncState.synced;
-        await AppDatabase.shared.upsertMilestone(m);
+        await AppDatabase.shared.updateFieldsIfUnchanged('milestone', snapshot, AppDatabase.milestoneFields(m));
         continue;
       }
       const body: Record<string, Object> = {
@@ -424,15 +426,15 @@ export class SyncEngine {
           SyncEngine.applyMilestone(saved, m);
           m.remoteId = SyncEngine.rStr(saved, 'id');
           m.syncState = SyncState.synced;
-          await AppDatabase.shared.upsertMilestone(m);
+          await AppDatabase.shared.updateFieldsIfUnchanged('milestone', snapshot, AppDatabase.milestoneFields(m));
           continue;
         }
         m.remoteId = saved['id'] as string;
         m.syncState = SyncState.synced;
-        await AppDatabase.shared.upsertMilestone(m);
+        await AppDatabase.shared.updateFieldsIfUnchanged('milestone', snapshot, AppDatabase.milestoneFields(m));
       } catch (e) {
         m.syncState = SyncState.failed;
-        await AppDatabase.shared.upsertMilestone(m);
+        await AppDatabase.shared.updateFieldsIfUnchanged('milestone', snapshot, AppDatabase.milestoneFields(m));
       }
     }
   }
@@ -442,6 +444,7 @@ export class SyncEngine {
     const items: FirstTime[] = await AppDatabase.shared.fetchFirstTimes();
     for (const f of items) {
       if (!SyncEngine.isDirty(f.syncState)) continue;
+      const snapshot = AppDatabase.firstTimeFields(f);
       const body: Record<string, Object> = {
         'what': f.what, 'happenedAt': new Date(f.happenedAt).toISOString(),
         'detectedByAI': f.detectedByAI, 'confirmedByParent': f.confirmedByParent,
@@ -454,15 +457,15 @@ export class SyncEngine {
           SyncEngine.applyFirstTime(saved, f);
           f.remoteId = SyncEngine.rStr(saved, 'id');
           f.syncState = SyncState.synced;
-          await AppDatabase.shared.insertFirstTime(f);
+          await AppDatabase.shared.updateFieldsIfUnchanged('first_time', snapshot, AppDatabase.firstTimeFields(f));
           continue;
         }
         f.remoteId = saved['id'] as string;
         f.syncState = SyncState.synced;
-        await AppDatabase.shared.insertFirstTime(f);
+        await AppDatabase.shared.updateFieldsIfUnchanged('first_time', snapshot, AppDatabase.firstTimeFields(f));
       } catch (e) {
         f.syncState = SyncState.failed;
-        await AppDatabase.shared.insertFirstTime(f);
+        await AppDatabase.shared.updateFieldsIfUnchanged('first_time', snapshot, AppDatabase.firstTimeFields(f));
       }
     }
   }
@@ -472,6 +475,7 @@ export class SyncEngine {
     const items: FamilyMember[] = await AppDatabase.shared.fetchMembers();
     for (const m of items) {
       if (!SyncEngine.isDirty(m.syncState)) continue;
+      const snapshot = AppDatabase.memberFields(m);
       const body: Record<string, Object> = {
         'name': m.name, 'relation': m.relation, 'avatarEmoji': m.avatarEmoji,
         'themeColorHex': m.themeColorHex, 'isPrimary': m.isPrimary,
@@ -483,15 +487,15 @@ export class SyncEngine {
           SyncEngine.applyMember(saved, m);
           m.remoteId = SyncEngine.rStr(saved, 'id');
           m.syncState = SyncState.synced;
-          await AppDatabase.shared.upsertMember(m);
+          await AppDatabase.shared.updateFieldsIfUnchanged('family_member', snapshot, AppDatabase.memberFields(m));
           continue;
         }
         m.remoteId = saved['id'] as string;
         m.syncState = SyncState.synced;
-        await AppDatabase.shared.upsertMember(m);
+        await AppDatabase.shared.updateFieldsIfUnchanged('family_member', snapshot, AppDatabase.memberFields(m));
       } catch (e) {
         m.syncState = SyncState.failed;
-        await AppDatabase.shared.upsertMember(m);
+        await AppDatabase.shared.updateFieldsIfUnchanged('family_member', snapshot, AppDatabase.memberFields(m));
       }
     }
   }
@@ -501,6 +505,7 @@ export class SyncEngine {
     const items: HealthRecord[] = await AppDatabase.shared.fetchHealth();
     for (const h of items) {
       if (!SyncEngine.isDirty(h.syncState)) continue;
+      const snapshot = AppDatabase.healthFields(h);
       const body: Record<string, Object> = {
         'kind': h.kind, 'title': h.title, 'recordedAt': new Date(h.recordedAt).toISOString(),
         'tags': h.tags, 'createdAt': new Date(h.createdAt).toISOString()
@@ -520,15 +525,15 @@ export class SyncEngine {
           SyncEngine.applyHealth(saved, h);
           h.remoteId = SyncEngine.rStr(saved, 'id');
           h.syncState = SyncState.synced;
-          await AppDatabase.shared.insertHealth(h);
+          await AppDatabase.shared.updateFieldsIfUnchanged('health_record', snapshot, AppDatabase.healthFields(h));
           continue;
         }
         h.remoteId = saved['id'] as string;
         h.syncState = SyncState.synced;
-        await AppDatabase.shared.insertHealth(h);
+        await AppDatabase.shared.updateFieldsIfUnchanged('health_record', snapshot, AppDatabase.healthFields(h));
       } catch (e) {
         h.syncState = SyncState.failed;
-        await AppDatabase.shared.insertHealth(h);
+        await AppDatabase.shared.updateFieldsIfUnchanged('health_record', snapshot, AppDatabase.healthFields(h));
       }
     }
   }
@@ -538,6 +543,7 @@ export class SyncEngine {
     const items: VaccineRecord[] = await AppDatabase.shared.fetchVaccines();
     for (const v of items) {
       if (!SyncEngine.isDirty(v.syncState)) continue;
+      const snapshot = AppDatabase.vaccineFields(v);
       const body: Record<string, Object> = {
         'vaccineName': v.vaccineName, 'injectedAt': new Date(v.injectedAt).toISOString(),
         'sourceRaw': v.source, 'createdAt': new Date(v.createdAt).toISOString()
@@ -555,12 +561,12 @@ export class SyncEngine {
           SyncEngine.applyVaccine(saved, v);
           v.remoteId = SyncEngine.rStr(saved, 'id');
           v.syncState = SyncState.synced;
-          await AppDatabase.shared.insertVaccine(v);
+          await AppDatabase.shared.updateFieldsIfUnchanged('vaccine_record', snapshot, AppDatabase.vaccineFields(v));
           continue;
         }
         v.remoteId = saved['id'] as string;
         v.syncState = SyncState.synced;
-        await AppDatabase.shared.insertVaccine(v);
+        await AppDatabase.shared.updateFieldsIfUnchanged('vaccine_record', snapshot, AppDatabase.vaccineFields(v));
       } catch (e) {
         if (SyncEngine.isMissingOptionalCollectionError(e, 'vaccinerecords')) {
           try {
@@ -568,14 +574,14 @@ export class SyncEngine {
             v.remoteId = saved['id'] as string;
             v.source = 'health-fallback';
             v.syncState = SyncState.synced;
-            await AppDatabase.shared.insertVaccine(v);
+            await AppDatabase.shared.updateFieldsIfUnchanged('vaccine_record', snapshot, AppDatabase.vaccineFields(v));
           } catch (fallbackError) {
             v.syncState = SyncState.failed;
-            await AppDatabase.shared.insertVaccine(v);
+            await AppDatabase.shared.updateFieldsIfUnchanged('vaccine_record', snapshot, AppDatabase.vaccineFields(v));
           }
         } else {
           v.syncState = SyncState.failed;
-          await AppDatabase.shared.insertVaccine(v);
+          await AppDatabase.shared.updateFieldsIfUnchanged('vaccine_record', snapshot, AppDatabase.vaccineFields(v));
         }
       }
     }
@@ -586,6 +592,7 @@ export class SyncEngine {
     const items: GrowthMeasurement[] = await AppDatabase.shared.fetchGrowth();
     for (const g of items) {
       if (!SyncEngine.isDirty(g.syncState)) continue;
+      const snapshot = AppDatabase.growthFields(g);
       const body: Record<string, Object> = {
         'measuredAt': new Date(g.measuredAt).toISOString(),
         'sourceRaw': g.source, 'createdAt': new Date(g.createdAt).toISOString()
@@ -601,12 +608,12 @@ export class SyncEngine {
           SyncEngine.applyGrowth(saved, g);
           g.remoteId = SyncEngine.rStr(saved, 'id');
           g.syncState = SyncState.synced;
-          await AppDatabase.shared.insertGrowth(g);
+          await AppDatabase.shared.updateFieldsIfUnchanged('growth_measurement', snapshot, AppDatabase.growthFields(g));
           continue;
         }
         g.remoteId = saved['id'] as string;
         g.syncState = SyncState.synced;
-        await AppDatabase.shared.insertGrowth(g);
+        await AppDatabase.shared.updateFieldsIfUnchanged('growth_measurement', snapshot, AppDatabase.growthFields(g));
       } catch (e) {
         if (SyncEngine.isMissingOptionalCollectionError(e, 'growthmeasurements')) {
           try {
@@ -614,14 +621,14 @@ export class SyncEngine {
             g.remoteId = saved['id'] as string;
             g.source = 'health-fallback';
             g.syncState = SyncState.synced;
-            await AppDatabase.shared.insertGrowth(g);
+            await AppDatabase.shared.updateFieldsIfUnchanged('growth_measurement', snapshot, AppDatabase.growthFields(g));
           } catch (fallbackError) {
             g.syncState = SyncState.failed;
-            await AppDatabase.shared.insertGrowth(g);
+            await AppDatabase.shared.updateFieldsIfUnchanged('growth_measurement', snapshot, AppDatabase.growthFields(g));
           }
         } else {
           g.syncState = SyncState.failed;
-          await AppDatabase.shared.insertGrowth(g);
+          await AppDatabase.shared.updateFieldsIfUnchanged('growth_measurement', snapshot, AppDatabase.growthFields(g));
         }
       }
     }
@@ -635,6 +642,7 @@ export class SyncEngine {
       const comments: Comment[] = await AppDatabase.shared.fetchCommentsForEntry(e.id);
       for (const c of comments) {
         if (!SyncEngine.isDirty(c.syncState)) continue;
+        const snapshot = AppDatabase.commentFields(c);
         const body: Record<string, Object> = {
           'entryLocalId': c.entryId, 'authorRole': c.authorRole,
           'voiceDuration': c.voiceDuration, 'voiceWaveform': c.voiceWaveform,
@@ -647,7 +655,7 @@ export class SyncEngine {
             SyncEngine.applyComment(saved, c);
             c.remoteId = SyncEngine.rStr(saved, 'id');
             c.syncState = SyncState.synced;
-            await AppDatabase.shared.insertComment(c);
+            await AppDatabase.shared.updateFieldsIfUnchanged('comment', snapshot, AppDatabase.commentFields(c));
             continue;
           }
           c.remoteId = saved['id'] as string;
@@ -664,10 +672,10 @@ export class SyncEngine {
             c.remoteURL = APIClient.shared.fileURL('comments', res.recordId, res.storedFileName);
           }
           c.syncState = SyncState.synced;
-          await AppDatabase.shared.insertComment(c);
+          await AppDatabase.shared.updateFieldsIfUnchanged('comment', snapshot, AppDatabase.commentFields(c));
         } catch (err) {
           c.syncState = SyncState.failed;
-          await AppDatabase.shared.insertComment(c);
+          await AppDatabase.shared.updateFieldsIfUnchanged('comment', snapshot, AppDatabase.commentFields(c));
         }
       }
     }
@@ -680,6 +688,7 @@ export class SyncEngine {
       const notes: VoiceNote[] = await AppDatabase.shared.fetchVoiceForEntry(e.id);
       for (const n of notes) {
         if (!SyncEngine.isDirty(n.syncState)) continue;
+        const snapshot = AppDatabase.voiceNoteFields(n);
         const body: Record<string, Object> = {
           'entryLocalId': n.entryId, 'authorRole': n.authorRole,
           'durationSeconds': n.durationSeconds, 'waveform': n.waveformSamples,
@@ -692,7 +701,7 @@ export class SyncEngine {
             SyncEngine.applyVoiceNote(saved, n);
             n.remoteId = SyncEngine.rStr(saved, 'id');
             n.syncState = SyncState.synced;
-            await AppDatabase.shared.insertVoiceNote(n);
+            await AppDatabase.shared.updateFieldsIfUnchanged('voice_note', snapshot, AppDatabase.voiceNoteFields(n));
             continue;
           }
           n.remoteId = saved['id'] as string;
@@ -709,10 +718,10 @@ export class SyncEngine {
             n.remoteURL = APIClient.shared.fileURL('voicenotes', res.recordId, res.storedFileName);
           }
           n.syncState = SyncState.synced;
-          await this.replaceVoiceNote(n);
+          await AppDatabase.shared.updateFieldsIfUnchanged('voice_note', snapshot, AppDatabase.voiceNoteFields(n));
         } catch (err) {
           n.syncState = SyncState.failed;
-          await this.replaceVoiceNote(n);
+          await AppDatabase.shared.updateFieldsIfUnchanged('voice_note', snapshot, AppDatabase.voiceNoteFields(n));
         }
       }
     }
@@ -727,6 +736,7 @@ export class SyncEngine {
     const memos: VoiceMemo[] = await AppDatabase.shared.fetchVoiceMemos();
     for (const memo of memos) {
       if (!SyncEngine.isDirty(memo.syncState)) continue;
+      const snapshot = AppDatabase.voiceMemoFields(memo);
       const body: Record<string, Object> = {
         'kind': memo.kindRaw,
         'recordedAt': new Date(memo.recordedAt).toISOString(),
@@ -741,7 +751,7 @@ export class SyncEngine {
           SyncEngine.applyVoiceMemo(saved, memo);
           memo.remoteId = SyncEngine.rStr(saved, 'id');
           memo.syncState = SyncState.synced;
-          await AppDatabase.shared.insertVoiceMemo(memo);
+          await AppDatabase.shared.updateFieldsIfUnchanged('voice_memo', snapshot, AppDatabase.voiceMemoFields(memo));
           continue;
         }
         memo.remoteId = saved['id'] as string;
@@ -762,7 +772,7 @@ export class SyncEngine {
         memo.syncState = SyncState.failed;
         hilog.warn(DOMAIN, 'Bubu', `同步成长之声失败 ${memo.id}: ${SyncEngine.errorText(e)}`);
       }
-      await AppDatabase.shared.insertVoiceMemo(memo);
+      await AppDatabase.shared.updateFieldsIfUnchanged('voice_memo', snapshot, AppDatabase.voiceMemoFields(memo));
     }
   }
 
@@ -776,16 +786,20 @@ export class SyncEngine {
   }
 
   private async pushMediaItem(m: Media): Promise<void> {
+    const snapshot = AppDatabase.mediaFields(m);
     if (m.localFileName === undefined) {
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: '本机媒体文件名缺失' });
+      await AppDatabase.shared.updateFieldsIfUnchanged('media', snapshot, { syncState: SyncState.failed, syncFailureReason: '本机媒体文件名缺失' });
       return;
     }
     const fileName = m.localFileName;
     if (!MediaStore.shared.exists(fileName)) {
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: '本机媒体文件不存在' });
+      await AppDatabase.shared.updateFieldsIfUnchanged('media', snapshot, { syncState: SyncState.failed, syncFailureReason: '本机媒体文件不存在' });
       return;
     }
-    await this.updateMediaFields(m.id, { syncState: SyncState.uploading, syncFailureReason: '' });
+    if (!await AppDatabase.shared.updateFieldsIfUnchanged('media', snapshot,
+      { syncState: SyncState.uploading, syncFailureReason: '' })) return;
+    snapshot['syncState'] = SyncState.uploading;
+    snapshot['syncFailureReason'] = '';
     const filePath = MediaStore.shared.fullPath(fileName);
     const fields: Record<string, string> = {
       'entryLocalId': m.entryId, 'mediaType': m.typeRaw,
@@ -803,7 +817,7 @@ export class SyncEngine {
     try {
       const res: UploadedFileResult = await APIClient.shared.uploadFile(
         'media', m.id, fields, 'file', filePath, fileName,
-        (fraction: number): void => { this.updateMediaFields(m.id, { uploadProgress: fraction }); },
+        (fraction: number): void => { this.updateMediaProgressIfUnchanged(snapshot, fraction); },
         hasThumb ? 'thumbnail' : undefined,
         hasThumb ? thumbPath : undefined,
         hasThumb ? thumbName : undefined);
@@ -815,13 +829,21 @@ export class SyncEngine {
         syncState: SyncState.synced, syncFailureReason: ''
       };
       if (remoteThumbURL !== undefined) completed['remoteThumbURL'] = remoteThumbURL;
-      await this.updateMediaFields(m.id, completed);
+      await AppDatabase.shared.updateFieldsIfUnchanged('media', snapshot, completed);
     } catch (e) {
       const size = MediaStore.shared.fileSizeForMedia(fileName) ?? 0;
       const reason = size > MediaStore.publicUploadSoftLimitBytes
         ? '大视频原片尚未上传成功，原片已保留并会继续重试，绝不以压缩代理冒充完整同步'
         : SyncEngine.errorText(e);
-      await this.updateMediaFields(m.id, { syncState: SyncState.failed, syncFailureReason: reason });
+      await AppDatabase.shared.updateFieldsIfUnchanged('media', snapshot, { syncState: SyncState.failed, syncFailureReason: reason });
+    }
+  }
+
+  private async updateMediaProgressIfUnchanged(snapshot: relationalStore.ValuesBucket, fraction: number): Promise<void> {
+    try {
+      await AppDatabase.shared.updateFieldsIfUnchanged('media', snapshot, { uploadProgress: fraction });
+    } catch (e) {
+      hilog.warn(DOMAIN, 'Bubu', '媒体上传进度暂未保存');
     }
   }
 
@@ -841,6 +863,7 @@ export class SyncEngine {
     const items: TimeCapsule[] = await AppDatabase.shared.fetchCapsules();
     for (const c of items) {
       if (!SyncEngine.isDirty(c.syncState)) continue;
+      const snapshot = AppDatabase.capsuleFields(c);
       const body: Record<string, Object> = {
         'title': c.title, 'fromRole': c.fromRole, 'unlockAt': new Date(c.unlockAt).toISOString(),
         'isLocked': c.isLocked, 'createdAt': new Date(c.createdAt).toISOString()
@@ -853,7 +876,7 @@ export class SyncEngine {
           SyncEngine.applyCapsule(saved, c);
           c.remoteId = SyncEngine.rStr(saved, 'id');
           c.syncState = SyncState.synced;
-          await AppDatabase.shared.insertCapsule(c);
+          await AppDatabase.shared.updateFieldsIfUnchanged('time_capsule', snapshot, AppDatabase.capsuleFields(c));
           continue;
         }
         c.remoteId = saved['id'] as string;
@@ -871,10 +894,10 @@ export class SyncEngine {
           c.remoteId = res.recordId;
         }
         c.syncState = SyncState.synced;
-        await this.replaceCapsule(c);
+        await AppDatabase.shared.updateFieldsIfUnchanged('time_capsule', snapshot, AppDatabase.capsuleFields(c));
       } catch (e) {
         c.syncState = SyncState.failed;
-        await this.replaceCapsule(c);
+        await AppDatabase.shared.updateFieldsIfUnchanged('time_capsule', snapshot, AppDatabase.capsuleFields(c));
       }
     }
   }
@@ -932,7 +955,7 @@ export class SyncEngine {
         if (await merge(r) === false) fullyMerged = false;
         maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(r, 'updated'));
       }
-      await this.removeRemoteTombstones(collection, tombstones);
+      if (!await this.removeRemoteTombstones(collection, tombstones)) fullyMerged = false;
       for (const tombstone of tombstones) {
         maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(tombstone, 'updated'));
       }
@@ -961,19 +984,22 @@ export class SyncEngine {
   }
 
   private async removeRemoteTombstones(collection: string,
-                                       tombstones: Record<string, Object>[]): Promise<void> {
-    if (collection === 'members' || collection === 'childprofile') return;
+                                       tombstones: Record<string, Object>[]): Promise<boolean> {
+    if (collection === 'members' || collection === 'childprofile') return true;
+    let fullyRemoved = true;
     for (const tombstone of tombstones) {
       const localId = SyncEngine.recordLocalId(tombstone);
-      if (localId !== undefined) await this.removeSyncedLocal(collection, localId);
+      if (localId !== undefined && !await this.removeSyncedLocal(collection, localId)) fullyRemoved = false;
     }
+    return fullyRemoved;
   }
 
   // 远端删除只作用于已同步本地项；本机仍有未推改动时保留，随后由 pushLocal 收敛。
-  private async removeSyncedLocal(collection: string, localId: string): Promise<void> {
+  private async removeSyncedLocal(collection: string, localId: string): Promise<boolean> {
     if (collection === 'entries') {
       const entry = (await AppDatabase.shared.fetchEntries(true)).find((item: Entry): boolean => item.id === localId);
-      if (!entry || entry.syncState !== SyncState.synced) return;
+      if (!entry) return true;
+      if (entry.syncState !== SyncState.synced) return false;
       for (const media of await AppDatabase.shared.fetchMediaForEntry(localId)) {
         MediaStore.shared.deleteLocalFiles(media.localFileName, media.thumbnailFileName);
       }
@@ -985,80 +1011,91 @@ export class SyncEngine {
       }
       await AppDatabase.shared.deleteEntryHard(localId);
       await AppDatabase.shared.deleteFeedEventsForTarget(localId);
-      return;
+      return true;
     }
     if (collection === 'media') {
       const item = (await AppDatabase.shared.fetchAllMedia()).find((value: Media): boolean => value.id === localId);
-      if (!item || item.syncState !== SyncState.synced) return;
+      if (!item) return true;
+      if (item.syncState !== SyncState.synced) return false;
       MediaStore.shared.deleteLocalFiles(item.localFileName, item.thumbnailFileName);
       await AppDatabase.shared.deleteMedia(localId);
-      return;
+      return true;
     }
     if (collection === 'milestones') {
       const item = (await AppDatabase.shared.fetchMilestones()).find((value: Milestone): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteMilestone(localId);
-      return;
+      return true;
     }
     if (collection === 'firsttimes') {
       const item = (await AppDatabase.shared.fetchFirstTimes()).find((value: FirstTime): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteFirstTime(localId);
-      return;
+      return true;
     }
     if (collection === 'healthrecords') {
       const item = (await AppDatabase.shared.fetchHealth()).find((value: HealthRecord): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) {
         await AppDatabase.shared.deleteHealth(localId);
         await AppDatabase.shared.deleteFeedEventsForTarget(localId);
       }
-      return;
+      return true;
     }
     if (collection === 'vaccinerecords') {
       const item = (await AppDatabase.shared.fetchVaccines()).find((value: VaccineRecord): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteVaccine(localId);
-      return;
+      return true;
     }
     if (collection === 'growthmeasurements') {
       const item = (await AppDatabase.shared.fetchGrowth()).find((value: GrowthMeasurement): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteGrowth(localId);
-      return;
+      return true;
     }
     if (collection === 'comments') {
       for (const entry of await AppDatabase.shared.fetchEntries(true)) {
         const item = (await AppDatabase.shared.fetchCommentsForEntry(entry.id))
           .find((value: Comment): boolean => value.id === localId);
+        if (item && item.syncState !== SyncState.synced) return false;
         if (item?.syncState === SyncState.synced) {
           MediaStore.shared.deleteLocalFiles(item.voiceFileName);
           await AppDatabase.shared.deleteComment(localId);
         }
       }
-      return;
+      return true;
     }
     if (collection === 'voicenotes') {
       for (const entry of await AppDatabase.shared.fetchEntries(true)) {
         const item = (await AppDatabase.shared.fetchVoiceForEntry(entry.id))
           .find((value: VoiceNote): boolean => value.id === localId);
+        if (item && item.syncState !== SyncState.synced) return false;
         if (item?.syncState === SyncState.synced) {
           MediaStore.shared.deleteLocalFiles(item.localFileName);
           await AppDatabase.shared.deleteVoiceNote(localId);
         }
       }
-      return;
+      return true;
     }
     if (collection === 'voicememos') {
       const item = (await AppDatabase.shared.fetchVoiceMemos()).find((value: VoiceMemo): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) {
         MediaStore.shared.deleteLocalFiles(item.localFileName);
         await AppDatabase.shared.deleteVoiceMemo(localId);
       }
-      return;
+      return true;
     }
     if (collection === 'timecapsules') {
       const item = (await AppDatabase.shared.fetchCapsules()).find((value: TimeCapsule): boolean => value.id === localId);
+      if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) {
         MediaStore.shared.deleteLocalFiles(item.encryptedBlobFileName);
         await AppDatabase.shared.deleteCapsule(localId);
       }
     }
+    return true;
   }
 
   private async pruneLocalToServerMirror(): Promise<void> {
@@ -2085,11 +2122,11 @@ export class SyncEngine {
   }
 
   private async ensureLocalCapsuleBlob(c: TimeCapsule, r: Record<string, Object>): Promise<void> {
+    const snapshot = AppDatabase.capsuleFields(c);
     if (c.encryptedBlobFileName !== undefined && MediaStore.shared.exists(c.encryptedBlobFileName)) {
       const version = CapsuleVault.shared.validateVersion(c.encryptedBlobFileName, c.cryptoVersion ?? 0);
       if (version > (c.cryptoVersion ?? 0)) {
-        c.cryptoVersion = version;
-        await this.replaceCapsule(c);
+        await AppDatabase.shared.updateFieldsIfUnchanged('time_capsule', snapshot, { cryptoVersion: version });
       }
       return;
     }
@@ -2100,9 +2137,9 @@ export class SyncEngine {
       const destPath = MediaStore.shared.fullPath(fileName);
       await APIClient.shared.downloadFile(remoteURL, destPath);
       const version = CapsuleVault.shared.validateVersion(fileName, c.cryptoVersion ?? 0);
-      c.cryptoVersion = rememberCapsuleVersion(c.cryptoVersion, version);
-      c.encryptedBlobFileName = fileName;
-      await this.replaceCapsule(c);
+      await AppDatabase.shared.updateFieldsIfUnchanged('time_capsule', snapshot, {
+        cryptoVersion: rememberCapsuleVersion(c.cryptoVersion, version), encryptedBlobFileName: fileName
+      });
     } catch (e) {
       hilog.warn(DOMAIN, 'Bubu', '下载时间胶囊载荷失败，下轮重试');
     }
@@ -2126,7 +2163,8 @@ export class SyncEngine {
         const ext = SyncEngine.extFromURL(m.remoteThumbURL) ?? 'jpg';
         const thumbName = existingThumb ?? `thumb_${m.id}.${ext}`;
         await APIClient.shared.downloadFile(m.remoteThumbURL, MediaStore.shared.thumbnailPath(thumbName));
-        await this.updateMediaFields(m.id, { thumbnailFileName: thumbName });
+        if (await AppDatabase.shared.updateFieldsIfUnchanged('media', AppDatabase.mediaFields(m),
+          { thumbnailFileName: thumbName })) m.thumbnailFileName = thumbName;
       } catch (e) {
         hilog.warn(DOMAIN, 'Bubu', `下载缩略图失败 ${m.id}: ${SyncEngine.errorText(e)}`);
       }
@@ -2158,8 +2196,8 @@ export class SyncEngine {
         }
         try { if (fileIo.accessSync(destPath)) fileIo.unlinkSync(destPath); } catch (cleanupError) {}
         fileIo.renameSync(tempPath, destPath);
-        await this.updateMediaFields(m.id, { localFileName: fileName });
-        mediaDone += 1;
+        if (await AppDatabase.shared.updateFieldsIfUnchanged('media', AppDatabase.mediaFields(m),
+          { localFileName: fileName })) mediaDone += 1;
       } catch (e) {
         // 缺失文件下载失败属瞬时可自愈，下轮继续补拉（对照 iOS softFailure）。
         mediaFailed += 1;
@@ -2186,9 +2224,8 @@ export class SyncEngine {
           const fileName = (existingName !== undefined && existingName.length > 0) ? existingName : `voice_${n.id}.m4a`;
           const destPath = MediaStore.shared.fullPath(fileName);
           await APIClient.shared.downloadFile(n.remoteURL, destPath);
-          n.localFileName = fileName;
-          await this.replaceVoiceNote(n);
-          voiceDone += 1;
+          if (await AppDatabase.shared.updateFieldsIfUnchanged('voice_note', AppDatabase.voiceNoteFields(n),
+            { localFileName: fileName })) voiceDone += 1;
         } catch (err) {
           voiceFailed += 1;
           hilog.warn(DOMAIN, 'Bubu', `下载记录语音失败 ${n.id}: ${SyncEngine.errorText(err)}`);
@@ -2212,9 +2249,8 @@ export class SyncEngine {
         const fileName = (existingName !== undefined && existingName.length > 0)
           ? existingName : `memo_${memo.id}.m4a`;
         await APIClient.shared.downloadFile(memo.remoteURL, MediaStore.shared.fullPath(fileName));
-        memo.localFileName = fileName;
-        await AppDatabase.shared.insertVoiceMemo(memo);
-        memoDone += 1;
+        if (await AppDatabase.shared.updateFieldsIfUnchanged('voice_memo', AppDatabase.voiceMemoFields(memo),
+          { localFileName: fileName })) memoDone += 1;
       } catch (e) {
         memoFailed += 1;
         hilog.warn(DOMAIN, 'Bubu', `下载成长之声失败 ${memo.id}: ${SyncEngine.errorText(e)}`);
@@ -2239,9 +2275,8 @@ export class SyncEngine {
           const fileName = (existingName !== undefined && existingName.length > 0) ? existingName : `comment_${c.id}.m4a`;
           const destPath = MediaStore.shared.fullPath(fileName);
           await APIClient.shared.downloadFile(c.remoteURL, destPath);
-          c.voiceFileName = fileName;
-          await this.replaceComment(c);
-          commentVoiceDone += 1;
+          if (await AppDatabase.shared.updateFieldsIfUnchanged('comment', AppDatabase.commentFields(c),
+            { voiceFileName: fileName })) commentVoiceDone += 1;
         } catch (err) {
           commentVoiceFailed += 1;
           hilog.warn(DOMAIN, 'Bubu', `下载评论语音失败 ${c.id}: ${SyncEngine.errorText(err)}`);
@@ -2262,8 +2297,8 @@ export class SyncEngine {
         const fileName = (existingAvatar !== undefined && existingAvatar.length > 0) ? existingAvatar : `avatar_${profile.id}.${ext}`;
         const destPath = MediaStore.shared.fullPath(fileName);
         await APIClient.shared.downloadFile(profile.avatarRemoteURL, destPath);
-        profile.avatarMediaFileName = fileName;
-        await AppDatabase.shared.upsertChildProfile(profile);
+        await AppDatabase.shared.updateFieldsIfUnchanged('child_profile', AppDatabase.childProfileFields(profile),
+          { avatarMediaFileName: fileName });
       } catch (e) {
         hilog.warn(DOMAIN, 'Bubu', `下载头像失败 ${profile.id}: ${SyncEngine.errorText(e)}`);
       }

@@ -85,7 +85,7 @@ jobs:
 
       # 单元测试与 UI 测试分开跑：UI 用例在共享 runner 上会因为 "Lost connection to the application"
       # 偶发抖动（2026-09-12 两次都是同一条用例），和 iPad 一样失败后重跑一次；单元测试不重跑。
-      - name: Build & unit test (iPhone)
+      - name: Clean build for testing (iPhone)
         run: |
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
@@ -95,9 +95,22 @@ jobs:
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.iphone }}" \
             -skip-testing:BubuTimeMachineUITests \
-            clean test 2>&1 | tee /tmp/build-iphone.log
+            clean build-for-testing 2>&1 | tee /tmp/build-iphone.log
+
+      - name: Unit tests (iPhone)
+        run: |
+          set -o pipefail
+          xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
+            -scheme BubuTimeMachine \
+            -parallel-testing-enabled NO \
+            -destination "id=${{ steps.sim.outputs.iphone }}" \
+            -skip-testing:BubuTimeMachineUITests \
+            test-without-building 2>&1 | tee /tmp/unit-iphone.log
 
       - name: Prepare synthetic PhotosPicker assets
+        timeout-minutes: 8
         run: |
           bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.iphone }}"
           if [ -n "${{ steps.sim.outputs.ipad }}" ]; then
@@ -172,10 +185,10 @@ jobs:
       - name: Build and test failure details
         if: failure()
         run: |
-          for log in /tmp/build-iphone.log /tmp/iphone-ui.log /tmp/ipad.log; do
+          for log in /tmp/build-iphone.log /tmp/unit-iphone.log /tmp/iphone-ui.log /tmp/ipad.log; do
             if [ -f "$log" ]; then
               echo "=== $log ==="
-              grep -E "error:|XCTAssert|Failing tests|Test Case .* failed" "$log" | tail -100 || true
+              grep -E "error:|XCTAssert|Failing tests|Test Case .* failed|Stack dump|While evaluating request|While emitting IR|Command SwiftCompile failed" "$log" | tail -100 || true
             fi
           done
 

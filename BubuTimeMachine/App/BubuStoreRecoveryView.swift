@@ -48,7 +48,7 @@ struct BubuStoreRecoveryView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    row("1", "先把数据导出来", "生成一个压缩包，发给自己存好。这是最重要的一步。")
+                    row("1", "先把数据库导出来", "保存数据库和迁移保护文件的压缩包；不包含照片、视频、录音等媒体原文件。")
                     row("2", "再试一次", "完全退出 App 再打开。临时占用导致的失败重启就好了。")
                     row("3", "还是不行就找回来", "保留导出的压缩包，请熟悉数据库恢复的人协助检查；旧版本不一定能打开升级后的数据库。")
                 }
@@ -62,7 +62,7 @@ struct BubuStoreRecoveryView: View {
                 } label: {
                     HStack(spacing: 8) {
                         if exporting { ProgressView().tint(.white) }
-                        Text(exporting ? "正在打包…" : "导出数据（推荐先做）")
+                        Text(exporting ? "正在打包…" : "导出数据库（推荐先做）")
                             .font(BubuTheme.Font.headline.weight(.bold))
                     }
                     .foregroundStyle(.white)
@@ -126,83 +126,177 @@ struct BubuStoreRecoveryView: View {
         }
     }
 
-    /// 把 store 三件套 + 迁移备份目录清单打包成 zip 交给系统分享。
-    /// 不解析、不修复——只是原样搬出来，越少动越好。
+    /// 只复制数据库及迁移保护材料，不打开或修复源数据库，也不导出媒体原文件。
     @MainActor
     private func exportStore() async {
         exporting = true
         exportError = nil
+        shareURL = nil
         defer { exporting = false }
 
         let source = BubuStorage.storeURL
+        let legacyDocuments = BubuStorage.legacyDocumentsURL
+        let legacyApplicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let stamp = StoreBackupStamp.now()
         let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("布布数据库备份_\(stamp)", isDirectory: true)
+            .appendingPathComponent("布布数据库备份_\(stamp)_\(UUID().uuidString)", isDirectory: true)
 
         do {
             let result = try await Task.detached(priority: .userInitiated) { () -> URL in
-                let fm = FileManager.default
-                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-                var copied = false
-                for suffix in ["", "-wal", "-shm"] {
-                    let src = URL(fileURLWithPath: source.path + suffix)
-                    guard fm.fileExists(atPath: src.path) else { continue }
-                    try fm.copyItem(at: src, to: folder.appendingPathComponent(src.lastPathComponent))
-                    copied = true
-                }
-                // A failed upgrade may leave the useful original only in its protection folder.
-                // Export those materials even when the active store itself is absent.
-                for name in ["Documents/UpgradeBackups", "MigrationBackups"] {
-                    let src = source.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
-                    guard fm.fileExists(atPath: src.path) else { continue }
-                    let dst = folder.appendingPathComponent(name, isDirectory: true)
-                    try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try fm.copyItem(at: src, to: dst)
-                    copied = true
-                }
-                guard copied else { throw CocoaError(.fileNoSuchFile) }
-                let readme = """
-                布布时光机 · 数据库原样备份
-                导出时间：\(stamp)
-
-                这是 SwiftData / SQLite 数据库文件本体，未做任何解析或修复。
-                .store 是主文件，-wal 与 -shm 是日志与共享内存，三个一起才完整，请勿单独删除。
-
-                如有 UpgradeBackups / MigrationBackups，它们是历史保护材料，并不保证包含最新记录。
-                导出不等于已验证可恢复。请保留全部文件，请熟悉 SwiftData / SQLite 的人先检查副本，
-                不要直接覆盖当前数据库；旧版本 App 不一定能打开升级后的数据。
-                """
-                try readme.write(to: folder.appendingPathComponent("请先读我.txt"),
-                                 atomically: true, encoding: .utf8)
+                try BubuStoreRecoveryPackage.prepare(
+                    activeStore: source, legacyDocuments: legacyDocuments,
+                    legacyApplicationSupport: legacyApplicationSupport,
+                    destination: folder, stamp: stamp)
+                defer { try? FileManager.default.removeItem(at: folder) }
                 return try Self.zip(folder: folder)
             }.value
-            try? FileManager.default.removeItem(at: folder)
             BubuHaptics.success()
             shareURL = result
         } catch {
-            try? FileManager.default.removeItem(at: folder)
-            exportError = "导出失败：\(error.localizedDescription)。可以在「文件」App 里找到布布时光机的文件夹手动拷贝。"
+            exportError = "导出失败：\(error.localizedDescription)。请勿卸载 App 或清理文件，先保留现有数据再安排检查。"
         }
     }
 
-    /// 与 ExportView 同款：系统 ditto 压缩，沙盒内可用，不引第三方。
+    /// 由系统文件协调器创建归档；仅发布完整压缩包，重试不覆盖已有导出。
     nonisolated private static func zip(folder: URL) throws -> URL {
-        let zipURL = folder.deletingPathExtension().appendingPathExtension("zip")
-        try? FileManager.default.removeItem(at: zipURL)
+        let fm = FileManager.default
+        let zipURL = folder.appendingPathExtension("zip")
+        let stagedZip = folder.appendingPathExtension("\(UUID().uuidString).zip-partial")
+        defer { try? fm.removeItem(at: stagedZip) }
         let coordinator = NSFileCoordinator()
         var coordError: NSError?
-        var result: URL?
         var thrown: Error?
+        var copied = false
         coordinator.coordinate(readingItemAt: folder, options: [.forUploading], error: &coordError) { tmpURL in
             do {
-                try FileManager.default.moveItem(at: tmpURL, to: zipURL)
-                result = zipURL
+                try fm.copyItem(at: tmpURL, to: stagedZip)
+                copied = true
             } catch { thrown = error }
         }
         if let coordError { throw coordError }
         if let thrown { throw thrown }
-        guard let result else { throw CocoaError(.fileWriteUnknown) }
-        return result
+        guard copied else { throw CocoaError(.fileWriteUnknown) }
+        try fm.moveItem(at: stagedZip, to: zipURL)
+        return zipURL
+    }
+}
+
+/// Injectable, copy-only packaging so recovery can be tested without touching installed stores.
+/// A failed copy never publishes a partial package. No source is opened with SQLite/SwiftData.
+nonisolated enum BubuStoreRecoveryPackage {
+    enum PackageError: LocalizedError, Equatable {
+        case noDatabaseFiles, unsafeDestination, unsupportedSource
+
+        var errorDescription: String? {
+            switch self {
+            case .noDatabaseFiles: "没有找到可导出的非空数据库或 WAL 文件"
+            case .unsafeDestination: "导出位置已存在或与源文件目录重叠"
+            case .unsupportedSource: "数据库保护材料中存在非普通文件，无法安全打包"
+            }
+        }
+    }
+
+    @discardableResult
+    static func prepare(activeStore: URL, legacyDocuments: URL,
+                        legacyApplicationSupport: URL, destination: URL,
+                        stamp: String,
+                        copyFile: (URL, URL) throws -> Void = { try FileManager.default.copyItem(at: $0, to: $1) }) throws -> Int {
+        let fm = FileManager.default
+        let roots = [activeStore.deletingLastPathComponent(), legacyDocuments, legacyApplicationSupport]
+        let output = destination.resolvingSymlinksInPath().standardizedFileURL.path
+        // Never create output within a source tree or remove a caller's pre-existing directory.
+        guard try attributesIfPresent(destination) == nil,
+              !roots.contains(where: {
+                  let path = $0.resolvingSymlinksInPath().standardizedFileURL.path
+                  return output == path || output.hasPrefix(path.hasSuffix("/") ? path : path + "/")
+              }) else { throw PackageError.unsafeDestination }
+        try fm.createDirectory(at: destination, withIntermediateDirectories: false)
+        var complete = false
+        defer { if !complete { try? fm.removeItem(at: destination) } }
+
+        var databaseFiles = 0
+        var seenStores = Set<URL>()
+        let stores: [(URL, String)] = [
+            (activeStore, ""),
+            (legacyDocuments.appendingPathComponent(BubuStorage.storeFileName), "LegacyDocuments"),
+            (legacyApplicationSupport.appendingPathComponent("default.store"), "LegacyApplicationSupport")
+        ]
+        for (store, namespace) in stores {
+            guard seenStores.insert(store.resolvingSymlinksInPath().standardizedFileURL).inserted else { continue }
+            let target = namespace.isEmpty ? destination : destination.appendingPathComponent(namespace)
+            for suffix in ["", "-wal", "-shm"] {
+                let source = URL(fileURLWithPath: store.path + suffix)
+                guard let attributes = try attributesIfPresent(source) else { continue }
+                try fm.createDirectory(at: target, withIntermediateDirectories: true)
+                databaseFiles += try copy(source, to: target.appendingPathComponent(source.lastPathComponent),
+                                          attributes: attributes, allowDirectory: false, copyFile: copyFile)
+            }
+        }
+        for name in ["Documents/UpgradeBackups", "MigrationBackups"] {
+            let source = activeStore.deletingLastPathComponent().appendingPathComponent(name)
+            guard let attributes = try attributesIfPresent(source) else { continue }
+            let target = destination.appendingPathComponent(name)
+            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            databaseFiles += try copy(source, to: target, attributes: attributes, allowDirectory: true, copyFile: copyFile)
+        }
+        // Locks, manifests, empty directories, checksums and SHM alone are not database content.
+        // Damaged stores and orphan WALs are still useful recovery material; do not try to open them.
+        guard databaseFiles > 0 else { throw PackageError.noDatabaseFiles }
+        let readme = """
+        布布时光机 · 数据库原样备份
+        导出时间：\(stamp)
+        包含 \(databaseFiles) 个非空数据库 / WAL 文件（未验证内容）。
+
+        这是 SwiftData / SQLite 数据库及迁移保护文件的原样副本，未做解析或修复。
+        本包不包含照片、视频、录音等媒体原文件，也不是完整的 App 备份。
+        保留找到的 .store、-wal、-shm；请将同一目录的文件一起保留，不要混配不同来源。
+
+        根目录：当前数据库；LegacyDocuments：旧 Documents 数据库；
+        LegacyApplicationSupport：旧 Application Support 数据库。
+        如有 UpgradeBackups / MigrationBackups，它们是历史保护材料，不保证包含最新记录。
+        复制期间数据库可能变化，导出不代表文件相互一致或已验证可恢复。
+        请熟悉 SwiftData / SQLite 的人先检查副本，不要直接覆盖当前数据库；
+        旧版本 App 不一定能打开升级后的数据。
+        """
+        try readme.write(to: destination.appendingPathComponent("请先读我.txt"), atomically: true, encoding: .utf8)
+        complete = true
+        return databaseFiles
+    }
+
+    private static func attributesIfPresent(_ url: URL) throws -> [FileAttributeKey: Any]? {
+        do { return try FileManager.default.attributesOfItem(atPath: url.path) }
+        catch {
+            let error = error as NSError
+            if error.domain == NSCocoaErrorDomain,
+               error.code == CocoaError.Code.fileNoSuchFile.rawValue || error.code == CocoaError.Code.fileReadNoSuchFile.rawValue {
+                return nil
+            }
+            throw error
+        }
+    }
+
+    private static func copy(_ source: URL, to destination: URL,
+                             attributes: [FileAttributeKey: Any], allowDirectory: Bool,
+                             copyFile: (URL, URL) throws -> Void) throws -> Int {
+        let fm = FileManager.default
+        let type = attributes[.type] as? FileAttributeType
+        if type == .typeDirectory, allowDirectory {
+            try fm.createDirectory(at: destination, withIntermediateDirectories: false)
+            var count = 0
+            for child in try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
+                let childAttributes = try fm.attributesOfItem(atPath: child.path)
+                count += try copy(child, to: destination.appendingPathComponent(child.lastPathComponent),
+                                  attributes: childAttributes, allowDirectory: true, copyFile: copyFile)
+            }
+            return count
+        }
+        // Symlinks must not pull unrelated data into a recovery export or count as a database.
+        guard type == .typeRegular else { throw PackageError.unsupportedSource }
+        try copyFile(source, destination)
+        let copiedSize = (try fm.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let name = destination.lastPathComponent
+        return copiedSize > 0 && (name.hasSuffix(".store") || name.hasSuffix(".store-wal")) ? 1 : 0
     }
 }
 

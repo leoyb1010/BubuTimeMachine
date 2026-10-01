@@ -143,6 +143,7 @@ struct BubuTimeMachineApp: App {
                     }
                     // 每次场景出现都要做的：手表上下文注入 + 小组件快照 + 消费待办 + 推手表快照。
                     WatchConnectivityManager.shared.appContext = modelContainer.mainContext
+                    NotificationReplyHandler.shared.retryPendingReplies()
                     WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                     pushWatchSnapshot()
@@ -155,6 +156,7 @@ struct BubuTimeMachineApp: App {
             case .active:
                 guard !BubuStoreHealth.loadFailed else { return }
                 env.syncEngine.start()
+                NotificationReplyHandler.shared.retryPendingReplies()
                 WatchConnectivityManager.shared.retryPendingVoiceImports()   // 进前台重试手表语音应急导入（W-P1-3）
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                 pushWatchSnapshot()

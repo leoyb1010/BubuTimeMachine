@@ -146,7 +146,7 @@ struct EntryDetailView: View {
         }
         .onChange(of: appendPick) { _, items in Task { await appendMedia(items) } }
         // 编辑态直接左滑返回（没点「完成」）：改动已实时写进 entry（绑定即改即生效），
-        // 必须补一次标脏+保存+同步，否则永不推送、下轮拉取还会被远端覆盖回旧值。
+        // 绑定 setter 已即时标脏；离开时补一次保存和同步。
         .onDisappear {
             if editing {
                 markEntryDirty()
@@ -328,9 +328,9 @@ struct EntryDetailView: View {
     private var metaSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             if editing {
-                DatePicker("发生时间", selection: $entry.happenedAt, displayedComponents: [.date, .hourAndMinute])
+                DatePicker("发生时间", selection: Self.editingBinding(for: entry, \.happenedAt), displayedComponents: [.date, .hourAndMinute])
                     .font(BubuTheme.Font.body)
-                MoodPicker(selection: $entry.mood, tint: theme)
+                MoodPicker(selection: Self.editingBinding(for: entry, \.mood), tint: theme)
                 Toggle(isOn: locationBinding) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("保存地点")
@@ -373,9 +373,7 @@ struct EntryDetailView: View {
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             if editing {
-                TextField("此刻的布布……", text: Binding(
-                    get: { entry.note ?? "" },
-                    set: { entry.note = $0.isEmpty ? nil : $0 }), axis: .vertical)
+                TextField("此刻的布布……", text: Self.noteBinding(for: entry), axis: .vertical)
                     .font(BubuTheme.Font.body)
                     .lineLimit(3...8)
                     .padding()
@@ -596,6 +594,25 @@ struct EntryDetailView: View {
         try? context.save()
         refreshWidgets()
         env.syncEngine.syncNow()
+    }
+
+    // 用户每次修改都立即标脏；仅更新内存元数据，不逐字保存、刷新小组件或触发同步。
+    // 否则上传刚结束到后续 pull 之间的输入会仍被当作 synced，远端旧值可覆盖正文。
+    static func editingBinding<Value: Equatable>(for entry: Entry,
+                                                 _ keyPath: ReferenceWritableKeyPath<Entry, Value>) -> Binding<Value> {
+        Binding(get: { entry[keyPath: keyPath] }, set: { value in
+            guard entry[keyPath: keyPath] != value else { return }
+            entry[keyPath: keyPath] = value
+            entry.editedAt = .now
+            entry.syncState = .local
+        })
+    }
+
+    static func noteBinding(for entry: Entry) -> Binding<String> {
+        let binding = editingBinding(for: entry, \.note)
+        return Binding(get: { binding.wrappedValue ?? "" }, set: {
+            binding.wrappedValue = $0.isEmpty ? nil : $0
+        })
     }
 
     private func markEntryDirty() {

@@ -255,3 +255,489 @@ struct SyncUploadCompletionTests {
         #expect(SyncEngine.uploadCompletionState(.synced) == .synced)
     }
 }
+
+// MARK: - 上传之后、拉取之前的即时编辑
+@MainActor
+struct EntryImmediateDirtyBindingTests {
+    private func uploadedEntry() -> (Entry, EntryDTO) {
+        let entry = Entry(authorRole: "audit", note: "已上传的内容")
+        let date = Date(timeIntervalSince1970: 1_000)
+        entry.createdAt = date
+        entry.editedAt = date
+        entry.happenedAt = date
+        entry.remoteId = "audit-entry"
+        entry.syncState = .synced
+        let remote = EntryDTO(id: entry.remoteId, localId: entry.id.uuidString,
+                              title: nil, note: entry.note, firstPersonNote: nil,
+                              happenedAt: date, locationName: nil, latitude: nil, longitude: nil,
+                              authorRole: entry.authorRole, mood: nil, isArchived: false,
+                              inStorybook: entry.inStorybook, editedAt: date, createdAt: date)
+        return (entry, remote)
+    }
+
+    @Test("上传已完成，正文下一次输入立即标脏并挡住旧 pull")
+    func noteChangedAfterUploadBeforePull() {
+        let (entry, remote) = uploadedEntry()
+        EntryDetailView.noteBinding(for: entry).wrappedValue = "尚未点击完成的新输入"
+        #expect(entry.syncState == .local)
+        #expect((entry.editedAt ?? .distantPast) > remote.editedAt!)
+        #expect(!SyncEngine.mergeEntryPayload(remote, into: entry))
+        #expect(entry.note == "尚未点击完成的新输入")
+    }
+
+    @Test("清空正文同样即时标脏，旧远端正文不能复活")
+    func clearingNoteIsAnEdit() {
+        let (entry, remote) = uploadedEntry()
+        EntryDetailView.noteBinding(for: entry).wrappedValue = ""
+        #expect(entry.note == nil)
+        #expect(entry.syncState == .local)
+        #expect(!SyncEngine.mergeEntryPayload(remote, into: entry))
+        #expect(entry.note == nil)
+    }
+
+    @Test("发生时间和心情的绑定都在 setter 中标脏")
+    func dateAndMoodDirtyImmediately() {
+        let (entry, remote) = uploadedEntry()
+        let newDate = entry.happenedAt.addingTimeInterval(60)
+        EntryDetailView.editingBinding(for: entry, \.happenedAt).wrappedValue = newDate
+        #expect(entry.syncState == .local)
+        #expect(!SyncEngine.mergeEntryPayload(remote, into: entry))
+        #expect(entry.happenedAt == newDate)
+        entry.syncState = .synced
+        let mood = Mood.allCases.first!
+        EntryDetailView.editingBinding(for: entry, \.mood).wrappedValue = mood
+        #expect(entry.syncState == .local)
+        #expect(!SyncEngine.mergeEntryPayload(remote, into: entry))
+        #expect(entry.mood == mood)
+    }
+
+    @Test("重复绑定值不制造虚假的编辑或时间戳")
+    func unchangedBindingDoesNotDirty() {
+        let (entry, remote) = uploadedEntry()
+        EntryDetailView.noteBinding(for: entry).wrappedValue = entry.note!
+        EntryDetailView.editingBinding(for: entry, \.happenedAt).wrappedValue = entry.happenedAt
+        EntryDetailView.editingBinding(for: entry, \.mood).wrappedValue = entry.mood
+        #expect(entry.syncState == .synced)
+        #expect(entry.editedAt == remote.editedAt)
+    }
+}
+
+// MARK: - 文件流必须有完成回执
+@MainActor
+struct SyncUploadStreamTests {
+    @Test("空流或只有进度的流结束不算上传成功", arguments: [false, true])
+    func missingReceiptThrows(includeProgress: Bool) async {
+        let stream = AsyncThrowingStream<UploadEvent, Error>.makeStream()
+        if includeProgress { stream.continuation.yield(.progress(1)) }
+        stream.continuation.finish()
+        do {
+            _ = try await SyncEngine.consumeUpload(stream.stream, onProgress: { _ in })
+            Issue.record("缺少完成回执却被当作成功")
+        } catch {
+            guard case APIError.network = error else {
+                Issue.record("应报告可重试的网络错误，实际为 \(error)")
+                return
+            }
+        }
+    }
+
+    @Test("合成上传挂起后发送完成回执，才允许返回身份与 URL")
+    func suspendedStreamCompletes() async throws {
+        let stream = AsyncThrowingStream<UploadEvent, Error>.makeStream()
+        let progressSeen = AsyncStream<Double>.makeStream()
+        var progress = progressSeen.stream.makeAsyncIterator()
+        let consumer = Task { @MainActor in
+            try await SyncEngine.consumeUpload(stream.stream, onProgress: { progressSeen.continuation.yield($0) })
+        }
+        stream.continuation.yield(.progress(0.5))
+        #expect(await progress.next() == 0.5)
+        stream.continuation.yield(.completed(remoteId: "audit-file", url: "https://example.invalid/file.bin"))
+        stream.continuation.finish()
+        let receipt = try await consumer.value
+        #expect(receipt.remoteId == "audit-file")
+        #expect(receipt.remoteURL == "https://example.invalid/file.bin")
+        progressSeen.continuation.finish()
+    }
+
+    @Test("收到回执后流仍抛错，不把失败流确认成成功")
+    func failureAfterReceiptStillThrows() async {
+        let stream = AsyncThrowingStream<UploadEvent, Error>.makeStream()
+        stream.continuation.yield(.completed(remoteId: "audit-file", url: "https://example.invalid/file.bin"))
+        stream.continuation.finish(throwing: APIError.network("synthetic failure"))
+        do {
+            _ = try await SyncEngine.consumeUpload(stream.stream, onProgress: { _ in })
+            Issue.record("抛错流被当作成功")
+        } catch {}
+    }
+
+    @Test("取消导致流自然结束时仍抛取消错误，不能标 synced")
+    func cancellationDoesNotAcknowledgeUpload() async {
+        let stream = AsyncThrowingStream<UploadEvent, Error>.makeStream()
+        let progressSeen = AsyncStream<Void>.makeStream()
+        var progress = progressSeen.stream.makeAsyncIterator()
+        let consumer = Task { @MainActor in
+            try await SyncEngine.consumeUpload(stream.stream, onProgress: { _ in progressSeen.continuation.yield(()) })
+        }
+        stream.continuation.yield(.progress(0.5))
+        _ = await progress.next()
+        consumer.cancel()
+        stream.continuation.finish()
+        do {
+            _ = try await consumer.value
+            Issue.record("取消上传被当作成功")
+        } catch {
+            #expect(error is CancellationError)
+        }
+        progressSeen.continuation.finish()
+    }
+}
+
+// MARK: - 前台 / 后台 / 强制补传共用同一许可
+@MainActor
+struct SyncRunGateTests {
+    @Test("前台挂起时，后台同步与强制补传（包括标脏）不能重入")
+    func serializesAllEntryPoints() async {
+        let gate = SyncRunGate()
+        let entered = AsyncStream<Int>.makeStream()
+        var events = entered.stream.makeAsyncIterator()
+        let release = AsyncStream<Void>.makeStream()
+        let attempts = AsyncStream<Int>.makeStream()
+        var attempted = attempts.stream.makeAsyncIterator()
+        var active = 0
+        var maximumActive = 0
+        var didMarkForReupload = false
+        let foreground = Task { @MainActor in
+            await gate.withPermit {
+                active += 1; maximumActive = max(maximumActive, active)
+                entered.continuation.yield(1)
+                for await _ in release.stream { break }
+                active -= 1
+            }
+        }
+        #expect(await events.next() == 1)
+        let background = Task { @MainActor in
+            attempts.continuation.yield(2)
+            await gate.withPermit {
+                active += 1; maximumActive = max(maximumActive, active)
+                entered.continuation.yield(2)
+                active -= 1
+            }
+        }
+        let forced = Task { @MainActor in
+            attempts.continuation.yield(3)
+            await gate.withPermit {
+                didMarkForReupload = true
+                active += 1; maximumActive = max(maximumActive, active)
+                entered.continuation.yield(3)
+                active -= 1
+            }
+        }
+        _ = await attempted.next()
+        _ = await attempted.next()
+        #expect(active == 1)
+        #expect(!didMarkForReupload)
+        release.continuation.finish()
+        _ = await foreground.value
+        _ = await background.value
+        _ = await forced.value
+        #expect(maximumActive == 1)
+        #expect(didMarkForReupload)
+        #expect(active == 0)
+        entered.continuation.finish()
+        attempts.continuation.finish()
+    }
+
+    @Test("取消排队的 BGTask 立即退出，不取消占用许可的前台轮次")
+    func cancelledWaiterDoesNotAffectOwnerOrLeakPermit() async {
+        let gate = SyncRunGate()
+        let entered = AsyncStream<Void>.makeStream()
+        var events = entered.stream.makeAsyncIterator()
+        let release = AsyncStream<Void>.makeStream()
+        let owner = Task { @MainActor in
+            await gate.withPermit {
+                entered.continuation.yield(())
+                for await _ in release.stream { break }
+                return "owner"
+            }
+        }
+        _ = await events.next()
+        let queued = Task { @MainActor in
+            entered.continuation.yield(())
+            return await gate.withPermit { "must-not-run" }
+        }
+        _ = await events.next()
+        queued.cancel()
+        #expect(await queued.value == nil)
+        #expect(!owner.isCancelled)
+        release.continuation.finish()
+        #expect(await owner.value == "owner")
+        #expect(await gate.withPermit { "next" } == "next")
+        entered.continuation.finish()
+    }
+}
+
+// MARK: - 迟到下载结果不得写回已删除 / 被替换的模型
+@MainActor
+struct SyncDownloadCompletionTests {
+    private func context() throws -> ModelContext {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: SharedModelContainer.schema, configurations: [configuration])
+        return ModelContext(container)
+    }
+
+    private func media(in context: ModelContext) throws -> Media {
+        let media = Media(type: .photo, localFileName: nil)
+        media.remoteId = "audit-media"
+        media.remoteURL = "https://example.invalid/original.bin"
+        media.remoteThumbURL = "https://example.invalid/preview.jpg"
+        media.syncState = .synced
+        context.insert(media)
+        try context.save()
+        return media
+    }
+
+    private func outcome(for media: Media, store: MediaStore, thumbnailOnly: Bool = false) throws -> SyncEngine.DownloadOutcome {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("synthetic download".utf8).write(to: temporary)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let name = thumbnailOnly
+            ? try store.importThumbnail(from: temporary)
+            : try store.importFile(from: temporary, preferredExtension: "bin")
+        let thumb = thumbnailOnly ? nil : try store.importThumbnail(from: temporary)
+        return SyncEngine.DownloadOutcome(snapshot: SyncEngine.MediaDownloadSnapshot(media), fileName: name,
+                                          thumbName: thumb, assignAsThumbnailOnly: thumbnailOnly)
+    }
+
+    @Test("媒体在下载挂起期间已删除：结果不重建模型并清理新下载文件")
+    func lateDownloadAfterDeletionIsDiscarded() async throws {
+        let context = try context()
+        let store = MediaStore()
+        let media = try media(in: context)
+        let result = try outcome(for: media, store: store)
+        let delivery = AsyncStream<SyncEngine.DownloadOutcome>.makeStream()
+        let download = Task { @MainActor in
+            for await result in delivery.stream {
+                #expect(try SyncEngine.completeMediaDownload(result, in: context, store: store) == false)
+                try context.save()
+            }
+        }
+        context.delete(media)
+        try context.save()
+        delivery.continuation.yield(result)
+        delivery.continuation.finish()
+        try await download.value
+        #expect(try context.fetchCount(FetchDescriptor<Media>()) == 0)
+        #expect(!store.fileExists(forMedia: result.fileName!))
+        #expect(!FileManager.default.fileExists(atPath: store.thumbnailURL(for: result.thumbName!).path))
+    }
+
+    @Test("资源身份或目标槽在 await 期间改变时丢弃旧下载", arguments: ["remoteURL", "remoteId", "remoteThumbURL", "localFileName", "thumbnailFileName", "syncState"])
+    func changedDestinationRejectsStaleDownload(field: String) async throws {
+        let context = try context()
+        let store = MediaStore()
+        let media = try media(in: context)
+        let result = try outcome(for: media, store: store)
+        let delivery = AsyncStream<SyncEngine.DownloadOutcome>.makeStream()
+        let download = Task { @MainActor in
+            for await result in delivery.stream {
+                #expect(try SyncEngine.completeMediaDownload(result, in: context, store: store) == false)
+                try context.save()
+            }
+        }
+        switch field {
+        case "remoteURL": media.remoteURL = "https://example.invalid/new-original.bin"
+        case "remoteId": media.remoteId = "new-audit-media"
+        case "remoteThumbURL": media.remoteThumbURL = "https://example.invalid/new-preview.jpg"
+        case "localFileName": media.localFileName = "user-replacement.bin"
+        case "thumbnailFileName": media.thumbnailFileName = "user-replacement.jpg"
+        default: media.syncState = .local
+        }
+        try context.save()
+        delivery.continuation.yield(result)
+        delivery.continuation.finish()
+        try await download.value
+        #expect(!store.fileExists(forMedia: result.fileName!))
+        #expect(!FileManager.default.fileExists(atPath: store.thumbnailURL(for: result.thumbName!).path))
+        #expect(media.localFileName == (field == "localFileName" ? "user-replacement.bin" : nil))
+        #expect(media.thumbnailFileName == (field == "thumbnailFileName" ? "user-replacement.jpg" : nil))
+    }
+
+    @Test("未变化的原片和预览图下载按正确目录落库", arguments: [false, true])
+    func unchangedDownloadIsAccepted(thumbnailOnly: Bool) throws {
+        let context = try context()
+        let store = MediaStore()
+        let media = try media(in: context)
+        let result = try outcome(for: media, store: store, thumbnailOnly: thumbnailOnly)
+        defer {
+            store.deleteLocalFiles(media: thumbnailOnly ? nil : result.fileName,
+                                   thumbnail: thumbnailOnly ? result.fileName : result.thumbName)
+        }
+        #expect(try SyncEngine.completeMediaDownload(result, in: context, store: store))
+        try context.save()
+        #expect(media.localFileName == (thumbnailOnly ? nil : result.fileName))
+        #expect(media.thumbnailFileName == (thumbnailOnly ? result.fileName : result.thumbName))
+        let reopened = ModelContext(context.container)
+        let persisted = try reopened.fetch(FetchDescriptor<Media>()).first
+        #expect(persisted?.localFileName == media.localFileName)
+        #expect(persisted?.thumbnailFileName == media.thumbnailFileName)
+    }
+}
+
+@MainActor
+struct SyncClientReplacementTests {
+    @Test("换客户端使后台/强制轮次和排队请求失效，旧请求返回后不能应用结果")
+    func invalidationCancelsOwnedWorkAndQueuedRequests() async {
+        let gate = SyncRunGate()
+        let entered = AsyncStream<Void>.makeStream()
+        var events = entered.stream.makeAsyncIterator()
+        var resumeOldRequest: CheckedContinuation<Void, Never>?
+        var appliedOldResult = false
+        var oldOperationWasCancelled = false
+        var startedNewRun = false
+        let oldRun = Task { @MainActor in
+            await gate.withPermit {
+                // 模拟不理会任务取消、仍会迟到返回的网络实现。
+                await withCheckedContinuation { continuation in
+                    resumeOldRequest = continuation
+                    entered.continuation.yield(())
+                }
+                oldOperationWasCancelled = Task.isCancelled
+                if !Task.isCancelled { appliedOldResult = true }
+                return "old"
+            }
+        }
+        _ = await events.next()
+        let queued = Task { @MainActor in
+            entered.continuation.yield(())
+            return await gate.withPermit { "obsolete queued request" }
+        }
+        _ = await events.next()
+        gate.invalidate()
+        #expect(await queued.value == nil)
+        let newRun = Task { @MainActor in
+            entered.continuation.yield(())
+            return await gate.withPermit {
+                startedNewRun = true
+                return "new"
+            }
+        }
+        _ = await events.next()
+        #expect(!startedNewRun)
+        resumeOldRequest?.resume()
+        #expect(await oldRun.value == nil)
+        #expect(await newRun.value == "new")
+        #expect(oldOperationWasCancelled)
+        #expect(!appliedOldResult)
+        entered.continuation.finish()
+    }
+}
+
+@MainActor
+struct SyncAttachmentDownloadTests {
+    private func context() throws -> ModelContext {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: SharedModelContainer.schema, configurations: [configuration])
+        return ModelContext(container)
+    }
+
+    private func assertDeletedDownloadIsDiscarded<Model: PersistentModel>(
+        _ model: Model, in context: ModelContext, descriptor: FetchDescriptor<Model>,
+        localFile: ReferenceWritableKeyPath<Model, String?>) async throws {
+        context.insert(model)
+        try context.save()
+        let store = MediaStore()
+        let fileName = try store.savePhoto(Data("synthetic attachment".utf8), preferredExtension: "bin")
+        let delivery = AsyncStream<String>.makeStream()
+        let download = Task { @MainActor in
+            for await fileName in delivery.stream {
+                #expect(try SyncEngine.completeFileDownload(fileName, in: context, store: store,
+                    descriptor: descriptor, localFile: localFile, isCurrent: { _ in true }) == false)
+            }
+        }
+        context.delete(model)
+        try context.save()
+        delivery.continuation.yield(fileName)
+        delivery.continuation.finish()
+        try await download.value
+        #expect(try context.fetchCount(descriptor) == 0)
+        #expect(!store.fileExists(forMedia: fileName))
+    }
+
+    @Test("语音、家人补充、成长之声和胶囊被删除后，迟到文件都不写回旧模型")
+    func deletedAttachmentsRejectLateFiles() async throws {
+        let context = try context()
+        let note = VoiceNote(localFileName: nil, durationSeconds: 1, authorRole: "audit")
+        let noteId = note.id
+        try await assertDeletedDownloadIsDiscarded(note, in: context,
+            descriptor: FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == noteId }), localFile: \.localFileName)
+        let comment = Comment(authorRole: "audit")
+        let commentId = comment.id
+        try await assertDeletedDownloadIsDiscarded(comment, in: context,
+            descriptor: FetchDescriptor<Comment>(predicate: #Predicate { $0.id == commentId }), localFile: \.voiceFileName)
+        let memo = VoiceMemo(kind: .childVoice)
+        let memoId = memo.id
+        try await assertDeletedDownloadIsDiscarded(memo, in: context,
+            descriptor: FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.id == memoId }), localFile: \.localFileName)
+        let capsule = TimeCapsule(title: "audit", fromRole: "audit", unlockAt: .distantFuture)
+        let capsuleId = capsule.id
+        try await assertDeletedDownloadIsDiscarded(capsule, in: context,
+            descriptor: FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == capsuleId }), localFile: \.encryptedBlobFileName)
+    }
+
+    @Test("下载中更换头像不被旧文件覆盖，并清理被丢弃的下载")
+    func replacedAvatarSurvivesLateFile() async throws {
+        let context = try context()
+        let store = MediaStore()
+        let profile = ChildProfile(name: "audit", birthday: Date(timeIntervalSince1970: 0))
+        let localId = profile.id
+        let oldURL = "https://example.invalid/old-avatar.jpg"
+        profile.avatarRemoteURL = oldURL
+        context.insert(profile)
+        try context.save()
+        let staleFile = try store.savePhoto(Data("old avatar".utf8), preferredExtension: "bin")
+        let chosenFile = try store.savePhoto(Data("new avatar".utf8), preferredExtension: "bin")
+        defer { store.deleteLocalFiles(media: chosenFile) }
+        let delivery = AsyncStream<String>.makeStream()
+        let download = Task { @MainActor in
+            for await name in delivery.stream {
+                #expect(try SyncEngine.completeFileDownload(name, in: context, store: store,
+                    descriptor: FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == localId }),
+                    localFile: \.avatarMediaFileName, isCurrent: { $0.avatarRemoteURL == oldURL }) == false)
+            }
+        }
+        profile.avatarMediaFileName = chosenFile
+        profile.avatarRemoteURL = nil
+        profile.syncState = .local
+        delivery.continuation.yield(staleFile)
+        delivery.continuation.finish()
+        try await download.value
+        #expect(profile.avatarMediaFileName == chosenFile)
+        #expect(store.fileExists(forMedia: chosenFile))
+        #expect(!store.fileExists(forMedia: staleFile))
+    }
+
+    @Test("原有缺失文件槽仍匹配时可以恢复胶囊文件；远端身份变更则拒绝")
+    func attachmentIdentityAndMissingFileRecovery() throws {
+        let context = try context()
+        let store = MediaStore()
+        let capsule = TimeCapsule(title: "audit", fromRole: "audit", unlockAt: .distantFuture)
+        let localId = capsule.id
+        capsule.remoteId = "old-remote"
+        capsule.encryptedBlobFileName = "missing-file.capsule"
+        context.insert(capsule)
+        try context.save()
+        let staleFile = try store.savePhoto(Data("stale".utf8), preferredExtension: "bin")
+        capsule.remoteId = "new-remote"
+        let descriptor = FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == localId })
+        #expect(try SyncEngine.completeFileDownload(staleFile, in: context, store: store,
+            descriptor: descriptor, localFile: \.encryptedBlobFileName, expectedFileName: "missing-file.capsule",
+            isCurrent: { $0.remoteId == "old-remote" }) == false)
+        #expect(!store.fileExists(forMedia: staleFile))
+        let currentFile = try store.savePhoto(Data("current".utf8), preferredExtension: "bin")
+        defer { store.deleteLocalFiles(media: currentFile) }
+        #expect(try SyncEngine.completeFileDownload(currentFile, in: context, store: store,
+            descriptor: descriptor, localFile: \.encryptedBlobFileName, expectedFileName: "missing-file.capsule",
+            isCurrent: { $0.remoteId == "new-remote" }))
+        #expect(capsule.encryptedBlobFileName == currentFile)
+    }
+}

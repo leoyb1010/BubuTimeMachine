@@ -386,12 +386,7 @@ export class AppDatabase {
   // —— GrowthMeasurement ——
   async insertGrowth(g: GrowthMeasurement): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: g.id, remoteId: g.remoteId ?? null, measuredAt: g.measuredAt,
-      heightCm: g.heightCm ?? null, weightKg: g.weightKg ?? null,
-      headCircumferenceCm: g.headCircumferenceCm ?? null, note: g.note ?? null, source: g.source,
-      syncState: g.syncState, createdAt: g.createdAt, updatedAt: g.updatedAt
-    };
+    const v = AppDatabase.growthFields(g);
     await this.store!.insert('growth_measurement', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertGrowth 失败，已中止本次操作');
@@ -431,12 +426,7 @@ export class AppDatabase {
   // —— VaccineRecord ——
   async insertVaccine(v: VaccineRecord): Promise<void> {
     try {
-    const bucket: relationalStore.ValuesBucket = {
-      id: v.id, remoteId: v.remoteId ?? null, doseId: v.doseId ?? null, vaccineName: v.vaccineName,
-      doseLabel: v.doseLabel ?? null, injectedAt: v.injectedAt, hospital: v.hospital ?? null,
-      injectionSite: v.injectionSite ?? null, reaction: v.reaction ?? null, note: v.note ?? null,
-      source: v.source, syncState: v.syncState, createdAt: v.createdAt, updatedAt: v.updatedAt
-    };
+    const bucket = AppDatabase.vaccineFields(v);
     await this.store!.insert('vaccine_record', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertVaccine 失败，已中止本次操作');
@@ -501,12 +491,7 @@ export class AppDatabase {
   // —— VoiceNote ——
   async insertVoiceNote(v: VoiceNote): Promise<void> {
     try {
-    const bucket: relationalStore.ValuesBucket = {
-      id: v.id, remoteId: v.remoteId ?? null, entryId: v.entryId, localFileName: v.localFileName ?? null,
-      remoteURL: v.remoteURL ?? null, durationSeconds: v.durationSeconds, transcript: v.transcript ?? null,
-      authorRole: v.authorRole, waveformSamples: JSON.stringify(v.waveformSamples),
-      syncState: v.syncState, createdAt: v.createdAt
-    };
+    const bucket = AppDatabase.voiceNoteFields(v);
     await this.store!.insert('voice_note', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertVoiceNote 失败，已中止本次操作');
@@ -528,7 +513,7 @@ export class AppDatabase {
         entryId: rs.getString(rs.getColumnIndex('entryId')),
         localFileName: AppDatabase.optStr(rs, 'localFileName'),
         remoteURL: AppDatabase.optStr(rs, 'remoteURL'),
-        durationSeconds: rs.getLong(rs.getColumnIndex('durationSeconds')),
+        durationSeconds: rs.getDouble(rs.getColumnIndex('durationSeconds')),
         transcript: AppDatabase.optStr(rs, 'transcript'),
         authorRole: rs.getString(rs.getColumnIndex('authorRole')),
         waveformSamples: wf ? JSON.parse(wf) as number[] : [],
@@ -547,11 +532,7 @@ export class AppDatabase {
   // —— FamilyMember ——
   async upsertMember(m: FamilyMember): Promise<void> {
     try {
-    const bucket: relationalStore.ValuesBucket = {
-      id: m.id, remoteId: m.remoteId ?? null, name: m.name, relation: m.relation,
-      avatarEmoji: m.avatarEmoji, themeColorHex: m.themeColorHex, isPrimary: m.isPrimary ? 1 : 0,
-      syncState: m.syncState, createdAt: m.createdAt
-    };
+    const bucket = AppDatabase.memberFields(m);
     await this.store!.insert('family_member', bucket, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 upsertMember 失败，已中止本次操作');
@@ -733,16 +714,7 @@ export class AppDatabase {
   // —— Media ——
   async insertMedia(m: Media): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: m.id, remoteId: m.remoteId ?? null, entryId: m.entryId, typeRaw: m.typeRaw,
-      localFileName: m.localFileName ?? null, remoteURL: m.remoteURL ?? null,
-      thumbnailFileName: m.thumbnailFileName ?? null, durationSeconds: m.durationSeconds ?? null,
-      remoteThumbURL: m.remoteThumbURL ?? null, contentHash: m.contentHash ?? null,
-      resourceRoleRaw: m.resourceRoleRaw ?? null, assetGroupID: m.assetGroupID ?? null,
-      width: m.width ?? null, height: m.height ?? null, uploadProgress: m.uploadProgress,
-      syncState: m.syncState, syncFailureReason: m.syncFailureReason ?? null,
-      aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
-    };
+    const v = AppDatabase.mediaFields(m);
     await this.store!.insert('media', v);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertMedia 失败，已中止本次操作');
@@ -887,13 +859,7 @@ export class AppDatabase {
   // —— ChildProfile ——
   async upsertChildProfile(p: ChildProfile): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: p.id, remoteId: p.remoteId ?? null, name: p.name, birthday: p.birthday,
-      gender: p.gender ?? null, bloodType: p.bloodType ?? null, birthPlace: p.birthPlace ?? null,
-      avatarMediaFileName: p.avatarMediaFileName ?? null, avatarRemoteURL: p.avatarRemoteURL ?? null,
-      schoolStartDate: p.schoolStartDate ?? null, allergies: p.allergies ?? null, medicalNotes: p.medicalNotes ?? null,
-      heroBackgroundFileName: p.heroBackgroundFileName ?? null, syncState: p.syncState, createdAt: p.createdAt
-    };
+    const v = AppDatabase.childProfileFields(p);
     await this.store!.insert('child_profile', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 upsertChildProfile 失败，已中止本次操作');
@@ -971,14 +937,7 @@ export class AppDatabase {
   // —— HealthRecord ——
   async insertHealth(h: HealthRecord): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: h.id, remoteId: h.remoteId ?? null, kind: h.kind, title: h.title, detail: h.detail ?? null,
-      recordedAt: h.recordedAt, amountText: h.amountText ?? null, reaction: h.reaction ?? null,
-      amountValue: h.amountValue ?? null, amountUnit: h.amountUnit ?? null,
-      startAt: h.startAt ?? null, endAt: h.endAt ?? null, severity: h.severity ?? null,
-      temperatureCelsius: h.temperatureCelsius ?? null, tags: JSON.stringify(h.tags),
-      syncState: h.syncState, createdAt: h.createdAt
-    };
+    const v = AppDatabase.healthFields(h);
     await this.store!.insert('health_record', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertHealth 失败，已中止本次操作');
@@ -1025,12 +984,7 @@ export class AppDatabase {
   // —— Milestone ——
   async upsertMilestone(m: Milestone): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: m.id, remoteId: m.remoteId ?? null, title: m.title, category: m.category, emoji: m.emoji,
-      detail: m.detail ?? null, happenedAt: m.happenedAt ?? null, ageDescription: m.ageDescription ?? null,
-      isCustom: m.isCustom ? 1 : 0, ceremonyPlayed: m.ceremonyPlayed ? 1 : 0,
-      syncState: m.syncState, createdAt: m.createdAt, entryId: m.entryId ?? null
-    };
+    const v = AppDatabase.milestoneFields(m);
     await this.store!.insert('milestone', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 upsertMilestone 失败，已中止本次操作');
@@ -1114,11 +1068,7 @@ export class AppDatabase {
   // —— TimeCapsule ——
   async insertCapsule(c: TimeCapsule): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: c.id, remoteId: c.remoteId ?? null, title: c.title, letterText: c.letterText ?? null, fromRole: c.fromRole,
-      unlockAt: c.unlockAt, isLocked: c.isLocked ? 1 : 0, encryptedBlobFileName: c.encryptedBlobFileName ?? null,
-      coverEmoji: c.coverEmoji ?? null, cryptoVersion: c.cryptoVersion ?? null, syncState: c.syncState, createdAt: c.createdAt
-    };
+    const v = AppDatabase.capsuleFields(c);
     await this.store!.insert('time_capsule', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertCapsule 失败，已中止本次操作');
@@ -1159,12 +1109,7 @@ export class AppDatabase {
   // —— Comment（家人合奏）——
   async insertComment(c: Comment): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: c.id, remoteId: c.remoteId ?? null, entryId: c.entryId, authorRole: c.authorRole,
-      text: c.text ?? null, voiceFileName: c.voiceFileName ?? null, remoteURL: c.remoteURL ?? null,
-      voiceDuration: c.voiceDuration, voiceWaveform: JSON.stringify(c.voiceWaveform),
-      syncState: c.syncState, createdAt: c.createdAt
-    };
+    const v = AppDatabase.commentFields(c);
     await this.store!.insert('comment', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertComment 失败，已中止本次操作');
@@ -1206,12 +1151,7 @@ export class AppDatabase {
   // —— VoiceMemo（成长之声）——
   async insertVoiceMemo(m: VoiceMemo): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: m.id, remoteId: m.remoteId ?? null, kindRaw: m.kindRaw, localFileName: m.localFileName ?? null,
-      remoteURL: m.remoteURL ?? null, transcript: m.transcript ?? null, ageYears: m.ageYears ?? null,
-      recordedAt: m.recordedAt, durationSeconds: m.durationSeconds ?? null,
-      syncState: m.syncState, createdAt: m.createdAt
-    };
+    const v = AppDatabase.voiceMemoFields(m);
     await this.store!.insert('voice_memo', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertVoiceMemo 失败，已中止本次操作');
@@ -1251,11 +1191,7 @@ export class AppDatabase {
   // —— FirstTime（人生第一次）——
   async insertFirstTime(f: FirstTime): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: f.id, remoteId: f.remoteId ?? null, what: f.what, detectedByAI: f.detectedByAI ? 1 : 0,
-      confirmedByParent: f.confirmedByParent ? 1 : 0, ceremonyPlayed: f.ceremonyPlayed ? 1 : 0,
-      happenedAt: f.happenedAt, entryId: f.entryId ?? null, syncState: f.syncState, createdAt: f.createdAt
-    };
+    const v = AppDatabase.firstTimeFields(f);
     await this.store!.insert('first_time', v, relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertFirstTime 失败，已中止本次操作');
@@ -1443,6 +1379,139 @@ export class AppDatabase {
     }
   }
 
+  // 序列化与普通写入共用，避免同步快照漏掉可编辑字段（包括本机附件、数组和 null）。
+  static growthFields(g: GrowthMeasurement): relationalStore.ValuesBucket {
+    return {
+      id: g.id, remoteId: g.remoteId ?? null, measuredAt: g.measuredAt,
+      heightCm: g.heightCm ?? null, weightKg: g.weightKg ?? null,
+      headCircumferenceCm: g.headCircumferenceCm ?? null, note: g.note ?? null, source: g.source,
+      syncState: g.syncState, createdAt: g.createdAt, updatedAt: g.updatedAt
+    };
+  }
+
+  static vaccineFields(v: VaccineRecord): relationalStore.ValuesBucket {
+    return {
+      id: v.id, remoteId: v.remoteId ?? null, doseId: v.doseId ?? null, vaccineName: v.vaccineName,
+      doseLabel: v.doseLabel ?? null, injectedAt: v.injectedAt, hospital: v.hospital ?? null,
+      injectionSite: v.injectionSite ?? null, reaction: v.reaction ?? null, note: v.note ?? null,
+      source: v.source, syncState: v.syncState, createdAt: v.createdAt, updatedAt: v.updatedAt
+    };
+  }
+
+  static voiceNoteFields(v: VoiceNote): relationalStore.ValuesBucket {
+    return {
+      id: v.id, remoteId: v.remoteId ?? null, entryId: v.entryId, localFileName: v.localFileName ?? null,
+      remoteURL: v.remoteURL ?? null, durationSeconds: v.durationSeconds, transcript: v.transcript ?? null,
+      authorRole: v.authorRole, waveformSamples: JSON.stringify(v.waveformSamples),
+      syncState: v.syncState, createdAt: v.createdAt
+    };
+  }
+
+  static memberFields(m: FamilyMember): relationalStore.ValuesBucket {
+    return {
+      id: m.id, remoteId: m.remoteId ?? null, name: m.name, relation: m.relation,
+      avatarEmoji: m.avatarEmoji, themeColorHex: m.themeColorHex, isPrimary: m.isPrimary ? 1 : 0,
+      syncState: m.syncState, createdAt: m.createdAt
+    };
+  }
+
+  static mediaFields(m: Media): relationalStore.ValuesBucket {
+    return {
+      id: m.id, remoteId: m.remoteId ?? null, entryId: m.entryId, typeRaw: m.typeRaw,
+      localFileName: m.localFileName ?? null, remoteURL: m.remoteURL ?? null,
+      thumbnailFileName: m.thumbnailFileName ?? null, durationSeconds: m.durationSeconds ?? null,
+      remoteThumbURL: m.remoteThumbURL ?? null, contentHash: m.contentHash ?? null,
+      resourceRoleRaw: m.resourceRoleRaw ?? null, assetGroupID: m.assetGroupID ?? null,
+      width: m.width ?? null, height: m.height ?? null, uploadProgress: m.uploadProgress,
+      syncState: m.syncState, syncFailureReason: m.syncFailureReason ?? null,
+      aiTags: JSON.stringify(m.aiTags), createdAt: m.createdAt
+    };
+  }
+
+  static childProfileFields(p: ChildProfile): relationalStore.ValuesBucket {
+    return {
+      id: p.id, remoteId: p.remoteId ?? null, name: p.name, birthday: p.birthday,
+      gender: p.gender ?? null, bloodType: p.bloodType ?? null, birthPlace: p.birthPlace ?? null,
+      avatarMediaFileName: p.avatarMediaFileName ?? null, avatarRemoteURL: p.avatarRemoteURL ?? null,
+      schoolStartDate: p.schoolStartDate ?? null, allergies: p.allergies ?? null, medicalNotes: p.medicalNotes ?? null,
+      heroBackgroundFileName: p.heroBackgroundFileName ?? null, syncState: p.syncState, createdAt: p.createdAt
+    };
+  }
+
+  static healthFields(h: HealthRecord): relationalStore.ValuesBucket {
+    return {
+      id: h.id, remoteId: h.remoteId ?? null, kind: h.kind, title: h.title, detail: h.detail ?? null,
+      recordedAt: h.recordedAt, amountText: h.amountText ?? null, reaction: h.reaction ?? null,
+      amountValue: h.amountValue ?? null, amountUnit: h.amountUnit ?? null,
+      startAt: h.startAt ?? null, endAt: h.endAt ?? null, severity: h.severity ?? null,
+      temperatureCelsius: h.temperatureCelsius ?? null, tags: JSON.stringify(h.tags),
+      syncState: h.syncState, createdAt: h.createdAt
+    };
+  }
+
+  static milestoneFields(m: Milestone): relationalStore.ValuesBucket {
+    return {
+      id: m.id, remoteId: m.remoteId ?? null, title: m.title, category: m.category, emoji: m.emoji,
+      detail: m.detail ?? null, happenedAt: m.happenedAt ?? null, ageDescription: m.ageDescription ?? null,
+      isCustom: m.isCustom ? 1 : 0, ceremonyPlayed: m.ceremonyPlayed ? 1 : 0,
+      syncState: m.syncState, createdAt: m.createdAt, entryId: m.entryId ?? null
+    };
+  }
+
+  static capsuleFields(c: TimeCapsule): relationalStore.ValuesBucket {
+    return {
+      id: c.id, remoteId: c.remoteId ?? null, title: c.title, letterText: c.letterText ?? null, fromRole: c.fromRole,
+      unlockAt: c.unlockAt, isLocked: c.isLocked ? 1 : 0, encryptedBlobFileName: c.encryptedBlobFileName ?? null,
+      coverEmoji: c.coverEmoji ?? null, cryptoVersion: c.cryptoVersion ?? null, syncState: c.syncState, createdAt: c.createdAt
+    };
+  }
+
+  static commentFields(c: Comment): relationalStore.ValuesBucket {
+    return {
+      id: c.id, remoteId: c.remoteId ?? null, entryId: c.entryId, authorRole: c.authorRole,
+      text: c.text ?? null, voiceFileName: c.voiceFileName ?? null, remoteURL: c.remoteURL ?? null,
+      voiceDuration: c.voiceDuration, voiceWaveform: JSON.stringify(c.voiceWaveform),
+      syncState: c.syncState, createdAt: c.createdAt
+    };
+  }
+
+  static voiceMemoFields(m: VoiceMemo): relationalStore.ValuesBucket {
+    return {
+      id: m.id, remoteId: m.remoteId ?? null, kindRaw: m.kindRaw, localFileName: m.localFileName ?? null,
+      remoteURL: m.remoteURL ?? null, transcript: m.transcript ?? null, ageYears: m.ageYears ?? null,
+      recordedAt: m.recordedAt, durationSeconds: m.durationSeconds ?? null,
+      syncState: m.syncState, createdAt: m.createdAt
+    };
+  }
+
+  static firstTimeFields(f: FirstTime): relationalStore.ValuesBucket {
+    return {
+      id: f.id, remoteId: f.remoteId ?? null, what: f.what, detectedByAI: f.detectedByAI ? 1 : 0,
+      confirmedByParent: f.confirmedByParent ? 1 : 0, ceremonyPlayed: f.ceremonyPlayed ? 1 : 0,
+      happenedAt: f.happenedAt, entryId: f.entryId ?? null, syncState: f.syncState, createdAt: f.createdAt
+    };
+  }
+
+  // 只更新仍与发送前快照完全一致的现有行，绝不 INSERT/REPLACE 复活已删除对象。
+  // Media 的 uploadProgress 是同一次上传的瞬时反馈，不属于用户数据版本。
+  async updateFieldsIfUnchanged(table: string, expected: relationalStore.ValuesBucket,
+                               fields: relationalStore.ValuesBucket): Promise<boolean> {
+    const tables: string[] = ['entry', 'media', 'child_profile', 'milestone', 'first_time',
+      'family_member', 'health_record', 'vaccine_record', 'growth_measurement',
+      'comment', 'voice_note', 'voice_memo', 'time_capsule'];
+    if (tables.indexOf(table) < 0 || typeof expected['id'] !== 'string' || expected['id'] === ''
+      || typeof expected['syncState'] !== 'string') throw new Error('无效的同步快照');
+    const predicates = new relationalStore.RdbPredicates(table);
+    for (const column of Object.keys(expected)) {
+      if (table === 'media' && column === 'uploadProgress') continue;
+      const value = expected[column];
+      if (value === null) predicates.isNull(column);
+      else if (typeof value === 'string' || typeof value === 'number') predicates.equalTo(column, value);
+      else throw new Error('同步快照字段类型无效');
+    }
+    return (await this.store!.update(fields, predicates)) > 0;
+  }
+
   // 同步响应只确认它实际发送的快照。单条条件 UPDATE 也覆盖同毫秒的编辑，
   // 避免网络等待期间的新内容被标为已同步，或被远端冲突结果覆盖。
   async updateEntryFieldsIfUnchanged(expected: Entry, fields: relationalStore.ValuesBucket): Promise<boolean> {
@@ -1456,13 +1525,7 @@ export class AppDatabase {
       isArchived: expected.isArchived ? 1 : 0, inStorybook: expected.inStorybook ? 1 : 0,
       editedAt: expected.editedAt ?? null, createdAt: expected.createdAt
     };
-    const predicates = new relationalStore.RdbPredicates('entry');
-    for (const column of Object.keys(snapshot)) {
-      const value = snapshot[column];
-      if (value === null) predicates.isNull(column);
-      else if (typeof value === 'string' || typeof value === 'number') predicates.equalTo(column, value);
-    }
-    return (await this.store!.update(fields, predicates)) > 0;
+    return this.updateFieldsIfUnchanged('entry', snapshot, fields);
   }
 
   async deleteEntryHard(id: string): Promise<void> {

@@ -19,14 +19,16 @@ function method(source, start, end) {
 const engineMethods = [
   method(sync, '  private async pushEntries(', '  // —— ChildProfile'),
   method(sync, '  private async pullCollection(', '  private async isPendingDeletion('),
+  method(sync, '  private async removeRemoteTombstones(', '  private async pruneLocalToServerMirror('),
   method(sync, '  private static applyEntry(', '  private async findEntry(')
 ].join('\n');
-const databaseMethod = method(database, '  async updateEntryFieldsIfUnchanged(', '  async deleteEntryHard(');
+const databaseMethod = method(database, '  async updateFieldsIfUnchanged(', '  async deleteEntryHard(');
 
 function harness() {
   const context = vm.createContext({
     Date, Map, Set, Error, Promise, Object, laterServerTimestamp,
     DOMAIN: 0, hilog: { warn() {} },
+    MediaStore: { shared: { deleteLocalFiles() {} } },
     SyncState: { local: 'local', synced: 'synced', failed: 'failed', uploading: 'uploading' }
   });
   vm.runInContext(stripTypeScriptTypes(`
@@ -41,21 +43,23 @@ function harness() {
   Engine.rStr = (row, key) => typeof row[key] === 'string' ? row[key] : undefined;
   Engine.rNum = (row, key) => typeof row[key] === 'number' ? row[key] : undefined;
   Engine.rBool = (row, key) => row[key] === true;
+  Engine.recordLocalId = row => row.localId ?? row.id;
   Engine.rDate = (row, key, fallback) => row[key] ? Date.parse(row[key]) : fallback;
   return { context, engine: new Engine(), database: new context.Database() };
 }
 
 function cursorHarness(records, tombstones = []) {
-  const { context, engine } = harness();
+  const { context, engine, database } = harness();
   let checkpoint = '2026-08-01T00:00:00.000Z';
   context.APIClient = { shared: {
-    fetchRecords: async () => records,
-    fetchDeletedTombstones: async () => tombstones
+    fetchRecords: async (_, since) => records.filter(row => !since || row.updated > since),
+    fetchDeletedTombstones: async (_, since) => tombstones.filter(row => !since || row.updated > since)
   } };
   engine.getCursor = async () => checkpoint;
   engine.setCursor = async (_, next) => { checkpoint = next; };
-  engine.removeRemoteTombstones = async () => {};
-  return { context, engine, checkpoint: () => checkpoint };
+  context.Database.shared = database;
+  database.fetchAllMedia = async () => [];
+  return { context, engine, database, checkpoint: () => checkpoint };
 }
 const oldMedia = { id: 'old-media', updated: '2026-09-01T00:00:00.000Z' };
 const newMedia = { id: 'new-media', updated: '2026-09-10T00:00:00.000Z' };
@@ -207,4 +211,59 @@ test('a deleted upload snapshot is never recreated by acknowledgement', async ()
     assert.equal(h.row().id, 'replacement-entry');
     assert.equal(h.row().syncState, 'local');
   } finally { h.close(); }
+});
+
+// Exercise both production tombstone methods, rather than a successful deletion stub.
+const tombstoneCases = [
+  ['entries', 'fetchEntries', 'deleteEntryHard'],
+  ['media', 'fetchAllMedia', 'deleteMedia'],
+  ['milestones', 'fetchMilestones', 'deleteMilestone'],
+  ['firsttimes', 'fetchFirstTimes', 'deleteFirstTime'],
+  ['healthrecords', 'fetchHealth', 'deleteHealth'],
+  ['vaccinerecords', 'fetchVaccines', 'deleteVaccine'],
+  ['growthmeasurements', 'fetchGrowth', 'deleteGrowth'],
+  ['comments', 'fetchCommentsForEntry', 'deleteComment'],
+  ['voicenotes', 'fetchVoiceForEntry', 'deleteVoiceNote'],
+  ['voicememos', 'fetchVoiceMemos', 'deleteVoiceMemo'],
+  ['timecapsules', 'fetchCapsules', 'deleteCapsule']
+];
+function tombstoneHarness(collection, fetch, remove, initialState = 'local') {
+  const h = cursorHarness([newMedia], [{ id: 'remote-old', localId: 'old-local', updated: oldMedia.updated }]);
+  let local = { id: 'old-local', syncState: initialState };
+  h.database.fetchEntries = async () => [{ id: 'parent-1', syncState: 'synced' }];
+  h.database.fetchMediaForEntry = async () => [];
+  h.database.fetchVoiceForEntry = async () => [];
+  h.database.fetchCommentsForEntry = async () => [];
+  h.database.deleteFeedEventsForTarget = async () => {};
+  h.database[fetch] = async () => local ? [local] : [];
+  h.database[remove] = async () => { local = undefined; };
+  h.local = () => local;
+  return h;
+}
+for (const [collection, fetch, remove] of tombstoneCases) {
+  test(`${collection}: deferred older tombstone retains cursor and is retried after local sync`, async () => {
+    for (const state of ['local', 'failed', 'uploading']) {
+      const h = tombstoneHarness(collection, fetch, remove, state);
+      assert.equal(await h.engine.pullCollection(collection, async () => true), false);
+      assert.equal(h.checkpoint(), '2026-08-01T00:00:00.000Z');
+      assert.equal(h.local().syncState, state);
+      h.local().syncState = 'synced';
+      assert.equal(await h.engine.pullCollection(collection, async () => true), true);
+      assert.equal(h.local(), undefined);
+      assert.equal(h.checkpoint(), newMedia.updated);
+    }
+  });
+}
+test('strict restores report deferred tombstones without advancing the cursor', async () => {
+  const h = tombstoneHarness('media', 'fetchAllMedia', 'deleteMedia');
+  h.engine.strictPullFailures = true;
+  await assert.rejects(h.engine.pullCollection('media', async () => true), /保留游标/);
+  assert.equal(h.checkpoint(), '2026-08-01T00:00:00.000Z');
+});
+test('missing tombstone targets and intentionally retained family singletons are complete', async () => {
+  for (const collection of ['media', 'members', 'childprofile']) {
+    const h = cursorHarness([], [newMedia]);
+    assert.equal(await h.engine.pullCollection(collection, async () => true), true);
+    assert.equal(h.checkpoint(), newMedia.updated);
+  }
 });
