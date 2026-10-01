@@ -109,13 +109,9 @@ jobs:
             -skip-testing:BubuTimeMachineUITests \
             test-without-building 2>&1 | tee /tmp/unit-iphone.log
 
-      - name: Prepare synthetic PhotosPicker assets
+      - name: Prepare synthetic iPhone PhotosPicker assets
         timeout-minutes: 8
-        run: |
-          bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.iphone }}"
-          if [ -n "${{ steps.sim.outputs.ipad }}" ]; then
-            bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.ipad }}"
-          fi
+        run: bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.iphone }}"
 
       - name: UI 回归 (iPhone)
         run: |
@@ -157,6 +153,12 @@ jobs:
       # UI 测试在共享 runner 上会因为资源竞争偶发超时。
       # 失败一次就重跑一次：真的坏了会连挂两次，偶发抖动则自愈。
       # 不用 continue-on-error——那等于把门禁降级成摆设。
+      # Keep iPhone verification independent of a cold iPad simulator boot.
+      - name: Prepare synthetic iPad PhotosPicker assets
+        if: steps.sim.outputs.ipad != ''
+        timeout-minutes: 12
+        run: bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.ipad }}"
+
       - name: UI 回归 (iPad)
         if: steps.sim.outputs.ipad != ''
         run: |

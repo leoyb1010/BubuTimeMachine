@@ -804,15 +804,20 @@ struct SyncAttachmentDownloadTests {
         let delivery = AsyncStream<String>.makeStream()
         let download = Task { @MainActor in
             for await fileName in delivery.stream {
-                #expect(try SyncEngine.completeFileDownload(fileName, in: context, store: store,
-                    descriptor: descriptor, localFile: localFile, isCurrent: { _ in true }) == false)
+                do {
+                    let accepted = try SyncEngine.completeFileDownload(fileName, in: context, store: store,
+                        descriptor: descriptor, localFile: localFile, isCurrent: { _ in true })
+                    #expect(!accepted)
+                } catch {
+                    Issue.record("迟到附件下载验证失败：\(error)")
+                }
             }
         }
         context.delete(model)
         try context.save()
         delivery.continuation.yield(fileName)
         delivery.continuation.finish()
-        try await download.value
+        await download.value
         #expect(try context.fetchCount(descriptor) == 0)
         #expect(!store.fileExists(forMedia: fileName))
     }
@@ -824,10 +829,10 @@ struct SyncAttachmentDownloadTests {
         let noteId = note.id
         try await assertDeletedDownloadIsDiscarded(note, in: context,
             descriptor: FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == noteId }), localFile: \.localFileName)
-        let comment = Comment(authorRole: "audit")
+        let comment = BubuTimeMachine.Comment(authorRole: "audit")
         let commentId = comment.id
         try await assertDeletedDownloadIsDiscarded(comment, in: context,
-            descriptor: FetchDescriptor<Comment>(predicate: #Predicate { $0.id == commentId }), localFile: \.voiceFileName)
+            descriptor: FetchDescriptor<BubuTimeMachine.Comment>(predicate: #Predicate { $0.id == commentId }), localFile: \.voiceFileName)
         let memo = VoiceMemo(kind: .childVoice)
         let memoId = memo.id
         try await assertDeletedDownloadIsDiscarded(memo, in: context,
@@ -854,9 +859,14 @@ struct SyncAttachmentDownloadTests {
         let delivery = AsyncStream<String>.makeStream()
         let download = Task { @MainActor in
             for await name in delivery.stream {
-                #expect(try SyncEngine.completeFileDownload(name, in: context, store: store,
-                    descriptor: FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == localId }),
-                    localFile: \.avatarMediaFileName, isCurrent: { $0.avatarRemoteURL == oldURL }) == false)
+                do {
+                    let accepted = try SyncEngine.completeFileDownload(name, in: context, store: store,
+                        descriptor: FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == localId }),
+                        localFile: \.avatarMediaFileName, isCurrent: { $0.avatarRemoteURL == oldURL })
+                    #expect(!accepted)
+                } catch {
+                    Issue.record("迟到头像下载验证失败：\(error)")
+                }
             }
         }
         profile.avatarMediaFileName = chosenFile
@@ -864,7 +874,7 @@ struct SyncAttachmentDownloadTests {
         profile.syncState = .local
         delivery.continuation.yield(staleFile)
         delivery.continuation.finish()
-        try await download.value
+        await download.value
         #expect(profile.avatarMediaFileName == chosenFile)
         #expect(store.fileExists(forMedia: chosenFile))
         #expect(!store.fileExists(forMedia: staleFile))

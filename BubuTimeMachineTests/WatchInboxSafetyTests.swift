@@ -50,7 +50,8 @@ struct WatchInboxSafetyTests {
         try bytes.write(to: original)
         let encoded = try #require(WatchLink.encode(intent))
         try encoded.write(to: sidecar)
-        let metadata = [WatchLink.fileMetaKey: try #require(String(data: encoded, encoding: .utf8))]
+        let metadataJSON = try #require(String(data: encoded, encoding: .utf8))
+        let metadata = [WatchLink.fileMetaKey: metadataJSON]
         let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("phone-inbox"))
         var receipt: WatchVoiceReceipt?
         #expect(throws: InjectedFailure.self) {
@@ -73,8 +74,10 @@ struct WatchInboxSafetyTests {
 
         // Normal foreground reconciliation retries. The complete phone package now owns
         // the original before the queued explicit receipt releases the Watch's copy.
-        let acknowledged = try #require(try inbox.stageForReceipt(audio: original, metadata: metadata))
-        let queued = try #require(try inbox.pendingVoices().first)
+        let stagedReceipt = try inbox.stageForReceipt(audio: original, metadata: metadata)
+        let acknowledged = try #require(stagedReceipt)
+        let pending = try inbox.pendingVoices()
+        let queued = try #require(pending.first)
         #expect(try Data(contentsOf: queued.audio) == bytes)
         #expect(try acknowledged.removeAcknowledgedSource(audio: original, metadata: sidecar))
         #expect(!FileManager.default.fileExists(atPath: original.path))
@@ -108,7 +111,8 @@ struct WatchInboxSafetyTests {
         try bytes.write(to: original)
         var changedIntent = intent
         changedIntent.roleRaw = "another synthetic parent"
-        try #require(WatchLink.encode(changedIntent)).write(to: sidecar)
+        let changedIntentData = try #require(WatchLink.encode(changedIntent))
+        try changedIntentData.write(to: sidecar)
         #expect(try !receipt.removeAcknowledgedSource(audio: original, metadata: sidecar))
         try encoded.write(to: sidecar)
         let invalid = WatchVoiceReceipt(version: 2, localId: receipt.localId,
@@ -119,8 +123,9 @@ struct WatchInboxSafetyTests {
         #expect(try !mismatched.removeAcknowledgedSource(audio: original, metadata: sidecar))
         #expect(try Data(contentsOf: original) == bytes)
         #expect(try Data(contentsOf: sidecar) == encoded)
-        let replay = try #require(WatchLink.decode(WatchVoiceReceipt.self,
-            from: try #require(WatchLink.encode(receipt))))
+        let encodedReceipt = try #require(WatchLink.encode(receipt))
+        let decodedReceipt = WatchLink.decode(WatchVoiceReceipt.self, from: encodedReceipt)
+        let replay = try #require(decodedReceipt)
         #expect(replay == receipt)
         #expect(try replay.removeAcknowledgedSource(audio: original, metadata: sidecar))
     }
@@ -192,7 +197,8 @@ struct WatchInboxSafetyTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
         let package = try stage(request(), inbox: inbox, root: root)
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         let memory = try ModelContainer(for: SharedModelContainer.schema,
                                        configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
         let media = root.appendingPathComponent("media")
@@ -214,17 +220,20 @@ struct WatchInboxSafetyTests {
         let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
         let request = request()
         let package = try stage(request, inbox: inbox, root: root)
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         let disk = try container(at: root)
         let media = root.appendingPathComponent("media")
         var attemptedContext: ModelContext?
+        var attemptedAutosave: Bool?
         #expect(throws: InjectedFailure.self) {
             try inbox.importVoice(voice, into: disk, mediaDirectory: media, save: { context in
-                #expect(!context.autosaveEnabled)
+                attemptedAutosave = context.autosaveEnabled
                 attemptedContext = context
                 throw InjectedFailure.diskFull
             })
         }
+        #expect(attemptedAutosave == false)
         let failedContext = try #require(attemptedContext)
         #expect(!failedContext.hasChanges)
         #expect(try failedContext.fetchCount(FetchDescriptor<Entry>()) == 0)
@@ -234,14 +243,17 @@ struct WatchInboxSafetyTests {
         try inbox.importVoice(voice, into: disk, mediaDirectory: media)
         #expect(!FileManager.default.fileExists(atPath: package.path))
         let duplicate = try stage(request, inbox: inbox, root: root)
-        try inbox.importVoice(try #require(try inbox.pendingVoices().first), into: disk, mediaDirectory: media)
+        let duplicatePending = try inbox.pendingVoices()
+        let duplicateVoice = try #require(duplicatePending.first)
+        try inbox.importVoice(duplicateVoice, into: disk, mediaDirectory: media)
         #expect(!FileManager.default.fileExists(atPath: duplicate.path))
         let readback = ModelContext(disk)
         #expect(try readback.fetchCount(FetchDescriptor<Entry>()) == 1)
         #expect(try readback.fetchCount(FetchDescriptor<VoiceNote>()) == 1)
         #expect(try readback.fetchCount(FetchDescriptor<FeedEvent>()) == 1)
         #expect(try FileManager.default.contentsOfDirectory(at: media, includingPropertiesForKeys: nil).count == 1)
-        let note = try #require(try readback.fetch(FetchDescriptor<VoiceNote>()).first)
+        let notes = try readback.fetch(FetchDescriptor<VoiceNote>())
+        let note = try #require(notes.first)
         let name = try #require(note.localFileName)
         #expect(try Data(contentsOf: media.appendingPathComponent(name)) == Data("synthetic voice bytes".utf8))
     }
@@ -252,7 +264,8 @@ struct WatchInboxSafetyTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
         let package = try stage(request(), inbox: inbox, root: root)
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         let disk = try container(at: root)
         let media = root.appendingPathComponent("media")
         let final = media.appendingPathComponent("watch-\(voice.deliveryId.uuidString).m4a")
@@ -286,7 +299,8 @@ struct WatchInboxSafetyTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
         let package = try stage(request(), inbox: inbox, root: root)
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         let disk = try container(at: root)
         let media = root.appendingPathComponent("media")
         let final = media.appendingPathComponent("watch-\(voice.deliveryId.uuidString).m4a")
@@ -323,7 +337,8 @@ struct WatchInboxSafetyTests {
         let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
         let package = try stage(request(), inbox: inbox, root: root)
         let disk = try container(at: root)
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         #expect(throws: WatchVoiceInbox.ImportError.self) {
             try inbox.importVoice(voice, into: disk, mediaDirectory: root.appendingPathComponent("media"), save: { _ in })
         }
@@ -345,7 +360,8 @@ struct WatchInboxSafetyTests {
         entry.id = try #require(UUID(uuidString: request.localId))
         seed.insert(entry)
         try seed.save()
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         let media = root.appendingPathComponent("media")
         #expect(throws: WatchVoiceInbox.ImportError.self) {
             try inbox.importVoice(voice, into: disk, mediaDirectory: media)
@@ -374,12 +390,14 @@ struct WatchInboxSafetyTests {
         let audio = inbox.directory.appendingPathComponent("\(request.localId).m4a")
         let metadata = inbox.directory.appendingPathComponent("\(request.localId).json")
         try Data("legacy audio".utf8).write(to: audio)
-        try #require(WatchLink.encode(request)).write(to: metadata)
+        let encodedRequest = try #require(WatchLink.encode(request))
+        try encodedRequest.write(to: metadata)
         let disk = try container(at: root)
         let ui = ModelContext(disk)
         ui.autosaveEnabled = false
         ui.insert(Entry(authorRole: FamilyRole.mama.rawValue, note: "unsaved UI edit"))
-        let voice = try #require(try inbox.pendingVoices().first)
+        let pending = try inbox.pendingVoices()
+        let voice = try #require(pending.first)
         try inbox.importVoice(voice, into: disk, mediaDirectory: root.appendingPathComponent("media"))
         #expect(ui.hasChanges)
         #expect(try ModelContext(disk).fetchCount(FetchDescriptor<Entry>()) == 1)
