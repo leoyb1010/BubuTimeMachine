@@ -2,6 +2,26 @@ import XCTest
 import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
+    func testSystemPickerBoundsTolerateOnlySubpixelRounding() {
+        let viewport = CGRect(x: 0, y: 300, width: 440, height: 500)
+        let observed = CGRect(x: -0.0000008477, y: 329.9999975, width: 145.5555573, height: 145.6666718)
+        XCTAssertTrue(Self.pickerContains(viewport, asset: observed))
+        XCTAssertFalse(Self.pickerContains(viewport, asset: observed.offsetBy(dx: -1, dy: 0)))
+        XCTAssertFalse(Self.pickerContains(viewport, asset: CGRect(x: 10, y: 299, width: 100, height: 100)))
+        XCTAssertFalse(Self.pickerContains(viewport, asset: CGRect(x: 10, y: 750, width: 100, height: 100)))
+        XCTAssertFalse(Self.pickerContains(.zero, asset: observed))
+        XCTAssertFalse(Self.pickerContains(viewport, asset: .zero))
+    }
+
+    private static func pickerContains(_ bounds: CGRect, asset: CGRect) -> Bool {
+        guard !bounds.isEmpty, !asset.isEmpty else { return false }
+        let center = CGPoint(x: asset.midX, y: asset.midY)
+        // Native Photos AX sometimes reports an edge at -0.0000008 instead of 0.
+        // Keep the actual tap center strictly inside and permit only half a point
+        // of edge rounding; genuinely clipped/offscreen assets remain rejected.
+        return bounds.contains(center) && bounds.insetBy(dx: -0.5, dy: -0.5).contains(asset)
+    }
+
     @MainActor
     func testSchoolReferenceHeaderCanOpenHistoryAndReturn() throws {
         let app = XCUIApplication()
@@ -153,7 +173,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         let assetBounds = image.frame
         guard navigation.exists, content.exists, image.exists,
               !pickerBounds.isEmpty, !assetBounds.isEmpty,
-              pickerBounds.contains(assetBounds), grid.frame.contains(assetBounds) else {
+              Self.pickerContains(pickerBounds, asset: assetBounds),
+              Self.pickerContains(grid.frame, asset: assetBounds) else {
             throw systemPickerFailure("\(labels.english) asset is outside the active picker viewport: \(assetBounds)", in: app)
         }
         print("PhotosPicker selecting \(image.label), asset=\(assetBounds), viewport=\(pickerBounds)")
@@ -234,7 +255,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         let pickerBounds = CGRect(x: visible.minX, y: top, width: visible.width,
                                   height: max(0, visible.maxY - top))
         return !pickerBounds.isEmpty && !assetBounds.isEmpty &&
-            pickerBounds.contains(assetBounds) && grid.frame.contains(assetBounds) &&
+            Self.pickerContains(pickerBounds, asset: assetBounds) &&
+            Self.pickerContains(grid.frame, asset: assetBounds) &&
             confirmation.exists && !confirmation.isEnabled
     }
 
