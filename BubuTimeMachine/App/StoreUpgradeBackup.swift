@@ -71,18 +71,17 @@ nonisolated enum StoreUpgradeBackup {
     /// iOS 换机可能只恢复 App Group 的 Documents，而遗漏根目录活动 store。
     /// 仅在活动库缺失或经十二类事实表确认全空时，用升级保护副本自愈；非空库永不覆盖。
     @discardableResult
-    static func restoreTransferredBackupIfNeeded(store: URL) throws -> Bool {
+    static func restoreTransferredBackupIfNeeded(store: URL, fm: FileManager = .default) throws -> Bool {
         writeRecoveryTrace(store: store, stage: "begin")
         do {
-            return try performTransferredBackupRestore(store: store)
+            return try performTransferredBackupRestore(store: store, manager: fm)
         } catch {
             writeRecoveryTrace(store: store, stage: "error", error: String(describing: error))
             throw error
         }
     }
 
-    private static func performTransferredBackupRestore(store: URL) throws -> Bool {
-        let manager = FileManager.default
+    private static func performTransferredBackupRestore(store: URL, manager: FileManager) throws -> Bool {
         let backup = destination(for: store)
         guard manager.fileExists(atPath: backup.path) else {
             writeRecoveryTrace(store: store, stage: "skipped-no-backup")
@@ -167,7 +166,11 @@ nonisolated enum StoreUpgradeBackup {
                 let file = URL(fileURLWithPath: store.path + suffix)
                 if manager.fileExists(atPath: file.path) { try manager.removeItem(at: file) }
             }
-            try manager.copyItem(at: restored, to: store)
+            // Staging is inside this store's own UpgradeBackups directory, on the same volume.
+            // Publish the already validated standalone file by rename while the loader lock is held.
+            // Copying here can expose a partial active database after interruption or disk exhaustion,
+            // which the next launch must protect as an unrecognized existing store instead of retrying.
+            try manager.moveItem(at: restored, to: store)
             try validateDatabase(store)
             guard try factCounts(store) == backupCounts else { throw BackupError.invalidSnapshot }
             log.notice("换机保护副本已恢复为活动库")
@@ -175,7 +178,7 @@ nonisolated enum StoreUpgradeBackup {
                                current: backupCounts, checksumMatches: true, auditMatches: true)
             return true
         } catch {
-            // 空库已有独立快照；有内容的库从未进入此分支。保留所有恢复材料并进入保护模式。
+            // 空库和原保护副本仍有独立快照；发布前失败不会留下半份活动库，下次可重试。
             throw error
         }
     }

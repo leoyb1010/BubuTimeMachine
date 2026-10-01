@@ -36,9 +36,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
         app.buttons["journal.primary"].tap()
         app.buttons["老师照片 / 视频"].tap()
-        let asset = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
-        XCTAssertTrue(asset.waitForExistence(timeout: 15))
-        asset.tap(); app.buttons["Add"].tap()
+        try tapSystemPickerAsset(.photo, in: app)
+        try confirmSystemPickerSelection(in: app)
         XCTAssertTrue(app.buttons["停止导入"].waitForExistence(timeout: 5))
         app.buttons["停止导入"].tap()
         XCTAssertTrue(app.buttons["school.manual-report"].isEnabled)
@@ -60,10 +59,9 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
         app.buttons["journal.primary"].tap()
         app.buttons["读一张亲子桥"].tap()
-        let photo = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
-        XCTAssertTrue(photo.waitForExistence(timeout: 15))
         attachScreenshot("school-system-picker-open", to: self)
-        photo.tap()
+        try tapSystemPickerAsset(.photo, in: app)
+        try confirmSystemPickerSelection(in: app, allowsAutomaticDismissal: true)
         // No text entry, no candidate adoption, no review toggle, no save tap.
         XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["school.record-status"].label.contains("自动记录"))
@@ -84,9 +82,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         // Reimport the identical original: retain the correction and keep a single memory.
         app.buttons["journal.primary"].tap()
         app.buttons["读一张亲子桥"].tap()
-        let samePhoto = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
-        XCTAssertTrue(samePhoto.waitForExistence(timeout: 15))
-        samePhoto.tap()
+        try tapSystemPickerAsset(.photo, in: app)
+        try confirmSystemPickerSelection(in: app, allowsAutomaticDismissal: true)
         XCTAssertTrue(app.staticTexts["85%"].waitForExistence(timeout: 20))
         XCTAssertEqual(app.staticTexts.matching(identifier: "每日亲子桥").count, 1)
         attachScreenshot("school-auto-correct-and-deduplicate", to: self)
@@ -101,16 +98,91 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
         app.buttons["journal.primary"].tap()
         app.buttons["老师照片 / 视频"].tap()
-        let asset = app.images.matching(identifier: "PXGGridLayout-Info").firstMatch
-        XCTAssertTrue(asset.waitForExistence(timeout: 15))
-        app.images.matching(identifier: "PXGGridLayout-Info").matching(NSPredicate(format: "label BEGINSWITH %@", "视频")).firstMatch.tap()
-        app.images.matching(identifier: "PXGGridLayout-Info").matching(NSPredicate(format: "label BEGINSWITH %@", "照片")).firstMatch.tap()
-        app.buttons["Add"].tap()
+        try tapSystemPickerAsset(.video, in: app)
+        try tapSystemPickerAsset(.photo, in: app)
+        try confirmSystemPickerSelection(in: app)
         XCTAssertTrue(app.staticTexts["已选 2 个素材"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.buttons["journal.save"].isEnabled)
         attachScreenshot("school-system-mixed-import", to: self)
         app.buttons["journal.save"].tap()
         XCTAssertTrue(app.staticTexts["老师镜头里的她"].waitForExistence(timeout: 8), "只选照片视频、不填写文字的日记也必须出现在幼儿园")
+    }
+
+    private enum SystemPickerAsset {
+        case photo, video
+
+        var labels: (english: String, chinese: String) {
+            switch self {
+            case .photo: return ("Photo", "照片")
+            case .video: return ("Video", "视频")
+            }
+        }
+    }
+
+    @MainActor
+    private func tapSystemPickerAsset(_ kind: SystemPickerAsset, in app: XCUIApplication) throws {
+        let labels = kind.labels
+        // The app is Chinese, but the hosted simulator's system picker is English.
+        let asset = NSPredicate(format: "identifier == %@ AND (label BEGINSWITH[c] %@ OR label BEGINSWITH %@)",
+                                "PXGGridLayout-Info", labels.english, labels.chinese)
+        let images = app.images.matching(asset)
+        guard images.firstMatch.waitForExistence(timeout: 15) else {
+            throw systemPickerFailure("Missing synthetic \(labels.english) asset", in: app)
+        }
+        // iOS 26 exposes PXGGridLayout-Info as an informational descendant: it can
+        // have a visible frame but no hit point. Tap its actual containing cell.
+        let cell = app.cells.containing(asset).firstMatch
+        if cell.waitForExistence(timeout: 3) {
+            guard cell.wait(for: \.isHittable, toEqual: true, timeout: 12) else {
+                throw systemPickerFailure("\(labels.english) picker cell never became hittable", in: app)
+            }
+            cell.tap()
+            return
+        }
+        // Some picker versions expose the asset itself as the tappable element.
+        // This fallback still requires a real hit point; never tap coordinates
+        // derived from a nonhittable informational image.
+        let image = images.firstMatch
+        guard image.wait(for: \.isHittable, toEqual: true, timeout: 12) else {
+            throw systemPickerFailure("No hittable \(labels.english) picker asset or containing cell", in: app)
+        }
+        image.tap()
+    }
+
+    @MainActor
+    private func confirmSystemPickerSelection(in app: XCUIApplication,
+                                              allowsAutomaticDismissal: Bool = false) throws {
+        let add = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add", "添加")).firstMatch
+        if allowsAutomaticDismissal && !add.waitForExistence(timeout: 2) {
+            // Single-selection pickers may close as soon as the asset is tapped.
+            // The caller still verifies the actual OCR/import/save result.
+            guard app.images.matching(identifier: "PXGGridLayout-Info").firstMatch.waitForNonExistence(timeout: 5) else {
+                throw systemPickerFailure("Single-selection picker neither dismissed nor offered Add", in: app)
+            }
+            return
+        }
+        guard add.waitForExistence(timeout: 10),
+              add.wait(for: \.isEnabled, toEqual: true, timeout: 10),
+              add.wait(for: \.isHittable, toEqual: true, timeout: 10) else {
+            throw systemPickerFailure("Picker Add button never became enabled and hittable", in: app)
+        }
+        add.tap()
+        guard app.images.matching(identifier: "PXGGridLayout-Info").firstMatch.waitForNonExistence(timeout: 10) else {
+            throw systemPickerFailure("Picker did not dismiss after confirming selection", in: app)
+        }
+    }
+
+    @MainActor
+    private func systemPickerFailure(_ message: String, in app: XCUIApplication) -> NSError {
+        let hierarchy = app.debugDescription
+        print("PhotosPicker failure: \(message)\n\(hierarchy)")
+        let attachment = XCTAttachment(string: hierarchy)
+        attachment.name = "school-system-picker-failure-hierarchy"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        attachScreenshot("school-system-picker-failure", to: self)
+        return NSError(domain: "BubuSystemPickerUITest", code: 1,
+                       userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     @MainActor
