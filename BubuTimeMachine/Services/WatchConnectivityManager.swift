@@ -16,8 +16,8 @@ final class WatchConnectivityManager: NSObject {
     private let log = Logger(subsystem: "com.bubu.timemachine", category: "WatchConnectivity")
     private var pendingSnapshot: WatchSnapshot?
 
-    /// App 正在用的 mainContext（与 @Query/UI 同一个）。激活时注入，保证手表写入能让前台时光轴实时刷新。
-    /// 未注入（如后台被 WC 唤醒）时回退到共享容器，数据仍落库、下次前台自会显示。
+    /// 只复用 App 的容器；后台写入使用独立 context，不能把 UI 未保存的对象当成已落盘记录。
+    /// 未注入（如后台被 WC 唤醒）时回退到共享容器。
     var appContext: ModelContext?
 
     /// 已撤销记录的 localId 名单（保最近 50 条）。
@@ -30,7 +30,19 @@ final class WatchConnectivityManager: NSObject {
         get { UserDefaults.standard.stringArray(forKey: Self.undoneKey) ?? [] }
         set { UserDefaults.standard.set(Array(newValue.suffix(50)), forKey: Self.undoneKey) }
     }
-    private var writeContext: ModelContext? { appContext ?? SharedModelContainer.sharedIfAvailable?.mainContext }
+    private var persistentContainer: ModelContainer? {
+        guard !BubuStoreHealth.loadFailed,
+              let container = appContext?.container ?? SharedModelContainer.sharedIfAvailable,
+              WatchVoiceInbox.isPersistent(container) else { return nil }
+        return container
+    }
+
+    private var writeContext: ModelContext? {
+        guard let container = persistentContainer else { return nil }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        return context
+    }
 
     func activate() {
         guard WCSession.isSupported() else { return }
@@ -142,12 +154,11 @@ final class WatchConnectivityManager: NSObject {
     }
 
     // MARK: 落库
-    private func handle(_ request: WatchRecordRequest, movedVoiceFileName: String? = nil) {
-        guard let context = writeContext else { return }
+    private func handle(_ request: WatchRecordRequest) {
+        guard let localId = UUID(uuidString: request.localId), let context = writeContext else { return }
         // 已撤销的记录：迟到的重复投递直接丢弃，不得重建。
-        if request.type != .undo, undoneLocalIds.contains(request.localId) { return }
+        if request.type != .undo, undoneLocalIds.contains(where: { UUID(uuidString: $0) == localId }) { return }
         let role = FamilyRole(rawValue: request.roleRaw) ?? .mama
-        let localId = UUID(uuidString: request.localId)
         do {
             switch request.type {
             case .text:
@@ -164,7 +175,8 @@ final class WatchConnectivityManager: NSObject {
                                                  role: role, in: context,
                                                  localId: localId, happenedAt: request.happenedAt)
             case .voice:
-                try writeVoice(request, fileName: movedVoiceFileName, role: role, in: context)
+                // 语音只能经持久收件箱导入；单独收到意图时不能确认文件已保存。
+                return
             case .undo:
                 try undoRecord(localId: request.localId, in: context)
             case .sleepStart:
@@ -186,32 +198,9 @@ final class WatchConnectivityManager: NSObject {
             }
             NotificationCenter.default.post(name: Self.didRecordNotification, object: nil)
         } catch {
+            context.rollback()
             log.error("watch record write failed: \(error.localizedDescription)")
         }
-    }
-
-    private func writeVoice(_ request: WatchRecordRequest, fileName: String?,
-                            role: FamilyRole, in context: ModelContext) throws {
-        guard let fileName else { return }
-        if let localId = UUID(uuidString: request.localId) {
-            let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
-            if ((try? context.fetchCount(d)) ?? 0) > 0 {
-                // 重复投递：删掉刚导入的孤儿音频，避免 App Group 里堆积无引用文件。
-                try? FileManager.default.removeItem(at: BubuStorage.mediaDirectory.appendingPathComponent(fileName))
-                return
-            }
-        }
-        let entry = Entry(happenedAt: request.happenedAt, authorRole: role.rawValue, note: nil)
-        if let localId = UUID(uuidString: request.localId) { entry.id = localId }
-        context.insert(entry)
-        let voice = VoiceNote(localFileName: fileName, durationSeconds: request.voiceDuration ?? 0,
-                              authorRole: role.rawValue, waveformSamples: [])
-        voice.entry = entry
-        context.insert(voice)
-        context.insert(FeedEvent(kind: .voiceAdded, actorRole: role.rawValue,
-                                 summary: "从手表录了一段声音",
-                                 targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt))
-        try context.save()
     }
 
     /// 手表结束哄睡：落一条带起止时刻的睡眠记录。语义与 iPhone 健康页 endSleep 一致，
@@ -545,92 +534,194 @@ extension WatchConnectivityManager: WCSessionDelegate {
     }
 
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
-        guard let json = file.metadata?[WatchLink.fileMetaKey] as? String,
-              let data = json.data(using: .utf8),
-              let request = WatchLink.decode(WatchRecordRequest.self, from: data) else { return }
-        // 把语音文件搬进 App Group 媒体目录（在 WC 队列同步搬运——file.fileURL 只在回调期间有效——再切回主线程写库）。
-        let tempURL = file.fileURL
-        if let moved = try? MediaStore().importFile(from: tempURL, preferredExtension: "m4a") {
-            Task { @MainActor in self.handle(request, movedVoiceFileName: moved) }
-        } else {
-            // W-P1-3：导入失败（磁盘满等）不再 guard-return 静默丢。手表端此刻可能已删源文件，
-            // 应急副本是最后防线：把 WCSessionFile 临时文件拷到 PendingWatchVoice/ + 落边车，
-            // 下次 App 启动/进前台 retryPendingVoiceImports() 重试导入。localId 保证重试幂等。
-            Self.stashEmergencyVoice(request: request, tempURL: tempURL)
-            Task { @MainActor in self.log.error("watch voice import failed, stashed for retry: \(request.localId, privacy: .public)") }
+        // WC 的临时 URL 只在回调期间有效。先同步保全原音频和原始 metadata，
+        // 无论媒体导入/数据库保存/解码是否成功，都不能只留下一个异步内存任务。
+        do {
+            try WatchVoiceInbox(directory: Self.emergencyVoiceDir()).stage(
+                audio: file.fileURL, metadata: file.metadata ?? [:])
+            Task { @MainActor in self.retryPendingVoiceImports() }
+        } catch {
+            // 磁盘完全不可写时无法保证接收成功；不把失败谎报成“已暂存”。
+            Task { @MainActor in
+                self.log.fault("watch voice staging failed; receipt not durable: \(error.localizedDescription)")
+            }
         }
     }
 }
 
-// MARK: - iPhone 侧语音应急收件箱（导入失败重试）
+// MARK: - iPhone 侧语音持久收件箱
 extension WatchConnectivityManager {
-    /// 应急目录：App Group 容器内 PendingWatchVoice/。首次创建（含中间目录）。
     nonisolated private static func emergencyVoiceDir() -> URL {
-        let dir = BubuStorage.containerURL.appendingPathComponent("PendingWatchVoice", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir
+        BubuStorage.containerURL.appendingPathComponent("PendingWatchVoice", isDirectory: true)
     }
 
-    /// 同步拷走 WCSessionFile 临时文件（回调期间有效）+ 落边车（编码后的 WatchRecordRequest）。
-    nonisolated private static func stashEmergencyVoice(request: WatchRecordRequest, tempURL: URL) {
-        let dir = emergencyVoiceDir()
-        let m4a = dir.appendingPathComponent("\(request.localId).m4a")
-        let sidecar = dir.appendingPathComponent("\(request.localId).json")
-        try? FileManager.default.removeItem(at: m4a)
-        guard (try? FileManager.default.copyItem(at: tempURL, to: m4a)) != nil else { return }
-        if let data = WatchLink.encode(request) {
-            try? data.write(to: sidecar, options: .atomic)
-        }
-    }
-
-    /// 重试导入应急语音（App 启动 / 进前台调用）。幂等：写库前按 localId 去重，
-    /// 仅在确认入库后才删应急副本，磁盘仍满则保留待下次。
-    @MainActor
+    /// 成功保存至磁盘库（或确认磁盘库已引用完整音频）后，才消费应急副本。
+    /// 恢复模式不消费、不清理；下次健康启动仍会重试。
     func retryPendingVoiceImports() {
-        let dir = Self.emergencyVoiceDir()
-        let fm = FileManager.default
-        let sidecars = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "json" }
-        guard !sidecars.isEmpty, let context = writeContext else { return }
-        // 孤儿清理：① 只有 m4a 没边车（拷贝成功但边车写失败）→ 无法导入，超 7 天删；
-        // ② 边车损坏解不出来 → 连同 m4a 一起删。否则这两类会永久滞留在 App Group（进备份）。
-        let all = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
-        let sidecarStems = Set(sidecars.map { $0.deletingPathExtension().lastPathComponent })
-        for url in all where url.pathExtension == "m4a" {
-            let stem = url.deletingPathExtension().lastPathComponent
-            guard !sidecarStems.contains(stem) else { continue }
-            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            if Date.now.timeIntervalSince(mtime) > 7 * 86_400 { try? fm.removeItem(at: url) }
+        guard let container = persistentContainer else { return }
+        let inbox = WatchVoiceInbox(directory: Self.emergencyVoiceDir())
+        do {
+            for voice in try inbox.pendingVoices() {
+                guard !undoneLocalIds.contains(where: { UUID(uuidString: $0) == voice.localId }) else { continue }
+                do {
+                    try inbox.importVoice(voice, into: container, mediaDirectory: BubuStorage.mediaDirectory)
+                    NotificationCenter.default.post(name: Self.didRecordNotification, object: nil)
+                } catch {
+                    log.error("watch voice remains queued: \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            log.error("watch voice inbox unavailable: \(error.localizedDescription)")
         }
-        for sidecar in sidecars {
-            guard let data = try? Data(contentsOf: sidecar),
-                  let request = WatchLink.decode(WatchRecordRequest.self, from: data) else {
-                try? fm.removeItem(at: sidecar)
-                try? fm.removeItem(at: dir.appendingPathComponent(
-                    sidecar.deletingPathExtension().lastPathComponent + ".m4a"))
-                continue
+    }
+}
+
+/// 文件侧与数据库侧都可注入独立测试路径，不依赖真实 App Group 或 WCSession。
+nonisolated struct WatchVoiceInbox: Sendable {
+    let directory: URL
+
+    struct PendingVoice: Sendable {
+        let request: WatchRecordRequest
+        let localId: UUID
+        let deliveryId: UUID
+        let audio: URL
+        let metadata: URL
+        let package: URL?
+    }
+
+    enum ImportError: Error {
+        case ephemeralStore, missingDurableAudio, audioConflict
+    }
+
+    /// 每次投递分配自己的目录，绝不用未校验的 localId 拼路径，也不覆盖之前的应急副本。
+    /// metadata 编码/写入失败时仍保留已经拷出的音频；后续重试不会清理这些孤儿。
+    @discardableResult
+    func stage(audio: URL, metadata: [String: Any]) throws -> URL {
+        let fm = FileManager.default
+        let package = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: package, withIntermediateDirectories: true)
+        try fm.copyItem(at: audio, to: package.appendingPathComponent("recording.m4a"))
+        let data = try PropertyListSerialization.data(fromPropertyList: metadata, format: .binary, options: 0)
+        try data.write(to: package.appendingPathComponent("metadata.plist"), options: .atomic)
+        return package
+    }
+
+    /// 同时兼容旧版 <localId>.json/.m4a。损坏、缺元数据、非法 UUID 全部保留供恢复，
+    /// 不按年龄删除可能是唯一副本的录音。只从受控文件名读取音频。
+    func pendingVoices() throws -> [PendingVoice] {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: directory.path) else { return [] }
+        let urls = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        return urls.compactMap { url in
+            let requestData: Data?
+            let audio: URL
+            let metadata: URL
+            let package: URL?
+            let deliveryId: UUID
+            if url.pathExtension == "json" {
+                guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) else { return nil }
+                deliveryId = id
+                metadata = url
+                audio = url.deletingPathExtension().appendingPathExtension("m4a")
+                package = nil
+                requestData = try? Data(contentsOf: url)
+            } else {
+                guard let id = UUID(uuidString: url.lastPathComponent) else { return nil }
+                deliveryId = id
+                package = url
+                metadata = url.appendingPathComponent("metadata.plist")
+                audio = url.appendingPathComponent("recording.m4a")
+                guard let data = try? Data(contentsOf: metadata),
+                      let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+                      let values = plist as? [String: Any],
+                      let json = values[WatchLink.fileMetaKey] as? String else { return nil }
+                requestData = json.data(using: .utf8)
             }
-            let m4a = dir.appendingPathComponent("\(request.localId).m4a")
-            guard fm.fileExists(atPath: m4a.path) else {
-                try? fm.removeItem(at: sidecar)   // 边车无对应音频：无可导入，清掉
-                continue
-            }
-            guard let moved = try? MediaStore().importFile(from: m4a, preferredExtension: "m4a") else {
-                continue   // 仍失败（磁盘仍满）：留待下次
-            }
-            handle(request, movedVoiceFileName: moved)
-            // 确认入库后再删应急副本：若 save 再次失败（entry 未落库）则保留，避免删了又没写进去。
-            if let localId = UUID(uuidString: request.localId) {
-                let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
-                if ((try? context.fetchCount(d)) ?? 0) > 0 {
-                    try? fm.removeItem(at: m4a)
-                    try? fm.removeItem(at: sidecar)
+            guard let requestData,
+                  let request = WatchLink.decode(WatchRecordRequest.self, from: requestData),
+                  request.type == .voice,
+                  let localId = UUID(uuidString: request.localId),
+                  package != nil || localId == deliveryId,
+                  fm.fileExists(atPath: audio.path) else { return nil }
+            return PendingVoice(request: request, localId: localId, deliveryId: deliveryId,
+                                audio: audio, metadata: metadata, package: package)
+        }
+    }
+
+    @MainActor
+    static func isPersistent(_ container: ModelContainer) -> Bool {
+        !container.configurations.isEmpty && container.configurations.allSatisfy { !$0.isStoredInMemoryOnly }
+    }
+
+    /// 每次尝试使用新 context；失败 rollback，下一次绝不能把未保存对象当成落盘去重证据。
+    /// save 参数仅作为故障注入点。生产调用总是显式 save；autosave 永远关闭。
+    @MainActor
+    func importVoice(_ voice: PendingVoice, into container: ModelContainer, mediaDirectory: URL,
+                     save: @MainActor (ModelContext) throws -> Void = { try $0.save() }) throws {
+        guard Self.isPersistent(container) else { throw ImportError.ephemeralStore }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        do {
+            let id = voice.localId
+            let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
+            if let existing = try context.fetch(descriptor).first {
+                // 单有 Entry 不是完整录音。缺音频/碰撞时保留收件箱，不误判为已安全落库。
+                guard Self.hasMatchingAudio(existing, source: voice.audio, mediaDirectory: mediaDirectory) else {
+                    throw ImportError.missingDurableAudio
                 }
             } else {
-                try? fm.removeItem(at: m4a); try? fm.removeItem(at: sidecar)
+                let fm = FileManager.default
+                try fm.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+                // 稳定、已校验的投递 UUID：重试复用先前的拷贝，不无限生成孤儿音频。
+                let fileName = "watch-\(voice.deliveryId.uuidString).m4a"
+                let destination = mediaDirectory.appendingPathComponent(fileName)
+                if fm.fileExists(atPath: destination.path) {
+                    guard fm.contentsEqual(atPath: destination.path, andPath: voice.audio.path) else {
+                        throw ImportError.audioConflict
+                    }
+                } else {
+                    try fm.copyItem(at: voice.audio, to: destination)
+                }
+                let role = FamilyRole(rawValue: voice.request.roleRaw) ?? .mama
+                let entry = Entry(happenedAt: voice.request.happenedAt, authorRole: role.rawValue, note: nil)
+                entry.id = id
+                context.insert(entry)
+                let note = VoiceNote(localFileName: fileName, durationSeconds: voice.request.voiceDuration ?? 0,
+                                     authorRole: role.rawValue, waveformSamples: [])
+                note.entry = entry
+                context.insert(note)
+                context.insert(FeedEvent(kind: .voiceAdded, actorRole: role.rawValue,
+                                         summary: "从手表录了一段声音", targetLocalId: id.uuidString,
+                                         happenedAt: voice.request.happenedAt))
+                try save(context)
             }
+            // 独立 context 回读，不能用刚写过（可能仍脏）的 context 作为删原件凭据。
+            let verification = ModelContext(container)
+            verification.autosaveEnabled = false
+            guard let persisted = try verification.fetch(descriptor).first,
+                  Self.hasMatchingAudio(persisted, source: voice.audio, mediaDirectory: mediaDirectory) else {
+                throw ImportError.missingDurableAudio
+            }
+        } catch {
+            context.rollback()
+            throw error
+        }
+        // 只在明确成功的路径删除。删除失败也安全：新 context 重试将以持久数据去重。
+        if let package = voice.package {
+            try FileManager.default.removeItem(at: package)
+        } else {
+            try FileManager.default.removeItem(at: voice.audio)
+            try FileManager.default.removeItem(at: voice.metadata)
+        }
+    }
+
+    @MainActor
+    private static func hasMatchingAudio(_ entry: Entry, source: URL, mediaDirectory: URL) -> Bool {
+        entry.voiceNotes.contains { note in
+            guard let name = note.localFileName, !name.isEmpty,
+                  name == (name as NSString).lastPathComponent else { return false }
+            return FileManager.default.contentsEqual(
+                atPath: mediaDirectory.appendingPathComponent(name).path, andPath: source.path)
         }
     }
 }

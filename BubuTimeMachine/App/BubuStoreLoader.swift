@@ -5,7 +5,7 @@ import Darwin
 
 /// App 和 Widget 共用的升级入口。先保护、再规范旧的隐式模型，最后执行版本化迁移。
 enum BubuStoreLoader {
-    static func open(at url: URL) throws -> ModelContainer {
+    static func open(at url: URL, prepareStore: () throws -> Void = {}) throws -> ModelContainer {
         let manager = FileManager.default
         let directory = url.deletingLastPathComponent().appendingPathComponent("Documents/UpgradeBackups")
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -17,6 +17,8 @@ enum BubuStoreLoader {
             guard Date() < deadline else { throw StoreUpgradeBackup.BackupError.cannotOpen }
             usleep(50_000)
         }
+        // Legacy sandbox publication must share the loader lock with extensions opening this store.
+        try prepareStore()
         try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: url)
         if manager.fileExists(atPath: url.path) {
             let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(

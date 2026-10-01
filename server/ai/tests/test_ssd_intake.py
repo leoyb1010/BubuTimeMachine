@@ -6,10 +6,37 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from intake_staging import IntakeStagingStore
 from ssd_intake import SSDIntakeScanner
+
+
+@pytest.fixture(autouse=True)
+def sufficient_staging_disk_space(monkeypatch):
+    # Synthetic tiny fixtures should not depend on the host having 10 GiB free.
+    # Keep the production threshold active and mock its observation instead.
+    from collections import namedtuple
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr("ssd_intake.shutil.disk_usage",
+                        lambda _: usage(100 * 1024**3, 20 * 1024**3, 80 * 1024**3))
+
+
+def test_low_disk_space_defers_candidate_without_touching_source(tmp_path: Path, monkeypatch):
+    source = tmp_path / "Bubu Inbox"
+    source.mkdir()
+    photo = source / "photo.jpg"
+    photo.write_bytes(b"synthetic-original")
+    before = photo.stat().st_mtime_ns
+    monkeypatch.setattr("ssd_intake.shutil.disk_usage",
+                        lambda _: type("Usage", (), {"free": 1})())
+    store = IntakeStagingStore(tmp_path / "staging")
+    assert SSDIntakeScanner(source, store).stage_candidates("family-bubu") == []
+    assert photo.read_bytes() == b"synthetic-original"
+    assert photo.stat().st_mtime_ns == before
+    assert "minimum_free_space_guard" in (store.root / "manifests/latest-scan.json").read_text()
 
 
 def test_ssd_scanner_is_read_only_idempotent_and_waits_for_phone_confirmation(tmp_path: Path):

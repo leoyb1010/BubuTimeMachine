@@ -248,6 +248,46 @@ struct GrowthIntegrityMigrationTests {
         #expect(counter.value == 1, "已完成的迁移不再重复执行")
     }
 
+    @Test("共享写入入口拒绝保护模式内存库且不尝试回退打开")
+    func recoveryContainerIsNotExposedToExternalWriters() throws {
+        let container = try makeContainer()
+        var attemptedFallback = false
+        let blocked = SharedModelContainer.resolveAvailableContainer(
+            injected: container, storeAvailable: false) {
+                attemptedFallback = true
+                return container
+            }
+        #expect(blocked == nil)
+        #expect(!attemptedFallback)
+        let available = SharedModelContainer.resolveAvailableContainer(
+            injected: container, storeAvailable: true) {
+                attemptedFallback = true
+                return nil
+            }
+        #expect(available === container)
+        #expect(!attemptedFallback)
+    }
+
+    @Test("保护模式不执行迁移，也不消耗持久化完成标记")
+    func recoveryStoreDoesNotConsumeMigrationFlags() throws {
+        let container = try makeContainer()
+        let (defaults, suite) = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let counter = Counter()
+        let runner = DataMigrationRunner(
+            migrations: [DataMigration(id: "recovery-retry-v1") { _ in counter.value += 1 }],
+            defaults: defaults)
+
+        runner.runPendingMigrations(context: container.mainContext, storeAvailable: false)
+        #expect(counter.value == 0)
+        #expect(!runner.hasCompleted("recovery-retry-v1"))
+
+        // The next healthy launch must still run the migration once.
+        runner.runPendingMigrations(context: container.mainContext, storeAvailable: true)
+        #expect(counter.value == 1)
+        #expect(runner.hasCompleted("recovery-retry-v1"))
+    }
+
     @Test("迁移失败不落标记、不阻塞后续迁移")
     func runnerFailureDoesNotBlockOrMark() throws {
         let container = try makeContainer()

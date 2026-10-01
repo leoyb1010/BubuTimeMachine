@@ -37,7 +37,19 @@ enum SharedModelContainer {
     /// 进程内统一入口：主 App 进程返回注入的 App 容器；extension 进程回退到自建共享容器。
     /// Widget/Intent 渲染层用它避免共享库暂时打不开时直接崩溃成空白。
     @MainActor static var sharedIfAvailable: ModelContainer? {
-        injected ?? lazyShared
+        resolveAvailableContainer(injected: injected, storeAvailable: !BubuStoreHealth.loadFailed) {
+            lazyShared
+        }
+    }
+
+    /// Recovery UI receives its memory container directly. External record writers must never
+    /// acknowledge a save to it, or attempt another store open behind the protection screen.
+    @MainActor static func resolveAvailableContainer(
+        injected: ModelContainer?, storeAvailable: Bool,
+        fallback: () -> ModelContainer?
+    ) -> ModelContainer? {
+        guard storeAvailable else { return nil }
+        return injected ?? fallback()
     }
 
     /// 主流程需要强一致数据时仍可使用强制入口；extension 渲染层不要用它。

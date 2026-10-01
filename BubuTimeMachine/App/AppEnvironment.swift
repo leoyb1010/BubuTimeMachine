@@ -127,6 +127,7 @@ final class AppEnvironment {
 
     /// App 启动后调用：注入上下文、启动同步层（离线时无副作用）。
     func bootstrap(context: ModelContext) {
+        guard !BubuStoreHealth.loadFailed else { return }
         // 预设补种是幂等的（按标题跳过已存在的），每次启动跑没有副作用，
         // 而且新版本追加预设（例如幼儿园包）必须靠它落地，所以留在这里。
         seedMilestonePresetsIfNeeded(context: context)
@@ -194,6 +195,7 @@ final class AppEnvironment {
     /// 只写 defaults 不 reload 时，桌面要等系统的低频节奏才更新，表现为「收了照片桌面没反应」。
     /// reload 本身有 2 秒合并节流（见 WidgetRefresher），高频调用不会打爆当日预算。
     func refreshWidgetSnapshot(context: ModelContext) {
+        guard !BubuStoreHealth.loadFailed else { return }
         if let snapshot = SharedWidgetSnapshot.make(context: context) {
             SharedDefaults.saveWidgetSnapshot(snapshot)
         }
@@ -232,6 +234,7 @@ final class AppEnvironment {
 
     /// 设置变更后重建客户端（用户改了服务器地址/账户/AI 开关时调用）。
     func reloadServices(context: ModelContext) {
+        guard !BubuStoreHealth.loadFailed else { return }
         let api = Self.makeAPIClient(config: config)
         self.apiClient = api
         self.aiService = Self.makeAIService(config: config, apiClient: api)

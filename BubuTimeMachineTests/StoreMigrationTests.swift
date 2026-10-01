@@ -37,18 +37,52 @@ struct StoreMigrationTests {
 
     /// 把 bundle 里的基线复制到临时目录再打开——绝不在 bundle 原件上跑迁移。
     private func copyFixture() throws -> URL {
-        // Fixtures 以 folder reference 进 bundle，所以要带 subdirectory 才找得到。
-        let source = try fixtureURL()
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("StoreMigration-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent("BubuTimeMachine.store")
-        try FileManager.default.copyItem(at: source, to: dest)
+        try materializeFixture(to: dest)
         return dest
     }
 
+    /// Hosted audit CI uses generated facts only. The installed-data fixture remains untouched
+    /// and is not even opened on this path; this does not replace its separate release gate.
+    private func materializeFixture(to destination: URL) throws {
+        guard ProcessInfo.processInfo.environment["BUBU_SYNTHETIC_MIGRATION_FIXTURE"] == "1" else {
+            try FileManager.default.copyItem(at: fixtureURL(), to: destination)
+            return
+        }
+        try autoreleasepool {
+            let schema = Schema(versionedSchema: BubuSchemaV1.self)
+            let container = try ModelContainer(for: schema,
+                configurations: [ModelConfiguration(schema: schema, url: destination)])
+            let context = ModelContext(container)
+            let date = Date(timeIntervalSince1970: 1_700_000_000)
+            context.insert(BubuSchemaV1.ChildProfile(name: "布布", birthday: date))
+            for index in 0..<4 {
+                let entry = BubuSchemaV1.Entry(
+                    happenedAt: date.addingTimeInterval(Double(index) * 86_400),
+                    authorRole: "合成测试家长", note: "纯合成迁移记录 \(index)")
+                let media = BubuSchemaV1.Media(type: .photo,
+                    localFileName: "synthetic-fixture-\(index).jpg")
+                media.entry = entry
+                context.insert(entry)
+                context.insert(media)
+            }
+            for index in 0..<130 {
+                context.insert(BubuSchemaV1.Milestone(title: "合成里程碑 \(index)", category: "合成测试"))
+            }
+            try context.save()
+        }
+        try makeStandalone(destination)
+    }
+
     private func copyStandaloneFixture(to destination: URL) throws {
-        try FileManager.default.copyItem(at: fixtureURL(), to: destination)
+        try materializeFixture(to: destination)
+        try makeStandalone(destination)
+    }
+
+    private func makeStandalone(_ destination: URL) throws {
         var database: OpaquePointer?
         guard sqlite3_open_v2(destination.path, &database,
                               SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,

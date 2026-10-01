@@ -41,7 +41,12 @@ struct DataMigrationRunner {
     func hasCompleted(_ id: String) -> Bool { defaults.bool(forKey: Self.doneKey(for: id)) }
 
     /// 顺序执行所有未完成的迁移。成功落标记；失败留痕但不阻塞后续迁移与启动。
-    func runPendingMigrations(context: ModelContext) {
+    func runPendingMigrations(
+        context: ModelContext,
+        storeAvailable: Bool = !BubuStoreHealth.loadFailed
+    ) {
+        // A successful save to the recovery-only memory store is not durable migration.
+        guard storeAvailable else { return }
         for migration in migrations {
             let key = Self.doneKey(for: migration.id)
             guard !defaults.bool(forKey: key) else { continue }

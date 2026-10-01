@@ -1443,6 +1443,28 @@ export class AppDatabase {
     }
   }
 
+  // 同步响应只确认它实际发送的快照。单条条件 UPDATE 也覆盖同毫秒的编辑，
+  // 避免网络等待期间的新内容被标为已同步，或被远端冲突结果覆盖。
+  async updateEntryFieldsIfUnchanged(expected: Entry, fields: relationalStore.ValuesBucket): Promise<boolean> {
+    const snapshot: relationalStore.ValuesBucket = {
+      id: expected.id, remoteId: expected.remoteId ?? null,
+      title: expected.title ?? null, note: expected.note ?? null,
+      firstPersonNote: expected.firstPersonNote ?? null, happenedAt: expected.happenedAt,
+      locationName: expected.locationName ?? null, latitude: expected.latitude ?? null,
+      longitude: expected.longitude ?? null, authorRole: expected.authorRole,
+      moodRaw: expected.moodRaw ?? null, syncState: expected.syncState,
+      isArchived: expected.isArchived ? 1 : 0, inStorybook: expected.inStorybook ? 1 : 0,
+      editedAt: expected.editedAt ?? null, createdAt: expected.createdAt
+    };
+    const predicates = new relationalStore.RdbPredicates('entry');
+    for (const column of Object.keys(snapshot)) {
+      const value = snapshot[column];
+      if (value === null) predicates.isNull(column);
+      else if (typeof value === 'string' || typeof value === 'number') predicates.equalTo(column, value);
+    }
+    return (await this.store!.update(fields, predicates)) > 0;
+  }
+
   async deleteEntryHard(id: string): Promise<void> {
     try {
     await this.deleteRowsByColumn('media', 'entryId', id);

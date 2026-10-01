@@ -5,8 +5,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, audit/three-round-safety-20261001]
   pull_request:
+
+# Test-only workflow: no deployment, production credentials or write-capable token.
+permissions:
+  contents: read
 
 jobs:
   harmony-policy:
@@ -40,10 +44,26 @@ jobs:
           xcodebuild -version
 
       - name: Install xcodegen
-        run: brew install xcodegen
+        run: brew install xcodegen ffmpeg
 
       - name: Generate project
         run: xcodegen generate
+
+      - name: Use synthetic migration fixtures
+        run: |
+          python3 - <<'PYTHON'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          path = Path("BubuTimeMachine.xcodeproj/xcshareddata/xcschemes/BubuTimeMachine.xcscheme")
+          tree = ET.parse(path)
+          action = tree.getroot().find("TestAction")
+          variables = action.find("EnvironmentVariables")
+          if variables is None:
+              variables = ET.SubElement(action, "EnvironmentVariables")
+          ET.SubElement(variables, "EnvironmentVariable", {
+              "key": "BUBU_SYNTHETIC_MIGRATION_FIXTURE", "value": "1", "isEnabled": "YES"})
+          tree.write(path, encoding="utf-8", xml_declaration=True)
+          PYTHON
 
       - name: Pick simulators
         id: sim
@@ -63,35 +83,48 @@ jobs:
           IPAD=$(pick iPad)
           echo "ipad=$IPAD" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare synthetic PhotosPicker assets
+        run: |
+          bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.iphone }}"
+          if [ -n "${{ steps.sim.outputs.ipad }}" ]; then
+            bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.ipad }}"
+          fi
+
       # 单元测试与 UI 测试分开跑：UI 用例在共享 runner 上会因为 "Lost connection to the application"
       # 偶发抖动（2026-09-12 两次都是同一条用例），和 iPad 一样失败后重跑一次；单元测试不重跑。
       - name: Build & unit test (iPhone)
         run: |
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.iphone }}" \
             -skip-testing:BubuTimeMachineUITests \
-            clean test 2>&1 | tee /tmp/build-iphone.log | tail -120
+            clean test 2>&1 | tee /tmp/build-iphone.log
 
       - name: UI 回归 (iPhone)
         run: |
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.iphone }}" \
             -only-testing:BubuTimeMachineUITests \
-            test 2>&1 | tee /tmp/iphone-ui.log | tail -80 \
+            test 2>&1 | tee /tmp/iphone-ui.log \
           || {
             echo "iPhone UI 回归第一次失败，重跑一次以排除 runner 资源抖动"
             xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
               -scheme BubuTimeMachine \
               -parallel-testing-enabled NO \
               -destination "id=${{ steps.sim.outputs.iphone }}" \
               -only-testing:BubuTimeMachineUITests \
-              test 2>&1 | tee /tmp/iphone-ui.log | tail -80
+              test 2>&1 | tee /tmp/iphone-ui.log
           }
 
       # CLAUDE.md 的验收标准是「零 error 零 warning」，但过去 CI 只看退出码，
@@ -116,26 +149,35 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.ipad }}" \
             -only-testing:BubuTimeMachineUITests \
-            test 2>&1 | tee /tmp/ipad.log | tail -80 \
+            test 2>&1 | tee /tmp/ipad.log \
           || {
             echo "iPad 回归第一次失败，重跑一次以排除 runner 资源抖动"
             xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
               -scheme BubuTimeMachine \
               -parallel-testing-enabled NO \
               -destination "id=${{ steps.sim.outputs.ipad }}" \
               -only-testing:BubuTimeMachineUITests \
-              test 2>&1 | tee /tmp/ipad.log | tail -80
+              test 2>&1 | tee /tmp/ipad.log
           }
 
-      # tail -80 会把断言细节截掉，失败时看不出是哪一条炸的。
-      - name: iPad 失败详情
+      # Keep compiler diagnostics for every stage, including an early build failure.
+      - name: Build and test failure details
         if: failure()
         run: |
-          grep -E "error:|XCTAssert|Failing tests|Test Case .* failed" /tmp/ipad.log | tail -40 || true
+          for log in /tmp/build-iphone.log /tmp/iphone-ui.log /tmp/ipad.log; do
+            if [ -f "$log" ]; then
+              echo "=== $log ==="
+              grep -E "error:|XCTAssert|Failing tests|Test Case .* failed" "$log" | tail -100 || true
+            fi
+          done
 
   server:
     name: AI server tests (Python 3.9)

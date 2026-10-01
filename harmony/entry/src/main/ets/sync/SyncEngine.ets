@@ -338,16 +338,19 @@ export class SyncEngine {
       try {
         const saved = await APIClient.shared.upsert('entries', e.id, body);
         if (APIClient.remoteWasNewer(saved)) {
-          SyncEngine.applyEntry(saved, e);
-          e.remoteId = SyncEngine.rStr(saved, 'id');
-          e.syncState = SyncState.synced;
-          await AppDatabase.shared.updateEntryFields(e.id, SyncEngine.entryToFields(e));
+          const merged: Entry = {
+            id: e.id, happenedAt: e.happenedAt, authorRole: e.authorRole,
+            isArchived: e.isArchived, createdAt: e.createdAt, syncState: SyncState.synced
+          };
+          SyncEngine.applyEntry(saved, merged);
+          merged.remoteId = SyncEngine.rStr(saved, 'id');
+          await AppDatabase.shared.updateEntryFieldsIfUnchanged(e, SyncEngine.entryToFields(merged));
           continue;
         }
         const remoteId = saved['id'] as string;
-        await AppDatabase.shared.updateEntryFields(e.id, { remoteId: remoteId, syncState: SyncState.synced });
+        await AppDatabase.shared.updateEntryFieldsIfUnchanged(e, { remoteId: remoteId, syncState: SyncState.synced });
       } catch (err) {
-        await AppDatabase.shared.updateEntryFields(e.id, { syncState: SyncState.failed });
+        await AppDatabase.shared.updateEntryFieldsIfUnchanged(e, { syncState: SyncState.failed });
         hilog.warn(DOMAIN, 'Bubu', `推送 Entry 失败 ${e.id}`);
       }
     }
@@ -908,10 +911,12 @@ export class SyncEngine {
   ): Promise<boolean> {
     try {
       const cursor = ignoreCursor ? undefined : await this.getCursor(collection);
-      const activeRequest = APIClient.shared.fetchRecords(collection, cursor);
-      const tombstoneRequest = APIClient.shared.fetchDeletedTombstones(collection, cursor);
-      const records = await activeRequest;
-      const tombstones = await tombstoneRequest;
+      const responses = await Promise.all([
+        APIClient.shared.fetchRecords(collection, cursor),
+        APIClient.shared.fetchDeletedTombstones(collection, cursor)
+      ]);
+      const records = responses[0];
+      const tombstones = responses[1];
       if (this.serverMirrorMode) {
         const seen = new Set<string>();
         for (const r of records) {
@@ -922,14 +927,17 @@ export class SyncEngine {
         this.serverSeen.set(collection, seen);
       }
       let maxUpdated: string | undefined;
+      let fullyMerged = true;
       for (const r of records) {
-        await merge(r);
+        if (await merge(r) === false) fullyMerged = false;
         maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(r, 'updated'));
       }
       await this.removeRemoteTombstones(collection, tombstones);
       for (const tombstone of tombstones) {
         maxUpdated = laterServerTimestamp(maxUpdated, SyncEngine.rStr(tombstone, 'updated'));
       }
+      // 缺父记录或本机仍有改动的行必须重试；不能被后面的新记录推进游标后永久跳过。
+      if (!fullyMerged) throw new Error(`${collection} 仍有待合并记录，保留游标下轮重试`);
       if (maxUpdated !== undefined) await this.setCursor(collection, maxUpdated);
       return true;
     } catch (e) {

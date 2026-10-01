@@ -4,7 +4,8 @@
 // 原作者为空（历史记录）允许本次补齐。superuser（服务账号/后台）不受限。
 const collectionsWithAuthor = [
     "entries", "media", "comments", "voicenotes", "milestones", "firsttimes",
-    "voicememos", "healthrecords", "timecapsules", "vaccinerecords", "growthmeasurements",
+    "voicememos", "members", "childprofile", "healthrecords", "timecapsules",
+    "feed_events", "vaccinerecords", "growthmeasurements",
 ];
 
 onRecordUpdateRequest((e) => {

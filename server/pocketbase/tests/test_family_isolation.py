@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -16,6 +17,16 @@ from pathlib import Path
 from server.pocketbase.tests import test_intake_commit as intake_helpers
 
 ROOT = intake_helpers.ROOT
+
+
+class AuthorshipHookScopeTests(unittest.TestCase):
+    def test_hook_covers_every_collection_with_relaxed_author_rule(self):
+        migration = (ROOT / "server/pocketbase/migrations/1700000021_relax_author_guard_and_auth_limit.js").read_text()
+        hook = (ROOT / "server/pocketbase/pb_hooks/authorship.pb.js").read_text()
+        relaxed = re.search(r"const business = \[(.*?)\]", migration, re.S).group(1)
+        protected = re.search(r"const collectionsWithAuthor = \[(.*?)\]", hook, re.S).group(1)
+        self.assertEqual(set(re.findall(r"['\"]([a-z_]+)['\"]", relaxed)),
+                         set(re.findall(r"['\"]([a-z_]+)['\"]", protected)))
 
 
 class FamilyIsolationIntegrationTests(unittest.TestCase):
@@ -193,6 +204,31 @@ class FamilyIsolationIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(status, 400)
         status, _ = self.call("PATCH", path, {"name": "renamed"}, self.token_a)
         self.assertEqual(status, 200)
+
+    def test_shared_profile_member_and_feed_edits_keep_original_author(self):
+        second_user, second_token = self.user("shared-editor", self.family_a)
+        records = [
+            ("members", {"name": "Synthetic member"}, "name"),
+            ("childprofile", {"name": "Synthetic child", "birthday": "2020-01-01 00:00:00.000Z"}, "name"),
+            ("feed_events", {"kind": "entry", "summary": "Synthetic event",
+                             "happenedAt": "2026-09-08 00:00:00.000Z"}, "summary"),
+        ]
+        for collection, fields, editable_field in records:
+            with self.subTest(collection=collection):
+                row = self.create(collection, dict(fields, localId="audit-" + collection,
+                                                   familyId=self.family_a, authorUserId=self.user_a["id"]))
+                path = f"/api/collections/{collection}/records/{row['id']}"
+                status, edited = self.call("PATCH", path,
+                                          {editable_field: "Edited by family", "authorUserId": second_user["id"]},
+                                          second_token)
+                self.assertEqual(status, 200, edited)
+                self.assertEqual(edited[editable_field], "Edited by family")
+                self.assertEqual(edited["authorUserId"], self.user_a["id"])
+                status, deleted = self.call("PATCH", path,
+                                           {"isDeleted": True, "authorUserId": second_user["id"]}, second_token)
+                self.assertEqual(status, 200, deleted)
+                self.assertTrue(deleted["isDeleted"])
+                self.assertEqual(deleted["authorUserId"], self.user_a["id"])
 
     def test_hardened_settings_are_applied_by_migration(self):
         status, settings = self.call("GET", "/api/settings", token=self.admin)

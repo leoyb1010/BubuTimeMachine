@@ -50,9 +50,10 @@ struct BubuTimeMachineApp: App {
         // 再让 ModelConfiguration 指向共享容器里的 store —— Widget/灵动岛等 extension 才能读到同一份数据。
         // 媒体库（可能几 GB）不在 init 里搬——它改到 .task 后台执行（migrateMediaIfNeeded），
         // 避免大库用户升级时主线程同步拷贝超过启动看门狗被 0x8badf00d 强杀。
-        StorageMigrator.migrateStoreIfNeeded()
         do {
-            modelContainer = try BubuStoreLoader.open(at: BubuStorage.storeURL)
+            modelContainer = try BubuStoreLoader.open(at: BubuStorage.storeURL) {
+                try StorageMigrator.migrateStoreIfNeeded()
+            }
             BubuStoreHealth.markHealthy()
         } catch {
             // 数据保护模式（R4 G-3）：以前这里 fatalError——升级迁移一旦失败，
@@ -82,6 +83,9 @@ struct BubuTimeMachineApp: App {
                 // 否则浅色系统下暗渐变底 + 深棕文字 = 全 App 不可读（R4 待核-星夜）
                 .preferredColorScheme(env.theme.theme.isDark ? .dark : nil)
                 .task {
+                    // A recovery container is deliberately ephemeral. Do not consume durable
+                    // migration flags, queued Watch imports, or replace saved snapshots with it.
+                    guard !BubuStoreHealth.loadFailed else { return }
                     #if DEBUG
                     seedForUITestingIfNeeded()
                     seedBigForPerfIfNeeded()
@@ -149,6 +153,7 @@ struct BubuTimeMachineApp: App {
             // 进后台停轮询省电；回前台立刻补一轮同步
             switch phase {
             case .active:
+                guard !BubuStoreHealth.loadFailed else { return }
                 env.syncEngine.start()
                 WatchConnectivityManager.shared.retryPendingVoiceImports()   // 进前台重试手表语音应急导入（W-P1-3）
                 env.refreshWidgetSnapshot(context: modelContainer.mainContext)
@@ -167,6 +172,7 @@ struct BubuTimeMachineApp: App {
     /// 读库生成概览快照并推给手表。
     @MainActor
     private func pushWatchSnapshot() {
+        guard !BubuStoreHealth.loadFailed else { return }
         guard let snapshot = WatchSnapshotBuilder.make(context: modelContainer.mainContext,
                                                        role: env.config.currentRole) else { return }
         WatchConnectivityManager.shared.push(snapshot)

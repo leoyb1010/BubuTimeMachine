@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftData
 @testable import BubuTimeMachine
 
 // MARK: - 同步韧性回归测试
@@ -80,5 +81,140 @@ struct TimelineCardTextTests {
         #expect(TimelineCardText.headline(title: nil, note: nil) == "记录此刻")
         #expect(TimelineCardText.subtitle(title: nil, note: nil) == nil)
         #expect(TimelineCardText.headline(title: "", note: "") == "记录此刻")
+    }
+}
+
+// MARK: - 上传回执跨 await 的数据安全
+@MainActor
+struct SyncUploadCompletionTests {
+    private func context() throws -> ModelContext {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: SharedModelContainer.schema, configurations: [config])
+        return ModelContext(container)
+    }
+
+    private func reply(for entry: Entry, note: String, editedAt: Date) -> EntryDTO {
+        EntryDTO(id: "audit-entry", localId: entry.id.uuidString,
+                 title: nil, note: note, firstPersonNote: nil,
+                 happenedAt: entry.happenedAt, locationName: nil, latitude: nil, longitude: nil,
+                 authorRole: entry.authorRole, mood: nil, isArchived: false,
+                 editedAt: editedAt, createdAt: entry.createdAt)
+    }
+
+    @Test("旧上传回执不能把 await 期间的新编辑标为已同步")
+    func deferredReplyKeepsNewerLocalEdit() async throws {
+        let context = try context()
+        let entry = Entry(authorRole: "audit", note: "已发出的旧内容")
+        let sentAt = Date(timeIntervalSince1970: 1_000)
+        entry.createdAt = sentAt
+        entry.editedAt = sentAt
+        entry.syncState = .uploading
+        context.insert(entry)
+        try context.save()
+        let localId = entry.id
+        let saved = reply(for: entry, note: "已发出的旧内容", editedAt: sentAt)
+        let delivery = AsyncStream<EntryDTO>.makeStream()
+        let upload = Task { @MainActor in
+            for await response in delivery.stream {
+                try SyncEngine.completeEntryUpload(response, localId: localId, in: context)
+                try context.save()
+            }
+        }
+        // 确认回执尚未送达时发生用户编辑，再恢复异步回执。
+        entry.note = "请求期间的新内容"
+        entry.editedAt = sentAt.addingTimeInterval(10)
+        entry.syncState = .local
+        try context.save()
+        delivery.continuation.yield(saved)
+        delivery.continuation.finish()
+        try await upload.value
+        #expect(entry.note == "请求期间的新内容")
+        #expect(entry.syncState == .local)
+        #expect(entry.remoteId == "audit-entry")
+        let reopened = ModelContext(context.container)
+        #expect(try reopened.fetch(FetchDescriptor<Entry>()).first?.syncState == .local)
+    }
+
+    @Test("更晚的远端编辑仍按原有 LWW 规则收敛")
+    func newerRemoteReplyWins() throws {
+        let context = try context()
+        let entry = Entry(authorRole: "audit", note: "旧内容")
+        entry.createdAt = Date(timeIntervalSince1970: 1_000)
+        entry.editedAt = entry.createdAt
+        entry.syncState = .uploading
+        context.insert(entry)
+        let saved = reply(for: entry, note: "远端新内容", editedAt: entry.createdAt.addingTimeInterval(20))
+        try SyncEngine.completeEntryUpload(saved, localId: entry.id, in: context)
+        try context.save()
+        #expect(entry.note == "远端新内容")
+        #expect(entry.syncState == .synced)
+    }
+
+    @Test("删除后的媒体收到迟到回执只补墓碑，不重建本地媒体")
+    func deferredMediaReplyPersistsDeletion() async throws {
+        let context = try context()
+        let media = Media(type: .photo, localFileName: nil)
+        let localId = media.id
+        media.syncState = .uploading
+        context.insert(media)
+        try context.save()
+        let delivery = AsyncStream<String>.makeStream()
+        let upload = Task { @MainActor in
+            for await remoteId in delivery.stream {
+                try SyncEngine.completeMediaUpload(localId: localId, remoteId: remoteId,
+                    remoteURL: "https://example.invalid/audit.jpg", in: context)
+                try context.save()
+            }
+        }
+        context.delete(media)
+        try context.save()
+        delivery.continuation.yield("audit-media")
+        delivery.continuation.finish()
+        try await upload.value
+        let reopened = ModelContext(context.container)
+        #expect(try reopened.fetchCount(FetchDescriptor<Media>()) == 0)
+        let deletions = try reopened.fetch(FetchDescriptor<PendingDeletion>())
+        #expect(deletions.count == 1)
+        #expect(deletions.first?.collection == "media")
+        #expect(deletions.first?.remoteId == "audit-media")
+    }
+
+    @Test("删除后的记录收到迟到回执同样保留删除意图")
+    func entryDeletionQueuesTombstone() throws {
+        let context = try context()
+        let entry = Entry(authorRole: "audit", note: "准备删除")
+        let saved = reply(for: entry, note: "准备删除", editedAt: entry.createdAt)
+        let localId = entry.id
+        context.insert(entry)
+        try context.save()
+        context.delete(entry)
+        try context.save()
+        try SyncEngine.completeEntryUpload(saved, localId: localId, in: context)
+        try context.save()
+        #expect(try context.fetchCount(FetchDescriptor<Entry>()) == 0)
+        #expect(try context.fetch(FetchDescriptor<PendingDeletion>()).first?.collection == "entries")
+    }
+
+    @Test("普通媒体上传回执仍落库并标记同步完成")
+    func existingMediaFinishesNormally() throws {
+        let context = try context()
+        let media = Media(type: .photo, localFileName: nil)
+        media.syncState = .uploading
+        context.insert(media)
+        try SyncEngine.completeMediaUpload(localId: media.id, remoteId: "audit-media",
+            remoteURL: "https://example.invalid/audit.jpg", in: context)
+        try context.save()
+        #expect(media.syncState == .synced)
+        #expect(media.remoteId == "audit-media")
+        #expect(media.uploadProgress == 1)
+        #expect(try context.fetchCount(FetchDescriptor<PendingDeletion>()) == 0)
+    }
+
+    @Test("所有可编辑模型都只确认 uploading 状态，不清除新草稿")
+    func completionStatePreservesDirtyRecords() {
+        #expect(SyncEngine.uploadCompletionState(.uploading) == .synced)
+        #expect(SyncEngine.uploadCompletionState(.local) == .local)
+        #expect(SyncEngine.uploadCompletionState(.failed) == .failed)
+        #expect(SyncEngine.uploadCompletionState(.synced) == .synced)
     }
 }

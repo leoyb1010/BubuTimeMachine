@@ -8,10 +8,10 @@ import SQLite3
 /// 否则 Widget / Live Activity 读不到、且老用户数据「消失」。
 ///
 /// 安全纪律（数据是用户 30 年的记忆，绝不能丢）：
-/// - **幂等**：用 UserDefaults 标记完成；若目标缺失或更旧，仍会自愈。
+/// - **幂等**：已有目标库永不替换；仅目标缺失时迁移。
 /// - **不删源**：迁移成功也保留旧文件（仅标记完成），万一新容器出问题可手动回退。
-/// - **失败不致命**：任一步失败只记日志、不抛错、不删任何东西；下次启动重试。
-/// - **store 三件套**：SQLite 的 `.store` / `.store-wal` / `.store-shm` 一并搬。
+/// - **失败保护**：store 迁移失败抛给启动保护模式；媒体失败下次启动重试。
+/// - **WAL 一致快照**：SQLite backup 合并已提交日志，完成后才原子发布独立库。
 /// `nonisolated`：全部是 FileManager/SQLite/UserDefaults 纯 IO，无 UI、无共享可变状态，
 /// 既能在 App.init（MainActor）同步调 store 迁移，也能在 Task.detached 后台跑媒体迁移。
 nonisolated enum StorageMigrator {
@@ -20,7 +20,6 @@ nonisolated enum StorageMigrator {
     // 媒体后台补搬（可能几 GB，绝不卡启动看门狗）。两者各自幂等自愈、互不阻塞。
     private static let storeDoneKey = "bubu.storage.migratedStoreToAppGroup.v3"
     private static let mediaDoneKey = "bubu.storage.migratedMediaToAppGroup.v3"
-    private static let storeSuffixes = ["", "-wal", "-shm"]
     private static let mediaDirNames = ["Media", "Thumbnails"]
 
     private struct StoreCandidate {
@@ -36,12 +35,6 @@ nonisolated enum StorageMigrator {
         let media: Int
         let fileBytes: Int64
 
-        /// 四张业务表全空。只有「打得开且确实为空」才算数——
-        /// 打不开的库压根不会生成 StoreStats（见 inspectStore 返回可选）。
-        var isEmpty: Bool {
-            childProfiles == 0 && entries == 0 && milestones == 0 && media == 0
-        }
-
         var score: Int64 {
             Int64(childProfiles) * 1_000_000
             + Int64(entries) * 10_000
@@ -52,10 +45,10 @@ nonisolated enum StorageMigrator {
     }
 
     /// 在 App 启动早期、创建 ModelContainer 之前【同步】调用。
-    /// 只搬 SwiftData store 三件套（.store / .store-wal / .store-shm）——文件小、且必须在
-    /// ModelConfiguration 指向共享容器前就位，否则容器会指向旧/空 store。
+    /// 在 BubuStoreLoader 的跨进程锁内发布独立 SQLite 快照；
+    /// ModelConfiguration 指向共享容器前必须完成，失败则进入保护模式。
     /// 媒体目录（可能几 GB）不在这里搬，改由 migrateMediaIfNeeded() 后台执行。
-    static func migrateStoreIfNeeded() {
+    static func migrateStoreIfNeeded() throws {
         let defaults = UserDefaults.standard
 
         // App Group 还没配好（拿不到共享容器）：本次跳过，等签名就绪后下次启动再迁。
@@ -76,68 +69,32 @@ nonisolated enum StorageMigrator {
             return
         }
 
-        var allOK = true
-        let destination = makeCandidate(label: "App Group", url: destinationStore, fm: fm)
-
-        // SwiftData store 三件套
-        // 真实旧库曾经落在 SwiftData 默认路径 default.store；后续 0A 迁移又引入了
-        // Documents/BubuTimeMachine.store。这里按业务表数量选“更完整”的库，避免把 300+ 里程碑
-        // 回退成早期 100+ 里程碑。
-        let legacyStores = [
-            makeCandidate(label: "SwiftData default.store",
-                          url: legacyAppSupport.appendingPathComponent("default.store"),
-                          fm: fm),
-            makeCandidate(label: "Documents BubuTimeMachine.store",
-                          url: legacyRoot.appendingPathComponent(BubuStorage.storeFileName),
-                          fm: fm)
-        ].compactMap { $0 }
-
-        let bestSource = legacyStores.max(by: { $0.stats.score < $1.stats.score })
-        let destinationFileExists = fm.fileExists(atPath: destinationStore.path)
-
-        // 一次性迁移的正确语义：**目标不存在才搬**。
-        //
-        // 以前这里是「谁分高谁赢」的启发式，两条路径都能把正在用的库删掉换成旧库：
-        //   A) 活库瞬时打不开（被别的进程持锁 / -shm 建不出）→ 分数塌成文件字节数 →
-        //      旧沙盒里一条儿童档案就值一百万分，稳赢。
-        //   B) SwiftData 走 WAL，最近写入还在 -wal 里没落主文件 → 活库被系统性低估，
-        //      早已 checkpoint 完毕的冻结旧库被系统性高估。
-        // 它确实会先备份到 MigrationBackups/，但 App 里没有任何恢复入口，
-        // 用户看到的就是「这半年的记录全没了」。
-        //
-        // 唯一保留的替换场景：目标**打得开、且四张业务表确认全空**（上次迁移中断留下的空壳），
-        // 而源确实有数据。这个判断必须建立在一次成功的 open 之上，不能靠猜。
-        let destinationIsVerifiedEmpty = destination?.stats.isEmpty ?? false
-        let sourceHasData = !(bestSource?.stats.isEmpty ?? true)
-        let storeNeedsRepair: Bool = {
-            guard bestSource != nil else { return false }
-            if !destinationFileExists { return true }
-            return destinationIsVerifiedEmpty && sourceHasData
-        }()
-
-        if defaults.bool(forKey: storeDoneKey), destinationFileExists, !storeNeedsRepair {
+        // Even a store containing only health, voice or capsule facts belongs to the user.
+        // Never guess that an existing database is safe to replace from four selected tables.
+        if fm.fileExists(atPath: destinationStore.path) {
+            defaults.set(true, forKey: storeDoneKey)
             return
         }
 
-        if let bestSource, storeNeedsRepair {
-            if destinationFileExists {
-                log.notice("App Group store 确认为空壳，备份后用 \(bestSource.label, privacy: .public) 补齐")
-                allOK = copyStoreTrio(from: bestSource.url, to: destinationStore,
-                                      replacingExisting: true, fm: fm) && allOK
-            } else {
-                log.notice("迁移 store 到 App Group：\(bestSource.label, privacy: .public)")
-                allOK = copyStoreTrio(from: bestSource.url, to: destinationStore,
-                                      replacingExisting: false, fm: fm) && allOK
+        let legacyURLs = [
+            legacyAppSupport.appendingPathComponent("default.store"),
+            legacyRoot.appendingPathComponent(BubuStorage.storeFileName)
+        ]
+        let legacyStores = legacyURLs.compactMap {
+            makeCandidate(label: $0.lastPathComponent, url: $0, fm: fm)
+        }
+        guard let bestSource = legacyStores.max(by: { $0.stats.score < $1.stats.score }) else {
+            // A present but unreadable legacy store is not a fresh installation.
+            guard !legacyURLs.contains(where: { fm.fileExists(atPath: $0.path) }) else {
+                throw StoreUpgradeBackup.BackupError.cannotOpen
             }
+            defaults.set(true, forKey: storeDoneKey)
+            return
         }
 
-        if allOK {
-            defaults.set(true, forKey: storeDoneKey)
-            log.notice("store 迁移到 App Group 完成")
-        } else {
-            // 不标记完成：下次启动重试。旧文件全部保留，数据不丢。
-            log.error("store 迁移失败，下次启动重试（旧数据已保留）")
-        }
+        _ = try copyStoreIfAbsent(from: bestSource.url, to: destinationStore, fm: fm)
+        defaults.set(true, forKey: storeDoneKey)
+        log.notice("store 迁移到 App Group 完成，旧库保留")
     }
 
     /// 媒体目录（Media / Thumbnails，可能几 GB）迁移，改在【后台】执行（App .task 里
@@ -232,53 +189,27 @@ nonisolated enum StorageMigrator {
         return Int(sqlite3_column_int64(statement, 0))
     }
 
-    private static func copyStoreTrio(from srcBase: URL, to dstBase: URL,
-                                      replacingExisting: Bool, fm: FileManager) -> Bool {
-        do {
-            try fm.createDirectory(at: dstBase.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if replacingExisting {
-                guard backupStoreTrio(at: dstBase, fm: fm) else { return false }
-                for suffix in storeSuffixes {
-                    let dst = URL(fileURLWithPath: dstBase.path + suffix)
-                    if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
-                }
-            }
-
-            var copied = false
-            for suffix in storeSuffixes {
-                let src = URL(fileURLWithPath: srcBase.path + suffix)
-                let dst = URL(fileURLWithPath: dstBase.path + suffix)
-                guard fm.fileExists(atPath: src.path) else { continue }
-                if fm.fileExists(atPath: dst.path), !replacingExisting { continue }
-                try fm.copyItem(at: src, to: dst)
-                copied = true
-            }
-            return copied
-        } catch {
-            log.error("迁移 store 失败：\(error.localizedDescription, privacy: .public)")
-            return false
+    /// Publish only a complete, WAL-consistent snapshot. Interruption can leave a staging
+    /// file, but never a partially copied active store. Call inside BubuStoreLoader's lock.
+    @discardableResult
+    static func copyStoreIfAbsent(from source: URL, to destination: URL,
+                                  fm: FileManager = .default) throws -> Bool {
+        guard !fm.fileExists(atPath: destination.path) else { return false }
+        // A lone journal may contain recoverable facts. Do not attach it to a different base.
+        guard !["-wal", "-shm"].contains(where: {
+            fm.fileExists(atPath: destination.path + $0)
+        }) else { throw StoreUpgradeBackup.BackupError.invalidSnapshot }
+        let staged = destination.deletingLastPathComponent()
+            .appendingPathComponent("\(UUID().uuidString).migration-partial")
+        defer {
+            try? fm.removeItem(at: staged)
+            try? fm.removeItem(at: staged.appendingPathExtension("sha256"))
         }
-    }
-
-    private static func backupStoreTrio(at storeURL: URL, fm: FileManager) -> Bool {
-        let stamp = ISO8601DateFormatter().string(from: .now)
-            .replacingOccurrences(of: ":", with: "-")
-        let backupDir = storeURL.deletingLastPathComponent()
-            .appendingPathComponent("MigrationBackups", isDirectory: true)
-            .appendingPathComponent(stamp, isDirectory: true)
-        do {
-            try fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
-            for suffix in storeSuffixes {
-                let src = URL(fileURLWithPath: storeURL.path + suffix)
-                guard fm.fileExists(atPath: src.path) else { continue }
-                let dst = backupDir.appendingPathComponent(storeURL.lastPathComponent + suffix)
-                try fm.copyItem(at: src, to: dst)
-            }
-            return true
-        } catch {
-            log.error("备份 App Group store 失败，已停止替换：\(error.localizedDescription, privacy: .public)")
-            return false
-        }
+        try StoreUpgradeBackup.snapshot(source: source, destination: staged)
+        // Recheck after snapshotting; an existing target always wins.
+        guard !fm.fileExists(atPath: destination.path) else { return false }
+        try fm.moveItem(at: staged, to: destination)
+        return true
     }
 
     /// 复制单个文件：源不存在视为成功（没什么可搬）；目标已存在则跳过（幂等）。
