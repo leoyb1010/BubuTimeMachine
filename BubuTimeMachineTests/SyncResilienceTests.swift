@@ -635,6 +635,12 @@ struct SyncClientReplacementTests {
 // MARK: - 已成功但迟到的创建回执：取消不撤销删除补偿，也不跨同步目标入队
 @MainActor
 struct SyncCancelledCreationReceiptTests {
+    @MainActor
+    private final class ScopeState {
+        var current: String
+        init(_ current: String) { self.current = current }
+    }
+
     private func context() throws -> ModelContext {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: SharedModelContainer.schema, configurations: [configuration])
@@ -652,7 +658,7 @@ struct SyncCancelledCreationReceiptTests {
         try context.save()
         let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
         let requestScope = "https://old.example.invalid|audit@example.invalid"
-        var currentScope = requestScope
+        let scopeState = ScopeState(requestScope)
         let gate = SyncRunGate()
         let entered = AsyncStream<Void>.makeStream()
         var events = entered.stream.makeAsyncIterator()
@@ -669,7 +675,7 @@ struct SyncCancelledCreationReceiptTests {
                 observedCancellation = Task.isCancelled
                 do {
                     preservedDeletion = try SyncEngine.persistDeletedUploadReceipt(remoteId,
-                        collection: "entries", requestScope: requestScope, currentScope: currentScope,
+                        collection: "entries", requestScope: requestScope, currentScope: scopeState.current,
                         descriptor: descriptor, in: context)
                 } catch {
                     Issue.record("删除补偿落盘失败：\(error)")
@@ -687,10 +693,10 @@ struct SyncCancelledCreationReceiptTests {
         switch change {
         case "cancel": upload.cancel()
         case "different-server":
-            currentScope = "https://new.example.invalid|audit@example.invalid"
+            scopeState.current = "https://new.example.invalid|audit@example.invalid"
             gate.invalidate()
         case "different-account":
-            currentScope = "https://old.example.invalid|other@example.invalid"
+            scopeState.current = "https://old.example.invalid|other@example.invalid"
             gate.invalidate()
         default: gate.invalidate()
         }
@@ -698,7 +704,7 @@ struct SyncCancelledCreationReceiptTests {
         let result = await upload.value
         #expect(result == nil)
         #expect(observedCancellation)
-        let sameScope = currentScope == requestScope
+        let sameScope = scopeState.current == requestScope
         #expect(preservedDeletion == sameScope)
         let reopened = ModelContext(context.container)
         #expect(try reopened.fetchCount(descriptor) == 0)
@@ -748,7 +754,7 @@ struct SyncCancelledCreationReceiptTests {
         try context.save()
         let descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.id == localId })
         let requestScope = "old-server|audit"
-        var currentScope = requestScope
+        let scopeState = ScopeState(requestScope)
         var observedRemoteId: String?
         let stream = AsyncThrowingStream<UploadEvent, Error>.makeStream()
         let receipts = AsyncStream<Void>.makeStream()
@@ -764,7 +770,7 @@ struct SyncCancelledCreationReceiptTests {
                 #expect(error is CancellationError)
                 if let observedRemoteId {
                     _ = try SyncEngine.persistDeletedUploadReceipt(observedRemoteId, collection: "media",
-                        requestScope: requestScope, currentScope: currentScope, descriptor: descriptor, in: context)
+                        requestScope: requestScope, currentScope: scopeState.current, descriptor: descriptor, in: context)
                 }
             }
         }
@@ -772,7 +778,7 @@ struct SyncCancelledCreationReceiptTests {
         _ = await received.next()
         context.delete(media)
         try context.save()
-        if changeScope { currentScope = "new-server|audit" }
+        if changeScope { scopeState.current = "new-server|audit" }
         upload.cancel()
         stream.continuation.finish()
         try await upload.value

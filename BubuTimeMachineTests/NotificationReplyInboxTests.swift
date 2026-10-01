@@ -9,6 +9,19 @@ import Testing
 struct NotificationReplyInboxTests {
     private enum InjectedFailure: Error { case diskFull, fetch, remove }
 
+    @MainActor
+    private final class ContainerAvailability {
+        var container: ModelContainer?
+    }
+
+    private nonisolated static var isPhysicalIOSDevice: Bool {
+        #if os(iOS) && !targetEnvironment(simulator) && !targetEnvironment(macCatalyst)
+        true
+        #else
+        false
+        #endif
+    }
+
     private func directory() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("NotificationReply-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -52,14 +65,30 @@ struct NotificationReplyInboxTests {
         #expect(signals == 0)
         let reopened = NotificationReplyInbox(directory: inbox.directory)
         #expect(try reopened.pendingReplies() == [intent])
-        let attributes = try FileManager.default.attributesOfItem(atPath: file(intent, in: inbox).path)
-        #expect(attributes[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
         try reopened.stage(intent)
         #expect(try reopened.pendingReplies().count == 1)
         #expect(throws: NotificationReplyInbox.InboxError.self) {
             try reopened.stage(reply(id: intent.id, note: "different original"))
         }
         #expect(try reopened.pendingReplies() == [intent])
+    }
+
+    // Physical-device release gate. Simulator's host filesystem cannot establish iOS
+    // at-rest data protection; keep this visible as skipped rather than claiming coverage.
+    // This attribute check alone does not test locked/before-first-unlock behavior.
+    // Apple DTS: https://developer.apple.com/forums/thread/780632
+    @Test("真机发布门禁：通知回复文件保护级别",
+          .enabled(if: NotificationReplyInboxTests.isPhysicalIOSDevice,
+                   "Requires a physical iOS device; Simulator does not validate at-rest file protection"))
+    func stagedReplyHasRequiredPhysicalDeviceProtection() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inbox = NotificationReplyInbox(directory: root.appendingPathComponent("inbox"))
+        let intent = reply()
+        try inbox.stage(intent)
+        #expect(try inbox.pendingReplies() == [intent])
+        let attributes = try FileManager.default.attributesOfItem(atPath: file(intent, in: inbox).path)
+        #expect(attributes[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
     }
 
     @Test("恢复内存库不消费回复；健康磁盘库恢复后才广播并清除意图")
@@ -70,12 +99,12 @@ struct NotificationReplyInboxTests {
         let intent = reply()
         let memory = try ModelContainer(for: SharedModelContainer.schema,
                                        configurations: [ModelConfiguration(isStoredInMemoryOnly: true)])
-        var available: ModelContainer?
+        let available = ContainerAvailability()
         var signals = 0
-        let handler = NotificationReplyHandler(inboxDirectory: { inbox.directory }, availableContainer: { available },
+        let handler = NotificationReplyHandler(inboxDirectory: { inbox.directory }, availableContainer: { available.container },
                                                didRecord: { signals += 1 })
         try handler.receiveReply(text: intent.note, role: intent.role, id: intent.id, happenedAt: intent.happenedAt)
-        available = memory
+        available.container = memory
         handler.retryPendingReplies()
         #expect(throws: NotificationReplyInbox.InboxError.self) { try inbox.importReply(intent, into: memory) }
         #expect(signals == 0)
@@ -83,7 +112,7 @@ struct NotificationReplyInboxTests {
         #expect(try ModelContext(memory).fetchCount(FetchDescriptor<Entry>()) == 0)
 
         let disk = try container(at: root)
-        available = disk
+        available.container = disk
         handler.retryPendingReplies()
         #expect(signals == 1)
         #expect(try inbox.pendingReplies().isEmpty)
