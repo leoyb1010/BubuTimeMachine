@@ -137,6 +137,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         }
         let confirmation = systemPickerConfirmation(in: app)
         let requiresConfirmation = confirmation.exists
+        let beganWithEmptySelection = requiresConfirmation && systemPickerSelectionIsEmpty(grid: grid, confirmation: confirmation)
+        let assetLabel = image.label
         attachScreenshot("school-system-picker-before-\(labels.english)", to: self)
         // The captured iPhone/iPad AX hierarchies have no asset Cells. These
         // informational image leaves have valid frames but no computed hit point.
@@ -163,12 +165,77 @@ final class BubuTimeMachineUITests: XCTestCase {
                 dy: assetBounds.midY - appBounds.minY)).tap()
         }
         if requiresConfirmation {
-            guard confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 15) else {
-                throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add", in: app)
+            if !confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 15) {
+                // Hosted iPad evidence showed one unconfirmed tap: the same asset
+                // remained unselected and Done stayed disabled. Retry only that
+                // observed empty state, never a picker with an existing selection.
+                let canRetry = beganWithEmptySelection &&
+                    canRetryEmptySystemPicker(in: app, assetLabel: assetLabel, assetBounds: assetBounds)
+                // AX inspection may outlast a delayed successful selection. Let the
+                // caller confirm and verify its import instead of tapping it again.
+                if confirmation.exists && confirmation.isEnabled { return }
+                guard canRetry else {
+                    throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add; empty-state retry is unsafe", in: app)
+                }
+                let state = "PhotosPicker one-time empty-selection retry: \(assetLabel), frame=\(assetBounds), Done/Add disabled\n\(app.debugDescription)"
+                print(state)
+                let attachment = XCTAttachment(string: state)
+                attachment.name = "school-system-picker-empty-selection-retry"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                attachScreenshot("school-system-picker-empty-selection-retry", to: self)
+                // Screenshot/AX capture can take time. Reobserve immediately before
+                // tapping so a delayed successful selection is never toggled off.
+                let remainsEmpty = canRetryEmptySystemPicker(in: app, assetLabel: assetLabel, assetBounds: assetBounds)
+                if confirmation.exists && confirmation.isEnabled { return }
+                guard remainsEmpty else {
+                    throw systemPickerFailure("Picker selection changed before the bounded retry", in: app)
+                }
+                let retryImage = grid.images.matching(NSPredicate(
+                    format: "identifier == %@ AND label == %@", "PXGGridLayout-Info", assetLabel)).firstMatch
+                if retryImage.isHittable {
+                    retryImage.tap()
+                } else {
+                    let retryAppBounds = app.frame
+                    app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                        dx: assetBounds.midX - retryAppBounds.minX,
+                        dy: assetBounds.midY - retryAppBounds.minY)).tap()
+                }
+                guard confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 15) else {
+                    throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add after one empty-state retry", in: app)
+                }
             }
         } else if !content.waitForNonExistence(timeout: 15) {
             throw systemPickerFailure("Selecting \(labels.english) did not dismiss the single-selection picker", in: app)
         }
+    }
+
+    @MainActor
+    private func systemPickerSelectionIsEmpty(grid: XCUIElement, confirmation: XCUIElement) -> Bool {
+        guard grid.exists, confirmation.exists, !confirmation.isEnabled else { return false }
+        let assets = grid.images.matching(identifier: "PXGGridLayout-Info").allElementsBoundByIndex
+        return !assets.isEmpty && assets.allSatisfy { $0.exists && !$0.isSelected } && !confirmation.isEnabled
+    }
+
+    @MainActor
+    private func canRetryEmptySystemPicker(in app: XCUIApplication, assetLabel: String, assetBounds: CGRect) -> Bool {
+        let navigation = systemPickerNavigation(in: app)
+        let content = app.scrollViews["photosView_content_scroll_view"].firstMatch
+        let grid = content.otherElements["PXGGridLayout-Group"].firstMatch
+        let confirmation = systemPickerConfirmation(in: app)
+        let matchingAssets = grid.images.matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", "PXGGridLayout-Info", assetLabel))
+        guard navigation.exists, content.exists, content.isHittable, grid.exists, matchingAssets.count == 1,
+              matchingAssets.firstMatch.frame == assetBounds,
+              !matchingAssets.firstMatch.isSelected,
+              systemPickerSelectionIsEmpty(grid: grid, confirmation: confirmation) else { return false }
+        let visible = content.frame.intersection(app.frame)
+        let top = max(visible.minY, navigation.frame.maxY)
+        let pickerBounds = CGRect(x: visible.minX, y: top, width: visible.width,
+                                  height: max(0, visible.maxY - top))
+        return !pickerBounds.isEmpty && !assetBounds.isEmpty &&
+            pickerBounds.contains(assetBounds) && grid.frame.contains(assetBounds) &&
+            confirmation.exists && !confirmation.isEnabled
     }
 
     @MainActor

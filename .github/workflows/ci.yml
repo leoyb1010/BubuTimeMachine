@@ -144,7 +144,7 @@ jobs:
           import math, os, time
           elapsed = math.ceil((time.time() - int(os.environ["BUBU_CI_STARTED_AT"])) / 60)
           # Two minutes cover job setup/rounding; six cover export and upload.
-          minutes = min(28, 60 - 2 - 6 - elapsed)
+          minutes = min(36, 60 - 2 - 6 - elapsed)
           if minutes < 1:
               raise SystemExit("Validation budget exhausted before UI; preserving earlier evidence")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -190,9 +190,13 @@ jobs:
           from pathlib import Path
           import subprocess
           root = Path.home() / "Library/Developer/Xcode/DerivedData"
+          export = ["xcrun", "xcresulttool", "export", "attachments"]
+          help_result = subprocess.run(export + ["--help"], capture_output=True, text=True,
+                                       check=False, timeout=15)
+          failure_only = ["--only-failures"] if "--only-failures" in help_result.stdout + help_result.stderr else []
           for result in root.glob("*/Logs/Test/*.xcresult"):
               try:
-                  subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
+                  subprocess.run(export + failure_only + ["--path", str(result),
                                   "--output-path", str(Path("/tmp/bubu-ci-diagnostics") / result.stem)],
                                  check=False, timeout=45)
               except subprocess.TimeoutExpired:
@@ -210,7 +214,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: synthetic-${{ matrix.device }}-failure-${{ github.sha }}
-          path: /tmp/bubu-ci-diagnostics
+          # Keep screenshots, accessibility text and logs readable without large recordings.
+          path: |
+            /tmp/bubu-ci-diagnostics/**/*.png
+            /tmp/bubu-ci-diagnostics/**/*.jpg
+            /tmp/bubu-ci-diagnostics/**/*.jpeg
+            /tmp/bubu-ci-diagnostics/**/*.txt
+            /tmp/bubu-ci-diagnostics/**/*.json
+            /tmp/bubu-ci-diagnostics/*.log
           retention-days: 3
           if-no-files-found: warn
 
