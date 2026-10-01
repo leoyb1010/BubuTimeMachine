@@ -74,12 +74,9 @@ struct ChildIdentitySettingsView: View {
         }
         .navigationTitle("认布布与精选")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .bubuContentColumn(760)
         .scrollContentBackground(.hidden)
         .background(BubuTheme.Color.background)
-        // 主导航是自绘悬浮条，不属于系统 tabBar；给极大字体的 Form 留出真实滚动尾距。
-        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 84) }
         .task { refreshStatus() }
         .confirmationDialog("清除这台 iPhone 上的识别模型？", isPresented: $showClearConfirmation,
                             titleVisibility: .visible) {

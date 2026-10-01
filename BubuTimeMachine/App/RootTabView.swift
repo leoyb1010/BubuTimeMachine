@@ -14,6 +14,11 @@ struct RootTabView: View {
     @State private var timelinePath: [UUID] = []
 
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
+    /// All retained tab stacks publish the same visibility. An inactive school
+    /// stack must not leave its hidden preference behind when another tab opens.
+    private var systemTabBarVisibility: Visibility {
+        selection == 3 && !isWide ? .hidden : .visible
+    }
 
     private var maximumSelectableTab: Int {
         #if targetEnvironment(macCatalyst)
@@ -25,7 +30,6 @@ struct RootTabView: View {
 
     var body: some View {
         tabsWithRecordAccessory
-            .toolbar(selection == 3 && !isWide ? .hidden : .visible, for: .tabBar)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if selection == 3 && !isWide {
                     HStack(spacing: 0) {
@@ -40,7 +44,9 @@ struct RootTabView: View {
             // 唯独最高频的这个动作是哑的。bubuSensoryFeedback 全仓只用了 2 处，严重低用。
             .bubuSensoryFeedback(.selection, trigger: selection)
             .tabViewStyle(.sidebarAdaptable)
-            .tabBarMinimizeBehavior(.onScrollDown)
+            // 页面入口必须始终可直接选择；自动收缩会把当前 Tab 与记录附件
+            // 合成紧凑底栏，跨页面/关闭记录后可能无法恢复完整导航。
+            .tabBarMinimizeBehavior(.never)
             .tabViewSidebarHeader {
                 Label("布布时光机", systemImage: "book.pages.fill")
                     .font(BubuTheme.Font.headline)
@@ -97,6 +103,7 @@ struct RootTabView: View {
                 Image(systemName: symbol).font(.system(size: 22, weight: .medium))
                 Text(title).font(.system(size: 11))
             }.frame(maxWidth: .infinity, minHeight: 45)
+                .contentShape(Rectangle())
                 .foregroundStyle(selection == tab ? SchoolPalette.coral : BubuTheme.Color.secondaryText)
         }.buttonStyle(.plain).accessibilityLabel(title)
             .accessibilityAddTraits(selection == tab ? .isSelected : [])
@@ -124,6 +131,7 @@ struct RootTabView: View {
                     CaptureHomeView(openTimeline: { selection = 1 },
                                     quickCaptureTrigger: quickCaptureTrigger)
                 }
+                .toolbar(systemTabBarVisibility, for: .tabBar)
                 .bubuTabContentTransition(isActive: selection == 0)
             }
 
@@ -132,22 +140,26 @@ struct RootTabView: View {
                     TimelineView()
                         .onAppear { openPendingTimelineEntryIfReady() }
                 }
+                    .toolbar(systemTabBarVisibility, for: .tabBar)
                     .bubuTabContentTransition(isActive: selection == 1)
             }
 
             Tab("成长", systemImage: "chart.xyaxis.line", value: 2) {
                 NavigationStack { GrowthHomeView() }
+                    .toolbar(systemTabBarVisibility, for: .tabBar)
                     .bubuTabContentTransition(isActive: selection == 2)
             }
 
             Tab("幼儿园", systemImage: "house.lodge.fill", value: 3) {
-                NavigationStack { MemoryJournalView().toolbar(isWide ? .visible : .hidden, for: .tabBar) }
+                NavigationStack { MemoryJournalView() }
+                    .toolbar(systemTabBarVisibility, for: .tabBar)
                     .bubuTabContentTransition(isActive: selection == 3)
             }
 
             #if targetEnvironment(macCatalyst)
             Tab("档案馆", systemImage: "archivebox.fill", value: 4) {
                 NavigationStack { MacArchiveWorkspaceView() }
+                    .toolbar(systemTabBarVisibility, for: .tabBar)
             }
             #endif
         }

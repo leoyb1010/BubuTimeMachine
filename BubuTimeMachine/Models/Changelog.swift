@@ -15,6 +15,12 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.19.1", date: "2026-10-01", title: "四个页面入口，始终触手可及",
+            highlights: [
+                "底部导航不再随滚动收缩：首页、时光、成长、幼儿园始终可直接选择",
+                "修复记录窗口关闭、页面往返和设置子页只剩记录入口的导航问题"
+            ]),
+        ReleaseNote(
             version: "2.19.0", date: "2026-09-26", title: "让亲子桥读完整，让幼儿园更可爱",
             highlights: [
                 "修复未登录家庭服务器时亲子桥静默退回本机识别：独立授权连接 DeepSeek，仅能识别你选择的日表",

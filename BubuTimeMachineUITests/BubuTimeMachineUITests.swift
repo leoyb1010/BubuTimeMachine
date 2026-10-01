@@ -2,6 +2,98 @@ import XCTest
 import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
+    @MainActor
+    func testRootTabsRemainSelectableInsideChildRecognitionSettings() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed"]
+        app.launch()
+        let settings = app.buttons["设置"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 12))
+        settings.tap()
+        let recognition = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "认布布与精选")).firstMatch
+        XCTAssertTrue(recognition.waitForExistence(timeout: 5))
+        recognition.tap()
+        XCTAssertTrue(app.navigationBars["认布布与精选"].waitForExistence(timeout: 5))
+        app.swipeUp()
+        assertRootNavigation(in: app)
+        attachScreenshot("tabs-visible-in-recognition-settings", to: self)
+        rootNavigationButton(named: "时光", in: app).tap()
+        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 5))
+        assertRootNavigation(in: app)
+        rootNavigationButton(named: "首页", in: app).tap()
+        assertRootNavigation(in: app)
+    }
+
+    @MainActor
+    func testRootTabsStaySelectableAfterScrollingAndQuickCapture() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-school-report"]
+        app.launch()
+        XCTAssertTrue(app.buttons["root.record"].waitForExistence(timeout: 12) || app.buttons["home.record"].waitForExistence(timeout: 5))
+        attachScreenshot("tabs-initial", to: self)
+        assertRootNavigation(in: app)
+
+        for _ in 0..<2 {
+            for name in ["首页", "时光", "成长", "幼儿园"] {
+                rootNavigationButton(named: name, in: app).tap()
+                app.swipeUp()
+                app.swipeUp()
+                attachScreenshot("tabs-after-scrolling-" + name, to: self)
+                assertRootNavigation(in: app)
+            }
+        }
+
+        rootNavigationButton(named: "首页", in: app).tap()
+        let record = app.buttons["root.record"].isHittable ? app.buttons["root.record"] : app.buttons["home.record"]
+        for _ in 0..<2 {
+            if !record.isHittable { app.swipeDown(); app.swipeDown() }
+            XCTAssertTrue(record.isHittable)
+            record.tap()
+            XCTAssertTrue(app.navigationBars["记录此刻"].waitForExistence(timeout: 5))
+            app.buttons["以后再说"].tap()
+            assertRootNavigation(in: app)
+            app.swipeUp()
+            assertRootNavigation(in: app)
+        }
+        rootNavigationButton(named: "时光", in: app).tap()
+        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 5))
+        attachScreenshot("tabs-restored-after-recording", to: self)
+    }
+
+    @MainActor
+    private func rootNavigationButton(named name: String, in app: XCUIApplication) -> XCUIElement {
+        let native = app.tabBars.buttons.matching(identifier: name).firstMatch
+        if native.exists && native.isHittable { return native }
+        return app.buttons.matching(identifier: name).allElementsBoundByIndex.first(where: { $0.isHittable })
+            ?? app.buttons.matching(identifier: name).firstMatch
+    }
+
+    @MainActor
+    private func assertRootNavigation(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let names = ["首页", "时光", "成长", "幼儿园"]
+        let buttons = names.map { rootNavigationButton(named: $0, in: app) }
+        for (index, button) in buttons.enumerated() {
+            guard button.exists else {
+                XCTFail("根导航缺少页面入口：" + names[index], file: file, line: line)
+                return
+            }
+            print("Root navigation \(names[index]): id=\(button.identifier), frame=\(button.frame), hittable=\(button.isHittable)")
+            XCTAssertTrue(button.exists && button.isHittable, "滚动或关闭记录后必须仍可选择：" + names[index], file: file, line: line)
+            XCTAssertTrue(app.frame.contains(CGPoint(x: button.frame.midX, y: button.frame.midY)), file: file, line: line)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 40, "Tab不能收缩成不可选择的小点", file: file, line: line)
+        }
+        for index in 0..<(buttons.count - 1) {
+            // Native tab hit rectangles include touch slop and may overlap a few
+            // points. Their centers, rather than their expanded AX bounds, must
+            // remain separate so each page can be selected directly.
+            let dx = abs(buttons[index].frame.midX - buttons[index + 1].frame.midX)
+            let dy = abs(buttons[index].frame.midY - buttons[index + 1].frame.midY)
+            XCTAssertGreaterThanOrEqual(max(dx, dy), 44, "四个页面必须保留独立点击区域", file: file, line: line)
+        }
+    }
+
     func testSystemPickerBoundsTolerateOnlySubpixelRounding() {
         let viewport = CGRect(x: 0, y: 300, width: 440, height: 500)
         let observed = CGRect(x: -0.0000008477, y: 329.9999975, width: 145.5555573, height: 145.6666718)
