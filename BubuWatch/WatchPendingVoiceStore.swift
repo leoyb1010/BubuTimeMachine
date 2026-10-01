@@ -7,7 +7,8 @@ import Foundation
 ///
 /// 幂等机制：每个待传 m4a 的文件名 stem 即稳定 localId，并配一份同名 .json 边车
 /// （编码后的 WatchRecordRequest，随传输 metadata 一并送达 iPhone 用于去重）。
-/// 传输成功(didFinish error==nil)才删文件+边车；失败保留，激活/进前台时对账重新入队。
+/// 只有手机明确回执“完整原音频和意图已持久暂存”才删源；WC 传输成功本身不够。
+/// 无回执/失败保留，激活/进前台时对账重新入队。
 ///
 /// nonisolated（enum 纯静态、仅 FileManager 计算，无共享可变状态）：可从任意隔离域调用。
 nonisolated enum WatchPendingVoiceStore {
@@ -48,7 +49,15 @@ nonisolated enum WatchPendingVoiceStore {
         return WatchLink.decode(WatchRecordRequest.self, from: data)
     }
 
-    /// 传输成功后清理文件 + 边车。
+    /// Only a matching durable phone receipt can release the Watch's original source.
+    static func consume(_ receipt: WatchVoiceReceipt) {
+        for file in pendingFiles() where UUID(uuidString: localId(forFile: file)) == receipt.localId {
+            _ = try? receipt.removeAcknowledgedSource(audio: file, metadata: sidecarURL(forFile: file))
+        }
+    }
+
+    /// Recorder-only discard (explicit cancel or a recording shorter than the minimum).
+    /// Transport completion must never call this method.
     static func remove(fileURL: URL) {
         try? FileManager.default.removeItem(at: fileURL)
         try? FileManager.default.removeItem(at: sidecarURL(forFile: fileURL))

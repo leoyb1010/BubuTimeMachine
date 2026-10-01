@@ -236,7 +236,14 @@ function tombstoneHarness(collection, fetch, remove, initialState = 'local') {
   h.database.fetchCommentsForEntry = async () => [];
   h.database.deleteFeedEventsForTarget = async () => {};
   h.database[fetch] = async () => local ? [local] : [];
-  h.database[remove] = async () => { local = undefined; };
+  // Cursor tests isolate database I/O; TombstoneAtomicity executes this transaction over SQLite.
+  for (const name of ['entry', 'media', 'milestone', 'firstTime', 'health', 'vaccine', 'growth',
+    'comment', 'voiceNote', 'voiceMemo', 'capsule']) h.context.Database[`${name}Fields`] = row => ({ ...row });
+  h.database.deleteSyncedFieldsIfUnchanged = async (_, expected) => {
+    assert.equal(expected.syncState, 'synced');
+    local = undefined;
+    return true;
+  };
   h.local = () => local;
   return h;
 }

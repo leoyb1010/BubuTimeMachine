@@ -123,12 +123,11 @@ final class WatchConnector: NSObject {
         session.transferFile(fileURL, metadata: [WatchLink.fileMetaKey: json])
     }
 
-    /// 传输完成：仅 error==nil（真正送达）才删源文件+边车。
-    /// error != nil 表示系统已放弃（不再重试），此时删源=录音两端永久丢失（P0-2）——故保留，
-    /// 下次激活/进前台对账重新 transferFile 入队。
+    /// WC success only confirms transport. The phone may still fail to stage the received
+    /// file (disk full / locked / interrupted); retain our source until its explicit receipt.
+    /// Old phones do not send receipts, so retain conservatively and use normal reconciliation.
     nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        guard error == nil else { return }
-        WatchPendingVoiceStore.remove(fileURL: fileTransfer.file.fileURL)
+        // No deletion or immediate retry loop here, on either success or failure.
     }
 
     /// 激活后对账：把持久目录里「不在传输队列中」的残留语音重新入队（涵盖上次失败/未激活遗留）。
@@ -186,6 +185,12 @@ final class WatchConnector: NSObject {
 }
 
 extension WatchConnector: WCSessionDelegate {
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        guard let data = userInfo[WatchLink.voiceReceiptKey] as? Data,
+              let receipt = WatchLink.decode(WatchVoiceReceipt.self, from: data) else { return }
+        WatchPendingVoiceStore.consume(receipt)
+    }
+
     nonisolated func session(_ session: WCSession,
                              activationDidCompleteWith state: WCSessionActivationState,
                              error: Error?) {

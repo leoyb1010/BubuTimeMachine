@@ -27,6 +27,36 @@ struct StoreBootstrapSafetyTests {
         }
     }
 
+    @Test("活动库缺失但日志尚在时禁止新建、旧库发布或保护副本恢复", arguments: ["-wal", "-shm", "-journal"])
+    func orphanJournalPreventsEveryBootstrapPath(suffix: String) throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let destination = root.appendingPathComponent("shared.store")
+        let journal = URL(fileURLWithPath: destination.path + suffix)
+        let bytes = Data("synthetic only remaining journal facts".utf8)
+        try bytes.write(to: journal)
+        var preparationRan = false
+        #expect(throws: StoreUpgradeBackup.BackupError.self) {
+            try BubuStoreLoader.open(at: destination) { preparationRan = true }
+        }
+        #expect(!preparationRan)
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+        #expect(try Data(contentsOf: journal) == bytes)
+
+        // A valid transferred backup must not authorize deleting an orphan active journal.
+        let source = root.appendingPathComponent("legacy.store")
+        try makeLegacyStore(at: source)
+        let backup = StoreUpgradeBackup.destination(for: destination)
+        try StoreUpgradeBackup.snapshot(source: source, destination: backup)
+        let originalBackup = try Data(contentsOf: backup)
+        #expect(throws: StoreUpgradeBackup.BackupError.self) {
+            try BubuStoreLoader.open(at: destination)
+        }
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+        #expect(try Data(contentsOf: journal) == bytes)
+        #expect(try Data(contentsOf: backup) == originalBackup)
+    }
+
     @Test("扩展先启动不创建空库；主 App 迁移后同一扩展可重试打开")
     func extensionFirstDoesNotSuppressLegacyMigration() throws {
         let root = try directory()

@@ -190,7 +190,7 @@ nonisolated enum BubuStoreRecoveryPackage {
 
         var errorDescription: String? {
             switch self {
-            case .noDatabaseFiles: "没有找到可导出的非空数据库或 WAL 文件"
+            case .noDatabaseFiles: "没有找到可导出的非空数据库或日志文件"
             case .unsafeDestination: "导出位置已存在或与源文件目录重叠"
             case .unsupportedSource: "数据库保护材料中存在非普通文件，无法安全打包"
             }
@@ -225,7 +225,7 @@ nonisolated enum BubuStoreRecoveryPackage {
         for (store, namespace) in stores {
             guard seenStores.insert(store.resolvingSymlinksInPath().standardizedFileURL).inserted else { continue }
             let target = namespace.isEmpty ? destination : destination.appendingPathComponent(namespace)
-            for suffix in ["", "-wal", "-shm"] {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
                 let source = URL(fileURLWithPath: store.path + suffix)
                 guard let attributes = try attributesIfPresent(source) else { continue }
                 try fm.createDirectory(at: target, withIntermediateDirectories: true)
@@ -241,16 +241,16 @@ nonisolated enum BubuStoreRecoveryPackage {
             databaseFiles += try copy(source, to: target, attributes: attributes, allowDirectory: true, copyFile: copyFile)
         }
         // Locks, manifests, empty directories, checksums and SHM alone are not database content.
-        // Damaged stores and orphan WALs are still useful recovery material; do not try to open them.
+        // Damaged stores and orphan WAL/rollback journals are useful forensic material; never open them.
         guard databaseFiles > 0 else { throw PackageError.noDatabaseFiles }
         let readme = """
         布布时光机 · 数据库原样备份
         导出时间：\(stamp)
-        包含 \(databaseFiles) 个非空数据库 / WAL 文件（未验证内容）。
+        包含 \(databaseFiles) 个非空数据库 / WAL / 回滚日志文件（未验证内容）。
 
         这是 SwiftData / SQLite 数据库及迁移保护文件的原样副本，未做解析或修复。
         本包不包含照片、视频、录音等媒体原文件，也不是完整的 App 备份。
-        保留找到的 .store、-wal、-shm；请将同一目录的文件一起保留，不要混配不同来源。
+        保留找到的 .store、-wal、-shm、-journal；请将同一目录的文件一起保留，不要混配不同来源。
 
         根目录：当前数据库；LegacyDocuments：旧 Documents 数据库；
         LegacyApplicationSupport：旧 Application Support 数据库。
@@ -296,7 +296,8 @@ nonisolated enum BubuStoreRecoveryPackage {
         try copyFile(source, destination)
         let copiedSize = (try fm.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value ?? 0
         let name = destination.lastPathComponent
-        return copiedSize > 0 && (name.hasSuffix(".store") || name.hasSuffix(".store-wal")) ? 1 : 0
+        return copiedSize > 0 && (name.hasSuffix(".store") || name.hasSuffix(".store-wal")
+                                 || name.hasSuffix(".store-journal")) ? 1 : 0
     }
 }
 

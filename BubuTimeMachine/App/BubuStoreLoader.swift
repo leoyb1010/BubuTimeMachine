@@ -24,6 +24,14 @@ enum BubuStoreLoader {
         guard !requiresExistingStore || manager.fileExists(atPath: url.path) else {
             throw StoreUpgradeBackup.BackupError.cannotOpen
         }
+        // A missing base does not prove a fresh installation. Opening SQLite or restoring
+        // another base beside an orphan journal can overwrite the only remaining facts.
+        // Check before both legacy preparation and transferred-backup recovery.
+        if !manager.fileExists(atPath: url.path), ["-wal", "-shm", "-journal"].contains(where: {
+            manager.fileExists(atPath: url.path + $0)
+        }) {
+            throw StoreUpgradeBackup.BackupError.invalidSnapshot
+        }
         // Legacy sandbox publication must share the loader lock with extensions opening this store.
         try prepareStore()
         try StoreUpgradeBackup.restoreTransferredBackupIfNeeded(store: url)

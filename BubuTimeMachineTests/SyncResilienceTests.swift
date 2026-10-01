@@ -632,6 +632,160 @@ struct SyncClientReplacementTests {
     }
 }
 
+// MARK: - 已成功但迟到的创建回执：取消不撤销删除补偿，也不跨同步目标入队
+@MainActor
+struct SyncCancelledCreationReceiptTests {
+    private func context() throws -> ModelContext {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: SharedModelContainer.schema, configurations: [configuration])
+        return ModelContext(container)
+    }
+
+    @Test("取消或换客户端后，迟到创建回执仅在同账号同服务器补持久化墓碑",
+          arguments: ["cancel", "same-scope-replacement", "different-server", "different-account"])
+    func cancelledCreationPreservesScopedDeletion(change: String) async throws {
+        let context = try context()
+        let entry = Entry(authorRole: "audit", note: "synthetic pending creation")
+        let localId = entry.id
+        entry.syncState = .uploading
+        context.insert(entry)
+        try context.save()
+        let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
+        let requestScope = "https://old.example.invalid|audit@example.invalid"
+        var currentScope = requestScope
+        let gate = SyncRunGate()
+        let entered = AsyncStream<Void>.makeStream()
+        var events = entered.stream.makeAsyncIterator()
+        var resumeRequest: CheckedContinuation<String, Never>?
+        var observedCancellation = false
+        var preservedDeletion = false
+        let upload = Task { @MainActor in
+            await gate.withPermit {
+                // 已提交的服务器请求可能不理会取消；continuation 可精确控制迟到成功回执。
+                let remoteId = await withCheckedContinuation { continuation in
+                    resumeRequest = continuation
+                    entered.continuation.yield(())
+                }
+                observedCancellation = Task.isCancelled
+                do {
+                    preservedDeletion = try SyncEngine.persistDeletedUploadReceipt(remoteId,
+                        collection: "entries", requestScope: requestScope, currentScope: currentScope,
+                        descriptor: descriptor, in: context)
+                } catch {
+                    Issue.record("删除补偿落盘失败：\(error)")
+                }
+                return "receipt returned"
+            }
+        }
+        _ = await events.next()
+        #expect(entry.remoteId == nil)
+        PendingDeletion.enqueue(collection: "entries", remoteId: entry.remoteId, in: context)
+        context.delete(entry)
+        try context.save()
+        #expect(try context.fetchCount(FetchDescriptor<PendingDeletion>()) == 0)
+
+        switch change {
+        case "cancel": upload.cancel()
+        case "different-server":
+            currentScope = "https://new.example.invalid|audit@example.invalid"
+            gate.invalidate()
+        case "different-account":
+            currentScope = "https://old.example.invalid|other@example.invalid"
+            gate.invalidate()
+        default: gate.invalidate()
+        }
+        resumeRequest?.resume(returning: "audit-created-entry")
+        let result = await upload.value
+        #expect(result == nil)
+        #expect(observedCancellation)
+        let sameScope = currentScope == requestScope
+        #expect(preservedDeletion == sameScope)
+        let reopened = ModelContext(context.container)
+        #expect(try reopened.fetchCount(descriptor) == 0)
+        let deletions = try reopened.fetch(FetchDescriptor<PendingDeletion>())
+        #expect(deletions.count == (sameScope ? 1 : 0))
+        if sameScope {
+            #expect(deletions.first?.collection == "entries")
+            #expect(deletions.first?.remoteId == "audit-created-entry")
+        }
+        entered.continuation.finish()
+    }
+
+    @Test("取消回执补偿不确认仍存在的新草稿，也不重复新增墓碑")
+    func existingDraftIsUntouchedAndDeletedReceiptIsIdempotent() throws {
+        let context = try context()
+        let entry = Entry(authorRole: "audit", note: "newer local draft")
+        let localId = entry.id
+        entry.syncState = .local
+        context.insert(entry)
+        try context.save()
+        let descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == localId })
+        let didSettle = try SyncEngine.persistDeletedUploadReceipt("audit-created-entry", collection: "entries",
+            requestScope: "same", currentScope: "same", descriptor: descriptor, in: context)
+        #expect(!didSettle)
+        #expect(entry.note == "newer local draft")
+        #expect(entry.syncState == .local)
+        #expect(entry.remoteId == nil)
+        #expect(try context.fetchCount(FetchDescriptor<PendingDeletion>()) == 0)
+        context.delete(entry)
+        try context.save()
+        for _ in 0..<2 {
+            let didPreserve = try SyncEngine.persistDeletedUploadReceipt("audit-created-entry", collection: "entries",
+                requestScope: "same", currentScope: "same", descriptor: descriptor, in: context)
+            #expect(didPreserve)
+        }
+        let reopened = ModelContext(context.container)
+        #expect(try reopened.fetchCount(FetchDescriptor<PendingDeletion>()) == 1)
+    }
+
+    @Test("媒体流已返回身份后取消，保留同目标删除补偿但仍不确认上传", arguments: [false, true])
+    func observedStreamReceiptSurvivesCancellation(changeScope: Bool) async throws {
+        let context = try context()
+        let media = Media(type: .photo, localFileName: nil)
+        let localId = media.id
+        media.syncState = .uploading
+        context.insert(media)
+        try context.save()
+        let descriptor = FetchDescriptor<Media>(predicate: #Predicate { $0.id == localId })
+        let requestScope = "old-server|audit"
+        var currentScope = requestScope
+        var observedRemoteId: String?
+        let stream = AsyncThrowingStream<UploadEvent, Error>.makeStream()
+        let receipts = AsyncStream<Void>.makeStream()
+        var received = receipts.stream.makeAsyncIterator()
+        let upload = Task { @MainActor in
+            do {
+                _ = try await SyncEngine.consumeUpload(stream.stream, onProgress: { _ in }, onReceipt: { remoteId, _ in
+                    observedRemoteId = remoteId
+                    receipts.continuation.yield(())
+                })
+                Issue.record("取消的媒体流不应返回成功")
+            } catch {
+                #expect(error is CancellationError)
+                if let observedRemoteId {
+                    _ = try SyncEngine.persistDeletedUploadReceipt(observedRemoteId, collection: "media",
+                        requestScope: requestScope, currentScope: currentScope, descriptor: descriptor, in: context)
+                }
+            }
+        }
+        stream.continuation.yield(.completed(remoteId: "audit-created-media", url: "https://example.invalid/file.bin"))
+        _ = await received.next()
+        context.delete(media)
+        try context.save()
+        if changeScope { currentScope = "new-server|audit" }
+        upload.cancel()
+        stream.continuation.finish()
+        try await upload.value
+        #expect(observedRemoteId == "audit-created-media")
+        let reopened = ModelContext(context.container)
+        #expect(try reopened.fetchCount(descriptor) == 0)
+        let deletions = try reopened.fetch(FetchDescriptor<PendingDeletion>())
+        #expect(deletions.count == (changeScope ? 0 : 1))
+        if !changeScope { #expect(deletions.first?.remoteId == "audit-created-media") }
+        receipts.continuation.finish()
+    }
+}
+
 @MainActor
 struct SyncAttachmentDownloadTests {
     private func context() throws -> ModelContext {

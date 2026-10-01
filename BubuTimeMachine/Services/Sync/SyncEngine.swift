@@ -449,8 +449,14 @@ final class SyncEngine {
             guard saveAndRefresh(context) else { return }
             let dto = Self.makeDTO(entry)
             let entryId = entry.id
+            let requestScope = clientScope
             do {
                 let saved = try await apiClient.createEntry(dto)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "entries", requestScope: requestScope,
+                    descriptor: FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryId }), in: context) {
+                    finishItem()
+                    continue
+                }
                 try checkRunValidity()
                 try Self.completeEntryUpload(saved, sent: dto, localId: entryId, in: context)
             } catch {
@@ -697,18 +703,17 @@ final class SyncEngine {
         for item in localMilestones where !Self.isLocalPresetPlaceholder(item) {
             guard isCurrentRun else { return }
             beginItem("同步里程碑")
+            let itemId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading; saveAndRefresh(context)
                 let saved = try await apiClient.upsertMilestone(Self.makeDTO(item))
-                try checkRunValidity()
-                let itemId = item.id
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<Milestone>(predicate: #Predicate { $0.id == itemId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "milestones", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "milestones", requestScope: requestScope,
+                    descriptor: FetchDescriptor<Milestone>(predicate: #Predicate { $0.id == itemId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 item.remoteId = saved.id; item.syncState = Self.uploadCompletionState(item.syncState)
             }
             catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; recordFailure(error, item: "里程碑") }
@@ -719,18 +724,17 @@ final class SyncEngine {
         for item in localFirstTimes {
             guard isCurrentRun else { return }
             beginItem("同步第一次")
+            let itemId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading; saveAndRefresh(context)
                 let saved = try await apiClient.upsertFirstTime(Self.makeDTO(item))
-                try checkRunValidity()
-                let itemId = item.id
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == itemId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "firsttimes", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "firsttimes", requestScope: requestScope,
+                    descriptor: FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == itemId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 item.remoteId = saved.id; item.syncState = Self.uploadCompletionState(item.syncState)
             }
             catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; recordFailure(error, item: "第一次") }
@@ -741,18 +745,17 @@ final class SyncEngine {
         for item in localMembers {
             guard isCurrentRun else { return }
             beginItem("同步家庭成员")
+            let itemId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading; saveAndRefresh(context)
                 let saved = try await apiClient.upsertFamilyMember(Self.makeDTO(item))
-                try checkRunValidity()
-                let itemId = item.id
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.id == itemId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "members", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "members", requestScope: requestScope,
+                    descriptor: FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.id == itemId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 item.remoteId = saved.id; item.syncState = Self.uploadCompletionState(item.syncState)
             }
             catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; recordFailure(error, item: "家庭成员") }
@@ -764,10 +767,16 @@ final class SyncEngine {
             guard isCurrentRun else { return }
             beginItem("同步布布档案")
             let profileId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertChildProfile(Self.makeDTO(item))
+                if try preserveDeletedUploadReceipt(saved.id, collection: "childprofile", requestScope: requestScope,
+                    descriptor: FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == profileId }), in: context) {
+                    finishItem()
+                    continue
+                }
                 try checkRunValidity()
                 // 头像变更后 avatarRemoteURL 被置空 → 补传到 childprofile.avatar
                 if let fileName = item.avatarMediaFileName, item.avatarRemoteURL == nil {
@@ -797,21 +806,18 @@ final class SyncEngine {
         for item in localHealth {
             guard isCurrentRun else { return }
             beginItem("同步健康记录")
+            let itemId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertHealthRecord(Self.makeDTO(item))
-                try checkRunValidity()
-                // 同 Entry：await 期间被撤销（手表打卡撤销窗口正好压着这段）→ 补墓碑防复活。
-                let itemId = item.id
-                let stillExists = try context.fetchCount(FetchDescriptor<HealthRecord>(
-                    predicate: #Predicate { $0.id == itemId })) > 0
-                guard stillExists else {
-                    PendingDeletion.enqueue(collection: "healthrecords", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "healthrecords", requestScope: requestScope,
+                    descriptor: FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == itemId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 item.remoteId = saved.id
                 item.syncState = Self.uploadCompletionState(item.syncState)
             }
@@ -823,22 +829,18 @@ final class SyncEngine {
         for item in localVaccines {
             guard isCurrentRun else { return }
             beginItem("同步疫苗记录")
+            let vaccineId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertVaccineRecord(Self.makeDTO(item))
-                try checkRunValidity()
-                // 同 Entry/HealthRecord 的复活守卫：await 期间用户可能已删除（疫苗页有删除入口），
-                // 彼时 remoteId 为 nil、删除队列空转——写回会让记录在全家复活。重查补墓碑。
-                let vaccineId = item.id
-                let vaccineExists = try context.fetchCount(FetchDescriptor<VaccineRecord>(
-                    predicate: #Predicate { $0.id == vaccineId })) > 0
-                guard vaccineExists else {
-                    PendingDeletion.enqueue(collection: "vaccinerecords", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "vaccinerecords", requestScope: requestScope,
+                    descriptor: FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == vaccineId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 // LWW：远端这条更新导致本次推送被通用 upsert 跳过（带回的编辑时间比本地新）→ 采用远端版本，
                 // 否则本地会停在旧内容却被标成 synced，且游标已越过该记录不会再拉回（与 S-P2 游标解耦并存的收尾）。
                 if let remoteEdited = saved.editedAt, remoteEdited > item.updatedAt {
@@ -851,6 +853,11 @@ final class SyncEngine {
                 if Self.isMissingOptionalServerCollection(error, item: "疫苗记录") {
                     do {
                         let saved = try await apiClient.upsertHealthRecord(Self.makeHealthFallbackDTO(item))
+                        if try preserveDeletedUploadReceipt(saved.id, collection: "healthrecords", requestScope: requestScope,
+                            descriptor: FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == vaccineId }), in: context) {
+                            finishItem()
+                            continue
+                        }
                         try checkRunValidity()
                         item.remoteId = saved.id
                         item.sourceRaw = "health-fallback"
@@ -872,10 +879,17 @@ final class SyncEngine {
         for item in localGrowth {
             guard isCurrentRun else { return }
             beginItem("同步成长测量")
+            let growthId = item.id
+            let requestScope = clientScope
             do {
                 item.syncState = .uploading
                 saveAndRefresh(context)
                 let saved = try await apiClient.upsertGrowthMeasurement(Self.makeDTO(item))
+                if try preserveDeletedUploadReceipt(saved.id, collection: "growthmeasurements", requestScope: requestScope,
+                    descriptor: FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.id == growthId }), in: context) {
+                    finishItem()
+                    continue
+                }
                 try checkRunValidity()
                 // 见疫苗记录：LWW 跳过时采用远端更新版本，避免本地停留在旧内容却标记 synced。
                 if let remoteEdited = saved.editedAt, remoteEdited > item.updatedAt {
@@ -888,6 +902,11 @@ final class SyncEngine {
                 if Self.isMissingOptionalServerCollection(error, item: "成长测量") {
                     do {
                         let saved = try await apiClient.upsertHealthRecord(Self.makeHealthFallbackDTO(item))
+                        if try preserveDeletedUploadReceipt(saved.id, collection: "healthrecords", requestScope: requestScope,
+                            descriptor: FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.id == growthId }), in: context) {
+                            finishItem()
+                            continue
+                        }
                         try checkRunValidity()
                         item.remoteId = saved.id
                         item.sourceRaw = "health-fallback"
@@ -914,18 +933,17 @@ final class SyncEngine {
             guard isCurrentRun else { return }
             beginItem("同步家人补充")
             let commentId = comment.id
+            let requestScope = clientScope
             do {
                 comment.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertComment(Self.makeDTO(comment))
-                try checkRunValidity()
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<Comment>(predicate: #Predicate { $0.id == commentId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "comments", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "comments", requestScope: requestScope,
+                    descriptor: FetchDescriptor<Comment>(predicate: #Predicate { $0.id == commentId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 comment.remoteId = saved.id
                 var uploadedRemoteURL = comment.remoteURL
                 if let fileName = comment.voiceFileName, let entryId = comment.entry?.id {
@@ -962,18 +980,17 @@ final class SyncEngine {
             guard isCurrentRun else { return }
             beginItem("同步记录语音")
             let noteId = note.id
+            let requestScope = clientScope
             do {
                 note.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertVoiceNote(Self.makeDTO(note))
-                try checkRunValidity()
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == noteId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "voicenotes", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "voicenotes", requestScope: requestScope,
+                    descriptor: FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == noteId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 note.remoteId = saved.id
                 var uploadedRemoteURL = note.remoteURL
                 if let fileName = note.localFileName, let entryId = note.entry?.id {
@@ -1010,18 +1027,17 @@ final class SyncEngine {
             guard isCurrentRun else { return }
             beginItem("同步成长之声")
             let memoId = memo.id
+            let requestScope = clientScope
             do {
                 memo.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertVoiceMemo(Self.makeDTO(memo))
-                try checkRunValidity()
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.id == memoId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "voicememos", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "voicememos", requestScope: requestScope,
+                    descriptor: FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.id == memoId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 memo.remoteId = saved.id
                 var uploadedRemoteURL = memo.remoteURL
                 if let fileName = memo.localFileName {
@@ -1111,6 +1127,8 @@ final class SyncEngine {
         guard saveAndRefresh(context) else { return }
         let mediaId = media.id
         let mediaType = media.type
+        let requestScope = clientScope
+        var observedRemoteId: String?
         let request = MediaUploadRequest(
             mediaId: media.id, entryLocalId: entryLocalId,
             fileURL: url, type: media.type, fileName: fileName,
@@ -1131,11 +1149,27 @@ final class SyncEngine {
                     current.uploadProgress = progress
                     self.currentUploadProgress = progress
                 }
-            })
+            }, onReceipt: { remoteId, _ in observedRemoteId = remoteId })
+            if try preserveDeletedUploadReceipt(receipt.remoteId, collection: "media", requestScope: requestScope,
+                descriptor: FetchDescriptor<Media>(predicate: #Predicate { $0.id == mediaId }), in: context) {
+                return
+            }
             try checkRunValidity()
             try Self.completeMediaUpload(localId: mediaId, remoteId: receipt.remoteId,
                                          remoteURL: receipt.remoteURL, in: context)
         } catch {
+            // 流已给出完成身份但随后取消/抛错：不确认上传，仍保住已删除记录的补偿意图。
+            if let observedRemoteId {
+                do {
+                    if try preserveDeletedUploadReceipt(observedRemoteId, collection: "media", requestScope: requestScope,
+                        descriptor: FetchDescriptor<Media>(predicate: #Predicate { $0.id == mediaId }), in: context) {
+                        return
+                    }
+                } catch {
+                    if isCurrentRun { recordFailure(error, item: "保存媒体删除") }
+                    return
+                }
+            }
             guard isCurrentRun else { return }
             if let current = try? context.fetch(FetchDescriptor<Media>(
                 predicate: #Predicate { $0.id == mediaId })).first {
@@ -1147,10 +1181,13 @@ final class SyncEngine {
 
     /// 流的正常结束不等于服务器已接收文件；进度到 100% 也不能替代完成回执。
     static func consumeUpload(_ stream: AsyncThrowingStream<UploadEvent, Error>,
-                              onProgress: (Double) throws -> Void) async throws -> (remoteId: String, remoteURL: String) {
+                              onProgress: (Double) throws -> Void,
+                              onReceipt: (String, String) -> Void = { _, _ in }) async throws -> (remoteId: String, remoteURL: String) {
         try Task.checkCancellation()
         var receipt: (remoteId: String, remoteURL: String)?
         for try await event in stream {
+            // 只保留已观察到的服务器身份，供删除补偿；取消后的流依然不能返回成功。
+            if case .completed(let remoteId, let remoteURL) = event { onReceipt(remoteId, remoteURL) }
             try Task.checkCancellation()
             switch event {
             case .progress(let progress): try onProgress(progress)
@@ -1165,6 +1202,26 @@ final class SyncEngine {
     /// 上传回执只能确认发送时的版本。用户在 await 期间写的新内容仍需补传。
     static func uploadCompletionState(_ current: SyncState) -> SyncState {
         current == .uploading ? .synced : current
+    }
+
+    /// 取消不能撤回服务器已经成功的 create。只补已删除本地行的墓碑，不确认内容或写旧模型。
+    /// 更换账号 / 服务器 / 上下文后，旧回执绝不能进入新同步目标的删除队列。
+    private func preserveDeletedUploadReceipt<Model: PersistentModel>(_ remoteId: String?, collection: String,
+        requestScope: String, descriptor: FetchDescriptor<Model>, in context: ModelContext) throws -> Bool {
+        guard modelContext === context, clientScope == Self.scope(for: config) else { return false }
+        return try Self.persistDeletedUploadReceipt(remoteId, collection: collection, requestScope: requestScope,
+            currentScope: clientScope, descriptor: descriptor, in: context)
+    }
+
+    @discardableResult
+    static func persistDeletedUploadReceipt<Model: PersistentModel>(_ remoteId: String?, collection: String,
+        requestScope: String, currentScope: String, descriptor: FetchDescriptor<Model>,
+        in context: ModelContext) throws -> Bool {
+        guard requestScope == currentScope, try context.fetchCount(descriptor) == 0 else { return false }
+        PendingDeletion.enqueue(collection: collection, remoteId: remoteId, in: context)
+        // 此处可能已取消；仍需同步保存补偿意图，否则下一轮 pull 会重建已撤销的内容。
+        try context.save()
+        return true
     }
 
     /// 回执落库前重新取当前模型；删除意图与补墓碑由调用者在同一次保存中提交。
@@ -1227,18 +1284,17 @@ final class SyncEngine {
             guard isCurrentRun else { return }
             beginItem("同步时间胶囊")
             let capsuleId = capsule.id
+            let requestScope = clientScope
             do {
                 capsule.syncState = .uploading
                 saveAndRefresh(context)
                 var saved = try await apiClient.upsertTimeCapsule(Self.makeDTO(capsule))
-                try checkRunValidity()
-                // 撤销竞态：await 期间用户已删除这条 → 给服务器补墓碑，跳过写回（见 Entry 同款处理）。
-                guard try context.fetchCount(FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == capsuleId })) > 0 else {
-                    PendingDeletion.enqueue(collection: "timecapsules", remoteId: saved.id, in: context)
+                if try preserveDeletedUploadReceipt(saved.id, collection: "timecapsules", requestScope: requestScope,
+                    descriptor: FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == capsuleId }), in: context) {
                     finishItem()
-                    saveAndRefresh(context)
                     continue
                 }
+                try checkRunValidity()
                 capsule.remoteId = saved.id
                 if let fileName = capsule.encryptedBlobFileName {
                     let url = mediaStore.mediaURL(for: fileName)
@@ -1704,12 +1760,13 @@ final class SyncEngine {
         var done = 0
         var nextIndex = 0
         await withTaskGroup(of: DownloadOutcome.self) { group in
-            func addNext() {
-                guard nextIndex < specs.count, Date() < deadline, isCurrentRun else { return }
+            func addNext(ifCurrent current: Bool) {
+                // 局部函数不会继承 MainActor 隔离；由调用点读取作用域，只传 Sendable 值。
+                guard nextIndex < specs.count, Date() < deadline, current, !Task.isCancelled else { return }
                 let spec = specs[nextIndex]; nextIndex += 1
                 group.addTask { await Self.fetchFileOffMain(api: api, store: store, spec: spec) }
             }
-            for _ in 0..<min(concurrency, specs.count) { addNext() }
+            for _ in 0..<min(concurrency, specs.count) { addNext(ifCurrent: isCurrentRun) }
             for await outcome in group {
                 do {
                     if try Self.completeMediaDownload(outcome, in: context, store: store, isCurrentRun: isCurrentRun) {
@@ -1723,7 +1780,7 @@ final class SyncEngine {
                     recordFailure(error, item: "保存下载")
                 }
                 currentSyncLabel = total > 20 ? "\(label) \(done)/\(total)" : label
-                addNext()
+                addNext(ifCurrent: isCurrentRun)
             }
         }
     }

@@ -1000,58 +1000,65 @@ export class SyncEngine {
       const entry = (await AppDatabase.shared.fetchEntries(true)).find((item: Entry): boolean => item.id === localId);
       if (!entry) return true;
       if (entry.syncState !== SyncState.synced) return false;
-      for (const media of await AppDatabase.shared.fetchMediaForEntry(localId)) {
-        MediaStore.shared.deleteLocalFiles(media.localFileName, media.thumbnailFileName);
-      }
-      for (const note of await AppDatabase.shared.fetchVoiceForEntry(localId)) {
-        MediaStore.shared.deleteLocalFiles(note.localFileName);
-      }
-      for (const comment of await AppDatabase.shared.fetchCommentsForEntry(localId)) {
-        MediaStore.shared.deleteLocalFiles(comment.voiceFileName);
-      }
-      await AppDatabase.shared.deleteEntryHard(localId);
-      await AppDatabase.shared.deleteFeedEventsForTarget(localId);
+      const media = await AppDatabase.shared.fetchMediaForEntry(localId);
+      const notes = await AppDatabase.shared.fetchVoiceForEntry(localId);
+      const comments = await AppDatabase.shared.fetchCommentsForEntry(localId);
+      const removed = await AppDatabase.shared.deleteSyncedFieldsIfUnchanged('entry', AppDatabase.entryFields(entry),
+        media.map((item: Media): relationalStore.ValuesBucket => AppDatabase.mediaFields(item)),
+        notes.map((item: VoiceNote): relationalStore.ValuesBucket => AppDatabase.voiceNoteFields(item)),
+        comments.map((item: Comment): relationalStore.ValuesBucket => AppDatabase.commentFields(item)));
+      if (!removed) return false;
+      for (const item of media) MediaStore.shared.deleteLocalFiles(item.localFileName, item.thumbnailFileName);
+      for (const item of notes) MediaStore.shared.deleteLocalFiles(item.localFileName);
+      for (const item of comments) MediaStore.shared.deleteLocalFiles(item.voiceFileName);
       return true;
     }
     if (collection === 'media') {
       const item = (await AppDatabase.shared.fetchAllMedia()).find((value: Media): boolean => value.id === localId);
       if (!item) return true;
       if (item.syncState !== SyncState.synced) return false;
+      if (!await AppDatabase.shared.deleteSyncedFieldsIfUnchanged('media', AppDatabase.mediaFields(item))) return false;
       MediaStore.shared.deleteLocalFiles(item.localFileName, item.thumbnailFileName);
-      await AppDatabase.shared.deleteMedia(localId);
       return true;
     }
     if (collection === 'milestones') {
       const item = (await AppDatabase.shared.fetchMilestones()).find((value: Milestone): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
-      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteMilestone(localId);
+      if (item?.syncState === SyncState.synced) {
+        return AppDatabase.shared.deleteSyncedFieldsIfUnchanged('milestone', AppDatabase.milestoneFields(item));
+      }
       return true;
     }
     if (collection === 'firsttimes') {
       const item = (await AppDatabase.shared.fetchFirstTimes()).find((value: FirstTime): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
-      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteFirstTime(localId);
+      if (item?.syncState === SyncState.synced) {
+        return AppDatabase.shared.deleteSyncedFieldsIfUnchanged('first_time', AppDatabase.firstTimeFields(item));
+      }
       return true;
     }
     if (collection === 'healthrecords') {
       const item = (await AppDatabase.shared.fetchHealth()).find((value: HealthRecord): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) {
-        await AppDatabase.shared.deleteHealth(localId);
-        await AppDatabase.shared.deleteFeedEventsForTarget(localId);
+        return AppDatabase.shared.deleteSyncedFieldsIfUnchanged('health_record', AppDatabase.healthFields(item));
       }
       return true;
     }
     if (collection === 'vaccinerecords') {
       const item = (await AppDatabase.shared.fetchVaccines()).find((value: VaccineRecord): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
-      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteVaccine(localId);
+      if (item?.syncState === SyncState.synced) {
+        return AppDatabase.shared.deleteSyncedFieldsIfUnchanged('vaccine_record', AppDatabase.vaccineFields(item));
+      }
       return true;
     }
     if (collection === 'growthmeasurements') {
       const item = (await AppDatabase.shared.fetchGrowth()).find((value: GrowthMeasurement): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
-      if (item?.syncState === SyncState.synced) await AppDatabase.shared.deleteGrowth(localId);
+      if (item?.syncState === SyncState.synced) {
+        return AppDatabase.shared.deleteSyncedFieldsIfUnchanged('growth_measurement', AppDatabase.growthFields(item));
+      }
       return true;
     }
     if (collection === 'comments') {
@@ -1060,8 +1067,8 @@ export class SyncEngine {
           .find((value: Comment): boolean => value.id === localId);
         if (item && item.syncState !== SyncState.synced) return false;
         if (item?.syncState === SyncState.synced) {
+          if (!await AppDatabase.shared.deleteSyncedFieldsIfUnchanged('comment', AppDatabase.commentFields(item))) return false;
           MediaStore.shared.deleteLocalFiles(item.voiceFileName);
-          await AppDatabase.shared.deleteComment(localId);
         }
       }
       return true;
@@ -1072,8 +1079,8 @@ export class SyncEngine {
           .find((value: VoiceNote): boolean => value.id === localId);
         if (item && item.syncState !== SyncState.synced) return false;
         if (item?.syncState === SyncState.synced) {
+          if (!await AppDatabase.shared.deleteSyncedFieldsIfUnchanged('voice_note', AppDatabase.voiceNoteFields(item))) return false;
           MediaStore.shared.deleteLocalFiles(item.localFileName);
-          await AppDatabase.shared.deleteVoiceNote(localId);
         }
       }
       return true;
@@ -1082,8 +1089,8 @@ export class SyncEngine {
       const item = (await AppDatabase.shared.fetchVoiceMemos()).find((value: VoiceMemo): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) {
+        if (!await AppDatabase.shared.deleteSyncedFieldsIfUnchanged('voice_memo', AppDatabase.voiceMemoFields(item))) return false;
         MediaStore.shared.deleteLocalFiles(item.localFileName);
-        await AppDatabase.shared.deleteVoiceMemo(localId);
       }
       return true;
     }
@@ -1091,8 +1098,8 @@ export class SyncEngine {
       const item = (await AppDatabase.shared.fetchCapsules()).find((value: TimeCapsule): boolean => value.id === localId);
       if (item && item.syncState !== SyncState.synced) return false;
       if (item?.syncState === SyncState.synced) {
+        if (!await AppDatabase.shared.deleteSyncedFieldsIfUnchanged('time_capsule', AppDatabase.capsuleFields(item))) return false;
         MediaStore.shared.deleteLocalFiles(item.encryptedBlobFileName);
-        await AppDatabase.shared.deleteCapsule(localId);
       }
     }
     return true;

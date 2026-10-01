@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - 手表 ↔ 手机 通信契约（两端共同编译）
 /// Watch 是瘦客户端：不跑 SwiftData / 同步，只把「记录意图」发给 iPhone，并显示 iPhone 推来的快照。
@@ -151,6 +152,8 @@ public nonisolated enum WatchLink {
     public static let recordKey = "bubu.watch.record"
     /// transferFile 的 metadata 里承载语音记录意图（JSON 字符串）。
     public static let fileMetaKey = "bubu.watch.record.json"
+    /// iPhone → Watch: explicit durable-inbox receipt. Transport completion alone is not a receipt.
+    public static let voiceReceiptKey = "bubu.watch.voice.receipt.v1"
     /// transferFile 的 metadata 标记「这是回忆照片包」，值为包内文件名集合的指纹。
     public static let photoBundleKey = "bubu.watch.photobundle"
     /// 手表 → 手机：「我的照片缓存缺图，请重发照片包」。手表重装/缓存被清后，
@@ -167,5 +170,60 @@ public nonisolated enum WatchLink {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         return try? dec.decode(type, from: data)
+    }
+}
+
+/// A receipt covers the original voice intent and its complete bytes, not merely a reusable ID.
+/// Both sides compile this helper; paths are supplied by their own controlled inboxes.
+public nonisolated struct WatchVoiceReceipt: Codable, Equatable, Sendable {
+    public let version: Int
+    public let localId: UUID
+    public let intentSHA256: String
+    public let audioSHA256: String
+
+    enum ReceiptError: Error { case invalidVoice, invalidFile }
+
+    public static func make(audio: URL, request: WatchRecordRequest) throws -> Self {
+        guard request.type == .voice, let id = UUID(uuidString: request.localId) else {
+            throw ReceiptError.invalidVoice
+        }
+        var canonical = request
+        canonical.localId = id.uuidString
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let intent = SHA256.hash(data: try encoder.encode(canonical))
+            .map { String(format: "%02x", $0) }.joined()
+        let attributes = try FileManager.default.attributesOfItem(atPath: audio.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+              ((attributes[.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
+            throw ReceiptError.invalidFile
+        }
+        let handle = try FileHandle(forReadingFrom: audio)
+        defer { try? handle.close() }
+        var digest = SHA256()
+        while let data = try handle.read(upToCount: 64 * 1024), !data.isEmpty {
+            digest.update(data: data)
+        }
+        return Self(version: 1, localId: id, intentSHA256: intent,
+                    audioSHA256: digest.finalize().map { String(format: "%02x", $0) }.joined())
+    }
+
+    /// Called only for an explicit phone receipt, never for WC transport completion.
+    /// Malformed, stale, duplicate or mismatched receipts cannot remove a different recording.
+    @discardableResult
+    public func removeAcknowledgedSource(audio: URL, metadata: URL) throws -> Bool {
+        let fm = FileManager.default
+        guard version == 1, UUID(uuidString: audio.deletingPathExtension().lastPathComponent) == localId,
+              metadata.standardizedFileURL == audio.deletingPathExtension().appendingPathExtension("json").standardizedFileURL,
+              fm.fileExists(atPath: audio.path), fm.fileExists(atPath: metadata.path) else { return false }
+        let original = try Data(contentsOf: metadata)
+        guard let request = WatchLink.decode(WatchRecordRequest.self, from: original),
+              try Self.make(audio: audio, request: request) == self else { return false }
+        // No asynchronous work between verification and cleanup. A failed removal leaves
+        // the remaining source material; replaying a receipt is harmless.
+        try fm.removeItem(at: audio)
+        try fm.removeItem(at: metadata)
+        return true
     }
 }

@@ -39,6 +39,109 @@ struct WatchInboxSafetyTests {
         return package
     }
 
+    @Test("传输送达但手机暂存失败时没有持久回执，手表原件保留供后续重试")
+    func failedStagingCannotReleaseWatchSource() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intent = request()
+        let original = root.appendingPathComponent("\(intent.localId).m4a")
+        let sidecar = original.deletingPathExtension().appendingPathExtension("json")
+        let bytes = Data("synthetic Watch original".utf8)
+        try bytes.write(to: original)
+        let encoded = try #require(WatchLink.encode(intent))
+        try encoded.write(to: sidecar)
+        let metadata = [WatchLink.fileMetaKey: try #require(String(data: encoded, encoding: .utf8))]
+        let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("phone-inbox"))
+        var receipt: WatchVoiceReceipt?
+        #expect(throws: InjectedFailure.self) {
+            receipt = try inbox.stageForReceipt(audio: original, metadata: metadata) { _, output in
+                try Data("partial".utf8).write(to: output)
+                throw InjectedFailure.diskFull
+            }
+        }
+        #expect(receipt == nil)
+        #expect(try Data(contentsOf: original) == bytes)
+        #expect(try Data(contentsOf: sidecar) == encoded)
+        #expect(try inbox.pendingVoices().isEmpty)
+        #expect(throws: WatchVoiceInbox.ImportError.self) {
+            receipt = try inbox.stageForReceipt(audio: original, metadata: metadata) { _, output in
+                try Data("silently truncated".utf8).write(to: output)
+            }
+        }
+        #expect(receipt == nil)
+        #expect(try inbox.pendingVoices().isEmpty)
+
+        // Normal foreground reconciliation retries. The complete phone package now owns
+        // the original before the queued explicit receipt releases the Watch's copy.
+        let acknowledged = try #require(try inbox.stageForReceipt(audio: original, metadata: metadata))
+        let queued = try #require(try inbox.pendingVoices().first)
+        #expect(try Data(contentsOf: queued.audio) == bytes)
+        #expect(try acknowledged.removeAcknowledgedSource(audio: original, metadata: sidecar))
+        #expect(!FileManager.default.fileExists(atPath: original.path))
+        #expect(!FileManager.default.fileExists(atPath: sidecar.path))
+        #expect(try !acknowledged.removeAcknowledgedSource(audio: original, metadata: sidecar))
+
+        let disk = try container(at: root)
+        #expect(throws: InjectedFailure.self) {
+            try inbox.importVoice(queued, into: disk, mediaDirectory: root.appendingPathComponent("media"),
+                                  save: { _ in throw InjectedFailure.diskFull })
+        }
+        #expect(try Data(contentsOf: queued.audio) == bytes)
+        try inbox.importVoice(queued, into: disk, mediaDirectory: root.appendingPathComponent("media"))
+        #expect(try ModelContext(disk).fetchCount(FetchDescriptor<VoiceNote>()) == 1)
+    }
+
+    @Test("迟到或不匹配的语音回执不能按 UUID 单独删掉变更的原音频和意图")
+    func receiptRequiresSameAudioAndOriginalIntent() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let intent = request()
+        let original = root.appendingPathComponent("\(intent.localId).m4a")
+        let sidecar = original.deletingPathExtension().appendingPathExtension("json")
+        let bytes = Data("synthetic Watch source".utf8)
+        let encoded = try #require(WatchLink.encode(intent))
+        try bytes.write(to: original)
+        try encoded.write(to: sidecar)
+        let receipt = try WatchVoiceReceipt.make(audio: original, request: intent)
+        try Data("newer same-ID audio".utf8).write(to: original)
+        #expect(try !receipt.removeAcknowledgedSource(audio: original, metadata: sidecar))
+        try bytes.write(to: original)
+        var changedIntent = intent
+        changedIntent.roleRaw = "another synthetic parent"
+        try #require(WatchLink.encode(changedIntent)).write(to: sidecar)
+        #expect(try !receipt.removeAcknowledgedSource(audio: original, metadata: sidecar))
+        try encoded.write(to: sidecar)
+        let invalid = WatchVoiceReceipt(version: 2, localId: receipt.localId,
+            intentSHA256: receipt.intentSHA256, audioSHA256: receipt.audioSHA256)
+        #expect(try !invalid.removeAcknowledgedSource(audio: original, metadata: sidecar))
+        let mismatched = WatchVoiceReceipt(version: 1, localId: UUID(),
+            intentSHA256: receipt.intentSHA256, audioSHA256: receipt.audioSHA256)
+        #expect(try !mismatched.removeAcknowledgedSource(audio: original, metadata: sidecar))
+        #expect(try Data(contentsOf: original) == bytes)
+        #expect(try Data(contentsOf: sidecar) == encoded)
+        let replay = try #require(WatchLink.decode(WatchVoiceReceipt.self,
+            from: try #require(WatchLink.encode(receipt))))
+        #expect(replay == receipt)
+        #expect(try replay.removeAcknowledgedSource(audio: original, metadata: sidecar))
+    }
+
+    @Test("非法元数据仍保留手机保护副本，但不能回执让手表删原件")
+    func malformedMetadataCannotAcknowledgeSource() throws {
+        let root = try directory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("\(UUID().uuidString).m4a")
+        try Data("preserve original audio".utf8).write(to: source)
+        let inbox = WatchVoiceInbox(directory: root.appendingPathComponent("inbox"))
+        #expect(try inbox.stageForReceipt(audio: source, metadata: [WatchLink.fileMetaKey: "damaged"]) == nil)
+        #expect(try inbox.stageForReceipt(audio: source, metadata: [:]) == nil)
+        #expect(try inbox.pendingVoices().isEmpty)
+        let packages = try FileManager.default.contentsOfDirectory(at: inbox.directory, includingPropertiesForKeys: nil)
+        #expect(packages.count == 2)
+        for package in packages {
+            #expect(try Data(contentsOf: package.appendingPathComponent("recording.m4a")) == Data(contentsOf: source))
+        }
+    }
+
     @Test("WC 回调返回前已独立保存原音频和原元数据，重复投递不覆盖")
     func stagePreservesOriginalAndMetadata() throws {
         let root = try directory()

@@ -581,14 +581,7 @@ export class AppDatabase {
   // —— Entry ——
   async insertEntry(e: Entry): Promise<void> {
     try {
-    const v: relationalStore.ValuesBucket = {
-      id: e.id, remoteId: e.remoteId ?? null, title: e.title ?? null, note: e.note ?? null,
-      firstPersonNote: e.firstPersonNote ?? null, happenedAt: e.happenedAt,
-      locationName: e.locationName ?? null, latitude: e.latitude ?? null, longitude: e.longitude ?? null,
-      authorRole: e.authorRole, moodRaw: e.moodRaw ?? null, syncState: e.syncState,
-      isArchived: e.isArchived ? 1 : 0, inStorybook: e.inStorybook ? 1 : 0,
-      editedAt: e.editedAt ?? null, createdAt: e.createdAt
-    };
+    const v = AppDatabase.entryFields(e);
     await this.store!.insert('entry', v);
       } catch (error) {
       hilog.error(DOMAIN, 'Bubu', '数据库 insertEntry 失败，已中止本次操作');
@@ -1514,8 +1507,8 @@ export class AppDatabase {
 
   // 同步响应只确认它实际发送的快照。单条条件 UPDATE 也覆盖同毫秒的编辑，
   // 避免网络等待期间的新内容被标为已同步，或被远端冲突结果覆盖。
-  async updateEntryFieldsIfUnchanged(expected: Entry, fields: relationalStore.ValuesBucket): Promise<boolean> {
-    const snapshot: relationalStore.ValuesBucket = {
+  static entryFields(expected: Entry): relationalStore.ValuesBucket {
+    return {
       id: expected.id, remoteId: expected.remoteId ?? null,
       title: expected.title ?? null, note: expected.note ?? null,
       firstPersonNote: expected.firstPersonNote ?? null, happenedAt: expected.happenedAt,
@@ -1525,7 +1518,10 @@ export class AppDatabase {
       isArchived: expected.isArchived ? 1 : 0, inStorybook: expected.inStorybook ? 1 : 0,
       editedAt: expected.editedAt ?? null, createdAt: expected.createdAt
     };
-    return this.updateFieldsIfUnchanged('entry', snapshot, fields);
+  }
+
+  async updateEntryFieldsIfUnchanged(expected: Entry, fields: relationalStore.ValuesBucket): Promise<boolean> {
+    return this.updateFieldsIfUnchanged('entry', AppDatabase.entryFields(expected), fields);
   }
 
   async deleteEntryHard(id: string): Promise<void> {
@@ -1540,6 +1536,81 @@ export class AppDatabase {
       hilog.error(DOMAIN, 'Bubu', '数据库 deleteEntryHard 失败，已中止本次操作');
       throw error as Error;
     }
+  }
+
+  // 墓碑删除是比较快照后的原子提交，不复用无条件的用户删除入口。
+  // 首条条件 DELETE 获取事务写锁；新增/修改子项导致整批回滚，原片留在提交后再清理。
+  // createTransaction 的写事务也隔离同一 RdbStore 的普通写入（14800024），不能改用裸 BEGIN。
+  // https://github.com/openharmony/docs/blob/master/en/application-dev/reference/apis-arkdata/arkts-apis-data-relationalStore-Transaction.md
+  async deleteSyncedFieldsIfUnchanged(table: string, expected: relationalStore.ValuesBucket,
+                                     media: relationalStore.ValuesBucket[] = [],
+                                     notes: relationalStore.ValuesBucket[] = [],
+                                     comments: relationalStore.ValuesBucket[] = []): Promise<boolean> {
+    const childTables: string[] = ['media', 'voice_note', 'comment'];
+    const children: relationalStore.ValuesBucket[][] = [media, notes, comments];
+    const predicate = AppDatabase.syncedDeletionPredicates(table, expected);
+    if (expected['syncState'] !== SyncState.synced) return false;
+    if (table !== 'entry' && (media.length > 0 || notes.length > 0 || comments.length > 0)) {
+      throw new Error('非记录墓碑不能级联删除');
+    }
+    for (const group of children) {
+      for (const child of group) {
+        if (child['entryId'] !== expected['id'] || child['syncState'] !== SyncState.synced) return false;
+      }
+    }
+    const transaction = await this.store!.createTransaction();
+    try {
+      if (await transaction.delete(predicate) !== 1) {
+        await transaction.rollback();
+        return false;
+      }
+      if (table === 'entry') {
+        for (let i = 0; i < childTables.length; i++) {
+          for (const child of children[i]) {
+            const childPredicate = AppDatabase.syncedDeletionPredicates(childTables[i], child);
+            if (await transaction.delete(childPredicate) !== 1) {
+              await transaction.rollback();
+              return false;
+            }
+          }
+          // 不按 entryId 无条件批量删除：等待期间新增的子项必须保留，并重试父墓碑。
+          const remaining = await transaction.querySql(
+            `SELECT id FROM ${childTables[i]} WHERE entryId = ?`, [expected['id'] as string]);
+          const hasRemaining = remaining.rowCount > 0;
+          remaining.close();
+          if (hasRemaining) {
+            await transaction.rollback();
+            return false;
+          }
+        }
+      }
+      if (table === 'entry' || table === 'health_record') {
+        const feedPredicate = new relationalStore.RdbPredicates('feed_event');
+        feedPredicate.equalTo('targetLocalId', expected['id'] as string);
+        await transaction.delete(feedPredicate);
+      }
+      await transaction.commit();
+      return true;
+    } catch (error) {
+      try { await transaction.rollback(); } catch (rollbackError) {}
+      throw error as Error;
+    }
+  }
+
+  private static syncedDeletionPredicates(table: string,
+                                          expected: relationalStore.ValuesBucket): relationalStore.RdbPredicates {
+    const tables: string[] = ['entry', 'media', 'milestone', 'first_time', 'health_record',
+      'vaccine_record', 'growth_measurement', 'comment', 'voice_note', 'voice_memo', 'time_capsule'];
+    if (tables.indexOf(table) < 0 || typeof expected['id'] !== 'string' || expected['id'] === ''
+      || typeof expected['syncState'] !== 'string') throw new Error('无效的墓碑快照');
+    const predicate = new relationalStore.RdbPredicates(table);
+    for (const column of Object.keys(expected)) {
+      const value = expected[column];
+      if (value === null) predicate.isNull(column);
+      else if (typeof value === 'string' || typeof value === 'number') predicate.equalTo(column, value);
+      else throw new Error('墓碑快照字段类型无效');
+    }
+    return predicate;
   }
 
   async deleteMedia(id: string): Promise<void> {

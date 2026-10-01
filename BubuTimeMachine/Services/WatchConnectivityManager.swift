@@ -537,8 +537,13 @@ extension WatchConnectivityManager: WCSessionDelegate {
         // WC 的临时 URL 只在回调期间有效。先同步保全原音频和原始 metadata，
         // 无论媒体导入/数据库保存/解码是否成功，都不能只留下一个异步内存任务。
         do {
-            try WatchVoiceInbox(directory: Self.emergencyVoiceDir()).stage(
+            let receipt = try WatchVoiceInbox(directory: Self.emergencyVoiceDir()).stageForReceipt(
                 audio: file.fileURL, metadata: file.metadata ?? [:])
+            if let receipt, let data = WatchLink.encode(receipt) {
+                // Queued userInfo survives disconnection; a lost receipt only causes a safe
+                // duplicate transfer on the Watch's next normal reconciliation.
+                session.transferUserInfo([WatchLink.voiceReceiptKey: data])
+            }
             Task { @MainActor in self.retryPendingVoiceImports() }
         } catch {
             // 磁盘完全不可写时无法保证接收成功；不把失败谎报成“已暂存”。
@@ -596,14 +601,37 @@ nonisolated struct WatchVoiceInbox: Sendable {
     /// 每次投递分配自己的目录，绝不用未校验的 localId 拼路径，也不覆盖之前的应急副本。
     /// metadata 编码/写入失败时仍保留已经拷出的音频；后续重试不会清理这些孤儿。
     @discardableResult
-    func stage(audio: URL, metadata: [String: Any]) throws -> URL {
+    func stage(audio: URL, metadata: [String: Any],
+               copyAudio: (URL, URL) throws -> Void = { try FileManager.default.copyItem(at: $0, to: $1) }) throws -> URL {
         let fm = FileManager.default
         let package = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fm.createDirectory(at: package, withIntermediateDirectories: true)
-        try fm.copyItem(at: audio, to: package.appendingPathComponent("recording.m4a"))
+        let copiedAudio = package.appendingPathComponent("recording.m4a")
+        try copyAudio(audio, copiedAudio)
+        // Do not publish importable metadata for a truncated copy, even if a copy hook returned.
+        guard fm.contentsEqual(atPath: audio.path, andPath: copiedAudio.path) else {
+            throw ImportError.audioConflict
+        }
         let data = try PropertyListSerialization.data(fromPropertyList: metadata, format: .binary, options: 0)
         try data.write(to: package.appendingPathComponent("metadata.plist"), options: .atomic)
         return package
+    }
+
+    /// Receipt is optional for old/invalid metadata, but every original package is retained.
+    /// Only reread, complete bytes and the same valid intent permit the sender to delete its copy.
+    func stageForReceipt(audio: URL, metadata: [String: Any],
+                         copyAudio: (URL, URL) throws -> Void = { try FileManager.default.copyItem(at: $0, to: $1) }) throws -> WatchVoiceReceipt? {
+        let package = try stage(audio: audio, metadata: metadata, copyAudio: copyAudio)
+        guard let json = metadata[WatchLink.fileMetaKey] as? String,
+              let data = json.data(using: .utf8),
+              let request = WatchLink.decode(WatchRecordRequest.self, from: data),
+              request.type == .voice, UUID(uuidString: request.localId) != nil else { return nil }
+        let persistedData = try Data(contentsOf: package.appendingPathComponent("metadata.plist"))
+        guard let persisted = try PropertyListSerialization.propertyList(from: persistedData, options: [], format: nil) as? [String: Any],
+              persisted[WatchLink.fileMetaKey] as? String == json else { throw ImportError.audioConflict }
+        let receipt = try WatchVoiceReceipt.make(audio: package.appendingPathComponent("recording.m4a"), request: request)
+        guard try WatchVoiceReceipt.make(audio: audio, request: request) == receipt else { throw ImportError.audioConflict }
+        return receipt
     }
 
     /// 同时兼容旧版 <localId>.json/.m4a。损坏、缺元数据、非法 UUID 全部保留供恢复，

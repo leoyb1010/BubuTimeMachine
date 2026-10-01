@@ -154,6 +154,34 @@ struct StoreRecoveryExportTests {
         #expect(try fixture.bytes(path) == Data("synthetic orphan WAL".utf8))
     }
 
+    @Test("启动保护保留的孤立回滚日志也可原样导出", arguments: [
+        "AppGroup/BubuTimeMachine.store-journal",
+        "Documents/BubuTimeMachine.store-journal",
+        "ApplicationSupport/default.store-journal",
+        "AppGroup/Documents/UpgradeBackups/pre-v2.store-journal"
+    ])
+    func preservesOrphanRollbackJournal(path: String) throws {
+        let fixture = try Fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let bytes = Data("synthetic orphan rollback journal".utf8)
+        try fixture.write(path, "synthetic orphan rollback journal")
+        #expect(try fixture.prepare() == 1)
+        #expect(try fixture.bytes(path) == bytes)
+        let exported: String
+        if path.hasPrefix("AppGroup/") {
+            exported = String(path.dropFirst("AppGroup/".count))
+        } else if path.hasPrefix("Documents/") {
+            exported = "LegacyDocuments/" + String(path.dropFirst("Documents/".count))
+        } else {
+            exported = "LegacyApplicationSupport/" + String(path.dropFirst("ApplicationSupport/".count))
+        }
+        #expect(try fixture.bytes(exported, exported: true) == bytes)
+        #expect(!FileManager.default.fileExists(atPath: fixture.activeStore.path))
+        let readme = try String(contentsOf: fixture.destination.appendingPathComponent("请先读我.txt"), encoding: .utf8)
+        #expect(readme.contains("未验证内容"))
+        #expect(readme.contains("不代表文件相互一致或已验证可恢复"))
+    }
+
     @Test("复制部分文件后遇到异常必须失败并清理输出，不删除任何源文件")
     func partialCopyFailureDoesNotLeavePackage() throws {
         let fixture = try Fixture()
