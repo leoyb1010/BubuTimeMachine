@@ -179,8 +179,8 @@ jobs:
               test-without-building 2>&1 | tee /tmp/ui-retry.log
           }
 
-      - name: Preserve synthetic simulator failure evidence
-        if: ${{ failure() || steps.ui.outputs.had_retry == 'true' }}
+      - name: Preserve synthetic simulator evidence
+        if: ${{ always() }}
         timeout-minutes: 4
         continue-on-error: true
         run: |
@@ -191,12 +191,10 @@ jobs:
           import subprocess
           root = Path.home() / "Library/Developer/Xcode/DerivedData"
           export = ["xcrun", "xcresulttool", "export", "attachments"]
-          help_result = subprocess.run(export + ["--help"], capture_output=True, text=True,
-                                       check=False, timeout=15)
-          failure_only = ["--only-failures"] if "--only-failures" in help_result.stdout + help_result.stderr else []
+          # Successful product journeys are evidence too; export their screenshots.
           for result in root.glob("*/Logs/Test/*.xcresult"):
               try:
-                  subprocess.run(export + failure_only + ["--path", str(result),
+                  subprocess.run(export + ["--path", str(result),
                                   "--output-path", str(Path("/tmp/bubu-ci-diagnostics") / result.stem)],
                                  check=False, timeout=45)
               except subprocess.TimeoutExpired:
@@ -208,12 +206,12 @@ jobs:
             fi
           done
 
-      - name: Upload synthetic simulator failure evidence
+      - name: Upload synthetic simulator evidence
         timeout-minutes: 2
-        if: ${{ failure() || steps.ui.outputs.had_retry == 'true' }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: synthetic-${{ matrix.device }}-failure-${{ github.sha }}
+          name: synthetic-${{ matrix.device }}-evidence-${{ github.sha }}
           # Keep screenshots, accessibility text and logs readable without large recordings.
           path: |
             /tmp/bubu-ci-diagnostics/**/*.png

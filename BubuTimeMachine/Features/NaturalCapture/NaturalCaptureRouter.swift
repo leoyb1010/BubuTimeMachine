@@ -10,6 +10,26 @@ struct NaturalCaptureRouter {
     /// 解耦 AppEnvironment：只需要作者角色字符串，单测可用内存容器直建。
     let authorRole: String
 
+    /// Save the review as one transaction. A failed retry must not leave inserts
+    /// in the UI context or roll back unrelated edits in another screen.
+    enum SaveError: Error { case invalidNumericField }
+
+    static func saveBatch(_ items: [NaturalCaptureItem], authorRole: String,
+                          container: ModelContainer,
+                          save: @MainActor (ModelContext) throws -> Void = { try $0.save() }) throws {
+        guard !items.contains(where: \.hasInvalidNumericFields) else { throw SaveError.invalidNumericField }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        let router = NaturalCaptureRouter(context: context, authorRole: authorRole)
+        do {
+            for item in items { router.save(item) }
+            try save(context)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
     func save(_ item: NaturalCaptureItem) {
         switch item.domain {
         case .vaccine:
@@ -94,6 +114,7 @@ struct NaturalCaptureRouter {
                 measurement.note = item.note
                 measurement.syncState = .local
                 context.insert(measurement)
+                record.growthMeasurementId = measurement.id
                 let summary = [
                     h.map { "身高 \(Self.cleanNumber($0))cm" },
                     w.map { "体重 \(Self.cleanNumber($0))kg" },
@@ -140,8 +161,6 @@ struct NaturalCaptureRouter {
         context.insert(FeedEvent(kind: .healthRecorded,
                                  actorRole: authorRole,
                                  summary: "智能记录了疫苗接种：\(name)"))
-        let ctx = context
-        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: ctx) }   // 打卡后自动排下一针
     }
 
     private static func cleanNumber(_ v: Double) -> String {

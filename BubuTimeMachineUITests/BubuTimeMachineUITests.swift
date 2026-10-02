@@ -484,6 +484,46 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
+    func testNaturalCaptureCancelThenSaveReturnsToTimeline() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-natural-local"]
+        app.launch()
+        let globalRecord = app.buttons["root.record"]
+        let record = globalRecord.waitForExistence(timeout: 12) ? globalRecord : app.buttons["home.record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 20))
+        record.tap()
+        let natural = app.buttons["打开一句话智能记录"]
+        XCTAssertTrue(natural.waitForExistence(timeout: 8))
+        natural.tap()
+        let input = app.textFields["写一句或说一句：布布今天……"]
+        let multilineInput = app.textViews.firstMatch
+        let field = input.waitForExistence(timeout: 3) ? input : multilineInput
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        field.tap()
+        let note = "Synthetic review audit memory"
+        field.typeText(note)
+        app.buttons["识别并保存这句话"].tap()
+        XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        attachScreenshot("natural-review-before-cancel", to: self)
+        app.navigationBars["确认保存"].buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["识别并保存这句话"].waitForExistence(timeout: 8))
+        XCTAssertEqual(field.value as? String, note, "取消确认页必须保留原文")
+        app.buttons["识别并保存这句话"].tap()
+        XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        app.navigationBars["确认保存"].buttons["保存"].tap()
+        XCTAssertTrue(app.navigationBars["一句话智能记录"].waitForExistence(timeout: 8))
+        app.buttons["关闭"].tap()
+        XCTAssertTrue(app.buttons["以后再说"].waitForExistence(timeout: 8))
+        app.buttons["以后再说"].tap()
+        let timeline = element(named: "时光", in: app)
+        XCTAssertTrue(timeline.waitForExistence(timeout: 8))
+        timeline.tap()
+        XCTAssertTrue(app.staticTexts[note].firstMatch.waitForExistence(timeout: 8), "已保存内容必须从真实 SwiftData 回到时光页")
+        attachScreenshot("natural-review-saved-timeline", to: self)
+    }
+
+    @MainActor
     func testTimelineProbeRendersAndSearches() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

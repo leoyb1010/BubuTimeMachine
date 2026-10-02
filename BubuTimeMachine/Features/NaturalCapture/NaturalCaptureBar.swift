@@ -201,6 +201,19 @@ struct NaturalCaptureBar: View {
         // 防重复提交：解析中 / 确认页已弹出时一律忽略
         guard !input.isEmpty, !isParsing, reviewPayload == nil else { return }
 
+        #if DEBUG
+        // Deterministic UI-only parsing fixture; never active for a disk-backed app.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-uitest-natural-local"), arguments.contains("-uitest-in-memory") {
+            reviewPayload = ReviewPayload(result: NaturalCaptureResult(confidence: 0.9,
+                items: [NaturalCaptureItem(domain: .timeline, action: .create,
+                    title: String(input.prefix(60)), note: input, date: .now, fields: [:], tags: [],
+                    confidence: 0.9, needsConfirmation: false, sourceText: input)], warnings: []),
+                originalText: input)
+            return
+        }
+        #endif
+
         isParsing = true
         errorText = nil
         // 超过 8 秒还没结果：给一句安抚，避免用户以为卡死
