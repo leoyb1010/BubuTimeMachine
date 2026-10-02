@@ -7,7 +7,7 @@ Legend: **EXECUTED** = synthetic runtime test this audit; **STATIC** = actual so
 | Journey/capability | Evidence this audit | Result / limitation |
 |---|---|---|
 | AI input → auth → parse → native-review JSON | EXECUTED: 24 new FastAPI TestClient cases, provider patched locally | 18 failures before fix; all 24 pass after; nullable/scalar containers, malformed domain/tags, nonfinite confidence/numbers, sensitive confirmation, valid multirecord compatibility |
-| iOS review → cancel → original input → resubmit → save → timeline | PENDING CI: `testNaturalCaptureCancelThenSaveReturnsToTimeline` | Real SwiftUI/SwiftData; parser alone is deterministic DEBUG in-memory fixture, no live AI |
+| iOS review → cancel → original input → resubmit → save → timeline | PENDING CI: `testNaturalCaptureCancelThenSaveReturnsToTimeline` | Real SwiftUI/SwiftData; Cancel, injected one-time disk failure, retained review and successful retry; parser/persistence fault fixtures require DEBUG + in-memory flags, no live AI |
 | iOS review save failure → rollback only its batch → retry | PENDING CI: `WaveNTests.batchFailureIsAtomicAndRetryKeepsUnrelatedDraft` | New autosave-disabled context; unrelated main-context draft retained; checks fresh-context counts before/after retry |
 | iOS AI checkup → exact growth-curve measurement | STATIC + PENDING CI: `checkupLinksExactGrowthMeasurement` | Stable link for two same-day checkups; no model/schema change |
 | Empty review / repeated same-day vaccine submission | PENDING CI: `emptyBatchAndVaccineRepeatAreSafe` | No empty inserts; preserves existing vaccine dedupe; no claim of durable replay dedupe for all domains |
@@ -25,6 +25,8 @@ Legend: **EXECUTED** = synthetic runtime test this audit; **STATIC** = actual so
 | Harmony ArkUI UI / navigation / forms | Source inventory + Node contract tests | No DevEco/API26 SDK or device; Node/static checks do not prove HAP compile or rendered UI |
 | Cross-platform release parity | EXECUTED: original `VersionParity.test.mjs` unchanged | Known baseline failure: iOS 2.19.0 vs Harmony 2.15.0. Platform-internal checks added; release policy unresolved |
 | Production backup and restoration | EXECUTED: synthetic local tests, temp SQLite, mock restic; PocketBase integration | Mac mini, launchd, actual backup data, production service never touched |
+
+Concrete current-run source traces and risk decisions: [flow-traces.md](flow-traces.md). Additional native regressions cover capsule commit-before-cleanup and isolated same-second exports; Harmony deep-link input handling ran 10/10 locally.
 
 ## Complete located-control ledger
 
@@ -49,13 +51,13 @@ Each row links to the source-level inventory in `controls-inventory.json`, conta
 | `BubuTimeMachine/Features/AIStudio/FamilyEnsembleView.swift` | 2 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/AIStudio/FirstPersonDiaryView.swift` | 3 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/AIStudio/GrowthMoviePlayer.swift` | 3 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/AIStudio/GrowthMovieView.swift` | 8 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/AIStudio/GrowthMovieView.swift` | 10 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/AIStudio/SoundRingView.swift` | 26 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/AIStudio/WeeklyReportView.swift` | 15 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/Album/AlbumDetailView.swift` | 1 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/Album/AlbumDetailView.swift` | 2 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Album/AlbumHomeView.swift` | 2 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Capsule/CapsuleComposeView.swift` | 9 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/Capsule/CapsuleHomeView.swift` | 13 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/Capsule/CapsuleHomeView.swift` | 14 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Capsule/CapsuleRecoveryView.swift` | 11 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Capsule/CapsuleUnlockView.swift` | 2 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Capture/CaptureHomeView.swift` | 34 | source inventory; not individually clicked |
@@ -73,7 +75,7 @@ Each row links to the source-level inventory in `controls-inventory.json`, conta
 | `BubuTimeMachine/Features/Health/VaccineView.swift` | 6 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Milestones/BubuConstellationView.swift` | 1 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Milestones/MilestoneSheets.swift` | 15 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/Milestones/MilestonesHomeView.swift` | 9 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/Milestones/MilestonesHomeView.swift` | 10 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/NaturalCapture/NaturalCaptureBar.swift` | 7 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/NaturalCapture/NaturalCaptureReviewSheet.swift` | 16 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Onboarding/OnboardingView.swift` | 6 | source inventory; not individually clicked |
@@ -91,7 +93,7 @@ Each row links to the source-level inventory in `controls-inventory.json`, conta
 | `BubuTimeMachine/Features/Settings/ExportView.swift` | 5 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Settings/MacArchiveWorkspaceView.swift` | 16 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Settings/MembersView.swift` | 15 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/Settings/SettingsView.swift` | 11 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/Settings/SettingsView.swift` | 12 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Settings/SyncCenterView.swift` | 10 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Settings/ThemeSettingsView.swift` | 2 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Settings/VoiceArchiveView.swift` | 7 | source inventory; not individually clicked |
@@ -99,12 +101,12 @@ Each row links to the source-level inventory in `controls-inventory.json`, conta
 | `BubuTimeMachine/Features/Settings/WidgetWallpaperView.swift` | 7 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Settings/YearbookView.swift` | 3 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Share/ShareCardSheet.swift` | 5 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/SimpleMode/SimpleModeView.swift` | 3 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/SimpleMode/SimpleTimelineView.swift` | 2 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/SimpleMode/SimpleModeView.swift` | 5 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/SimpleMode/SimpleTimelineView.swift` | 3 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Story/BubuStoryReaderView.swift` | 2 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Story/BubuStoryView.swift` | 1 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Timeline/CommentComposeSheet.swift` | 4 | source inventory; not individually clicked |
-| `BubuTimeMachine/Features/Timeline/EntryDetailView.swift` | 24 | source inventory; not individually clicked |
+| `BubuTimeMachine/Features/Timeline/EntryDetailView.swift` | 25 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Timeline/Reaction.swift` | 1 | source inventory; not individually clicked |
 | `BubuTimeMachine/Features/Timeline/TimelineView.swift` | 12 | source inventory; not individually clicked |
 | `BubuWatch/Views/WatchMoodView.swift` | 1 | source inventory; not individually clicked |

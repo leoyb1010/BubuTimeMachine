@@ -22,6 +22,9 @@ struct NaturalCaptureReviewSheet: View {
     @State private var showUnconfirmedAlert = false
     @State private var saveError: String?
     @State private var didSave = false
+    #if DEBUG
+    @State private var injectedSaveFailure = false
+    #endif
 
     init(result: NaturalCaptureResult, originalText: String, onSaved: @escaping () -> Void) {
         self.result = result
@@ -402,7 +405,17 @@ struct NaturalCaptureReviewSheet: View {
         guard !didSave, !savableItems.isEmpty else { return }
         do {
             try NaturalCaptureRouter.saveBatch(savableItems,
-                authorRole: env.config.currentRole.rawValue, container: context.container)
+                authorRole: env.config.currentRole.rawValue, container: context.container) { batchContext in
+                    #if DEBUG
+                    let arguments = ProcessInfo.processInfo.arguments
+                    if !injectedSaveFailure, arguments.contains("-uitest-in-memory"),
+                       arguments.contains("-uitest-natural-fail-save") {
+                        injectedSaveFailure = true
+                        throw CocoaError(.fileWriteOutOfSpace)
+                    }
+                    #endif
+                    try batchContext.save()
+                }
         } catch {
             saveError = "保存失败，内容还在这里。请检查可用存储空间后重试。"
             return

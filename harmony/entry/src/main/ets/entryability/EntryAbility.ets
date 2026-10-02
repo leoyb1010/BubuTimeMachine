@@ -142,7 +142,13 @@ export default class EntryAbility extends UIAbility {
     const raw = want.uri ?? '';
     const prefix = 'bubutime://entry/';
     if (!raw.startsWith(prefix)) return;
-    const entryId = decodeURIComponent(raw.substring(prefix.length));
+    let entryId = '';
+    try {
+      entryId = decodeURIComponent(raw.substring(prefix.length));
+    } catch (error) {
+      // A malformed external URI must not abort cold startup or a warm onNewWant.
+      return;
+    }
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(entryId)) return;
     AppStorage.setOrCreate('bubuOpenEntryId', entryId);
   }

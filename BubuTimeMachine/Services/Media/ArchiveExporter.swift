@@ -138,10 +138,10 @@ nonisolated struct ArchiveExporter: Sendable {
         }
     }
 
-    func export(_ input: ExportInput) throws -> ExportResult {
+    func export(_ input: ExportInput, at timestamp: Date = .now) throws -> ExportResult {
         let fm = FileManager.default
         let root = fm.temporaryDirectory
-            .appendingPathComponent("布布的一生_\(Int(Date().timeIntervalSince1970))", isDirectory: true)
+            .appendingPathComponent("布布的一生_\(Int(timestamp.timeIntervalSince1970))_\(UUID().uuidString)", isDirectory: true)
         let mediaDir = root.appendingPathComponent("media", isDirectory: true)
         try fm.createDirectory(at: mediaDir, withIntermediateDirectories: true)
 

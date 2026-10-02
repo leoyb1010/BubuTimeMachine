@@ -487,7 +487,7 @@ final class BubuTimeMachineUITests: XCTestCase {
     func testNaturalCaptureCancelThenSaveReturnsToTimeline() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-natural-local"]
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-natural-local", "-uitest-natural-fail-save"]
         app.launch()
         let globalRecord = app.buttons["root.record"]
         let record = globalRecord.waitForExistence(timeout: 12) ? globalRecord : app.buttons["home.record"]
@@ -511,6 +511,12 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, note, "取消确认页必须保留原文")
         app.buttons["识别并保存这句话"].tap()
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        app.navigationBars["确认保存"].buttons["保存"].tap()
+        XCTAssertTrue(app.alerts["没能保存"].waitForExistence(timeout: 8))
+        attachScreenshot("natural-review-save-failure-retains-draft", to: self)
+        app.alerts["没能保存"].buttons["返回重试"].tap()
+        XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts[note].firstMatch.exists, "保存失败后确认内容不能消失")
         app.navigationBars["确认保存"].buttons["保存"].tap()
         XCTAssertTrue(app.navigationBars["一句话智能记录"].waitForExistence(timeout: 8))
         app.buttons["关闭"].tap()

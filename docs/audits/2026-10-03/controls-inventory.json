@@ -403,6 +403,16 @@
       "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
       "controls": [
         {
+          "line": 51,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showPlayer) {"
+        },
+        {
+          "line": 58,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showServerPlayer) {"
+        },
+        {
           "line": 102,
           "kind": "Button",
           "source": "Button {"
@@ -669,6 +679,11 @@
           "line": 36,
           "kind": "Button",
           "source": "Button {"
+        },
+        {
+          "line": 72,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $viewerRoute) { route in"
         }
       ]
     },
@@ -782,6 +797,11 @@
           "line": 71,
           "kind": "sheet",
           "source": ".sheet(item: $editing) { capsule in CapsuleComposeView(editing: capsule) }"
+        },
+        {
+          "line": 72,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $unlocking) { capsule in"
         },
         {
           "line": 172,
@@ -1822,6 +1842,11 @@
           "source": ".sheet(item: $detailFor) { MilestoneEditSheet(milestone: $0) }"
         },
         {
+          "line": 91,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $ceremonyFor) { milestone in"
+        },
+        {
           "line": 148,
           "kind": "TextField",
           "source": "TextField(\"搜索里程碑，比如 走路、吃饭、睡觉\", text: $searchText)"
@@ -1879,82 +1904,82 @@
       "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
       "controls": [
         {
-          "line": 91,
+          "line": 94,
           "kind": "Button",
           "source": "Button(\"取消\") { dismiss() }"
         },
         {
-          "line": 94,
+          "line": 97,
           "kind": "Button",
           "source": "Button(unconfirmedCount == 0 ? \"保存\" : \"保存 \\(savableItems.count) 条\") {"
         },
         {
-          "line": 105,
+          "line": 108,
           "kind": "alert",
           "source": ".alert(\"没能保存\", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {"
         },
         {
-          "line": 106,
+          "line": 109,
           "kind": "Button",
           "source": "Button(\"返回重试\", role: .cancel) { saveError = nil }"
         },
         {
-          "line": 110,
+          "line": 113,
           "kind": "alert",
           "source": ".alert(\"还有 \\(unconfirmedCount) 条需要确认\", isPresented: $showUnconfirmedAlert) {"
         },
         {
-          "line": 111,
+          "line": 114,
           "kind": "Button",
           "source": "Button(\"仍然保存其余 \\(savableItems.count) 条\") { saveAll() }"
         },
         {
-          "line": 112,
+          "line": 115,
           "kind": "Button",
           "source": "Button(\"返回确认\", role: .cancel) {}"
         },
         {
-          "line": 178,
+          "line": 181,
           "kind": "Button",
           "source": "Button {"
         },
         {
-          "line": 221,
+          "line": 224,
           "kind": "Button",
           "source": "Button(editing ? \"完成\" : \"编辑\") {"
         },
         {
-          "line": 230,
+          "line": 233,
           "kind": "Button",
           "source": "Button(confirmed ? \"取消确认\" : \"确认无误\") {"
         },
         {
-          "line": 244,
+          "line": 247,
           "kind": "Button",
           "source": "Button {"
         },
         {
-          "line": 264,
+          "line": 267,
           "kind": "Menu",
           "source": "Menu {"
         },
         {
-          "line": 266,
+          "line": 269,
           "kind": "Button",
           "source": "Button {"
         },
         {
-          "line": 288,
+          "line": 291,
           "kind": "TextField",
           "source": "TextField(\"标题\", text: item.title)"
         },
         {
-          "line": 294,
+          "line": 297,
           "kind": "DatePicker",
           "source": "DatePicker(\"时间\", selection: dateBinding(item), in: ...Date.now,"
         },
         {
-          "line": 318,
+          "line": 321,
           "kind": "TextField",
           "source": "TextField(\"未填写\", text: numericFieldBinding(item, key: key))"
         }
@@ -2790,6 +2815,11 @@
           "source": "NavigationLink { AdvancedSettingsView() } label: {"
         },
         {
+          "line": 157,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showFrame) { PhotoFrameView() }"
+        },
+        {
           "line": 163,
           "kind": "NavigationLink",
           "source": "NavigationLink { MembersView() } label: {"
@@ -3033,9 +3063,19 @@
       "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
       "controls": [
         {
+          "line": 87,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showCamera) {"
+        },
+        {
           "line": 94,
           "kind": "sheet",
           "source": ".sheet(isPresented: $showVoice) { voiceSheet }"
+        },
+        {
+          "line": 95,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showTimeline) { SimpleTimelineView() }"
         },
         {
           "line": 167,
@@ -3053,6 +3093,11 @@
       "path": "BubuTimeMachine/Features/SimpleMode/SimpleTimelineView.swift",
       "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
       "controls": [
+        {
+          "line": 39,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $viewer) { target in"
+        },
         {
           "line": 52,
           "kind": "Button",
@@ -3181,6 +3226,11 @@
           "line": 158,
           "kind": "sheet",
           "source": ".sheet(isPresented: $showCommentSheet) {"
+        },
+        {
+          "line": 161,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: Binding("
         },
         {
           "line": 173,

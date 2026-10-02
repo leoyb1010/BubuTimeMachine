@@ -5,6 +5,28 @@ import Testing
 
 @MainActor
 struct ArchiveExporterTests {
+    @Test("同一秒重复导出使用独立目录，不覆盖正在分享的第一份档案")
+    func sameSecondExportsStayIndependent() throws {
+        let date = Date(timeIntervalSince1970: 1_786_000_000)
+        func input(_ name: String) -> ArchiveExporter.ExportInput {
+            .init(childName: name, birthday: date, entries: [], milestones: [], voiceMemos: [],
+                  healthRecords: [], growthMeasurements: [], vaccines: [], firstTimes: [],
+                  timeCapsules: [], unavailableReferences: [])
+        }
+        let exporter = ArchiveExporter(mediaStore: MediaStore())
+        let first = try exporter.export(input("Synthetic A"), at: date)
+        defer { try? FileManager.default.removeItem(at: first.root) }
+        let firstData = try Data(contentsOf: first.root.appendingPathComponent("data.json"))
+        let firstManifest = try Data(contentsOf: first.root.appendingPathComponent("manifest.sha256"))
+        let second = try exporter.export(input("Synthetic B"), at: date)
+        defer { try? FileManager.default.removeItem(at: second.root) }
+        #expect(first.root != second.root)
+        #expect(try Data(contentsOf: first.root.appendingPathComponent("data.json")) == firstData)
+        #expect(try Data(contentsOf: first.root.appendingPathComponent("manifest.sha256")) == firstManifest)
+        #expect(try OpenArchiveVerifier.verify(folder: first.root).childName == "Synthetic A")
+        #expect(try OpenArchiveVerifier.verify(folder: second.root).childName == "Synthetic B")
+    }
+
     @Test("开放档案包含成长疫苗胶囊、不完整报告与 SHA 清单")
     func openArchiveIsCompleteAndHonest() throws {
         let date = Date(timeIntervalSince1970: 1_786_000_000)
