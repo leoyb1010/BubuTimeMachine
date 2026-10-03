@@ -14,12 +14,10 @@ final class WatchConnector: NSObject {
     /// 照片包落盘次数。视图 onChange 它来重取缓存图——照片总在快照之后才到，
     /// 没有这个信号，时光机会一直显示「快照有图名、缓存无图」的空格子直到下次重进。
     var photoVersion = 0
-    /// 上次向手机请求补发照片包的时刻（节流：一分钟最多一次）。
-    private var lastPhotoRequestAt: Date = .distantPast
     /// 已经为哪一批照片请求过补发。同一批只求一次——手机若真的没有那张图
     /// （比如家人的照片这台手机也还没下载），再求多少次也变不出来，
     /// 求下去只会每分钟白传一次整包。
-    private var requestedFingerprints: [String] = []
+    private var photoRequestGate = WatchPhotoRequestGate()
     /// 会话未激活期间缓存的文字/心情/健康记录，激活后补发（#6：冷启动秒录窗口 session 尚未激活）。
     private var pendingRecords: [WatchRecordRequest] = []
 
@@ -134,6 +132,7 @@ final class WatchConnector: NSObject {
     func reconcilePending() {
         let session = WCSession.default
         guard session.activationState == .activated else { return }
+        requestPhotosIfMissing()
         // 补发未激活期间缓存的文字/心情/健康。
         let queued = pendingRecords
         pendingRecords.removeAll()
@@ -185,6 +184,14 @@ final class WatchConnector: NSObject {
 }
 
 extension WatchConnector: WCSessionDelegate {
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        // Reachability often arrives after activation/context. Capture the Bool,
+        // not the non-Sendable WCSession, across the actor boundary.
+        let reachable = session.isReachable
+        Task { @MainActor [weak self] in
+            if reachable { self?.requestPhotosIfMissing() }
+        }
+    }
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
         guard let data = userInfo[WatchLink.voiceReceiptKey] as? Data,
               let receipt = WatchLink.decode(WatchVoiceReceipt.self, from: data) else { return }
@@ -269,16 +276,13 @@ extension WatchConnector: WCSessionDelegate {
 
         // 同一批照片只请求一次（指纹按整批算，换批自然重新可请求）。
         let fingerprint = WatchPhotoBundle.fingerprint(names)
-        guard !requestedFingerprints.contains(fingerprint) else { return }
-        guard Date.now.timeIntervalSince(lastPhotoRequestAt) > 60 else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
-
-        requestedFingerprints.append(fingerprint)
-        // 只记最近几批（FIFO）。之前用 Set 时 removeFirst 删的是任意元素，
-        // 可能把刚记的当前指纹删掉导致重复请求整包。
-        if requestedFingerprints.count > 8 { requestedFingerprints.removeFirst() }
-        lastPhotoRequestAt = .now
-        session.sendMessage([WatchLink.photoBundleRequestKey: true], replyHandler: nil)
+        guard photoRequestGate.begin(fingerprint: fingerprint, at: .now) else { return }
+        session.sendMessage([WatchLink.photoBundleRequestKey: true], replyHandler: nil) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.photoRequestGate.failed(fingerprint: fingerprint)
+            }
+        }
     }
 }

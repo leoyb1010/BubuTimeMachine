@@ -1,5 +1,5 @@
 {
-  "ios": { "version": "2.19.2", "build": "2026100301" },
+  "ios": { "version": "2.20.0", "build": "2026100302" },
   "harmony": { "version": "2.15.0", "build": "2026091201" },
   "parityVerified": false,
   "note": "Source release baselines only. Version equality does not prove capability parity. See PARITY_MATRIX.md for device gates."

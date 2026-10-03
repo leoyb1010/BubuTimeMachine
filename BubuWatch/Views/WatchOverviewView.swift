@@ -1,236 +1,107 @@
 import SwiftUI
 import UIKit
 
-// MARK: - 抬腕即布布（概览页）
-/// 抬腕 3 秒内要完成的事：看到脸 → 知道多大了 → 心情变好。
-/// 所以这页的主角是照片，不是数据格——数据全部降级到照片下面一行小字。
+/// The whole first viewport is one portrait and two useful destinations.
 struct WatchOverviewView: View {
     @Environment(WatchConnector.self) private var connector
-    @Environment(\.isLuminanceReduced) private var dimmed
-
-    /// 「陪伴第 N 天」当前显示值。进场从 N-10 滚到 N（numericText），
-    /// 抬腕那一刻这个数字是数出来的，不是贴上去的。
-    @State private var shownDays = 0
-    /// 本次进场选中的英雄照片（小时轮换）。
-    @State private var heroPhoto: UIImage?
-
-    private var snap: WatchSnapshot? { connector.snapshot }
-    private var name: String { snap?.childName ?? "布布" }
-    private var birthday: Date? { snap?.birthday }
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var now = Date.now
+    private var snapshot: WatchSnapshot? { connector.snapshot }
+    private var memories: [WatchMemory] { WatchReadModel.memories(from: snapshot) }
+    private var hero: WatchMemory? {
+        memories.first(where: { $0.isOnThisDay && $0.photoFileName != nil })
+            ?? memories.first(where: { $0.photoFileName != nil }) ?? memories.first
+    }
+    private var compactProbe: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-watch-compact-probe")
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                heroCard
-                if let birthday {
-                    ageBlock(birthday)
-                } else {
-                    onboardingHint
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 8) {
+                    if compactProbe {
+                        HStack(spacing: 8) {
+                            WatchPhotoSurface(fileName: nil, avatarData: snapshot?.avatarData)
+                                .frame(width: 42, height: 42).clipShape(Circle())
+                            identity
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    NavigationLink(value: WatchReadingRoute.memories) {
+                        ZStack(alignment: .bottomLeading) {
+                            WatchPhotoSurface(fileName: hero?.photoFileName, avatarData: snapshot?.avatarData, fitsPhoto: true)
+                            if !compactProbe {
+                                LinearGradient(colors: [.clear, .black.opacity(0.8)],
+                                               startPoint: .center, endPoint: .bottom)
+                                HStack(spacing: 6) {
+                                    if snapshot?.avatarData != nil {
+                                        WatchPhotoSurface(fileName: nil, avatarData: snapshot?.avatarData)
+                                            .frame(width: 30, height: 30).clipShape(Circle())
+                                            .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 1))
+                                    }
+                                    identity
+                                }
+                                .padding(10)
+                            }
+                        }
+                        .frame(height: compactProbe ? 88 : max(96, min(geometry.size.width * 0.75, geometry.size.height - 76)))
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("看\(snapshot?.childName ?? "布布")的回忆照片")
+                    HStack(spacing: 8) {
+                        destination("回忆", icon: "photo.stack", route: .memories, color: WatchTheme.rose)
+                        destination("最近", icon: "book.closed", route: .recent, color: WatchTheme.lav)
+                    }
+                    if let birthday = snapshot?.birthday {
+                        Text("陪伴第 \(AgeCalculator.daysSinceBirth(birthday: birthday, at: now)) 天")
+                            .font(.caption2).foregroundStyle(WatchTheme.rose.opacity(0.9))
+                    }
+                    if snapshot == nil {
+                        Text("先打开 iPhone 上的布布时光机\n回忆会自动来到这里")
+                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    } else if let updated = snapshot?.updatedAt, now.timeIntervalSince(updated) >= 7200 {
+                        Text("离线回忆 · 更新于 \(updated.formatted(.dateTime.month().day().hour().minute()))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .padding(.horizontal, 4)
             }
         }
-        .background(WatchSpaceBackground(accent: WatchTheme.rose))
-        .onAppear { refresh() }
-        .onChange(of: connector.photoVersion) { refresh() }
-        .onChange(of: snap?.updatedAt) { refresh() }
+        .navigationTitle("时光机")
+        .background(WatchReadingBackground())
+        .onAppear { now = .now }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { now = .now } }
     }
 
-    // MARK: 英雄照片卡
-
-    private var heroCard: some View {
-        ZStack(alignment: .bottomLeading) {
-            if let heroPhoto {
-                KenBurnsPhoto(image: heroPhoto, animated: !dimmed)
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(snapshot?.childName ?? "布布")
+                .font(.title3.bold()).fontDesign(.rounded).lineLimit(1).minimumScaleFactor(0.75)
+            if let birthday = snapshot?.birthday {
+                Text(AgeCalculator.ageDescription(birthday: birthday, at: now))
+                    .font(.caption).foregroundStyle(.white.opacity(0.9))
             } else {
-                // 没有照片（新装/还没收到照片包）：头像 + 深空渐变兜底，不出现空白灰块。
-                ZStack {
-                    LinearGradient(colors: [WatchTheme.rose.opacity(0.45), WatchTheme.lav.opacity(0.35)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                    avatarView(size: 56)
-                }
-            }
-            // 底部渐变压字，照片再亮名字也读得出。
-            LinearGradient(colors: [.clear, .black.opacity(0.55)],
-                           startPoint: .center, endPoint: .bottom)
-            HStack(spacing: 6) {
-                if heroPhoto != nil { avatarRing }
-                Text(name)
-                    .font(.system(size: 19, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 2)
-            }
-            .padding(10)
-        }
-        .frame(height: 128)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    /// 头像 + 生日进度环。生日前 7 天环变金色并开始呼吸。
-    private var avatarRing: some View {
-        let progress = birthday.map(birthdayProgress) ?? 0
-        let soon = birthday.map { AgeCalculator.daysUntilNextBirthday(birthday: $0) <= 7 } ?? false
-        return avatarView(size: 30)
-            .overlay {
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(soon ? WatchTheme.butter : WatchTheme.rose,
-                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .phaseAnimator([1.0, 0.6], trigger: soon) { view, phase in
-                        view.opacity(soon && !dimmed ? phase : 1)
-                    } animation: { _ in .easeInOut(duration: 1.2).repeatForever(autoreverses: true) }
-            }
-    }
-
-    private func avatarView(size: CGFloat) -> some View {
-        Group {
-            if let data = snap?.avatarData, let img = UIImage(data: data) {
-                Image(uiImage: img).resizable().scaledToFill()
-            } else {
-                Text("👶").font(.system(size: size * 0.7))
+                Text("把她放在腕间").font(.caption).foregroundStyle(.white.opacity(0.8))
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 1.5))
+        .foregroundStyle(.white)
     }
 
-    private func birthdayProgress(_ b: Date) -> Double {
-        let d = Double(AgeCalculator.daysUntilNextBirthday(birthday: b))
-        return max(0, min(1, (365 - d) / 365))
-    }
-
-    // MARK: 活的年龄行
-
-    private func ageBlock(_ birthday: Date) -> some View {
-        let days = AgeCalculator.daysSinceBirth(birthday: birthday)
-        let toBirthday = AgeCalculator.daysUntilNextBirthday(birthday: birthday)
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("陪伴第")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                Text("\(shownDays)")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(WatchTheme.rose)
-                    .contentTransition(.numericText(value: Double(shownDays)))
-                Text("天")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-            Text(AgeCalculator.ageDescription(birthday: birthday, at: .now))
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white.opacity(0.92))
-
-            HStack(spacing: 8) {
-                if toBirthday == 0 {
-                    chip("🎂 今天生日快乐！", tint: WatchTheme.butter)
-                } else {
-                    chip("🎂 \(toBirthday) 天后生日", tint: WatchTheme.butter)
-                }
-                if let s = snap, s.totalMilestones > 0 {
-                    chip("⭐ \(s.achievedMilestones)/\(s.totalMilestones)", tint: WatchTheme.lav)
-                }
-            }
-            .padding(.top, 2)
-            // 手表优先显示缓存快照：手机没在身边/没解锁时，这里可能是几小时甚至几天前的数据。
-            // 不标出来的话，长辈会以为「今天一条都没有」，其实只是没连上。
-            if let stale = staleText {
-                chip(stale, tint: WatchTheme.butter.opacity(0.85))
-                    .padding(.top, 2)
-            }
+    private func destination(_ title: String, icon: String, route: WatchReadingRoute, color: Color) -> some View {
+        NavigationLink(value: route) {
+            Label(title, systemImage: icon).font(.footnote.weight(.semibold)).fontDesign(.rounded)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                .contentShape(RoundedRectangle(cornerRadius: 14))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
-        .onAppear { animateDays(to: days) }
-        .onChange(of: days) { animateDays(to: days) }
-    }
-
-    /// 快照超过 2 小时才提示——手机在身边时快照本来就是每次抬腕都刷新的，
-    /// 每次都标「更新于 1 分钟前」纯属噪音。
-    private var staleText: String? {
-        guard let updatedAt = snap?.updatedAt else { return nil }
-        let seconds = Date.now.timeIntervalSince(updatedAt)
-        guard seconds >= 2 * 3600 else { return nil }
-        let hours = Int(seconds / 3600)
-        if hours < 24 { return "🕰 更新于 \(hours) 小时前" }
-        return "🕰 更新于 \(hours / 24) 天前"
-    }
-
-    private func chip(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .bold, design: .rounded))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(tint.opacity(0.16), in: Capsule())
-    }
-
-    private var onboardingHint: some View {
-        Text("打开手机上的布布时光机\n建立档案后，这里就有内容啦")
-            .font(.system(size: 13, weight: .medium, design: .rounded))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-    }
-
-    // MARK: 数据
-
-    private func animateDays(to days: Int) {
-        // AOD 下不做进场动画（降亮渲染预算内不该跑 spring）。
-        guard !dimmed else { shownDays = days; return }
-        shownDays = max(0, days - 10)
-        withAnimation(.spring(duration: 1.1)) { shownDays = days }
-    }
-
-    /// 从有照片的回忆里按小时轮换选一张（同一小时内稳定，不闪换）。
-    private func refresh() {
-        let withPhotos = (snap?.memories ?? []).compactMap(\.photoFileName)
-        guard !withPhotos.isEmpty else { heroPhoto = nil; return }
-        let hourIndex = Int(Date.now.timeIntervalSince1970 / 3600)
-        for offset in 0..<withPhotos.count {
-            let name = withPhotos[(hourIndex + offset) % withPhotos.count]
-            if let data = WatchPhotoStore.data(for: name), let img = UIImage(data: data) {
-                heroPhoto = img
-                return
-            }
-        }
-        heroPhoto = nil
-    }
-}
-
-// MARK: - Ken Burns 照片
-/// 20 秒一个来回的缓慢推近（1.0 → 1.06）。用 keyframeAnimator 不用 Timer——
-/// 离屏即停，不留常驻定时器。
-struct KenBurnsPhoto: View {
-    let image: UIImage
-    var animated = true
-
-    var body: some View {
-        GeometryReader { geo in
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: geo.size.width, height: geo.size.height)
-                .modifier(KenBurnsEffect(animated: animated))
-                .clipped()
-        }
-    }
-}
-
-private struct KenBurnsEffect: ViewModifier {
-    let animated: Bool
-
-    func body(content: Content) -> some View {
-        if animated {
-            content.keyframeAnimator(initialValue: 1.0, repeating: true) { view, scale in
-                view.scaleEffect(scale)
-            } keyframes: { _ in
-                KeyframeTrack {
-                    LinearKeyframe(1.06, duration: 10)
-                    LinearKeyframe(1.0, duration: 10)
-                }
-            }
-        } else {
-            content
-        }
+        .buttonStyle(.plain).foregroundStyle(color)
+        .accessibilityIdentifier(route == .memories ? "watch.memories" : "watch.recent")
     }
 }

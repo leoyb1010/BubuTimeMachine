@@ -9,6 +9,7 @@ struct BubuWatchApp: App {
         WindowGroup {
             WatchRootView()
                 .environment(connector)
+                .modifier(WatchReadingPreviewOverrides())
                 .task { connector.activate() }
         }
         // 进前台对账：补发缓存记录 + 重发上次失败/未激活遗留的待传语音（P0-2 / W-P1-1）。
@@ -18,43 +19,46 @@ struct BubuWatchApp: App {
     }
 }
 
-// MARK: - 根导航（纵向分页：概览 / 时光机 / 记录 / 打卡 / 最近）
+enum WatchReadingRoute: Hashable { case memories, recent, story(WatchMemory) }
+
+// MARK: - 只读导航：主页 → 回忆 / 最近，系统返回与表冠各司其职。
 struct WatchRootView: View {
-    @Environment(WatchConnector.self) private var connector
-    @State private var selection = WatchRootView.initialTab
+    @State private var path = WatchRootView.initialPath
 
     /// 模拟器截图核验用：`-watch-tab N` 直达第 N 页（手表 UI 无法脚本点击）。仅 DEBUG。
-    private static var initialTab: Int {
+    private static var initialPath: [WatchReadingRoute] {
         #if DEBUG
         if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-watch-tab"),
            i + 1 < ProcessInfo.processInfo.arguments.count,
            let tab = Int(ProcessInfo.processInfo.arguments[i + 1]) {
-            return tab
+            return tab == 1 ? [.memories] : ([2, 4].contains(tab) ? [.recent] : [])
         }
         #endif
-        return 0
+        return []
     }
 
     var body: some View {
-        TabView(selection: $selection) {
-            WatchOverviewView().tag(0)
-            WatchTimeMachineView().tag(1)   // 表冠时光机：拧表冠穿越回忆
-            WatchRecordView().tag(2)
-            WatchQuickLogView().tag(3)
-            WatchRecentView().tag(4)
+        NavigationStack(path: $path) {
+            WatchOverviewView()
+                .navigationDestination(for: WatchReadingRoute.self) { route in
+                    switch route {
+                    case .memories: WatchTimeMachineView()
+                    case .recent: WatchRecentView()
+                    case .story(let memory): WatchStoryView(memory: memory)
+                    }
+                }
         }
-        .tabViewStyle(.verticalPage)
-        .overlay(alignment: .top) {
-            if let label = connector.lastSentLabel {
-                Text(label)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(WatchTheme.rose, in: Capsule())
-                    .transition(.move(edge: .top).combined(with: .opacity))
+        .tint(WatchTheme.rose)
+        .onOpenURL { url in
+            guard url.scheme == "bubuwatch" else { return }
+            switch url.host {
+            case "timemachine", "memories": path = [.memories]
+            case "recent": path = [.recent]
+            // Old complications may still link to record; open the read-only home.
+            case "overview", "record": path = []
+            default: break
             }
         }
-        .animation(.snappy, value: connector.lastSentLabel)
     }
 }
 

@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.19.2"
-    CURRENT_PROJECT_VERSION: "2026100301"
+    MARKETING_VERSION: "2.20.0"
+    CURRENT_PROJECT_VERSION: "2026100302"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -38,6 +38,8 @@ targets:
           - "Features/Timeline/TimelineEntryCard.swift"
       # 手表通信契约（与 watchOS target 共用）
       - path: WatchShared/WatchLink.swift
+      - path: WatchShared/WatchBrowseSelection.swift
+      - path: WatchShared/WatchPhotoRequestGate.swift
       - path: WatchShared/WatchPhotoBundle.swift
     entitlements:
       path: BubuTimeMachine/BubuTimeMachine.entitlements
@@ -108,6 +110,24 @@ targets:
     type: application
     platform: watchOS
     deploymentTarget: "26.0"
+    info:
+      path: BubuWatch/Info.plist
+      properties:
+        CFBundleName: 布布时光机
+        CFBundleDisplayName: 布布
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.bubu.timemachine
+        NSMicrophoneUsageDescription: 用来把你说给布布的话录下来，收进时光机。
+        CFBundleURLTypes:
+          - CFBundleURLName: com.bubu.timemachine.watchkitapp
+            CFBundleTypeRole: Viewer
+            CFBundleURLSchemes: [bubuwatch]
     sources:
       - path: BubuWatch
         excludes:
@@ -116,6 +136,8 @@ targets:
       # 通信契约 + 手表本地快照存储 + 纯 Foundation 的年龄/枚举（手表不引入 SwiftData）
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchSnapshotStore.swift
+      - path: WatchShared/WatchBrowseSelection.swift
+      - path: WatchShared/WatchPhotoRequestGate.swift
       - path: WatchShared/WatchPhotoBundle.swift
       - path: WatchShared/WatchPhotoStore.swift
       - path: BubuTimeMachine/Models/AgeCalculator.swift
