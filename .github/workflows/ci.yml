@@ -5,7 +5,7 @@ name: CI
 
 on:
   push:
-    branches: [main, audit/three-round-safety-20261001]
+    branches: [main, audit/five-round-product-20261004, audit/three-round-safety-20261001]
   pull_request:
 
 # Test-only workflow: no deployment, production credentials or write-capable token.
