@@ -496,9 +496,9 @@ final class BubuTimeMachineUITests: XCTestCase {
         let natural = app.buttons["打开一句话智能记录"]
         XCTAssertTrue(natural.waitForExistence(timeout: 8))
         natural.tap()
-        let input = app.textFields["写一句或说一句：布布今天……"]
-        let multilineInput = app.textViews.firstMatch
-        let field = input.waitForExistence(timeout: 3) ? input : multilineInput
+        // A populated SwiftUI vertical TextField no longer exposes its placeholder
+        // as its identifier after sheet dismissal; use stable semantic identity.
+        let field = app.descendants(matching: .any).matching(identifier: "natural.input").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 8))
         field.tap()
         let note = "Synthetic review audit memory"
@@ -508,6 +508,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         attachScreenshot("natural-review-before-cancel", to: self)
         app.navigationBars["确认保存"].buttons["取消"].tap()
         XCTAssertTrue(app.buttons["识别并保存这句话"].waitForExistence(timeout: 8))
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
         XCTAssertEqual(field.value as? String, note, "取消确认页必须保留原文")
         app.buttons["识别并保存这句话"].tap()
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))

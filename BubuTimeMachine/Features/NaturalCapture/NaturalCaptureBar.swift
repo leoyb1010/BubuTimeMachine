@@ -44,6 +44,7 @@ struct NaturalCaptureBar: View {
                     }
                 } else {
                     TextField("写一句或说一句：布布今天……", text: $text, axis: .vertical)
+                        .accessibilityIdentifier("natural.input")
                         .font(BubuTheme.Font.body)
                         .lineLimit(1...3)
                         .submitLabel(.send)
