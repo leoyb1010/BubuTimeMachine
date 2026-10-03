@@ -323,7 +323,7 @@ class SemanticWorker:
             self.index.remove(job.source_record_id)
             return
         role = str(media.get("resourceRole") or "display")
-        if role != "display":
+        if role != "display" or media.get("mediaType") not in {"photo", "video"}:
             self.index.remove(job.source_record_id)
             return
         entry_local_id = media.get("entryLocalId")
@@ -333,11 +333,14 @@ class SemanticWorker:
         configured_family = os.environ.get("SEMANTIC_FAMILY_ID", "").strip()
         media_family = str(media.get("familyId") or job.family_id or configured_family)
         entry_family = str(entry.get("familyId") or "")
-        if entry.get("isDeleted"):
+        if not entry or entry.get("isDeleted"):
             self.index.remove(job.source_record_id)
             return
         if media_family and entry_family and media_family != entry_family:
-            raise RuntimeError("媒体与时光记录不属于同一家庭")
+            # Ownership/association changes invalidate an old index row too;
+            # merely retrying a mismatched source leaves stale search results.
+            self.index.remove(job.source_record_id)
+            return
         caption_parts = [
             entry.get("title", ""),
             entry.get("note", ""),
