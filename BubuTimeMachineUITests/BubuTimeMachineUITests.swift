@@ -3,6 +3,127 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    private func freshOnboarding(failSave: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-fresh-onboarding"]
+        if failSave { app.launchArguments.append("-uitest-onboarding-fail-save") }
+        app.launch()
+        XCTAssertTrue(app.buttons["onboarding.continue"].waitForExistence(timeout: 12))
+        let emptyStore = expectation(for: NSPredicate(format: "label CONTAINS %@", "done=false|identity=none|profiles=0|members=0|storedProfiles=0|storedMembers=0"),
+                                     evaluatedWith: app.staticTexts["onboarding.audit.readback"])
+        wait(for: [emptyStore], timeout: 5)
+        return app
+    }
+
+    @MainActor
+    func testOnboardingRejectedSaveDoesNotCompleteOrChooseIdentity() throws {
+        continueAfterFailure = false
+        let app = freshOnboarding(failSave: true)
+        attachScreenshot("onboarding-fresh-welcome", to: self)
+        app.buttons["onboarding.continue"].tap()
+        XCTAssertTrue(app.textFields["onboarding.child-name"].waitForExistence(timeout: 5))
+        attachScreenshot("onboarding-child-profile", to: self)
+        app.buttons["onboarding.continue"].tap()
+        let relation = app.buttons["onboarding.relation.爸爸"]
+        XCTAssertTrue(relation.waitForExistence(timeout: 5)); relation.tap()
+        let name = app.textFields["onboarding.member-name"]
+        name.tap(); name.typeText("Synthetic Parent")
+        attachScreenshot("onboarding-member-draft-before-failure", to: self)
+        app.buttons["onboarding.continue"].tap()
+        // Capture first: a falsely completed route is evidence, not a retry excuse.
+        let failure = app.alerts["没有保存成功"]
+        let rejected = failure.waitForExistence(timeout: 5)
+        attachScreenshot("onboarding-after-rejected-save", to: self)
+        XCTAssertTrue(rejected, "Persistence rejection must remain on onboarding with a recoverable error")
+        failure.buttons["好"].tap()
+        XCTAssertEqual(name.value as? String, "Synthetic Parent")
+        XCTAssertTrue(relation.isSelected)
+        XCTAssertTrue(app.staticTexts["onboarding.audit.readback"].label.contains("done=false|identity=none|profiles=0|members=0|storedProfiles=0|storedMembers=0"))
+        app.buttons["onboarding.continue"].tap()
+        let saved = expectation(for: NSPredicate(format: "label CONTAINS %@", "done=true|identity=set|profiles=1|members=1|storedProfiles=1|storedMembers=1|role=爸爸"),
+                                evaluatedWith: app.staticTexts["onboarding.audit.readback"])
+        wait(for: [saved], timeout: 8)
+        XCTAssertFalse(app.buttons["onboarding.continue"].exists)
+        attachScreenshot("onboarding-retry-commits-one-profile-and-member", to: self)
+    }
+
+    @MainActor
+    func testOnboardingJoinExistingFamilyOpensLoginWithoutCreatingLocalFamily() throws {
+        continueAfterFailure = false
+        let app = freshOnboarding()
+        app.buttons["家里已经在用了？我是来加入的 →"].tap()
+        let relation = app.buttons["onboarding.relation.姥姥"]
+        XCTAssertTrue(relation.waitForExistence(timeout: 5)); relation.tap()
+        attachScreenshot("onboarding-join-existing-role", to: self)
+        app.buttons["onboarding.continue"].tap()
+        XCTAssertTrue(app.navigationBars["账号与安全"].waitForExistence(timeout: 8))
+        attachScreenshot("onboarding-join-existing-opens-login", to: self)
+        app.swipeDown()
+        let dismissed = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.navigationBars["账号与安全"])
+        wait(for: [dismissed], timeout: 5)
+        let state = app.staticTexts["onboarding.audit.readback"].label
+        XCTAssertTrue(state.contains("done=true|identity=none|profiles=0|members=0|storedProfiles=0|storedMembers=0|role=姥姥"), state)
+        XCTAssertFalse(app.buttons["onboarding.continue"].exists)
+        attachScreenshot("onboarding-join-existing-cancel-login-keeps-empty-local-family", to: self)
+    }
+
+    @MainActor
+    private func assertConstellationTargetsDoNotOverlap(largeText: Bool) throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-milestones"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        app.launch()
+        let closeCeremony = app.buttons["收好这一刻"]
+        if closeCeremony.waitForExistence(timeout: 5) {
+            closeCeremony.tap()
+            let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: closeCeremony)
+            wait(for: [gone], timeout: 5)
+        }
+        let stars = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "milestone.star."))
+        XCTAssertTrue(stars.firstMatch.waitForExistence(timeout: 8))
+        var lastFrames: [CGRect] = []
+        var stableSamples = 0
+        for _ in 0..<50 {
+            let frames = stars.allElementsBoundByIndex.map(\.frame)
+            if frames.count == 12 && frames.allSatisfy({ !$0.isEmpty && !$0.isNull && $0.width > 1 && $0.height > 1 }) {
+                stableSamples = frames == lastFrames ? stableSamples + 1 : 0
+                if stableSamples >= 3 { break }
+            } else { stableSamples = 0 }
+            lastFrames = frames
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertEqual(stars.count, 12)
+        XCTAssertGreaterThanOrEqual(stableSamples, 3, "All 12 real target frames must be nonempty and stable before collision checks")
+        attachScreenshot(largeText ? "milestone-stars-large-text-targets" : "milestone-stars-normal-targets", to: self)
+        let elements = stars.allElementsBoundByIndex
+        let frames = elements.map { ["id": $0.identifier, "label": $0.label, "frame": NSStringFromCGRect($0.frame)] }
+        let data = try JSONSerialization.data(withJSONObject: frames, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = largeText ? "milestone-stars-large-frames" : "milestone-stars-normal-frames"
+        attachment.lifetime = .keepAlways; add(attachment)
+        for first in elements.indices {
+            for second in elements.indices where second > first {
+                let intersection = elements[first].frame.intersection(elements[second].frame)
+                XCTAssertFalse(intersection.width > 1 && intersection.height > 1,
+                    "Milestone targets must not overlap: \(elements[first].label) / \(elements[second].label); \(intersection)")
+            }
+        }
+    }
+
+    @MainActor
+    func testMilestoneConstellationTargetsDoNotOverlap() throws {
+        try assertConstellationTargetsDoNotOverlap(largeText: false)
+    }
+
+    @MainActor
+    func testMilestoneConstellationLargeTextTargetsDoNotOverlap() throws {
+        try assertConstellationTargetsDoNotOverlap(largeText: true)
+    }
+
+    @MainActor
     private func controlledDiary(failSave: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-diary-controlled"]

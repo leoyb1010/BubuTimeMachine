@@ -497,6 +497,14 @@ struct RootView: View {
 
     var body: some View {
         rootContent
+            .overlay(alignment: .bottom) {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+                   ProcessInfo.processInfo.arguments.contains("-uitest-fresh-onboarding") {
+                    OnboardingAuditReadback()
+                }
+                #endif
+            }
             .onAppear {
                 if resolvedOnboarding, !env.hasCompletedOnboarding {
                     env.hasCompletedOnboarding = true

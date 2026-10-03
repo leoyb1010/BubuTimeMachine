@@ -47,7 +47,25 @@ final class AppEnvironment {
     }
 
     init() {
+        #if DEBUG
+        // Explicit fresh, synthetic onboarding runs must not inherit another
+        // UI test's completed flag or current family identity.
+        let freshOnboarding = ProcessInfo.processInfo.arguments.contains("-uitest-in-memory")
+            && ProcessInfo.processInfo.arguments.contains("-uitest-fresh-onboarding")
+        if freshOnboarding {
+            UserDefaults.standard.removeObject(forKey: Self.memberKey)
+            UserDefaults.standard.set(false, forKey: Self.onboardedKey)
+            UserDefaults.standard.set(false, forKey: OnboardingView.pendingFamilyLoginKey)
+        }
+        #endif
         let config = ServerConfig()
+        #if DEBUG
+        if freshOnboarding {
+            config.currentRoleRaw = "妈妈"
+            config.childName = "布布"
+            config.simpleModeEnabled = false
+        }
+        #endif
         self.config = config
 
         // 根据配置选择真实/Mock 客户端

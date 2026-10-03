@@ -163,6 +163,7 @@ struct BubuConstellationView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(m.title)
+        .accessibilityIdentifier("milestone.star." + m.id.uuidString)
     }
 }
 

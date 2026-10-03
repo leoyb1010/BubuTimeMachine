@@ -108,6 +108,7 @@ struct OnboardingView: View {
                     Text("名字").font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText)
                     Spacer()
                     TextField("布布", text: $childName)
+                        .accessibilityIdentifier("onboarding.child-name")
                         .multilineTextAlignment(.trailing)
                         .font(BubuTheme.Font.headline)
                         .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -157,10 +158,13 @@ struct OnboardingView: View {
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("onboarding.relation." + rel.rawValue)
+                    .accessibilityAddTraits(selectedRelation == rel ? .isSelected : [])
                 }
             }
 
             TextField("也可以填你的名字（选填）", text: $memberName)
+                .accessibilityIdentifier("onboarding.member-name")
                 .multilineTextAlignment(.center)
                 .font(BubuTheme.Font.body)
                 .padding()
@@ -190,6 +194,7 @@ struct OnboardingView: View {
                 .bubuCardShadow()
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("onboarding.continue")
     }
 
     /// 「加入已有家庭」完成引导后，由根视图消费一次，直接把登录页推到面前。
@@ -239,7 +244,7 @@ struct OnboardingView: View {
             context.insert(member)
         }
 
-        try? context.save()
+        try? persistOnboarding()
 
         env.currentMemberId = member.id
         env.config.childName = profile.name
@@ -249,4 +254,12 @@ struct OnboardingView: View {
             env.hasCompletedOnboarding = true
         }
     }
+
+    private func persistOnboarding() throws {
+        #if DEBUG
+        try OnboardingUITestFault.injectOnce(in: context.container)
+        #endif
+        try context.save()
+    }
+
 }
