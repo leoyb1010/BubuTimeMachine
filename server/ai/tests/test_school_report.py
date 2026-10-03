@@ -167,6 +167,20 @@ def test_school_token_cannot_authorize_other_business_routes(scoped_auth, monkey
     assert not main._rate_buckets
 
 
+@pytest.mark.parametrize("host", [
+    "localhost/school-report/recognize#",
+    "localhost/school-report/recognize?ignored=",
+])
+def test_school_scope_uses_routed_path_not_host_reconstructed_url(scoped_auth, monkeypatch, host):
+    monkeypatch.setattr(main.llm, "complete", lambda *args, **kwargs: "synthetic")
+    with TestClient(main.app) as client:
+        response = client.post("/rewrite-first-person", json={"note": "synthetic"},
+                               headers={"Authorization": "Bearer " + scoped_auth, "Host": host})
+    assert response.status_code == 401
+    assert host not in response.text
+    assert not main._rate_buckets
+
+
 @pytest.mark.parametrize("configured", ["", "too-short"])
 def test_scoped_token_is_disabled_when_unconfigured_or_weak(scoped_auth, monkeypatch, configured):
     monkeypatch.setenv("SCHOOL_VISION_TOKEN", configured)

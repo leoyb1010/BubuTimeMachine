@@ -61,7 +61,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="2.15.0")
+app = FastAPI(title="布布时光机 AI 服务", version="2.22.0")
 
 llm = LLMClient()
 
@@ -94,8 +94,10 @@ def _intake_components() -> IntakeStagingStore:
     with _intake_lock:
         if _intake_store is None:
             _intake_store = IntakeStagingStore()
-            _intake_store.recover_stale_commits()
             _intake_store.cleanup_temporary_files()
+        # A fast restart can observe an abandoned commit before its timeout.
+        # Revisit on later requests; per-batch locks protect active transactions.
+        _intake_store.recover_stale_commits()
         return _intake_store
 
 
@@ -113,25 +115,26 @@ def _intake_family_id() -> str:
 def _commit_staged_batch(
     store: IntakeStagingStore, batch_id: str, principal: str
 ) -> dict[str, Any]:
-    manifest = store.begin_commit(batch_id, principal)
-    if manifest["state"] == "committed":
-        return manifest
-    commit_key = os.environ.get("INTAKE_COMMIT_KEY", "").strip()
-    if len(commit_key) < 32:
-        raise IntakeError("commit key is not configured")
-    base_url = pb_base_url()
-    with httpx.Client(timeout=300, trust_env=False) as client:
-        response = client.post(
-            base_url + "/api/bubu/intake/commit",
-            json=manifest,
-            headers={"X-Bubu-Intake-Key": commit_key},
-        )
-    if response.status_code not in {200, 201}:
-        raise IntakeError("PocketBase atomic commit failed")
-    entry_id = str((response.json() or {}).get("entry_id") or "")
-    if not entry_id:
-        raise IntakeError("PocketBase commit returned no entry")
-    return store.finish_commit(batch_id, principal, entry_id)
+    with store.commit_lock(batch_id):
+        manifest = store.begin_commit(batch_id, principal)
+        if manifest["state"] == "committed":
+            return manifest
+        commit_key = os.environ.get("INTAKE_COMMIT_KEY", "").strip()
+        if len(commit_key) < 32:
+            raise IntakeError("commit key is not configured")
+        base_url = pb_base_url()
+        with httpx.Client(timeout=300, trust_env=False) as client:
+            response = client.post(
+                base_url + "/api/bubu/intake/commit",
+                json=manifest,
+                headers={"X-Bubu-Intake-Key": commit_key},
+            )
+        if response.status_code not in {200, 201}:
+            raise IntakeError("PocketBase atomic commit failed")
+        entry_id = str((response.json() or {}).get("entry_id") or "")
+        if not entry_id:
+            raise IntakeError("PocketBase commit returned no entry")
+        return store.finish_commit(batch_id, principal, entry_id)
 
 # ---------- 鉴权 + 限流（公网暴露时的最低防线）----------
 # 客户端是原生 App，无需 CORS；浏览器跨域一律不放行（不挂 CORSMiddleware 即默认拒绝）。
@@ -254,7 +257,9 @@ def require_api_key(
     """PB/key remain general credentials; the school token has exactly one POST scope."""
     client_host = request.client.host if request.client else "unknown"
     principal = None
-    if request.method == "POST" and request.url.path == "/school-report/recognize":
+    # Match the router's path, never a URL reconstructed from an untrusted Host.
+    routed_path = request.scope.get("path", "")
+    if request.method == "POST" and routed_path == "/school-report/recognize":
         principal = _school_vision_principal(authorization)
     if principal is None:
         principal = _authorized_principal(
@@ -262,7 +267,7 @@ def require_api_key(
         )
     if principal is None:
         logger.warning("unauthorized request path=%s ip=%s",
-                       request.url.path, request.client.host if request.client else "unknown")
+                       routed_path, request.client.host if request.client else "unknown")
         raise HTTPException(status_code=401, detail="鉴权失败：请先登录家庭服务器。")
     # 鉴权后按服务主体/用户计数，反代后的共享源 IP 不会让全家互相挤占额度。
     _check_rate(principal)
@@ -712,8 +717,12 @@ def intake_confirm(
         return batch
     try:
         return _commit_staged_batch(store, req.batch_id, principal)
+    except IntakeConflict as exc:
+        # Another confirmed request may already own this batch's live commit.
+        # Do not demote its state or revoke its confirmation on a lock conflict.
+        raise HTTPException(status_code=409, detail="这段时光正在入库，请稍后查看。") from exc
     except (IntakeError, httpx.HTTPError, ValueError) as exc:
-        store.reset_candidate_confirmation(req.batch_id, _intake_family_id())
+        store.reset_candidate_confirmation(req.batch_id, _intake_family_id(), principal)
         logger.warning(
             "intake candidate commit failed batch=%s reason=%s",
             req.batch_id, type(exc).__name__,
@@ -1217,31 +1226,42 @@ class MovieRenderResp(BaseModel):
     year: int = 0
 
 
-@app.post("/movie/render", response_model=MovieRenderResp,
-          dependencies=[Depends(require_api_key)])
-def movie_render_start(req: MovieRenderReq):
+@app.post("/movie/render", response_model=MovieRenderResp)
+def movie_render_start(req: MovieRenderReq, principal: str = Depends(require_api_key),
+                       authorization: Optional[str] = Header(default=None)):
+    # Maintenance keys authenticate services, not a family's right to these files.
+    if not principal.startswith("pb:"):
+        raise HTTPException(status_code=403, detail="制作电影需要家庭账号登录。")
     if not movie_render.ffmpeg_available():
         raise HTTPException(status_code=503, detail="服务器未安装 ffmpeg，无法服务端合成")
     if not req.photos:
         raise HTTPException(status_code=400, detail="没有可合成的照片")
     photos = [movie_render.RenderPhoto(url=p.url, caption=p.caption) for p in req.photos]
-    job = movie_render.submit_render(req.child_name, req.year, req.template, photos, req.narration)
+    try:
+        photos = movie_render.authorize_photos(photos, authorization or "")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="部分照片不可读取，请重新选择素材。") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="照片引用格式无效。") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="家庭服务器暂时不可用，请稍后重试。") from exc
+    job = movie_render.submit_render(req.child_name, req.year, req.template, photos, req.narration,
+                                     owner=principal)
     return MovieRenderResp(**job.public())
 
 
-@app.get("/movie/status/{job_id}", response_model=MovieRenderResp,
-         dependencies=[Depends(require_api_key)])
-def movie_render_status(job_id: str):
+@app.get("/movie/status/{job_id}", response_model=MovieRenderResp)
+def movie_render_status(job_id: str, principal: str = Depends(require_api_key)):
     job = movie_render.get_job(job_id)
-    if not job:
+    if not job or job.owner != principal:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return MovieRenderResp(**job.public())
 
 
-@app.get("/movie/file/{job_id}", dependencies=[Depends(require_api_key)])
-def movie_render_file(job_id: str):
+@app.get("/movie/file/{job_id}")
+def movie_render_file(job_id: str, principal: str = Depends(require_api_key)):
     job = movie_render.get_job(job_id)
-    if not job or job.status != "ready" or not job.file_path:
+    if not job or job.owner != principal or job.status != "ready" or not job.file_path:
         raise HTTPException(status_code=404, detail="成片尚未就绪")
     return FileResponse(job.file_path, media_type="video/mp4",
                         filename=f"{job.child_name}_{job.year}.mp4")

@@ -224,7 +224,7 @@ def test_pending_ssd_candidate_time_can_be_edited_or_cancelled(tmp_path: Path):
     assert updated["entry"]["happened_at"] == "2025-05-22T08:00:00Z"
     store.confirm("batch-id-0001", "family-bubu", "pb:family-user")
     store.begin_commit("batch-id-0001", "pb:family-user")
-    store.reset_candidate_confirmation("batch-id-0001", "family-bubu")
+    store.reset_candidate_confirmation("batch-id-0001", "family-bubu", "pb:family-user")
     assert store.batch("batch-id-0001")["state"] == "awaiting_confirmation"
     assert store.cancel("batch-id-0001", "family-bubu")["state"] == "cancelled"
 

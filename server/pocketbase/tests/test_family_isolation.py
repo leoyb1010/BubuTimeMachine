@@ -44,9 +44,9 @@ class FamilyIsolationIntegrationTests(unittest.TestCase):
                         "isolated-audit-password-123", *args], check=True, capture_output=True)
         port = intake_helpers.IntakeCommitIntegrationTests._free_port()
         self.base = f"http://127.0.0.1:{port}"
-        self.process = subprocess.Popen([binary, "serve", f"--http=127.0.0.1:{port}",
-                                         "--hooksWatch=false", *args],
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.process = intake_helpers.start_initialized_pocketbase(
+            binary, [f"--http=127.0.0.1:{port}", "--hooksWatch=false", *args]
+        )
         self.addCleanup(self.stop)
         intake_helpers.IntakeCommitIntegrationTests._wait_until_ready(port, self.process)
         self.admin = self.call("POST", "/api/collections/_superusers/auth-with-password",

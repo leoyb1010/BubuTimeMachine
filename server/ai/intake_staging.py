@@ -7,6 +7,7 @@ PocketBase commit hook.
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import hmac
 import json
 import logging
@@ -17,6 +18,7 @@ import shutil
 import sqlite3
 import time
 from dataclasses import asdict, dataclass
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -396,13 +398,13 @@ class IntakeStagingStore:
         except IntakeConflict as exc:
             # 校验失败（文件被改/损坏/逃逸）以前会把批次永久留在 committing：
             # 不能提交、不能取消、不能重传。现在退回并把坏素材标记为失败，允许重传。
-            self.reset_commit(batch_id, owner, type(exc).__name__)
+            self._reset_commit_state(batch_id, owner)
             asset_key = getattr(exc, "asset_key", "")
             if asset_key:
                 self.invalidate_staged_item(batch_id, asset_key, str(exc))
             raise
         except Exception:
-            self.reset_commit(batch_id, owner, "verification_error")
+            self._reset_commit_state(batch_id, owner)
             raise
 
     def invalidate_staged_item(self, batch_id: str, asset_key: str, reason: str) -> None:
@@ -592,19 +594,33 @@ class IntakeStagingStore:
         return self.batch(batch_id, owner)
 
     def reset_commit(self, batch_id: str, owner: str, reason: str) -> None:
+        # Cleanup belongs to an already-failed request. A newer request may have
+        # acquired this batch in the meantime, even under the same user account.
+        try:
+            with self.commit_lock(batch_id):
+                self._reset_commit_state(batch_id, owner)
+        except IntakeConflict:
+            return
+
+    def _reset_commit_state(self, batch_id: str, owner: str) -> None:
+        # begin_commit already owns the operation when manifest validation fails;
+        # do not reacquire the non-reentrant file lock on that internal path.
         with self._connect() as db:
             db.execute(
                 "UPDATE batches SET state='staged',updated_at=? WHERE id=? AND owner=? AND state='committing'",
                 (time.time(), batch_id, owner),
             )
 
-    def reset_candidate_confirmation(self, batch_id: str, family_id: str) -> None:
-        with self._connect() as db:
-            db.execute(
-                "UPDATE batches SET confirmed=0,state='awaiting_confirmation',updated_at=? "
-                "WHERE id=? AND family_id=? AND state IN ('staged','committing')",
-                (time.time(), batch_id, family_id),
-            )
+    def reset_candidate_confirmation(self, batch_id: str, family_id: str, owner: str) -> None:
+        try:
+            with self.commit_lock(batch_id), self._connect() as db:
+                db.execute(
+                    "UPDATE batches SET confirmed=0,state='awaiting_confirmation',updated_at=? "
+                    "WHERE id=? AND family_id=? AND owner=? AND state IN ('staged','committing')",
+                    (time.time(), batch_id, family_id, owner),
+                )
+        except IntakeConflict:
+            return
 
     def cleanup(self, older_than_seconds: int = 7 * 86400) -> int:
         cutoff = time.time() - max(3600, older_than_seconds)
@@ -649,19 +665,50 @@ class IntakeStagingStore:
         return removed
 
     def recover_stale_commits(self, older_than_seconds: int = 5 * 60) -> int:
-        """A retry is safe: PocketBase commit is idempotent by intakeBatchId."""
+        """Recover expired, abandoned commits, never a still-running request.
+
+        flock is shared by all AI processes using this staging root and released
+        automatically on process exit. Elapsed wall time alone is not a lease:
+        a slow but live PocketBase transaction must retain its committing state.
+        """
         cutoff = time.time() - max(60, older_than_seconds)
         with self._connect() as db:
-            changed = db.execute(
-                "UPDATE batches SET "
-                "state=CASE WHEN entry_json LIKE '%\"source\":\"ssd-bubu-inbox\"%' "
-                "THEN 'awaiting_confirmation' ELSE 'staged' END, "
-                "confirmed=CASE WHEN entry_json LIKE '%\"source\":\"ssd-bubu-inbox\"%' "
-                "THEN 0 ELSE confirmed END, updated_at=? "
-                "WHERE state='committing' AND updated_at<?",
-                (time.time(), cutoff),
-            ).rowcount
+            stale = db.execute("SELECT id FROM batches WHERE state='committing' AND updated_at<?",
+                               (cutoff,)).fetchall()
+        changed = 0
+        for row in stale:
+            try:
+                with self.commit_lock(row["id"]), self._connect() as db:
+                    changed += db.execute(
+                        "UPDATE batches SET "
+                        "state=CASE WHEN entry_json LIKE '%\"source\":\"ssd-bubu-inbox\"%' "
+                        "THEN 'awaiting_confirmation' ELSE 'staged' END, "
+                        "confirmed=CASE WHEN entry_json LIKE '%\"source\":\"ssd-bubu-inbox\"%' "
+                        "THEN 0 ELSE confirmed END, updated_at=? "
+                        "WHERE id=? AND state='committing' AND updated_at<?",
+                        (time.time(), row["id"], cutoff),
+                    ).rowcount
+            except IntakeConflict:
+                continue
         return int(changed)
+
+    @contextmanager
+    def commit_lock(self, batch_id: str):
+        batch_id = self._valid_id(batch_id, "batch id")
+        locks = self.root / "commit-locks"
+        locks.mkdir(exist_ok=True, mode=0o700)
+        # Keep lock inodes stable: unlinking a lock while another process has it
+        # open permits two different inodes to be held for the same batch.
+        with (locks / (batch_id + ".lock")).open("a+") as handle:
+            os.chmod(handle.name, 0o600)
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise IntakeConflict("batch commit is already running") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _sha256(path: Path) -> str:

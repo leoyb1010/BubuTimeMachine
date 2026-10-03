@@ -32,6 +32,8 @@ from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, build_opener
 
+import httpx
+
 logger = logging.getLogger("bubu.ai.movie")
 
 # 成片落盘目录（可用环境变量覆盖到大盘）
@@ -192,6 +194,8 @@ _FFMPEG = _resolve_ffmpeg()
 class RenderPhoto:
     url: str
     caption: str = ""
+    family_id: str = ""
+    entry_record_id: str = ""
 
 
 @dataclass
@@ -204,6 +208,7 @@ class RenderJob:
     error: str = ""
     file_path: str = ""
     created_at: float = field(default_factory=time.time)
+    owner: str = ""
 
     def public(self) -> dict:
         return {
@@ -226,9 +231,9 @@ def get_job(job_id: str) -> Optional[RenderJob]:
 
 
 def submit_render(child_name: str, year: int, template: str,
-                  photos: list[RenderPhoto], narration: str = "") -> RenderJob:
+                  photos: list[RenderPhoto], narration: str = "", *, owner: str = "") -> RenderJob:
     """登记任务并提交后台渲染，立即返回 job（异步轮询 status）。"""
-    job = RenderJob(job_id=uuid.uuid4().hex[:16], year=year, child_name=child_name or "布布")
+    job = RenderJob(job_id=uuid.uuid4().hex[:16], year=year, child_name=child_name or "布布", owner=owner)
     with _jobs_lock:
         _jobs[job.job_id] = job
         _prune_locked()
@@ -270,7 +275,70 @@ def pocketbase_file_reference(url: str) -> Optional[tuple]:
     if not match:
         return None
     collection, record_id, file_name = match.groups()
-    return collection, record_id, urllib.parse.unquote(file_name)
+    file_name = urllib.parse.unquote(file_name)
+    if file_name in {".", ".."} or any(c in file_name for c in "/\\\x00"):
+        return None
+    return collection, record_id, file_name
+
+
+def authorize_photos(photos: list[RenderPhoto], authorization: str) -> list[RenderPhoto]:
+    """Apply PocketBase user rules before the service account may fetch any bytes.
+
+    The client-facing hostname is intentionally ignored; only a validated media
+    reference is read from the configured PB endpoint. Never retain the user token
+    in jobs or pass it to a client-supplied host.
+    """
+    from memory_query import pb_base_url
+    approved = []
+    with httpx.Client(base_url=pb_base_url(), timeout=10, trust_env=False,
+                      headers={"Authorization": authorization}) as client:
+        for photo in photos:
+            reference = pocketbase_file_reference(photo.url)
+            if reference is None:
+                raise ValueError("invalid media reference")
+            _, record_id, file_name = reference
+            response = client.get("/api/collections/media/records/" + record_id)
+            if response.status_code in {401, 403, 404}:
+                raise PermissionError("unavailable media")
+            response.raise_for_status()
+            media = response.json()
+            local_id = str(media.get("entryLocalId") or "")
+            family = str(media.get("familyId") or "")
+            if (media.get("isDeleted") or not family or media.get("file") != file_name
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", local_id)):
+                raise PermissionError("unavailable media")
+            response = client.get("/api/collections/entries/records", params={
+                "filter": "localId='%s'" % local_id, "perPage": 1,
+            })
+            if response.status_code in {401, 403, 404}:
+                raise PermissionError("unavailable entry")
+            response.raise_for_status()
+            entries = response.json().get("items", [])
+            if (not entries or entries[0].get("isDeleted")
+                    or entries[0].get("familyId") != family):
+                raise PermissionError("unavailable entry")
+            approved.append(RenderPhoto(photo.url, photo.caption, family, entries[0]["id"]))
+    return approved
+
+
+def _source_still_authorized(photo: RenderPhoto, owner: str, store: Any) -> bool:
+    """Recheck queued sources, including membership changes, without caching tokens."""
+    reference = pocketbase_file_reference(photo.url)
+    if not reference or not photo.family_id or not photo.entry_record_id or not owner.startswith("pb:"):
+        return False
+    _, record_id, file_name = reference
+    try:
+        user = store.get_record("users", owner[3:])
+        media = store.get_record("media", record_id)
+        entry = store.get_record("entries", photo.entry_record_id)
+        return (user.get("familyId") == photo.family_id
+                and media.get("familyId") == photo.family_id
+                and entry.get("familyId") == photo.family_id
+                and not media.get("isDeleted") and not entry.get("isDeleted")
+                and media.get("file") == file_name
+                and media.get("entryLocalId") == entry.get("localId"))
+    except Exception:
+        return False
 
 
 def _normalize_for_ffmpeg(dest: str) -> bool:
@@ -388,8 +456,9 @@ def _run_render(job: RenderJob, template: str, photos: list[RenderPhoto], narrat
         _fail(job, "没有可用照片")
         return
 
-    workdir = tempfile.mkdtemp(prefix=f"bubu_movie_{job.job_id}_")
+    workdir = None
     try:
+        workdir = tempfile.mkdtemp(prefix=f"bubu_movie_{job.job_id}_")
         _set(job, status="rendering", progress=0.05)
 
         # 1) 下载照片（坏图跳过）
@@ -398,10 +467,13 @@ def _run_render(job: RenderJob, template: str, photos: list[RenderPhoto], narrat
         try:
             from memory_query import PocketBaseMemoryStore
             store = PocketBaseMemoryStore()
-        except Exception:  # noqa: BLE001 没有服务账户配置时退回白名单直连
+        except Exception:  # noqa: BLE001 无法复核授权时关闭下载，不退回无鉴权直连
             store = None
         try:
             for i, p in enumerate(photos):
+                if store is None or not _source_still_authorized(p, job.owner, store):
+                    _fail(job, "照片已不可用，请重新选择素材。")
+                    return
                 dst = os.path.join(workdir, f"img_{i:03d}.jpg")
                 if _download(p.url, dst, store):
                     local_imgs.append(dst)
@@ -433,8 +505,16 @@ def _run_render(job: RenderJob, template: str, photos: list[RenderPhoto], narrat
 
         _set(job, status="ready", progress=1.0, file_path=out_path)
         logger.info("movie ready: %s (%d photos)", out_path, len(clips))
+    except Exception as exc:
+        logger.error("movie job %s failed (%s)", job.job_id, type(exc).__name__)
+        _fail(job, "制作暂时失败，请稍后重试；原照片仍然安全。")
+        try:
+            Path(MOVIES_DIR, job.job_id + ".mp4").unlink(missing_ok=True)
+        except OSError:
+            pass
     finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
 
 
 def _set(job: RenderJob, **kw) -> None:

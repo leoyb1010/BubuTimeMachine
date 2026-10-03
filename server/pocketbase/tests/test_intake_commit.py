@@ -15,12 +15,37 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def start_initialized_pocketbase(binary, args, *, env=None):
+    """Fail before serve can open an installation browser on the developer's desktop."""
+    data_dir = Path(args[args.index("--dir") + 1])
+    # mode=rw permits SQLite to create WAL shared-memory bookkeeping in this
+    # disposable directory; the guard itself runs only SELECT and never creates DBs.
+    with sqlite3.connect(f"file:{data_dir / 'data.db'}?mode=rw", uri=True) as db:
+        initialized = db.execute("SELECT count(*) FROM _superusers").fetchone()[0] > 0
+    if not initialized:
+        raise AssertionError("Disposable PocketBase must have a synthetic superuser before serve")
+    return subprocess.Popen([str(binary), "serve", *args], env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+
+class DisposableServerGuardTests(unittest.TestCase):
+    def test_empty_admin_table_blocks_before_starting_server(self):
+        with tempfile.TemporaryDirectory(prefix="bubu-pb-start-guard-") as raw:
+            with sqlite3.connect(Path(raw) / "data.db") as db:
+                db.execute("CREATE TABLE _superusers(id TEXT PRIMARY KEY)")
+            with patch.object(subprocess, "Popen") as spawn:
+                with self.assertRaises(AssertionError):
+                    start_initialized_pocketbase("unused", ["--dir", raw])
+                spawn.assert_not_called()
 
 
 class IntakeCommitIntegrationTests(unittest.TestCase):
@@ -72,18 +97,16 @@ class IntakeCommitIntegrationTests(unittest.TestCase):
             )
 
             port = self._free_port()
-            process = subprocess.Popen(
+            process = start_initialized_pocketbase(
+                binary,
                 [
-                    str(binary), "serve", f"--http=127.0.0.1:{port}",
+                    f"--http=127.0.0.1:{port}",
                     "--dir", str(data_dir),
                     "--migrationsDir", str(ROOT / "server/pocketbase/migrations"),
                     "--hooksDir", str(ROOT / "server/pocketbase/pb_hooks"),
                     "--hooksWatch=false",
                 ],
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
             )
             try:
                 self._wait_until_ready(port, process)
@@ -206,9 +229,13 @@ class IntakeCommitIntegrationTests(unittest.TestCase):
                     "--hooksDir", str(ROOT / "server/pocketbase/pb_hooks")]
             subprocess.run([str(binary), "migrate", "up", *args], check=True, env=env,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            subprocess.run([str(binary), "superuser", "upsert", "intake-test@example.invalid",
+                            secrets.token_urlsafe(32), *args], check=True, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             port = self._free_port()
-            process = subprocess.Popen([str(binary), "serve", f"--http=127.0.0.1:{port}", "--hooksWatch=false", *args],
-                                       env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            process = start_initialized_pocketbase(
+                binary, [f"--http=127.0.0.1:{port}", "--hooksWatch=false", *args], env=env
+            )
             try:
                 self._wait_until_ready(port, process)
                 manifest = {"id": "batch-fwd-0001", "family_id": "family-fwd-0001", "state": "committing",
@@ -225,8 +252,12 @@ class IntakeCommitIntegrationTests(unittest.TestCase):
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
+                    process.wait(timeout=5)
                 if process.stdout:
+                    # Assert without including any first-run URL/token in failure output.
+                    opened_installer = "/_/#/pbinstall/" in process.stdout.read()
                     process.stdout.close()
+                    self.assertFalse(opened_installer, "Disposable server offered an installer")
 
     @staticmethod
     def _status_with_headers(port: int, key: str, manifest: dict, extra: dict) -> int:
