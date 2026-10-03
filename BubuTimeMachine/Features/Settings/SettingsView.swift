@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import TipKit
+import UIKit
 
 // MARK: - 设置（Wave L §5.1 重构）
 /// 信息架构按使用频率重排：个人化在前、资料中间、机房（服务器/AI Key）收进「高级 · 自托管」二级页。
@@ -9,6 +10,8 @@ struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @Query private var members: [FamilyMember]
     @State private var soundOn = BubuSound.isEnabled
     @State private var showFrame = false
@@ -155,6 +158,10 @@ struct SettingsView: View {
         .navigationTitle("设置")
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .fullScreenCover(isPresented: $showFrame) { PhotoFrameView() }
+        .task { await reconcileDailyReminder() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await reconcileDailyReminder() } }
+        }
     }
 
     // MARK: 顶卡 · 当前身份
@@ -230,17 +237,52 @@ struct SettingsView: View {
     // MARK: 提醒卡
 
     private func reminderCard(config: ServerConfig) -> some View {
-        group("提醒") {
-            Toggle(isOn: Binding(get: { config.dailyReminderEnabled },
-                                 set: { config.dailyReminderEnabled = $0 })) {
+        let permission = ReminderScheduler.shared.dailyPermission
+        return group("提醒") {
+            Toggle(isOn: Binding(get: { config.dailyReminderEnabled && permission.outcome.isEnabled },
+                                 set: { enabled in
+                Task {
+                    if let result = await ReminderScheduler.shared.update(enabled: enabled, context: context) {
+                        config.dailyReminderEnabled = result.isEnabled
+                    }
+                }
+            })) {
                 settingRowLabel("那年今日 · 每日回忆", icon: "bell.badge.fill",
-                                tint: BubuTheme.Color.warning, subtitle: "每天提醒：往年的今天",
+                                tint: BubuTheme.Color.warning,
+                                subtitle: permission.isUpdating ? "正在确认通知权限…" : "每天提醒：往年的今天",
                                 showsChevron: false)
             }
-            .onChange(of: config.dailyReminderEnabled) { _, on in
-                Task { await ReminderScheduler.shared.update(enabled: on, context: context) }
-            }
+            .disabled(permission.isUpdating)
             .tint(env.theme.theme.primary)
+            if permission.outcome == .denied {
+                Text("系统未允许通知，每日回忆尚未开启。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .padding(.horizontal, 14)
+                Button("前往系统通知设置") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                }
+                .font(BubuTheme.Font.body)
+                .padding(14)
+                .accessibilityIdentifier("settings.reminder.openSettings")
+            } else if permission.outcome == .failed {
+                Text("暂时未能确认通知权限，每日回忆未开启。请稍后重试。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .padding(14)
+            }
+        }
+        .onChange(of: permission.isUpdating) { _, updating in
+            // A bootstrap refresh may already own the single flight when this
+            // screen appears. Its completion must also correct a stale saved toggle.
+            if !updating, !permission.outcome.isEnabled { config.dailyReminderEnabled = false }
+        }
+    }
+
+    private func reconcileDailyReminder() async {
+        if let result = await ReminderScheduler.shared.reconcileDailyPermission(
+            enabled: env.config.dailyReminderEnabled, context: context) {
+            env.config.dailyReminderEnabled = result.isEnabled
         }
     }
 

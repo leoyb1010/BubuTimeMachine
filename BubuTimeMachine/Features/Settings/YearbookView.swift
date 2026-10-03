@@ -28,6 +28,7 @@ struct YearbookView: View {
                 generateButton
                 if let errorText {
                     Text(errorText).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.danger)
+                    NavigationLink("前往同步与备份") { SyncCenterView() }
                 }
             }
             .padding()
@@ -126,6 +127,8 @@ struct YearbookView: View {
     private func generate() async {
         guard let profile else { return }
         generating = true
+        pdfURL = nil
+        showShare = false
         errorText = nil
         progressText = nil
         defer { generating = false; progressText = nil }
@@ -138,7 +141,7 @@ struct YearbookView: View {
                 note: e.firstPersonNote ?? e.note,
                 ageText: AgeCalculator.compactAge(birthday: profile.birthday, at: e.happenedAt),
                 authorRole: e.authorRole,
-                imageFileNames: e.sortedMedia.filter { $0.type == .photo }.compactMap { $0.localFileName },
+                imageFileNames: e.sortedMedia.filter { $0.type == .photo }.map { $0.localFileName },
                 mood: e.mood?.emoji)
         }
         let rangeStart = cal.date(byAdding: .year, value: selectedYear, to: profile.birthday) ?? profile.birthday
@@ -164,14 +167,16 @@ struct YearbookView: View {
             messages: Array(messages.prefix(14)))
 
         let exporter = YearbookExporter(mediaStore: env.mediaStore, theme: env.theme.theme)
-        if let url = await exporter.makePDF(input, onProgress: { done, total in
-            progressText = "正在排版… \(done)/\(total)"
-        }) {
+        do {
+            progressText = "正在检查照片原片…"
+            let url = try await exporter.makePDF(input, onProgress: { done, total in
+                progressText = "正在排版… \(done)/\(total)"
+            })
             pdfURL = url
             showShare = true
             BubuHaptics.success()
-        } else {
-            errorText = "年册生成失败了，稍后再试试。"
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 }

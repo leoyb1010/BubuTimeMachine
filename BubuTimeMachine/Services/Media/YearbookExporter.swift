@@ -17,7 +17,7 @@ struct YearbookExporter {
         let note: String?
         let ageText: String
         let authorRole: String
-        let imageFileNames: [String]
+        let imageFileNames: [String?]
         let mood: String?
     }
 
@@ -35,21 +35,34 @@ struct YearbookExporter {
     /// 全程只有当前一页位图在内存里，不再攒 `[UIImage]`（整年 300 条 ≈ 2.4GB 必闪退的老问题不再有）。
     /// ImageRenderer 必须在主线程，故本方法保持 @MainActor；照片解码走后台，页间 `Task.yield()` 让出主线程，
     /// 配合 onProgress 让 UI 有进度、不假死。
-    func makePDF(_ input: Input, onProgress: ((Int, Int) -> Void)? = nil) async -> URL? {
+    func makePDF(_ input: Input, onProgress: ((Int, Int) -> Void)? = nil) async throws -> URL {
+        // Preserve missing references and validate before creating any PDF.
+        let photoURLs = input.entries.map { entry in
+            entry.imageFileNames.map { name in name.map { mediaStore.mediaURL(for: $0) } }
+        }
+        let coverURL = input.coverImageFileName.map { mediaStore.mediaURL(for: $0) }
+        try await Task.detached(priority: .userInitiated) {
+            try YearbookPhotoPreflight.requireAvailable(pages: photoURLs, cover: coverURL)
+        }.value
+        try Task.checkCancellation()
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("布布年册-\(input.rangeTitle).pdf")
-        try? FileManager.default.removeItem(at: url)
+            .appendingPathComponent("布布年册-\(input.rangeTitle)-\(UUID().uuidString).pdf")
 
         let totalPages = 1 + input.entries.count
             + (input.milestones.isEmpty ? 0 : 1) + (input.messages.isEmpty ? 0 : 1)
 
         // 增量 PDF：一页画完立即落盘，位图随即释放。
         var mediaBox = CGRect(origin: .zero, size: Self.pageSize)
-        guard let ctx = CGContext(url as CFURL, mediaBox: &mediaBox, nil) else { return nil }
+        guard let ctx = CGContext(url as CFURL, mediaBox: &mediaBox, nil) else { throw YearbookExportError.renderFailed }
+        var finished = false
+        defer {
+            ctx.closePDF()
+            if !finished { try? FileManager.default.removeItem(at: url) }
+        }
 
         // 把一张现成位图作为一页写入 PDF（PDF 坐标系原点在左下，需翻转）。
-        func addPage(_ image: UIImage) {
-            guard let cg = image.cgImage else { return }
+        func addPage(_ image: UIImage?) throws {
+            guard let cg = image?.cgImage else { throw YearbookExportError.renderFailed }
             ctx.beginPDFPage(nil)
             ctx.saveGState()
             ctx.translateBy(x: 0, y: Self.pageSize.height)
@@ -63,18 +76,21 @@ struct YearbookExporter {
 
         // 封面
         let cover = await loadImageAsync(input.coverImageFileName)
-        if let img = renderPage({ CoverPage(input: input, theme: theme, cover: cover) }) { addPage(img) }
+        if input.coverImageFileName != nil && cover == nil { throw YearbookExportError.unavailablePhotos(1) }
+        try addPage(renderPage({ CoverPage(input: input, theme: theme, cover: cover) }))
         done += 1
         onProgress?(done, totalPages)
         await Task.yield()
 
         // 每条记录一页
         for entry in input.entries {
+            try Task.checkCancellation()
             var images: [UIImage] = []
-            for name in entry.imageFileNames.prefix(4) {
-                if let img = await loadImageAsync(name) { images.append(img) }
+            for name in entry.imageFileNames.prefix(YearbookPhotoPreflight.photosPerPage) {
+                guard let img = await loadImageAsync(name) else { throw YearbookExportError.unavailablePhotos(1) }
+                images.append(img)
             }
-            if let img = renderPage({ EntryPage(entry: entry, theme: theme, images: images) }) { addPage(img) }
+            try addPage(renderPage({ EntryPage(entry: entry, theme: theme, images: images) }))
             images = []   // 本页源图与渲染位图到此都不再持有
             done += 1
             onProgress?(done, totalPages)
@@ -83,9 +99,7 @@ struct YearbookExporter {
 
         // 里程碑
         if !input.milestones.isEmpty {
-            if let img = renderPage({ ListPage(title: "这一年的里程碑", icon: "star.fill", items: input.milestones, theme: theme) }) {
-                addPage(img)
-            }
+            try addPage(renderPage({ ListPage(title: "这一年的里程碑", icon: "star.fill", items: input.milestones, theme: theme) }))
             done += 1
             onProgress?(done, totalPages)
             await Task.yield()
@@ -93,14 +107,12 @@ struct YearbookExporter {
 
         // 家人寄语
         if !input.messages.isEmpty {
-            if let img = renderPage({ ListPage(title: "家人想对你说", icon: "heart.fill", items: input.messages, theme: theme) }) {
-                addPage(img)
-            }
+            try addPage(renderPage({ ListPage(title: "家人想对你说", icon: "heart.fill", items: input.messages, theme: theme) }))
             done += 1
             onProgress?(done, totalPages)
         }
 
-        ctx.closePDF()
+        finished = true
         return url
     }
 

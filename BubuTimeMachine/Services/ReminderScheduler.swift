@@ -1,6 +1,84 @@
 import Foundation
 import SwiftData
 import UserNotifications
+import Observation
+
+/// Permission state is independently injectable; unit tests never contact the real
+/// notification center or change a device's authorization settings.
+@Observable
+@MainActor
+final class DailyReminderPermission {
+    enum Outcome: Equatable {
+        case enabled, disabled, denied, failed
+        var isEnabled: Bool { self == .enabled }
+    }
+    private(set) var outcome: Outcome = .disabled
+    private(set) var isUpdating = false
+    private(set) var revision: UInt64 = 0
+    private let requestAuthorization: () async throws -> Bool
+    private let readAuthorization: () async -> UNAuthorizationStatus
+
+    init(requestAuthorization: @escaping () async throws -> Bool = {
+        try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+    }, readAuthorization: @escaping () async -> UNAuthorizationStatus = {
+        await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }) {
+        self.requestAuthorization = requestAuthorization
+        self.readAuthorization = readAuthorization
+    }
+
+    @discardableResult
+    func update(enabled: Bool, apply: (Bool) -> Void) async -> Outcome? {
+        // Turning off is immediate, even if the system's authorization sheet has
+        // not returned. Its late result loses authority to enable or schedule.
+        if !enabled {
+            revision &+= 1
+            outcome = .disabled
+            apply(false)
+            return .disabled
+        }
+        guard !isUpdating else { return nil }
+        revision &+= 1
+        let requestedRevision = revision
+        isUpdating = true
+        defer { isUpdating = false }
+        let result: Outcome
+        do {
+            result = try await requestAuthorization() ? .enabled : .denied
+        } catch {
+            result = .failed
+        }
+        guard requestedRevision == revision, !Task.isCancelled else { return nil }
+        outcome = result
+        apply(result.isEnabled)
+        return result
+    }
+
+    @discardableResult
+    func reconcile(enabled: Bool, apply: (Bool) -> Void) async -> Outcome? {
+        // Foreground checks never prompt. Do not overlap or supersede an explicit
+        // enable request while its system authorization UI is still resolving.
+        guard !isUpdating else { return nil }
+        revision &+= 1
+        let requestedRevision = revision
+        isUpdating = true
+        defer { isUpdating = false }
+        let status = await readAuthorization()
+        guard requestedRevision == revision, !Task.isCancelled else { return nil }
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            outcome = enabled ? .enabled : .disabled
+        case .denied:
+            outcome = .denied
+        case .notDetermined:
+            outcome = .disabled
+        @unknown default:
+            outcome = .failed
+        }
+        apply(outcome.isEnabled)
+        return outcome
+    }
+}
 
 // MARK: - 那年今日 · 提醒调度
 /// 每天上午 9:00 提醒一次：往年的今天，布布在做什么。
@@ -10,6 +88,7 @@ import UserNotifications
 final class ReminderScheduler {
     static let shared = ReminderScheduler()
     private init() {}
+    let dailyPermission = DailyReminderPermission()
 
     private let identifierPrefix = "bubu.onThisDay."
     /// 「那年今日」的扫描窗口。按 happenedAt 倒序取最近这么多条：
@@ -22,15 +101,24 @@ final class ReminderScheduler {
     }
 
     /// 开关变化时调用。
-    func update(enabled: Bool, context: ModelContext) async {
-        let center = UNUserNotificationCenter.current()
-        if enabled {
-            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-            guard granted else { return }
-            scheduleWeekAhead(center: center, context: context)
-        } else {
-            center.removePendingNotificationRequests(withIdentifiers: allIdentifiers + ["bubu.onThisDay.daily"])
+    @discardableResult
+    func update(enabled: Bool, context: ModelContext) async -> DailyReminderPermission.Outcome? {
+        await dailyPermission.update(enabled: enabled) { allowed in
+            applyDailyReminder(enabled: allowed, context: context)
         }
+    }
+
+    @discardableResult
+    func reconcileDailyPermission(enabled: Bool, context: ModelContext) async -> DailyReminderPermission.Outcome? {
+        await dailyPermission.reconcile(enabled: enabled) { allowed in
+            applyDailyReminder(enabled: allowed, context: context)
+        }
+    }
+
+    private func applyDailyReminder(enabled: Bool, context: ModelContext) {
+        let center = UNUserNotificationCenter.current()
+        if enabled { scheduleWeekAhead(center: center, context: context) }
+        else { center.removePendingNotificationRequests(withIdentifiers: allIdentifiers + ["bubu.onThisDay.daily"]) }
     }
 
     /// App 启动时按开关状态刷新（滚动重排未来 7 天）。
@@ -41,8 +129,10 @@ final class ReminderScheduler {
         // 几千条时无感，几万条时就是几万个 SwiftData 对象在主线程物化——
         // 启动路径上最重的一次操作，直接顶启动看门狗（0x8badf00d）。
         // 推到下一个 runloop：首帧先渲染出来，通知晚几十毫秒排期没有任何影响。
+        let requestedRevision = dailyPermission.revision
         Task { @MainActor [weak self] in
-            self?.scheduleWeekAhead(center: .current(), context: context)
+            guard let self, dailyPermission.revision == requestedRevision else { return }
+            await reconcileDailyPermission(enabled: enabled, context: context)
         }
     }
 

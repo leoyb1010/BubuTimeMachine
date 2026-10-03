@@ -18,7 +18,7 @@ struct ExportView: View {
     @Query private var profiles: [ChildProfile]
 
     @State private var exporting = false
-    @State private var exportedURL: URL?
+    @State private var exportShare: ArchiveExportShare?
     @State private var showShare = false
     @State private var errorText: String?
     @State private var missingNote: String?
@@ -50,8 +50,10 @@ struct ExportView: View {
         .navigationTitle("开放阅读档案")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showShare) {
-            if let url = exportedURL {
-                ShareSheet(items: [url])
+            if let archive = exportShare {
+                ShareSheet(items: [archive.url]) { completed, error in
+                    archive.recordCompletion(completed: completed, error: error)
+                }
             }
         }
         .alert("这份档案还不完整", isPresented: $showIncompleteExportAlert) {
@@ -131,6 +133,7 @@ struct ExportView: View {
     private func runExport() async {
         guard let profile else { return }
         exporting = true
+        exportShare = nil
         errorText = nil
         missingNote = nil
         defer { exporting = false }
@@ -239,7 +242,7 @@ struct ExportView: View {
             // 目录名带时间戳，导出 N 次就有 N 份「布布的一生」完整明文副本
             // （全部照片、视频、语音、健康记录）堆在 App 容器里，直到系统磁盘吃紧。
             try? FileManager.default.removeItem(at: folder)
-            exportedURL = zip
+            exportShare = ArchiveExportShare(url: zip, isComplete: result.incompleteReferences.isEmpty)
             // 诚实告知：有媒体因源文件缺失或拷贝失败未能纳入档案。
             if !result.incompleteReferences.isEmpty {
                 missingNote = "本次档案不完整：有 \(result.incompleteReferences.count) 个文件引用未能纳入。请先在同步中心下载完整原片后重新导出。"
@@ -247,10 +250,7 @@ struct ExportView: View {
             } else {
                 showShare = true
             }
-            // 记录导出时间戳，供「备份健康度卡」判断是否过期。
-            if result.incompleteReferences.isEmpty {
-                UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: "bubu.lastExportAt")
-            }
+            // 临时 ZIP 生成不等于已导出；只有系统分享明确完成后才更新导出时间。
         } catch {
             errorText = "导出失败：\(error.localizedDescription)"
         }
@@ -305,8 +305,16 @@ struct ExportView: View {
 // MARK: - 分享 sheet
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
+    var onCompletion: ((Bool, Error?) -> Void)? = nil
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
+        makeActivityController()
+    }
+    func makeActivityController() -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, completed, _, error in
+            onCompletion?(completed, error)
+        }
+        return controller
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

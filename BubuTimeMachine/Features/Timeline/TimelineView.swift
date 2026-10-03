@@ -297,6 +297,7 @@ struct TimelineList: View {
             }
             .buttonStyle(.plain)
             .matchedTransitionSource(id: entry.id, in: zoomNS)
+            .accessibilityIdentifier("timeline.memory.\(entry.id.uuidString)")
             .entranceEffect(index: entranceIndex(sectionIndex: sectionIndex, entryId: entry.id))
             // 进出视口时轻微淡入淡出 + 缩放。幅度刻意很小：时光轴是每天翻的页面，
             // 动效要像纸张的质感，不能像特效。reduceMotion 时整段跳过。
@@ -324,67 +325,64 @@ struct TimelineList: View {
         }
     }
 
-    // 大图卡片：顶部 hue 占位/真实图（带日期标）+ 标题正文 + tag 行
+    // 真实媒体保留大图；纯文字/声音直接阅读，不用假照片占据封面空间。
     private func bigPhotoCard(_ entry: Entry) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .bottomLeading) {
-                Group {
-                    if let media = cardMedia(entry) {
-                        MediaThumbnail(media: media, mediaStore: env.mediaStore)
-                    } else {
-                        BubuDreamPhoto(hue: entry.id.bubuStableHue, height: 178,
-                                       cornerRadius: 0, motif: entry.mood?.emoji ?? "◡")
-                    }
-                }
-                // 封面按照片自己的长宽比排版（夹在 4:5 ~ 1.9:1 之间）：
-                // 原来固定 178 高，竖图会被裁成中间一条窄带，看不出拍了什么。
-                // 宽屏把最小比例收紧到 1.5（而不是加 maxHeight——那会让封面按比例缩小、两侧留灰边）：
-                // 高度 = 宽 / 比例，天然受控，同时始终填满卡片宽度。
-                .aspectRatio(coverAspect(cardMedia(entry)), contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipped()
+            if let media = cardMedia(entry) {
+                ZStack(alignment: .bottomLeading) {
+                    MediaThumbnail(media: media, mediaStore: env.mediaStore)
+                    // 封面按照片自己的长宽比排版（夹在 4:5 ~ 1.9:1 之间）：
+                    // 原来固定 178 高，竖图会被裁成中间一条窄带，看不出拍了什么。
+                    // 宽屏把最小比例收紧到 1.5（而不是加 maxHeight——那会让封面按比例缩小、两侧留灰边）：
+                    // 高度 = 宽 / 比例，天然受控，同时始终填满卡片宽度。
+                    .aspectRatio(coverAspect(media), contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
 
-                Text("\(BubuDateFormat.monthDay(entry.happenedAt)) · \(BubuDateFormat.shortTime(entry.happenedAt))")
-                    .font(BubuTheme.Font.scaled(12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
-                    .padding(.horizontal, 14).padding(.bottom, 10)
-            }
+                    Text("\(BubuDateFormat.monthDay(entry.happenedAt)) · \(BubuDateFormat.shortTime(entry.happenedAt))")
+                        .font(BubuTheme.Font.scaled(12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+                        .padding(.horizontal, 14).padding(.bottom, 10)
+                }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(cardHeadline(entry))
-                    .font(BubuTheme.Font.scaled(15.5, weight: .heavy, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                    .lineLimit(1)
-                // 无标题时正文已被顶上去当标题，这里不能再原样重复一遍。
-                if let note = cardSubtitle(entry) {
-                    Text(note)
-                        .font(BubuTheme.Font.scaled(12.5, weight: .regular, design: .rounded))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(2)
-                }
-                HStack(spacing: 6) {
-                    if let mood = entry.mood {
-                        BubuTag(text: "\(mood.emoji) \(mood.rawValue)")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(cardHeadline(entry))
+                        .font(BubuTheme.Font.scaled(15.5, weight: .heavy, design: .rounded))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .lineLimit(1)
+                    // 无标题时正文已被顶上去当标题，这里不能再原样重复一遍。
+                    if let note = cardSubtitle(entry) {
+                        Text(note)
+                            .font(BubuTheme.Font.scaled(12.5, weight: .regular, design: .rounded))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                            .lineLimit(2)
                     }
-                    if let ft = entry.firstTime?.what, !ft.isEmpty {
-                        BubuTag(text: "第一次 · \(ft)", background: BubuTheme.Color.pink.opacity(0.5),
-                                foreground: BubuTheme.Color.deepRose)
+                    HStack(spacing: 6) {
+                        if let mood = entry.mood {
+                            BubuTag(text: "\(mood.emoji) \(mood.rawValue)")
+                        }
+                        if let ft = entry.firstTime?.what, !ft.isEmpty {
+                            BubuTag(text: "第一次 · \(ft)", background: BubuTheme.Color.pink.opacity(0.5),
+                                    foreground: BubuTheme.Color.deepRose)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
+                    .padding(.top, 4)
+                    if let hit = semanticMatches[entry.id] {
+                        Label(semanticReason(entry: entry, hit: hit), systemImage: "sparkle.magnifyingglass")
+                            .font(BubuTheme.Font.caption.weight(.semibold))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                            .accessibilityLabel("语义匹配原因：\(semanticReason(entry: entry, hit: hit))")
+                    }
                 }
-                .padding(.top, 4)
-                if let hit = semanticMatches[entry.id] {
-                    Label(semanticReason(entry: entry, hit: hit), systemImage: "sparkle.magnifyingglass")
-                        .font(BubuTheme.Font.caption.weight(.semibold))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-                        .accessibilityLabel("语义匹配原因：\(semanticReason(entry: entry, hit: hit))")
-                }
+                .padding(14)
+            } else {
+                compactTextContent(entry)
             }
-            .padding(14)
         }
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
@@ -395,8 +393,65 @@ struct TimelineList: View {
         .accessibilityLabel(cardAccessibilityLabel(entry))
     }
 
+    private func compactTextContent(_ entry: Entry) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(BubuDateFormat.monthDay(entry.happenedAt)) · \(BubuDateFormat.shortTime(entry.happenedAt)) · \(entry.authorRole)")
+                .font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let note = cardSubtitle(entry) {
+                    Text(cardHeadline(entry))
+                        .font(BubuTheme.Font.body.weight(.semibold))
+                        .lineLimit(1)
+                    Text(note)
+                        .font(BubuTheme.Font.body)
+                        .lineLimit(4)
+                } else {
+                    Text(cardHeadline(entry))
+                        .font(BubuTheme.Font.body)
+                        .lineLimit(4)
+                }
+            }
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if !entry.voiceNotes.isEmpty {
+                Label(entry.voiceNotes.count == 1 ? "语音记录" : "\(entry.voiceNotes.count) 段语音", systemImage: "waveform")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            if entry.mood != nil || !(entry.firstTime?.what.isEmpty ?? true) {
+                FlowLayout(spacing: 6) {
+                    if let mood = entry.mood {
+                        BubuTag(text: "\(mood.emoji) \(mood.rawValue)")
+                    }
+                    if let ft = entry.firstTime?.what, !ft.isEmpty {
+                        BubuTag(text: "第一次 · \(ft)", background: BubuTheme.Color.pink.opacity(0.5),
+                                foreground: BubuTheme.Color.deepRose)
+                    }
+                }
+            }
+            if let hit = semanticMatches[entry.id] {
+                Label(semanticReason(entry: entry, hit: hit), systemImage: "sparkle.magnifyingglass")
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("语义匹配原因：\(semanticReason(entry: entry, hit: hit))")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+    }
+
     private func cardAccessibilityLabel(_ entry: Entry) -> String {
         var parts = ["\(BubuDateFormat.monthDay(entry.happenedAt)) \(BubuDateFormat.shortTime(entry.happenedAt))"]
+        if cardMedia(entry) == nil {
+            parts.append(entry.authorRole)
+            if !entry.voiceNotes.isEmpty { parts.append("\(entry.voiceNotes.count) 段语音") }
+        }
         parts.append(cardHeadline(entry))
         if let note = cardSubtitle(entry) { parts.append(note) }
         if let mood = entry.mood { parts.append("心情\(mood.rawValue)") }
