@@ -3,10 +3,11 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
-    private func freshOnboarding(failSave: Bool = false) -> XCUIApplication {
+    private func freshOnboarding(failSave: Bool = false, darkAppearance: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-fresh-onboarding"]
         if failSave { app.launchArguments.append("-uitest-onboarding-fail-save") }
+        if darkAppearance { app.launchArguments.append("-uitest-dark-appearance") }
         app.launch()
         XCTAssertTrue(app.buttons["onboarding.continue"].waitForExistence(timeout: 12))
         let emptyStore = expectation(for: NSPredicate(format: "label CONTAINS %@", "done=false|identity=none|profiles=0|members=0|storedProfiles=0|storedMembers=0"),
@@ -17,23 +18,33 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     func testOnboardingRejectedSaveDoesNotCompleteOrChooseIdentity() throws {
+        try assertOnboardingRejectedSaveRetainsDraft(darkAppearance: false)
+    }
+
+    @MainActor
+    func testOnboardingRejectedSaveAndRetryInDarkAppearance() throws {
+        try assertOnboardingRejectedSaveRetainsDraft(darkAppearance: true)
+    }
+
+    @MainActor
+    private func assertOnboardingRejectedSaveRetainsDraft(darkAppearance: Bool) throws {
         continueAfterFailure = false
-        let app = freshOnboarding(failSave: true)
-        attachScreenshot("onboarding-fresh-welcome", to: self)
+        let app = freshOnboarding(failSave: true, darkAppearance: darkAppearance)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "onboarding-fresh-welcome", to: self)
         app.buttons["onboarding.continue"].tap()
         XCTAssertTrue(app.textFields["onboarding.child-name"].waitForExistence(timeout: 5))
-        attachScreenshot("onboarding-child-profile", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "onboarding-child-profile", to: self)
         app.buttons["onboarding.continue"].tap()
         let relation = app.buttons["onboarding.relation.爸爸"]
         XCTAssertTrue(relation.waitForExistence(timeout: 5)); relation.tap()
         let name = app.textFields["onboarding.member-name"]
         name.tap(); name.typeText("Synthetic Parent")
-        attachScreenshot("onboarding-member-draft-before-failure", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "onboarding-member-draft-before-failure", to: self)
         app.buttons["onboarding.continue"].tap()
         // Capture first: a falsely completed route is evidence, not a retry excuse.
         let failure = app.alerts["没有保存成功"]
         let rejected = failure.waitForExistence(timeout: 5)
-        attachScreenshot("onboarding-after-rejected-save", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "onboarding-after-rejected-save", to: self)
         XCTAssertTrue(rejected, "Persistence rejection must remain on onboarding with a recoverable error")
         failure.buttons["好"].tap()
         XCTAssertEqual(name.value as? String, "Synthetic Parent")
@@ -45,13 +56,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         XCTAssertEqual(name.value as? String, "Synthetic Parent")
         XCTAssertTrue(relation.isSelected)
-        attachScreenshot("onboarding-back-keeps-member-draft", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "onboarding-back-keeps-member-draft", to: self)
         app.buttons["onboarding.continue"].tap()
         let saved = expectation(for: NSPredicate(format: "label CONTAINS %@", "done=true|identity=set|profiles=1|members=1|storedProfiles=1|storedMembers=1|role=爸爸"),
                                 evaluatedWith: app.staticTexts["onboarding.audit.readback"])
         wait(for: [saved], timeout: 8)
         XCTAssertFalse(app.buttons["onboarding.continue"].exists)
-        attachScreenshot("onboarding-retry-commits-one-profile-and-member", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "onboarding-retry-commits-one-profile-and-member", to: self)
     }
 
     @MainActor
@@ -154,10 +165,11 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
-    private func controlledDiary(failSave: Bool = false) -> XCUIApplication {
+    private func controlledDiary(failSave: Bool = false, darkAppearance: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-diary-controlled"]
         if failSave { app.launchArguments.append("-uitest-diary-fail-save") }
+        if darkAppearance { app.launchArguments.append("-uitest-dark-appearance") }
         app.launch()
         XCTAssertTrue(app.buttons["diary.entry.00000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 12))
         return app
@@ -257,8 +269,18 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     func testDiaryRejectedSaveRetainsResultAndRetryCommitsOnlyOrigin() throws {
+        try assertDiaryRejectedSaveRetainsOrigin(darkAppearance: false)
+    }
+
+    @MainActor
+    func testDiaryRejectedSaveAndRetryInDarkAppearance() throws {
+        try assertDiaryRejectedSaveRetainsOrigin(darkAppearance: true)
+    }
+
+    @MainActor
+    private func assertDiaryRejectedSaveRetainsOrigin(darkAppearance: Bool) throws {
         continueAfterFailure = false
-        let app = controlledDiary(failSave: true)
+        let app = controlledDiary(failSave: true, darkAppearance: darkAppearance)
         let a = "00000000-0000-4000-8000-000000000001", b = "00000000-0000-4000-8000-000000000002"
         app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
         XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
@@ -266,7 +288,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         saveDiary("合成回复A1", in: app, expectSaved: false)
         let failure = app.alerts["没有保存成功"]
         XCTAssertTrue(failure.waitForExistence(timeout: 5))
-        attachScreenshot("diary-save-rejection-preserves-result", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "diary-save-rejection-preserves-result", to: self)
         failure.buttons["好"].tap()
         XCTAssertEqual(app.staticTexts["diary.output"].label, "合成回复A1")
         XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
@@ -274,7 +296,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "合成回复A1")
         XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>")
         XCTAssertFalse(app.buttons["diary.save"].isEnabled)
-        attachScreenshot("diary-save-retry-origin-only", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "diary-save-retry-origin-only", to: self)
     }
 
     @MainActor
@@ -891,22 +913,33 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     func testSchoolGraphicJournalDisplaysEveryReportGroup() throws {
+        try assertSchoolGraphicJournalDisplaysEveryReportGroup(darkAppearance: false)
+    }
+
+    @MainActor
+    func testSchoolGraphicJournalDarkAppearanceKeepsEveryReportGroup() throws {
+        try assertSchoolGraphicJournalDisplaysEveryReportGroup(darkAppearance: true)
+    }
+
+    @MainActor
+    private func assertSchoolGraphicJournalDisplaysEveryReportGroup(darkAppearance: Bool) throws {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-school-report"]
+        if darkAppearance { app.launchArguments.append("-uitest-dark-appearance") }
         app.launch()
         XCTAssertTrue(app.staticTexts["每日亲子桥"].waitForExistence(timeout: 12))
         XCTAssertTrue(app.staticTexts["100%"].exists)
-        attachScreenshot("school-graphic-life", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "school-graphic-life", to: self)
         for name in ["午睡", "体温", "在园表现", "身体与外观", "排便", "老师叮嘱"] {
             let section = app.staticTexts[name].firstMatch
             for _ in 0..<8 where !section.isHittable { app.swipeUp() }
             XCTAssertTrue(section.exists)
-            if name == "体温" { attachScreenshot("school-graphic-nap-temperature", to: self) }
-            if name == "身体与外观" { attachScreenshot("school-graphic-observations", to: self) }
+            if name == "体温" { attachScreenshot((darkAppearance ? "dark-" : "") + "school-graphic-nap-temperature", to: self) }
+            if name == "身体与外观" { attachScreenshot((darkAppearance ? "dark-" : "") + "school-graphic-observations", to: self) }
         }
         XCTAssertTrue(app.staticTexts["明天带上替换衣物（验收样例）"].exists)
-        attachScreenshot("school-graphic-notes", to: self)
+        attachScreenshot((darkAppearance ? "dark-" : "") + "school-graphic-notes", to: self)
     }
 
     @MainActor

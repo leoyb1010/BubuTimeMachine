@@ -62,10 +62,10 @@ struct OnboardingView: View {
             }
             .padding(28)
         }
-        .tint(theme.textAccent)
         .alert("没有保存成功", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("好", role: .cancel) { saveError = nil }
         } message: { Text(saveError ?? "") }
+        .tint(theme.textAccent)
     }
 
     private var backgroundGradient: some View {

@@ -49,6 +49,13 @@ jobs:
         timeout-minutes: 1
         run: bash scripts/check-duplicate-source-files.sh
 
+      - name: Test bounded executor and complete coverage gates
+        timeout-minutes: 1
+        run: |
+          set -o pipefail
+          python3 -m unittest discover -s scripts -p test_native_ci.py -v 2>&1 | tee /tmp/native-ci-selftest.log
+          python3 scripts/select-ui-retries.py --self-test
+
       - name: Select latest Xcode 26
         timeout-minutes: 1
         run: |
@@ -97,9 +104,11 @@ jobs:
           echo "device=$SIMULATOR" >> "$GITHUB_OUTPUT"
 
       - name: Clean build for testing
+        id: build
         timeout-minutes: 8
         run: |
           set -o pipefail
+          mkdir -p /tmp/bubu-native-results /tmp/bubu-ui-attempts
           xcodebuild -project BubuTimeMachine.xcodeproj \
             BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
             BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
@@ -113,16 +122,21 @@ jobs:
         if: matrix.device == 'iPhone'
         run: |
           set -o pipefail
-          xcodebuild -project BubuTimeMachine.xcodeproj \
+          python3 scripts/run-bounded.py --seconds 420 --grace-seconds 30 \
+            --record /tmp/bubu-ui-attempts/unit-command.json -- \
+            xcodebuild -project BubuTimeMachine.xcodeproj \
             BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
             BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.device }}" \
+            -resultBundlePath /tmp/bubu-native-results/unit.xcresult \
             -skip-testing:BubuTimeMachineUITests \
             test-without-building 2>&1 | tee /tmp/unit.log
 
       - name: 零警告门禁
+        id: warnings
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 1
         run: |
           if grep -E "^/Users/runner/work/.*/(BubuTimeMachine|BubuWatch|BubuWidgets|WatchShared)[^:]*:[0-9]+:[0-9]+: warning:" /tmp/build.log | sort -u > /tmp/warnings.txt && [ -s /tmp/warnings.txt ]; then
@@ -132,32 +146,54 @@ jobs:
           fi
           echo "零警告 ✅"
 
+      - name: Boot the selected simulator before timed UI execution
+        id: ready
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.warnings.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          python3 scripts/run-bounded.py --seconds 240 --grace-seconds 10 \
+            --record /tmp/bubu-ui-attempts/simulator-boot.json -- \
+            xcrun simctl bootstatus "${{ steps.sim.outputs.device }}" -b
+
       - name: Focused natural capture failure and retry journey
-        timeout-minutes: 8
+        id: focused
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
+        timeout-minutes: 12
         run: |
           set -o pipefail
-          xcodebuild -project BubuTimeMachine.xcodeproj \
+          python3 scripts/run-bounded.py --seconds 600 --grace-seconds 30 \
+            --record /tmp/bubu-ui-attempts/focused-command.json -- \
+            xcodebuild -project BubuTimeMachine.xcodeproj \
             BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
             BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.device }}" \
+            -resultBundlePath /tmp/bubu-native-results/focused.xcresult \
             -only-testing:BubuTimeMachineUITests/BubuTimeMachineUITests/testNaturalCaptureCancelThenSaveReturnsToTimeline \
             test-without-building 2>&1 | tee /tmp/ui-focused.log
+          python3 scripts/select-ui-retries.py --validate-only --device '${{ matrix.device }}' \
+            --source BubuTimeMachineUITests/BubuTimeMachineUITests.swift \
+            --only-case testNaturalCaptureCancelThenSaveReturnsToTimeline \
+            --first-log /tmp/ui-focused.log --output /tmp/bubu-ui-attempts/focused
 
       - name: Prepare synthetic PhotosPicker assets
+        id: photos
+        # A focused failure remains red but must not suppress the complete suite.
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: 10
         run: bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.device }}"
 
       - name: Reserve failure evidence time
         id: budget
+        if: ${{ !cancelled() && steps.photos.outcome == 'success' }}
         timeout-minutes: 1
         run: |
           python3 - <<'PYTHON'
           import math, os, time
           elapsed = math.ceil((time.time() - int(os.environ["BUBU_CI_STARTED_AT"])) / 60)
-          # Two minutes cover job setup/rounding; nine cover export, image upload and raw-result preservation.
-          minutes = min(36, 60 - 2 - 9 - elapsed)
+          # Two minutes cover job setup/rounding; ten cover a stable snapshot, export, image upload and raw-result preservation.
+          minutes = min(36, 60 - 2 - 10 - elapsed)
           if minutes < 1:
               raise SystemExit("Validation budget exhausted before UI; preserving earlier evidence")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -167,16 +203,23 @@ jobs:
 
       - name: UI 回归 (${{ matrix.device }})
         id: ui
+        if: ${{ !cancelled() && steps.budget.outcome == 'success' }}
         # Leave time for evidence export even when a simulator stalls.
         timeout-minutes: ${{ fromJSON(steps.budget.outputs.minutes) }}
         run: |
           set -o pipefail
-          xcodebuild -project BubuTimeMachine.xcodeproj \
+          # The wrapper gets interrupted before the step limit, with time to finish
+          # the xcresult. A retry shares this deadline; it cannot restart the clock.
+          UI_DEADLINE=$(( $(date +%s) + ${{ steps.budget.outputs.minutes }} * 60 - 45 ))
+          python3 scripts/run-bounded.py --deadline-epoch "$UI_DEADLINE" --grace-seconds 30 \
+            --record /tmp/bubu-ui-attempts/full-first-command.json -- \
+            xcodebuild -project BubuTimeMachine.xcodeproj \
             BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
             BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
             -scheme BubuTimeMachine \
             -parallel-testing-enabled NO \
             -destination "id=${{ steps.sim.outputs.device }}" \
+            -resultBundlePath /tmp/bubu-native-results/full-first.xcresult \
             -only-testing:BubuTimeMachineUITests \
             test-without-building 2>&1 | tee /tmp/ui-first.log \
           || {
@@ -192,12 +235,15 @@ jobs:
             done < /tmp/bubu-ui-attempts/retry-tests.txt
             [ "${#RETRY[@]}" -gt 0 ] || exit 1
             retry_status=0
-            xcodebuild -project BubuTimeMachine.xcodeproj \
+            python3 scripts/run-bounded.py --deadline-epoch "$UI_DEADLINE" --grace-seconds 30 \
+              --record /tmp/bubu-ui-attempts/full-retry-command.json -- \
+              xcodebuild -project BubuTimeMachine.xcodeproj \
               BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
               BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
               -scheme BubuTimeMachine \
               -parallel-testing-enabled NO \
               -destination "id=${{ steps.sim.outputs.device }}" \
+              -resultBundlePath /tmp/bubu-native-results/full-retry.xcresult \
               "${RETRY[@]}" \
               test-without-building 2>&1 | tee /tmp/ui-retry.log || retry_status=$?
             python3 scripts/select-ui-retries.py --device '${{ matrix.device }}' \
@@ -206,6 +252,18 @@ jobs:
               --output /tmp/bubu-ui-attempts || exit 1
             [ "$retry_status" -eq 0 ] || exit "$retry_status"
           }
+          if [ ! -f /tmp/ui-retry.log ]; then
+            python3 scripts/select-ui-retries.py --validate-only --device '${{ matrix.device }}' \
+              --source BubuTimeMachineUITests/BubuTimeMachineUITests.swift \
+              --first-log /tmp/ui-first.log --output /tmp/bubu-ui-attempts
+          fi
+
+      - name: Snapshot native result files after command completion
+        if: ${{ always() }}
+        timeout-minutes: 1
+        run: |
+          python3 scripts/snapshot-native-results.py \
+            --source /tmp/bubu-native-results --destination /tmp/bubu-result-snapshot
 
       - name: Preserve synthetic simulator evidence
         if: ${{ always() }}
@@ -214,16 +272,18 @@ jobs:
         run: |
           mkdir -p /tmp/bubu-ci-diagnostics
           cp /tmp/bubu-ui-attempts/*.json /tmp/bubu-ui-attempts/*.txt /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
-          cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
+          cp /tmp/bubu-ui-attempts/focused/attempt-summary.json /tmp/bubu-ci-diagnostics/focused-attempt-summary.json 2>/dev/null || true
+          cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log /tmp/native-ci-selftest.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
+          cp /tmp/bubu-result-snapshot/snapshot-status.json /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
           python3 - <<'PYTHON'
           from pathlib import Path
           import subprocess, time, json
-          root = Path.home() / "Library/Developer/Xcode/DerivedData"
+          root = Path("/tmp/bubu-result-snapshot")
           output = Path("/tmp/bubu-ci-diagnostics")
           export = ["xcrun", "xcresulttool", "export", "attachments"]
           deadline = time.monotonic() + 205
           records = []
-          results = sorted(root.glob("*/Logs/Test/*.xcresult"), key=lambda p: p.stat().st_mtime, reverse=True)
+          results = sorted(root.glob("*.xcresult"), key=lambda p: p.stat().st_mtime, reverse=True)
           # Export failures first: a large successful screenshot set previously consumed
           # the full per-bundle budget before any failed onboarding/star evidence.
           for result in results:
@@ -285,7 +345,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: synthetic-${{ matrix.device }}-xcresults-${{ github.sha }}
-          path: ~/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult
+          path: |
+            /tmp/bubu-result-snapshot/*.xcresult
+            /tmp/bubu-result-snapshot/snapshot-status.json
           retention-days: 3
           if-no-files-found: warn
 

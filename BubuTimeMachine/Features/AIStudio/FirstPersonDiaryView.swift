@@ -65,12 +65,12 @@ struct FirstPersonDiaryView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("第一人称日记")
         .navigationBarTitleDisplayMode(.inline)
-        .tint(env.theme.theme.textAccent)
         .alert("没有保存成功", isPresented: Binding(
             get: { selectedDraft.saveError != nil },
             set: { shown in if !shown, let selected { rewriteState.saveFailed(for: selected.id, message: nil) } })) {
                 Button("好", role: .cancel) {}
             } message: { Text(selectedDraft.saveError ?? "") }
+        .tint(env.theme.theme.textAccent)
         .onDisappear {
             typeTask?.cancel()
             rewriteState.cancelAll()

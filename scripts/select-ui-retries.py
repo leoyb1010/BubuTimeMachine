@@ -64,12 +64,30 @@ def main():
     p.add_argument('--source', type=Path)
     p.add_argument('--first-log', type=Path)
     p.add_argument('--retry-log', type=Path)
+    p.add_argument('--validate-only', action='store_true')
+    p.add_argument('--only-case', action='append', default=[])
     p.add_argument('--output', type=Path)
     a = p.parse_args()
     if a.self_test: self_test(); return
     if not a.source or not a.first_log or not a.output or not a.device: p.error('device, source, first-log, output required')
     expected = set(re.findall(r'\bfunc\s+(test\w+)\s*\(', a.source.read_text()))
     if not expected: raise ValueError('No expected XCTest cases found')
+    if a.only_case:
+        if not set(a.only_case) <= expected:
+            raise ValueError('Focused selection contains a case absent from source')
+        expected = set(a.only_case)
+    if a.validate_only:
+        allowed_skips = {'testIPadLandscapeKeepsNavigationAndRecord'} if a.device == 'iPhone' else set()
+        observed = completed_cases(a.first_log.read_text(), expected, allowed_skips)
+        if any(status == 'failed' for status in observed.values()):
+            raise SystemExit('A failed case cannot be reported as a first-attempt pass')
+        a.output.mkdir(parents=True, exist_ok=True)
+        (a.output/'attempt-summary.json').write_text(json.dumps({
+            'first_attempt': observed, 'first_attempt_failed': False,
+            'result': 'passed_first_attempt', 'expected_count': len(expected), 'device': a.device,
+            'intentional_platform_skips': sorted(name for name, status in observed.items() if status == 'skipped'),
+        }, indent=2) + '\n')
+        return
     first, failures = select(a.first_log.read_text(), expected, a.device)
     result = {'first_attempt': first, 'first_attempt_failed': True, 'retry_selected': failures,
               'result': 'retry_pending', 'expected_count': len(expected), 'device': a.device,

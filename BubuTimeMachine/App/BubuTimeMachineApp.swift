@@ -73,6 +73,18 @@ struct BubuTimeMachineApp: App {
         SharedModelContainer.injected = modelContainer
     }
 
+    private var preferredAppColorScheme: ColorScheme? {
+        #if DEBUG
+        // Synthetic store only: exercise the real system dark appearance without
+        // persisting a theme preference or touching an existing household store.
+        if Self.usesInMemoryUITestStore,
+           ProcessInfo.processInfo.arguments.contains("-uitest-dark-appearance") {
+            return .dark
+        }
+        #endif
+        return env.theme.theme.isDark ? .dark : nil
+    }
+
     var body: some Scene {
         WindowGroup {
             // 每个窗口一份 router：多窗口下深链只影响收到它的那个窗口
@@ -81,7 +93,7 @@ struct BubuTimeMachineApp: App {
                 .tint(env.theme.theme.primary)
                 // 选了深色主题（星夜）就整 App 强制深色：动态色 token 统一翻到深色值，
                 // 否则浅色系统下暗渐变底 + 深棕文字 = 全 App 不可读（R4 待核-星夜）
-                .preferredColorScheme(env.theme.theme.isDark ? .dark : nil)
+                .preferredColorScheme(preferredAppColorScheme)
                 .task {
                     // A recovery container is deliberately ephemeral. Do not consume durable
                     // migration flags, queued Watch imports, or replace saved snapshots with it.

@@ -73,6 +73,10 @@ struct SchoolJournalHome: View {
             proxy.scrollTo("school.day-top", anchor: .top)
         }
         }
+        // With the navigation bar hidden, scrolling cards otherwise paint behind
+        // the system status glyphs. Clip content, while keeping the paper below
+        // free to extend through the safe area.
+        .clipped()
         .foregroundStyle(BubuTheme.Color.warmBrown)
         .background {
             if colorScheme == .dark { BubuTheme.Color.background.ignoresSafeArea() }
