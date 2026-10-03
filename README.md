@@ -5,7 +5,7 @@
 
 原生 iOS（SwiftUI + SwiftData）与 HarmonyOS（ArkTS + ArkUI）双端工程，为家庭记录孩子成长、传承一生。离线优先、隐私至上、自托管。
 
-> 当前源码基线为 iOS/watchOS 2.21.0 与 HarmonyOS 2.15.0，尚不能宣称双端版本或功能追平。同步、档案字段与加密保护共用后端契约；真实进度和边界见
+> 当前源码基线为 iOS/watchOS 2.22.0 与 HarmonyOS 2.15.0，尚不能宣称双端版本或功能追平。同步、档案字段与加密保护共用后端契约；真实进度和边界见
 > [`harmony/PARITY_MATRIX.md`](harmony/PARITY_MATRIX.md)，不再以“页面存在”代替完成。
 
 ## 当前进度

@@ -1,6 +1,6 @@
 # 布布时光机 · HarmonyOS 手机端
 
-鸿蒙原生客户端（源码版本 2.15.0；iOS 为 2.21.0，尚未统一），使用 ArkTS / ArkUI，与 iOS 共用 PocketBase + FastAPI 自托管后端。
+鸿蒙原生客户端（源码版本 2.15.0；iOS 为 2.22.0，尚未统一），使用 ArkTS / ArkUI，与 iOS 共用 PocketBase + FastAPI 自托管后端。
 
 本工程只支持 HarmonyOS 手机。平板、折叠屏、鸿蒙电脑和穿戴端不在本次范围，`module.json5` 仅声明 `phone`。
 
