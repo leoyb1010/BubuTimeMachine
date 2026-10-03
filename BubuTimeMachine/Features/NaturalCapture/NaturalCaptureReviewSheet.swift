@@ -22,9 +22,6 @@ struct NaturalCaptureReviewSheet: View {
     @State private var showUnconfirmedAlert = false
     @State private var saveError: String?
     @State private var didSave = false
-    #if DEBUG
-    @State private var injectedSaveFailure = false
-    #endif
 
     init(result: NaturalCaptureResult, originalText: String, onSaved: @escaping () -> Void) {
         self.result = result
@@ -407,12 +404,7 @@ struct NaturalCaptureReviewSheet: View {
             try NaturalCaptureRouter.saveBatch(savableItems,
                 authorRole: env.config.currentRole.rawValue, container: context.container) { batchContext in
                     #if DEBUG
-                    let arguments = ProcessInfo.processInfo.arguments
-                    if !injectedSaveFailure, arguments.contains("-uitest-in-memory"),
-                       arguments.contains("-uitest-natural-fail-save") {
-                        injectedSaveFailure = true
-                        throw CocoaError(.fileWriteOutOfSpace)
-                    }
+                    try NaturalCaptureUITestSaveFault.injectOnce(in: batchContext.container)
                     #endif
                     try batchContext.save()
                 }
@@ -421,7 +413,7 @@ struct NaturalCaptureReviewSheet: View {
             if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
                ProcessInfo.processInfo.arguments.contains("-uitest-natural-fail-save") {
                 let failure = error as NSError
-                print("[NaturalCaptureUITest] save error: \(failure.domain) / \(failure.code); injected=\(injectedSaveFailure)")
+                print("[NaturalCaptureUITest] save error: \(failure.domain) / \(failure.code); injected=\(NaturalCaptureUITestSaveFault.didInject)")
             }
             #endif
             saveError = "保存失败，内容还在这里。请检查可用存储空间后重试。"
@@ -429,7 +421,7 @@ struct NaturalCaptureReviewSheet: View {
             if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
                ProcessInfo.processInfo.arguments.contains("-uitest-natural-fail-save") {
                 let failure = error as NSError
-                saveError! += " [synthetic: \(failure.domain)/\(failure.code), injected=\(injectedSaveFailure)]"
+                saveError! += " [synthetic: \(failure.domain)/\(failure.code), injected=\(NaturalCaptureUITestSaveFault.didInject)]"
             }
             #endif
             return
@@ -444,3 +436,23 @@ struct NaturalCaptureReviewSheet: View {
         dismiss()
     }
 }
+
+#if DEBUG
+/// The synthetic disk fault belongs to the launched test process, not a sheet's
+/// view state, which SwiftUI can reconstruct after a model-context rollback.
+@MainActor
+private enum NaturalCaptureUITestSaveFault {
+    static var didInject = false
+
+    static func injectOnce(in container: ModelContainer) throws {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-uitest-in-memory"),
+              arguments.contains("-uitest-natural-fail-save"),
+              !container.configurations.isEmpty,
+              container.configurations.allSatisfy({ $0.isStoredInMemoryOnly }),
+              !didInject else { return }
+        didInject = true
+        throw CocoaError(.fileWriteOutOfSpace)
+    }
+}
+#endif
