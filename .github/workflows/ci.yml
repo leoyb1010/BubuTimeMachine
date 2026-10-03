@@ -132,6 +132,19 @@ jobs:
           fi
           echo "零警告 ✅"
 
+      - name: Focused natural capture failure and retry journey
+        timeout-minutes: 8
+        run: |
+          set -o pipefail
+          xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
+            -scheme BubuTimeMachine \
+            -parallel-testing-enabled NO \
+            -destination "id=${{ steps.sim.outputs.device }}" \
+            -only-testing:BubuTimeMachineUITests/BubuTimeMachineUITests/testNaturalCaptureCancelThenSaveReturnsToTimeline \
+            test-without-building 2>&1 | tee /tmp/ui-focused.log
+
       - name: Prepare synthetic PhotosPicker assets
         timeout-minutes: 10
         run: bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.device }}"
@@ -185,7 +198,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p /tmp/bubu-ci-diagnostics
-          cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
+          cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
           python3 - <<'PYTHON'
           from pathlib import Path
           import subprocess
@@ -200,7 +213,7 @@ jobs:
               except subprocess.TimeoutExpired:
                   print("Attachment export timed out:", result.name)
           PYTHON
-          for log in /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log; do
+          for log in /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log; do
             if [ -f "$log" ]; then
               grep -E "error:|XCTAssert|Failing tests|Test Case .* failed|PhotosPicker failure" "$log" | tail -60 || true
             fi

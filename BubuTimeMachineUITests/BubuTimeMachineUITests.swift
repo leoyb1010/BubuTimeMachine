@@ -519,7 +519,15 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts[note].firstMatch.exists, "保存失败后确认内容不能消失")
         app.navigationBars["确认保存"].buttons["保存"].tap()
-        XCTAssertTrue(app.navigationBars["一句话智能记录"].waitForExistence(timeout: 8))
+        let returnedToInput = app.navigationBars["一句话智能记录"].waitForExistence(timeout: 8)
+        if !returnedToInput {
+            attachScreenshot("natural-retry-final-state", to: self)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "natural-retry-final-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertTrue(returnedToInput, "重试保存后应回到智能记录输入页")
         app.buttons["关闭"].tap()
         XCTAssertTrue(app.buttons["以后再说"].waitForExistence(timeout: 8))
         app.buttons["以后再说"].tap()
