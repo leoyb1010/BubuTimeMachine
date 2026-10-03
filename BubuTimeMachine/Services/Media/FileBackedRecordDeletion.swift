@@ -42,6 +42,16 @@ enum FileBackedRecordDeletion {
               container.configurations.allSatisfy({ !$0.isStoredInMemoryOnly }) else {
             throw DeletionError.ephemeralStore
         }
+        // Do not discard an unsaved edit on the exact object being deleted. A
+        // separate context cannot safely settle that editor's pending update.
+        let dirtyTarget = uiContext.changedModelsArray.contains { model in
+            switch request.kind {
+            case .media: return (model as? Media)?.id == request.id
+            case .voice: return (model as? VoiceNote)?.id == request.id
+            case .capsule: return (model as? TimeCapsule)?.id == request.id
+            }
+        }
+        guard !dirtyTarget else { throw DeletionError.changedRecord }
         let context = ModelContext(container)
         context.autosaveEnabled = false
         let id = request.id

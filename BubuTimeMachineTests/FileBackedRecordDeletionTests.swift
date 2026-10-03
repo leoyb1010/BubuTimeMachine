@@ -96,6 +96,10 @@ struct FileBackedRecordDeletionTests {
         #expect(otherDraft.note == "unrelated unsaved draft")
         let persistedParent = try #require(try ModelContext(f.container).fetch(FetchDescriptor<Entry>()).first)
         #expect(persistedParent.note == "persisted parent")
+        // Observe the already-loaded UI relationship before saving the editor.
+        await Task.yield()
+        if kind == "media" { #expect(f.parent.media.isEmpty) }
+        if kind == "voice" { #expect(f.parent.voiceNotes.isEmpty) }
         // Completing the already-open editor must not recreate a deleted relationship.
         try f.context.save()
         await Task.yield()
@@ -237,6 +241,34 @@ struct FileBackedRecordDeletionTests {
             #expect(!cleaned && FileManager.default.fileExists(atPath: f.file("original.bin").path))
             #expect(try recordCount(f) == 1)
         }
+    }
+
+    @Test("正在编辑的同一子对象先拒绝删除，后续保存不丢稿", arguments: ["media", "voice", "capsule"])
+    func dirtyChildRefusesDeletion(_ kind: String) throws {
+        let f = try fixture(kind)
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        switch f.request.kind {
+        case .media:
+            let value = try #require(try f.context.fetch(FetchDescriptor<Media>()).first)
+            value.aiTags = ["unsaved edit"]
+        case .voice:
+            let value = try #require(try f.context.fetch(FetchDescriptor<VoiceNote>()).first)
+            value.transcript = "unsaved edit"
+        case .capsule:
+            let value = try #require(try f.context.fetch(FetchDescriptor<TimeCapsule>()).first)
+            value.title = "unsaved edit"
+        }
+        var cleaned = false
+        #expect(throws: FileBackedRecordDeletion.DeletionError.self) {
+            try FileBackedRecordDeletion.delete(f.request, from: f.context,
+                removeFiles: { _, _ in cleaned = true })
+        }
+        #expect(!cleaned && f.context.hasChanges)
+        #expect(try recordCount(f) == 1)
+        try f.context.save()
+        #expect(try recordCount(f) == 1)
+        #expect(try Data(contentsOf: f.file("original.bin")) == Data("original bytes".utf8))
+        #expect(try ModelContext(f.container).fetchCount(FetchDescriptor<PendingDeletion>()) == 0)
     }
 
 }
