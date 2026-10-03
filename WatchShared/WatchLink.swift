@@ -28,12 +28,15 @@ public nonisolated struct WatchSnapshot: Codable, Sendable {
     public var todayStats: [String: Int]?
     /// 哄睡进行中的起始时刻。非 nil 时打卡页「睡觉」进入呼吸态并显示已睡时长。
     public var sleepingSince: Date?
+    /// v3: phone-curated, photo-only reading deck. nil means an older phone;
+    /// an empty array is authoritative (no eligible photos). Never a health feed.
+    public var photoCards: [WatchMemory]?
 
     public init(childName: String, birthday: Date?, roleRaw: String,
                 achievedMilestones: Int, totalMilestones: Int,
                 recent: [WatchRecent], avatarData: Data? = nil, updatedAt: Date,
                 memories: [WatchMemory]? = nil, todayStats: [String: Int]? = nil,
-                sleepingSince: Date? = nil) {
+                sleepingSince: Date? = nil, photoCards: [WatchMemory]? = nil) {
         self.childName = childName
         self.birthday = birthday
         self.roleRaw = roleRaw
@@ -45,6 +48,7 @@ public nonisolated struct WatchSnapshot: Codable, Sendable {
         self.memories = memories
         self.todayStats = todayStats
         self.sleepingSince = sleepingSince
+        self.photoCards = photoCards
     }
 }
 

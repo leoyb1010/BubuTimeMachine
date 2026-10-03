@@ -21,7 +21,7 @@ let recent = memories.map { memory -> [String: Any] in
 }
 var snapshot: [String: Any] = ["childName": "小布", "birthday": "2025-01-01T00:00:00Z",
     "roleRaw": "爸爸", "achievedMilestones": 12, "totalMilestones": 36,
-    "recent": recent, "memories": memories, "updatedAt": ISO8601DateFormatter().string(from: .now)]
+    "recent": recent, "memories": memories, "photoCards": memories, "updatedAt": ISO8601DateFormatter().string(from: .now)]
 if mode != "empty" { snapshot["avatarData"] = illustration.base64EncodedString() }
 let data = try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])
 print(data.map { String(format: "%02x", $0) }.joined())

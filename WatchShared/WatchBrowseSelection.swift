@@ -29,20 +29,17 @@ public nonisolated struct WatchBrowseSelection: Sendable {
     }
 }
 
-/// v1 phones only have recent records. Browse them without changing the wire contract.
+/// Only the explicit photo deck is eligible. Legacy health/text feeds stay off screen.
 public nonisolated enum WatchReadModel {
     public static func memories(from snapshot: WatchSnapshot?) -> [WatchMemory] {
-        guard let snapshot else { return [] }
-        let source: [WatchMemory]
-        if let memories = snapshot.memories, !memories.isEmpty {
-            source = memories
-        } else {
-            source = snapshot.recent.map {
-                WatchMemory(id: $0.id, dateText: $0.dateText, note: $0.note, ageText: "",
-                            moodEmoji: $0.moodEmoji, photoFileName: $0.photoFileName)
-            }
-        }
-        var seen = Set<String>()
-        return source.filter { seen.insert($0.id).inserted }
+        var ids = Set<String>(), names = Set<String>()
+        return Array((snapshot?.photoCards ?? []).filter {
+            guard let name = $0.photoFileName, !name.isEmpty,
+                  name == (name as NSString).lastPathComponent,
+                  name != ".", name != "..", !name.contains("\\"),
+                  !ids.contains($0.id), !names.contains(name) else { return false }
+            ids.insert($0.id); names.insert(name)
+            return true
+        }.prefix(5))
     }
 }

@@ -14,7 +14,7 @@ struct WatchBrowseSelectionTests {
         WatchSnapshot(childName: "测试宝宝", birthday: nil, roleRaw: "爸爸",
                       achievedMilestones: 1, totalMilestones: 10,
                       recent: recent, updatedAt: Date(timeIntervalSince1970: 0),
-                      memories: memories)
+                      memories: memories, photoCards: memories)
     }
 
     @Test("首次接收快照选中第一段回忆")
@@ -144,7 +144,7 @@ struct WatchBrowseSelectionTests {
         #expect(WatchReadModel.memories(from: snapshot(memories: [])).isEmpty)
     }
 
-    @Test("有 v2 回忆时优先回忆而不是混入 recent")
+    @Test("只用照片清单，不混入 recent 动态")
     func memoriesTakePriority() {
         let item = memory("m", note: "当时的回忆")
         let recent = WatchRecent(id: "r", dateText: "今天", note: "最近", moodEmoji: nil)
@@ -152,23 +152,15 @@ struct WatchBrowseSelectionTests {
         #expect(result == [item])
     }
 
-    @Test("空 v2 回忆回落 recent，保留日期摘要心情与照片")
+    @Test("明确空照片清单不回落到 recent 动态")
     func emptyMemoriesFallBackToRecent() throws {
         let recent = WatchRecent(id: "r", dateText: "10月2日", note: "第一次画画",
                                  moodEmoji: "🎨", photoFileName: "drawing.jpg")
         let result = WatchReadModel.memories(from: snapshot(memories: [], recent: [recent]))
-        let item = try #require(result.first)
-        #expect(result.count == 1)
-        #expect(item.id == recent.id)
-        #expect(item.dateText == recent.dateText)
-        #expect(item.note == recent.note)
-        #expect(item.moodEmoji == recent.moodEmoji)
-        #expect(item.photoFileName == recent.photoFileName)
-        #expect(item.ageText.isEmpty)
-        #expect(item.isOnThisDay == false)
+        #expect(result.isEmpty)
     }
 
-    @Test("真实 v1 形状解码后仍可浏览文字回忆")
+    @Test("旧快照仍能解码，但不把文字或健康动态显示为照片")
     func legacySnapshotFallsBackToRecent() throws {
         let json = """
         {"childName":"测试宝宝","birthday":null,"roleRaw":"爸爸",
@@ -179,13 +171,8 @@ struct WatchBrowseSelectionTests {
         let decoded = try #require(WatchLink.decode(WatchSnapshot.self, from: Data(json.utf8)))
         #expect(decoded.memories == nil)
         let result = WatchReadModel.memories(from: decoded)
-        let item = try #require(result.first)
-        #expect(result.count == 1)
-        #expect(item.id == "legacy")
-        #expect(item.note == "旧版回忆")
-        #expect(item.ageText.isEmpty)
-        #expect(item.isOnThisDay == false)
-        #expect(item.photoFileName == nil)
+        #expect(decoded.photoCards == nil)
+        #expect(result.isEmpty)
     }
 
     @Test("回忆与 recent 都按 ID 保序去重，保留第一条内容")
@@ -202,7 +189,25 @@ struct WatchBrowseSelectionTests {
             WatchRecent(id: "b", dateText: "昨天", note: "第二条", moodEmoji: nil)
         ]
         let fallback = WatchReadModel.memories(from: snapshot(recent: recent))
-        #expect(fallback.map(\.id) == ["a", "b"])
-        #expect(fallback.map(\.note) == ["第一条", "第二条"])
+        #expect(fallback.isEmpty)
+    }
+
+    @Test("照片清单最多五张，按素材文件名再去重")
+    func boundedPhotoDeck() {
+        var repeated = memory("repeat")
+        repeated.photoFileName = "0.jpg"
+        let items = [memory("0"), repeated] + (1..<12).map { memory(String($0)) }
+        let result = WatchReadModel.memories(from: snapshot(memories: items))
+        #expect(result.map(\.id) == ["0", "1", "2", "3", "4"])
+    }
+
+    @Test("无图片或越界文件名不进入照片清单")
+    func rejectsInvalidPhotoNames() {
+        let items: [WatchMemory] = [nil, "", "../secret.jpg", ".", "..", "a\\b.jpg"].enumerated().map { index, name in
+            var value = memory(String(index))
+            value.photoFileName = name
+            return value
+        }
+        #expect(WatchReadModel.memories(from: snapshot(memories: items)).isEmpty)
     }
 }

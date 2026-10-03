@@ -62,7 +62,8 @@ final class WatchConnectivityManager: NSObject {
         } catch {
             log.error("push snapshot failed: \(error.localizedDescription)")
         }
-        pushPhotoBundle(names: photoNames(memories: snapshot.memories, recent: snapshot.recent),
+        pushPhotoBundle(names: photoNames(photoCards: snapshot.photoCards,
+                                         memories: snapshot.memories, recent: snapshot.recent),
                         session: session)
     }
 
@@ -75,10 +76,13 @@ final class WatchConnectivityManager: NSObject {
     /// 最近一次组包用的照片名清单，手表请求补发时直接按它重组，不用重读库。
     private var lastPhotoNames: [String]?
 
-    /// 回忆 + 最近 两处引用的照片名并集（去重保序）。
-    private func photoNames(memories: [WatchMemory]?, recent: [WatchRecent]?) -> [String] {
+    /// 新版五张生活照 + 旧版回忆/最近引用的照片名并集（去重保序）。
+    private func photoNames(photoCards: [WatchMemory]?, memories: [WatchMemory]?, recent: [WatchRecent]?) -> [String] {
         var seen = Set<String>()
         var names: [String] = []
+        for name in (photoCards ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
+            names.append(name)
+        }
         for name in (memories ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
             names.append(name)
         }
@@ -325,7 +329,135 @@ enum WatchSnapshotBuilder {
                              updatedAt: .now,
                              memories: memories(context: context, birthday: profile.birthday),
                              todayStats: todayStats(context: context),
-                             sleepingSince: SharedDefaults.sleepStartedAt)
+                             sleepingSince: SharedDefaults.sleepStartedAt,
+                             photoCards: photoCards(context: context, birthday: profile.birthday))
+    }
+
+    // MARK: 五张生活照（新版单屏）
+
+    @MainActor
+    private static func photoCards(context: ModelContext, birthday: Date?) -> [WatchMemory] {
+        var descriptor = FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived },
+                                                sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
+        descriptor.fetchLimit = 300
+        let entries = (try? context.fetch(descriptor)) ?? []
+        return photoCards(entries: entries, birthday: birthday)
+    }
+
+    /// 只读筛选；文件解析可注入临时目录，测试不接触家庭真实照片。
+    /// 只排除已有明确标签的截图/文档，不声称能识别所有聊天截图。
+    @MainActor
+    static func photoCards(entries: [Entry], birthday: Date?, now: Date = .now,
+                           calendar: Calendar = .current,
+                           photoURL: (String) -> URL? = localPhotoURL) -> [WatchMemory] {
+        var seenIDs = Set<UUID>()
+        var seenHashes = Set<String>()
+        var seenNames = Set<String>()
+        var picked: [(date: Date, card: WatchMemory)] = []
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日"
+        let today = calendar.startOfDay(for: now)
+        let entries = entries.filter { !$0.isArchived }.sorted {
+            if $0.happenedAt == $1.happenedAt { return $0.id.uuidString < $1.id.uuidString }
+            return $0.happenedAt > $1.happenedAt
+        }.prefix(300)
+
+        func isOnThisDay(_ date: Date) -> Bool {
+            calendar.startOfDay(for: date) < today
+                && calendar.component(.month, from: date) == calendar.component(.month, from: now)
+                && calendar.component(.day, from: date) == calendar.component(.day, from: now)
+        }
+
+        // 只有实际试选时才读文件、解码；不预先检查全部 300 条的照片。
+        @MainActor
+        func take(_ entry: Entry) -> Bool {
+            guard SchoolDailyReport.from(note: entry.note) == nil else { return false }
+            for media in entry.sortedMedia where media.typeRaw == MediaType.photo.rawValue {
+                guard !media.aiTags.contains(where: isExcludedPhotoTag) else { continue }
+                let id = media.id
+                let hash = media.contentHash?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !seenIDs.contains(id),
+                      hash.map({ $0.isEmpty || !seenHashes.contains($0) }) != false else { continue }
+                // 取局部值，避免 Release 下 ?? autoclosure 捕获 SwiftData 模型。
+                let thumb = media.thumbnailFileName
+                let original = media.localFileName
+                let fileNames = [thumb, original].compactMap { $0 }.filter {
+                    !$0.isEmpty && $0 != "." && $0 != ".." && ($0 as NSString).lastPathComponent == $0
+                }
+                guard let name = fileNames.first(where: { name in
+                    guard let url = photoURL(name) else { return false }
+                    return ThumbnailProvider.downsample(url: url, maxPixel: 1) != nil
+                }), !seenNames.contains(name) else { continue }
+
+                seenIDs.insert(id)
+                if let hash, !hash.isEmpty { seenHashes.insert(hash) }
+                seenNames.insert(name)
+                let date = entry.happenedAt
+                picked.append((date, WatchMemory(
+                    id: id.uuidString, dateText: formatter.string(from: date),
+                    note: photoCaption(note: entry.note, title: entry.title),
+                    ageText: birthday.map { AgeCalculator.compactAge(birthday: $0, at: date) } ?? "",
+                    isOnThisDay: isOnThisDay(date), moodEmoji: entry.mood?.emoji, photoFileName: name)))
+                return true // 每条记录最多一张生活照。
+            }
+            return false
+        }
+
+        var scanned = 0
+        for entry in entries {
+            scanned += 1
+            _ = take(entry)
+            if picked.count == 3 { break }
+        }
+        guard let oldestRecent = picked.last?.date else { return [] }
+        var dates = Set(picked.map { calendar.startOfDay(for: $0.date) })
+        let older = entries.dropFirst(scanned).filter {
+            calendar.startOfDay(for: $0.happenedAt) < calendar.startOfDay(for: oldestRecent)
+        }
+        // 那年今日先选；其余按时间倒序补不同旧日期，不足五张也不填重复。
+        for entry in older.filter({ isOnThisDay($0.happenedAt) }) + older.filter({ !isOnThisDay($0.happenedAt) }) {
+            guard picked.count < 5 else { break }
+            let day = calendar.startOfDay(for: entry.happenedAt)
+            guard !dates.contains(day) else { continue }
+            if take(entry) { dates.insert(day) }
+        }
+        return picked.map(\.card)
+    }
+
+    private static func isExcludedPhotoTag(_ tag: String) -> Bool {
+        let tag = tag.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["截图", "截屏", "螢幕截圖", "屏幕截图", "screenshot", "screen capture",
+                "亲子桥", "親子橋", "文档", "文件扫描", "document"].contains { tag.contains($0) }
+    }
+
+    private static func photoCaption(note: String?, title: String?) -> String {
+        func short(_ value: String?) -> String? {
+            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else { return nil }
+            return value.count <= 24 ? value : String(value.prefix(23)) + "…"
+        }
+        let isJournal = MemoryJournalKind.school.contains(note) || MemoryJournalKind.saying.contains(note)
+        if isJournal {
+            for section in (note ?? "").components(separatedBy: "\n\n") {
+                for label in ["今天的小故事：", "她说："] where section.hasPrefix(label) {
+                    if let words = short(String(section.dropFirst(label.count))) { return words }
+                }
+            }
+            return "" // 不把结构标记、餐睡数据或自动生成的日记标题当成短句。
+        }
+        let plain = short(note)
+        let heading = short(title)
+        return plain ?? heading ?? ""
+    }
+
+    nonisolated private static func localPhotoURL(_ name: String) -> URL? {
+        let store = MediaStore()
+        guard hasLocalFile(name, store: store) else { return nil }
+        let thumb = store.thumbnailURL(for: name)
+        return FileManager.default.fileExists(atPath: thumb.path) ? thumb : store.mediaURL(for: name)
     }
 
     // MARK: 回忆序列（表冠时光机）

@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.20.0"
-    CURRENT_PROJECT_VERSION: "2026100302"
+    MARKETING_VERSION: "2.21.0"
+    CURRENT_PROJECT_VERSION: "2026100303"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -123,7 +123,6 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.bubu.timemachine
-        NSMicrophoneUsageDescription: 用来把你说给布布的话录下来，收进时光机。
         CFBundleURLTypes:
           - CFBundleURLName: com.bubu.timemachine.watchkitapp
             CFBundleTypeRole: Viewer
@@ -133,15 +132,13 @@ targets:
         excludes:
           - "Info.plist"
           - "BubuWatch.entitlements"
-      # 通信契约 + 手表本地快照存储 + 纯 Foundation 的年龄/枚举（手表不引入 SwiftData）
+      # 只读照片契约、缓存及旧队列安全收尾（手表不引入 SwiftData）
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchSnapshotStore.swift
       - path: WatchShared/WatchBrowseSelection.swift
       - path: WatchShared/WatchPhotoRequestGate.swift
       - path: WatchShared/WatchPhotoBundle.swift
       - path: WatchShared/WatchPhotoStore.swift
-      - path: BubuTimeMachine/Models/AgeCalculator.swift
-      - path: BubuTimeMachine/Models/Enums.swift
     entitlements:
       path: BubuWatch/BubuWatch.entitlements
       properties:
@@ -175,11 +172,9 @@ targets:
           - "Info.plist"
       - path: WatchShared/WatchLink.swift
       - path: WatchShared/WatchSnapshotStore.swift
+      - path: WatchShared/WatchBrowseSelection.swift
       - path: WatchShared/WatchPhotoBundle.swift
       - path: WatchShared/WatchPhotoStore.swift
-      # 复用共享 AgeCalculator（只 import Foundation）：删除 widget 内联的年龄/生日副本，
-      # 与手表 App、iPhone 小组件同口径（含"生日当天=0天"修复）。
-      - path: BubuTimeMachine/Models/AgeCalculator.swift
     entitlements:
       path: BubuWatchWidgets/BubuWatchWidgets.entitlements
       properties:

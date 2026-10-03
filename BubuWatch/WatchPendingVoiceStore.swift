@@ -12,20 +12,11 @@ import Foundation
 ///
 /// nonisolated（enum 纯静态、仅 FileManager 计算，无共享可变状态）：可从任意隔离域调用。
 nonisolated enum WatchPendingVoiceStore {
-    /// 持久目录：Application Support/PendingVoice/。首次创建（含中间目录）。
-    /// Application Support 在 watchOS 首次访问可能不存在，withIntermediateDirectories 一并建出。
+    /// 只定位旧版遗留目录，不创建目录或录音。目录不存在时 pendingFiles 返回空。
     static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = base.appendingPathComponent("PendingVoice", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
         return dir
-    }
-
-    /// 新建一个待传语音文件 URL；stem 即 localId（稳定幂等键），供录音器直接写入。
-    static func newFileURL(localId: String = UUID().uuidString) -> URL {
-        directory.appendingPathComponent("\(localId).m4a")
     }
 
     /// 从待传文件 URL 反推 localId（= stem）。
@@ -35,12 +26,6 @@ nonisolated enum WatchPendingVoiceStore {
 
     private static func sidecarURL(forFile fileURL: URL) -> URL {
         fileURL.deletingPathExtension().appendingPathExtension("json")
-    }
-
-    /// 写边车（记录意图）。传输前调用，保证失败后能据此原样重发（含稳定 localId、时长、身份）。
-    static func writeSidecar(_ request: WatchRecordRequest, forFile fileURL: URL) {
-        guard let data = WatchLink.encode(request) else { return }
-        try? data.write(to: sidecarURL(forFile: fileURL), options: .atomic)
     }
 
     /// 读边车 → 记录意图（对账重发时用）。
@@ -54,13 +39,6 @@ nonisolated enum WatchPendingVoiceStore {
         for file in pendingFiles() where UUID(uuidString: localId(forFile: file)) == receipt.localId {
             _ = try? receipt.removeAcknowledgedSource(audio: file, metadata: sidecarURL(forFile: file))
         }
-    }
-
-    /// Recorder-only discard (explicit cancel or a recording shorter than the minimum).
-    /// Transport completion must never call this method.
-    static func remove(fileURL: URL) {
-        try? FileManager.default.removeItem(at: fileURL)
-        try? FileManager.default.removeItem(at: sidecarURL(forFile: fileURL))
     }
 
     /// 目录里所有「带边车」的待传 m4a（对账用）。
