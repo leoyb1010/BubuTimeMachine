@@ -515,7 +515,14 @@ struct RootView: View {
                 if done { consumePendingFamilyLogin() }
             }
             .sheet(isPresented: $showFamilyLogin) {
-                NavigationStack { AccountView() }
+                NavigationStack {
+                    AccountView()
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("稍后登录") { showFamilyLogin = false }
+                            }
+                        }
+                }
             }
             // 全 App Dynamic Type 兜底基线：老人把系统字体开到最大无障碍档时，先统一夹到
             // accessibility3，避免布局爆裂。这是较宽的上限，专给以大按钮/单列布局为主、

@@ -65,6 +65,7 @@ struct FirstPersonDiaryView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("第一人称日记")
         .navigationBarTitleDisplayMode(.inline)
+        .tint(env.theme.theme.textAccent)
         .alert("没有保存成功", isPresented: Binding(
             get: { selectedDraft.saveError != nil },
             set: { shown in if !shown, let selected { rewriteState.saveFailed(for: selected.id, message: nil) } })) {
@@ -179,7 +180,7 @@ struct FirstPersonDiaryView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 54)
-                .background(theme, in: Capsule())
+                .background(env.theme.theme.actionFill, in: Capsule())
             }
             .buttonStyle(.plain)
             .disabled(generating)
@@ -187,6 +188,7 @@ struct FirstPersonDiaryView: View {
 
             if generating, let selected {
                 Button("停止等待") { cancelRewrite(for: selected.id) }
+                    .tint(env.theme.theme.textAccent)
                     .accessibilityIdentifier("diary.cancel")
             }
 
@@ -232,7 +234,7 @@ struct FirstPersonDiaryView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("布布说")
                     .font(BubuTheme.Font.scaled(12, weight: .semibold))
-                    .foregroundStyle(theme)
+                    .foregroundStyle(env.theme.theme.textAccent)
                 Text(displayed)
                     .accessibilityIdentifier("diary.output")
                     .textSelection(.enabled)
@@ -246,7 +248,7 @@ struct FirstPersonDiaryView: View {
                     } label: {
                         Label(selectedDraft.saved ? "已保存到这条记录" : "保存到这条记录", systemImage: selectedDraft.saved ? "checkmark.circle" : "tray.and.arrow.down")
                             .font(BubuTheme.Font.caption.weight(.semibold))
-                            .foregroundStyle(theme)
+                            .foregroundStyle(env.theme.theme.textAccent)
                             .padding(.top, 4)
                     }
                     .buttonStyle(.plain)

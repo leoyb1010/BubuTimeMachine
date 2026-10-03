@@ -17,6 +17,8 @@ struct BubuConstellationView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     /// 容器实际宽度（宽屏下星盘高度按它取比例）。由外层 onGeometryChange 写入。
     @State private var containerWidth: CGFloat = 360
+    @ScaledMetric(relativeTo: .body) private var minimumStarWidth: CGFloat = 88
+    @ScaledMetric(relativeTo: .body) private var titleLineHeight: CGFloat = 15
 
     // 星盘显示一部分未点亮星，避免 0 点亮时空白；已点亮星保持发光并连线。
     private var achieved: [Milestone] { milestones.filter(\.isAchieved) }
@@ -55,16 +57,17 @@ struct BubuConstellationView: View {
             } else {
             // 星盘
             GeometryReader { geo in
-                let positions = layout(count: shown.count, in: geo.size)
+                let layout = starLayout(width: geo.size.width)
                 ZStack {
-                    constellationLines(positions: positions, milestones: shown)
+                    constellationLines(positions: layout.positions, milestones: shown)
                     ForEach(Array(shown.enumerated()), id: \.element.id) { idx, m in
-                        starView(m, index: idx, dense: shown.count > 12)
-                            .position(positions.indices.contains(idx) ? positions[idx] : CGPoint(x: geo.size.width/2, y: geo.size.height/2))
+                        starView(m, index: idx, size: layout.targetSize)
+                            .position(layout.positions[idx])
                     }
                 }
+                .frame(width: geo.size.width, height: layout.height)
             }
-            .frame(height: starboardHeight)
+            .frame(height: starLayout(width: containerWidth).height)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
             .background(
                 LinearGradient(colors: [BubuTheme.Color.lav.opacity(0.20),
@@ -84,43 +87,13 @@ struct BubuConstellationView: View {
         }
     }
 
-    // 设计稿手工锚点（在 340×540 画布上的比例坐标，错落有致、绝不挤成网格）。
-    // 一组 10 个，超过则在其后用「黄金角螺旋」错落延展，保持星空感而非排队。
-    private static let anchorTemplate: [CGPoint] = [
-        .init(x: 0.17, y: 0.09), .init(x: 0.44, y: 0.185), .init(x: 0.77, y: 0.12),
-        .init(x: 0.29, y: 0.34), .init(x: 0.62, y: 0.41), .init(x: 0.22, y: 0.57),
-        .init(x: 0.53, y: 0.63), .init(x: 0.79, y: 0.55), .init(x: 0.38, y: 0.815),
-        .init(x: 0.68, y: 0.87)
-    ]
-
-    private var starboardHeight: CGFloat {
-        // 首页式紧凑星盘：信息够看，但不把底栏附近空间全部吃掉。
-        // 宽屏放宽上限——原来死锁 320pt 而宽度随容器涨到 1000pt+，星星被摊平成一条横线，
-        // 「星座」的视觉完全丢失。宽屏按 0.5 的宽高比走，星盘才立得起来。
-        let base = max(260, min(320, 230 + CGFloat(shown.count) * 4))
-        guard BubuAdaptive.isWide(sizeClass) else { return base }
-        return max(base, min(560, containerWidth * 0.5))
-    }
-
-    // 锚点布局：前 10 用模板比例；超出部分用黄金角螺旋错落填充。
-    private func layout(count: Int, in size: CGSize) -> [CGPoint] {
-        guard count > 0 else { return [] }
-        let pad: CGFloat = 28
-        let w = size.width - pad * 2, h = size.height - pad * 2
-        return (0..<count).map { i in
-            if i < Self.anchorTemplate.count {
-                let a = Self.anchorTemplate[i]
-                return CGPoint(x: pad + a.x * w, y: pad + a.y * h)
-            }
-            // 螺旋延展（黄金角 137.5°），落在下半区，避免与模板重叠
-            let k = Double(i - Self.anchorTemplate.count)
-            let ang = k * 2.399963
-            let rad = (0.18 + 0.06 * k.truncatingRemainder(dividingBy: 5))
-            let cx = 0.5 + cos(ang) * rad
-            let cy = 0.5 + sin(ang) * rad * 0.7
-            return CGPoint(x: pad + CGFloat(min(0.92, max(0.08, cx))) * w,
-                           y: pad + CGFloat(min(0.95, max(0.05, cy))) * h)
-        }
+    private func starLayout(width: CGFloat) -> ConstellationLayout {
+        // 真实窄屏截图中，黄金螺旋的第11/12颗星压住了既有标签。
+        // 为整个按钮预留空间；字体放大时减少列数、增长画布，不挤压或遮挡。
+        ConstellationLayout.make(count: shown.count, width: width,
+                                 minimumTargetWidth: minimumStarWidth,
+                                 targetHeight: 48 + 6 + titleLineHeight * 3,
+                                 maximumColumns: BubuAdaptive.isWide(sizeClass) ? 4 : 3)
     }
 
     @ViewBuilder
@@ -146,20 +119,23 @@ struct BubuConstellationView: View {
         }
     }
 
-    private func starView(_ m: Milestone, index: Int, dense: Bool) -> some View {
+    private func starView(_ m: Milestone, index: Int, size: CGSize) -> some View {
         let starColor = BubuTheme.Color.hue(m.title.bubuStableHue, lightness: 0.82)
         return Button { onTapStar(m) } label: {
             VStack(spacing: 6) {
                 ConstellationStar(emoji: m.emoji, color: starColor, index: index, lit: m.isAchieved,
                                   reduceMotion: reduceMotion)
-                if m.isAchieved || !dense {
-                    Text(m.title)
-                        .font(BubuTheme.Font.scaled(10, weight: .bold, design: .rounded))
-                        .foregroundStyle(m.isAchieved ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
-                        .lineLimit(1).frame(width: 66)
-                        .shadow(color: BubuTheme.Color.cream.opacity(0.95), radius: 3)
-                }
+                    .frame(height: 48)
+                Text(m.title)
+                    .font(BubuTheme.Font.scaled(12, weight: .bold, design: .rounded))
+                    .foregroundStyle(m.isAchieved ? BubuTheme.Color.warmBrown : BubuTheme.Color.secondaryText)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .shadow(color: BubuTheme.Color.cream.opacity(0.95), radius: 3)
             }
+            .frame(width: size.width, height: size.height)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(m.title)

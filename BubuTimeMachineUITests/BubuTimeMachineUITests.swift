@@ -39,6 +39,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertEqual(name.value as? String, "Synthetic Parent")
         XCTAssertTrue(relation.isSelected)
         XCTAssertTrue(app.staticTexts["onboarding.audit.readback"].label.contains("done=false|identity=none|profiles=0|members=0|storedProfiles=0|storedMembers=0"))
+        app.buttons["onboarding.back"].tap()
+        XCTAssertTrue(app.textFields["onboarding.child-name"].waitForExistence(timeout: 5))
+        app.buttons["onboarding.continue"].tap()
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "Synthetic Parent")
+        XCTAssertTrue(relation.isSelected)
+        attachScreenshot("onboarding-back-keeps-member-draft", to: self)
         app.buttons["onboarding.continue"].tap()
         let saved = expectation(for: NSPredicate(format: "label CONTAINS %@", "done=true|identity=set|profiles=1|members=1|storedProfiles=1|storedMembers=1|role=爸爸"),
                                 evaluatedWith: app.staticTexts["onboarding.audit.readback"])
@@ -58,7 +65,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["onboarding.continue"].tap()
         XCTAssertTrue(app.navigationBars["账号与安全"].waitForExistence(timeout: 8))
         attachScreenshot("onboarding-join-existing-opens-login", to: self)
-        app.swipeDown()
+        app.buttons["稍后登录"].tap()
         let dismissed = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.navigationBars["账号与安全"])
         wait(for: [dismissed], timeout: 5)
         let state = app.staticTexts["onboarding.audit.readback"].label
@@ -84,33 +91,56 @@ final class BubuTimeMachineUITests: XCTestCase {
         }
         let stars = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "milestone.star."))
         XCTAssertTrue(stars.firstMatch.waitForExistence(timeout: 8))
-        var lastFrames: [CGRect] = []
-        var stableSamples = 0
-        for _ in 0..<50 {
-            let frames = stars.allElementsBoundByIndex.map(\.frame)
-            if frames.count == 12 && frames.allSatisfy({ !$0.isEmpty && !$0.isNull && $0.width > 1 && $0.height > 1 }) {
-                stableSamples = frames == lastFrames ? stableSamples + 1 : 0
-                if stableSamples >= 3 { break }
-            } else { stableSamples = 0 }
-            lastFrames = frames
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-        XCTAssertEqual(stars.count, 12)
-        XCTAssertGreaterThanOrEqual(stableSamples, 3, "All 12 real target frames must be nonempty and stable before collision checks")
-        attachScreenshot(largeText ? "milestone-stars-large-text-targets" : "milestone-stars-normal-targets", to: self)
-        let elements = stars.allElementsBoundByIndex
-        let frames = elements.map { ["id": $0.identifier, "label": $0.label, "frame": String(describing: $0.frame)] }
-        let data = try JSONSerialization.data(withJSONObject: frames, options: [.prettyPrinted, .sortedKeys])
-        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-        attachment.name = largeText ? "milestone-stars-large-frames" : "milestone-stars-normal-frames"
-        attachment.lifetime = .keepAlways; add(attachment)
-        for first in elements.indices {
-            for second in elements.indices where second > first {
-                let intersection = elements[first].frame.intersection(elements[second].frame)
-                XCTAssertFalse(intersection.width > 1 && intersection.height > 1,
-                    "Milestone targets must not overlap: \(elements[first].label) / \(elements[second].label); \(intersection)")
+        // 呼吸光晕持续改变旧版按钮的 AX 包围框；不能把永久精确静止当作 UI 完成条件。
+        // 每个完整样本都验实际碰撞，先保存诊断，再断言，避免失败丢失唯一证据。
+        let deadline = Date().addingTimeInterval(15)
+        var sampleCount = 0
+        while sampleCount < 3 && Date() < deadline {
+            let elements = stars.allElementsBoundByIndex
+            let snapshots = try elements.map { try $0.snapshot() }
+            let sampleCompletedAt = Date()
+            let rectangles = snapshots.map(\.frame)
+            let frames = zip(snapshots, rectangles).map { element, frame in
+                ["id": element.identifier, "label": element.label, "frame": String(describing: frame)]
             }
+            let data = try JSONSerialization.data(withJSONObject: frames, options: [.prettyPrinted, .sortedKeys])
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            attachment.name = "milestone-stars-\(largeText ? "large" : "normal")-sample-\(sampleCount)"
+            attachment.lifetime = .keepAlways; add(attachment)
+            print("CONSTELLATION_FRAME_SAMPLE", String(decoding: data, as: UTF8.self))
+            attachScreenshot("milestone-stars-\(largeText ? "large" : "normal")-sample-\(sampleCount)", to: self)
+            XCTAssertLessThanOrEqual(sampleCompletedAt, deadline, "The complete geometry sample must arrive within 15 seconds")
+            XCTAssertEqual(rectangles.count, 12)
+            XCTAssertTrue(rectangles.allSatisfy { !$0.isEmpty && !$0.isNull && $0.width > 1 && $0.height > 1 },
+                          "All 12 real targets must have nonempty frames before collision checks")
+            for frame in rectangles {
+                XCTAssertGreaterThanOrEqual(frame.width + 0.000001, 44)
+                XCTAssertGreaterThanOrEqual(frame.height + 0.000001, 44)
+                XCTAssertGreaterThanOrEqual(frame.minX, app.frame.minX)
+                XCTAssertLessThanOrEqual(frame.maxX, app.frame.maxX)
+            }
+            for first in rectangles.indices {
+                for second in rectangles.indices where second > first {
+                    let intersection = rectangles[first].intersection(rectangles[second])
+                    XCTAssertFalse(intersection.width > 1 && intersection.height > 1,
+                        "Milestone targets must not overlap: \(snapshots[first].label) / \(snapshots[second].label); \(intersection)")
+                }
+            }
+            sampleCount += 1
         }
+        XCTAssertEqual(sampleCount, 3, "Three complete geometry samples must fit the real 15-second observation deadline")
+        let elements = stars.allElementsBoundByIndex
+        let last = try XCTUnwrap(elements.last)
+        let expectedTitle = last.label
+        for _ in 0..<12 where !last.isHittable { app.swipeUp() }
+        XCTAssertTrue(last.isHittable, "Every star must remain reachable through the real scroll view")
+        attachScreenshot(largeText ? "milestone-stars-large-text-last-reachable" : "milestone-stars-normal-last-reachable", to: self)
+        last.tap()
+        let title = app.textFields["如：第一次自己走路"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.value as? String, expectedTitle)
+        app.buttons["取消"].tap()
+        XCTAssertTrue(last.waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -143,12 +173,16 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
-    private func saveDiary(_ output: String, in app: XCUIApplication) {
+    private func saveDiary(_ output: String, in app: XCUIApplication, expectSaved: Bool = true) {
         let save = app.buttons["diary.save"]
         XCTAssertTrue(save.waitForExistence(timeout: 8))
         for _ in 0..<3 where !save.isHittable { app.swipeUp() }
         XCTAssertEqual(app.staticTexts["diary.output"].label, output)
         save.tap()
+        if expectSaved {
+            let committed = expectation(for: NSPredicate(format: "enabled == false AND label == %@", "已保存到这条记录"), evaluatedWith: save)
+            wait(for: [committed], timeout: 5)
+        }
     }
 
     @MainActor
@@ -229,7 +263,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
         XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
         app.buttons["diary-audit.success.A1"].tap(); waitForDiaryReplies(1, in: app)
-        saveDiary("合成回复A1", in: app)
+        saveDiary("合成回复A1", in: app, expectSaved: false)
         let failure = app.alerts["没有保存成功"]
         XCTAssertTrue(failure.waitForExistence(timeout: 5))
         attachScreenshot("diary-save-rejection-preserves-result", to: self)
@@ -295,7 +329,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["diary-audit.success.A1"].tap(); waitForDiaryReplies(1, in: app)
         app.buttons["diary-audit.archive-A"].tap()
         XCTAssertEqual(app.staticTexts["diary-audit.archive-result"].label, "archived")
-        saveDiary("合成回复A1", in: app)
+        saveDiary("合成回复A1", in: app, expectSaved: false)
         let failure = app.alerts["没有保存成功"]
         XCTAssertTrue(failure.waitForExistence(timeout: 5))
         XCTAssertTrue(failure.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "原记录已归档或移除")).firstMatch.exists)

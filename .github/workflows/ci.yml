@@ -156,8 +156,8 @@ jobs:
           python3 - <<'PYTHON'
           import math, os, time
           elapsed = math.ceil((time.time() - int(os.environ["BUBU_CI_STARTED_AT"])) / 60)
-          # Two minutes cover job setup/rounding; six cover export and upload.
-          minutes = min(36, 60 - 2 - 6 - elapsed)
+          # Two minutes cover job setup/rounding; nine cover export, image upload and raw-result preservation.
+          minutes = min(36, 60 - 2 - 9 - elapsed)
           if minutes < 1:
               raise SystemExit("Validation budget exhausted before UI; preserving earlier evidence")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -217,17 +217,44 @@ jobs:
           cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
           python3 - <<'PYTHON'
           from pathlib import Path
-          import subprocess
+          import subprocess, time, json
           root = Path.home() / "Library/Developer/Xcode/DerivedData"
+          output = Path("/tmp/bubu-ci-diagnostics")
           export = ["xcrun", "xcresulttool", "export", "attachments"]
-          # Successful product journeys are evidence too; export their screenshots.
-          for result in root.glob("*/Logs/Test/*.xcresult"):
+          deadline = time.monotonic() + 205
+          records = []
+          results = sorted(root.glob("*/Logs/Test/*.xcresult"), key=lambda p: p.stat().st_mtime, reverse=True)
+          # Export failures first: a large successful screenshot set previously consumed
+          # the full per-bundle budget before any failed onboarding/star evidence.
+          for result in results:
+              if not (result / "Info.plist").exists():
+                  records.append({"bundle": result.name, "incomplete": True})
+                  continue
+              for action, command, budget in [
+                  ("summary", ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result)], 12),
+                  ("tests", ["xcrun", "xcresulttool", "get", "test-results", "tests", "--path", str(result)], 12),
+                  ("failures", export + ["--path", str(result), "--output-path", str(output / (result.stem + "-failures")), "--only-failures"], 40),
+              ]:
+                  remaining = min(budget, deadline - time.monotonic())
+                  if remaining <= 0: break
+                  suffix = ".log" if action == "failures" else ".json"
+                  with (output / (result.stem + "-" + action + suffix)).open("w") as log:
+                      try:
+                          proc = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False, timeout=remaining)
+                          records.append({"bundle": result.name, "action": action, "exit": proc.returncode})
+                      except subprocess.TimeoutExpired:
+                          records.append({"bundle": result.name, "action": action, "timed_out": True})
+          for result in results:
+              remaining = min(90, deadline - time.monotonic())
+              if remaining <= 0: break
+              if not (result / "Info.plist").exists(): continue
               try:
-                  subprocess.run(export + ["--path", str(result),
-                                  "--output-path", str(Path("/tmp/bubu-ci-diagnostics") / result.stem)],
-                                 check=False, timeout=45)
+                  proc = subprocess.run(export + ["--path", str(result), "--output-path", str(output / result.stem)],
+                                        check=False, timeout=remaining)
+                  records.append({"bundle": result.name, "action": "all_attachments", "exit": proc.returncode})
               except subprocess.TimeoutExpired:
-                  print("Attachment export timed out:", result.name)
+                  records.append({"bundle": result.name, "action": "all_attachments", "timed_out": True})
+          (output / "attachment-export-status.json").write_text(json.dumps(records, indent=2))
           PYTHON
           for log in /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log; do
             if [ -f "$log" ]; then
@@ -249,6 +276,16 @@ jobs:
             /tmp/bubu-ci-diagnostics/**/*.txt
             /tmp/bubu-ci-diagnostics/**/*.json
             /tmp/bubu-ci-diagnostics/*.log
+          retention-days: 3
+          if-no-files-found: warn
+
+      - name: Preserve raw synthetic native test results
+        timeout-minutes: 3
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-${{ matrix.device }}-xcresults-${{ github.sha }}
+          path: ~/Library/Developer/Xcode/DerivedData/*/Logs/Test/*.xcresult
           retention-days: 3
           if-no-files-found: warn
 

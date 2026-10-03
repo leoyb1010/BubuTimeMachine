@@ -8,14 +8,16 @@ struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
 
-    @Query private var existingProfiles: [ChildProfile]
-    @Query private var existingMembers: [FamilyMember]
-
     @State private var step = 0
     @State private var childName = "布布"
     @State private var birthday = Calendar.current.date(byAdding: .month, value: -6, to: .now) ?? .now
     @State private var selectedRelation: Relation = .mama
     @State private var memberName = ""
+    @State private var profileDraftID = UUID()
+    @State private var memberDraftID = UUID()
+    @State private var saveError: String?
+    @FocusState private var focusedField: InputField?
+    private enum InputField: Hashable { case childName, memberName }
     /// 「加入已有家庭」：第二台设备不再新建档案（否则同步后全家出现两个布布，R4 P2-29）。
     @State private var joinExisting = false
 
@@ -26,7 +28,24 @@ struct OnboardingView: View {
             backgroundGradient.ignoresSafeArea()
 
             VStack {
-                progressDots
+                ZStack {
+                    progressDots
+                    HStack {
+                        if step > 0 {
+                            Button("返回", systemImage: "chevron.left") {
+                                withAnimation(.smooth) {
+                                    if joinExisting { joinExisting = false; step = 0 }
+                                    else { step -= 1 }
+                                }
+                            }
+                            .tint(theme.textAccent)
+                            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                            .accessibilityIdentifier("onboarding.back")
+                        }
+                        Spacer()
+                    }
+                }
+                .frame(minHeight: 44)
                 Spacer()
                 Group {
                     switch step {
@@ -43,6 +62,10 @@ struct OnboardingView: View {
             }
             .padding(28)
         }
+        .tint(theme.textAccent)
+        .alert("没有保存成功", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("好", role: .cancel) { saveError = nil }
+        } message: { Text(saveError ?? "") }
     }
 
     private var backgroundGradient: some View {
@@ -109,6 +132,9 @@ struct OnboardingView: View {
                     Spacer()
                     TextField("布布", text: $childName)
                         .accessibilityIdentifier("onboarding.child-name")
+                        .focused($focusedField, equals: .childName)
+                        .submitLabel(.done)
+                        .onSubmit { focusedField = nil }
                         .multilineTextAlignment(.trailing)
                         .font(BubuTheme.Font.headline)
                         .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -165,6 +191,9 @@ struct OnboardingView: View {
 
             TextField("也可以填你的名字（选填）", text: $memberName)
                 .accessibilityIdentifier("onboarding.member-name")
+                .focused($focusedField, equals: .memberName)
+                .submitLabel(.done)
+                .onSubmit { focusedField = nil }
                 .multilineTextAlignment(.center)
                 .font(BubuTheme.Font.body)
                 .padding()
@@ -190,7 +219,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
-                .background(theme.primary, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.button, style: .continuous))
+                .background(theme.actionFill, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.button, style: .continuous))
                 .bubuCardShadow()
         }
         .buttonStyle(.plain)
@@ -201,6 +230,7 @@ struct OnboardingView: View {
     static let pendingFamilyLoginKey = "bubu.onboarding.pendingFamilyLogin"
 
     private func advance() {
+        focusedField = nil
         if step < 2 {
             withAnimation(.smooth) { step += 1 }
         } else {
@@ -209,6 +239,7 @@ struct OnboardingView: View {
     }
 
     private func finish() {
+        guard !env.hasCompletedOnboarding else { return }
         if joinExisting {
             // 加入已有家庭：不建档、不建成员——登录后由同步拉回全家的布布与成员，
             // 不会再产生第二个「布布」污染全家（R4 P2-29）
@@ -222,44 +253,29 @@ struct OnboardingView: View {
             return
         }
 
-        // 常规建档。若档案已存在（例如同步先一步到达），复用而不是再插一个
-        let profile: ChildProfile
-        if let existing = existingProfiles.first {
-            profile = existing
-        } else {
-            profile = ChildProfile(name: childName.isEmpty ? "布布" : childName, birthday: birthday)
-            context.insert(profile)
-        }
-
-        // 创建第一个成员（主账号）；同关系成员已存在（同步到达）就复用
-        let displayName = memberName.isEmpty ? selectedRelation.rawValue : memberName
-        let member: FamilyMember
-        if let existing = existingMembers.first(where: { $0.relation == selectedRelation.rawValue }) {
-            member = existing
-        } else {
-            member = FamilyMember(name: displayName, relation: selectedRelation.rawValue,
-                                  avatarEmoji: selectedRelation.defaultEmoji,
-                                  themeColorHex: selectedRelation.defaultColorHex)
-            member.isPrimary = true
-            context.insert(member)
-        }
-
-        try? persistOnboarding()
-
-        env.currentMemberId = member.id
-        env.config.childName = profile.name
-        env.config.currentRoleRaw = selectedRelation.rawValue
-        env.refreshWidgetSnapshot(context: context)
-        withAnimation(.smooth) {
-            env.hasCompletedOnboarding = true
+        do {
+            let result = try OnboardingMutation.complete(draft: .init(
+                profileID: profileDraftID, memberID: memberDraftID,
+                childName: childName, birthday: birthday, memberName: memberName,
+                relation: selectedRelation.rawValue, emoji: selectedRelation.defaultEmoji,
+                colorHex: selectedRelation.defaultColorHex), container: context.container,
+                persist: persistOnboarding)
+            // 独立事务真正提交后才更新身份和完成状态，拒绝保存时原表单保持可重试。
+            env.currentMemberId = result.memberID
+            env.config.childName = result.childName
+            env.config.currentRoleRaw = result.relation
+            env.refreshWidgetSnapshot(context: context)
+            withAnimation(.smooth) { env.hasCompletedOnboarding = true }
+        } catch {
+            saveError = "信息仍保留在这里，尚未完成建档。请检查可用存储空间后重试。"
         }
     }
 
-    private func persistOnboarding() throws {
+    private func persistOnboarding(_ transaction: ModelContext) throws {
         #if DEBUG
-        try OnboardingUITestFault.injectOnce(in: context.container)
+        try OnboardingUITestFault.injectOnce(in: transaction.container)
         #endif
-        try context.save()
+        try transaction.save()
     }
 
 }
