@@ -1,0 +1,13 @@
+# Inference-only dependency input for uv pip compile; Python 3.11/macOS arm64.
+# Keep the proven ML stack. MobileCLIP itself is installed from the fixed Apple
+# commit with --no-deps by install_semantic_model.sh, not from the PyPI namesake.
+# Its datasets/clip-benchmark training extras are intentionally excluded.
+torch==2.8.0
+torchvision==0.23.0
+open_clip_torch==3.3.0
+timm==1.0.28
+numpy==2.0.2
+pillow>=12.3,<13
+filelock>=3.20.3,<4
+requests>=2.33.0,<3
+urllib3>=2.8.0,<3

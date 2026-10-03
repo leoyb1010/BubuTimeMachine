@@ -1,2 +1,2 @@
 # 开发/CI 测试依赖（运行时依赖见 requirements.txt）
-pytest>=8.0
+pytest>=9.0.3,<10

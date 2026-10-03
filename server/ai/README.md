@@ -5,8 +5,12 @@
 
 ## 环境要求
 
-- **Python ≥ 3.9**（代码刻意保持 3.9 兼容：Pydantic 模型一律 `Optional[...]` 写法，勿改成 `X | None`）
-- 依赖见 `requirements.txt`；语音转写可选装 `faster-whisper`
+- **Python ≥ 3.10，部署基线为 Python 3.11 / macOS arm64**。修复版本的 Starlette、AnyIO、
+  python-multipart 和 Pillow 不再支持 Python 3.9，不能复用旧 3.9 venv。
+- 运行时锁由 `uv pip compile` 生成：HTTP 用 `requirements.lock.txt`，语义推理用
+  `requirements-semantic.lock.txt`（输入为 `requirements-semantic-runtime.txt`）。
+  两份锁可以装进同一新环境；pytest 只在 `requirements-dev.txt`，不进入生产锁。
+- 语音转写是可选能力，`faster-whisper` 不在默认锁中；安装 HTTP/语义环境不代表已启用转写。
 
 ## 启动
 
@@ -14,6 +18,15 @@
 cp .env.example .env   # 填 DEEPSEEK_API_KEY 与 AI_API_KEY（必填，fail-closed）
 ./start_ai.sh          # 自动建 venv、装依赖、起 uvicorn（默认 :8000）
 ```
+
+已有部署升级时，先在独立目录用 Python 3.11 创建新 venv，联合安装两份运行时锁（启用语义
+搜索时），再以 `--no-deps` 安装固定 Apple MobileCLIP commit
+`aecfb5453d022e9deff12f81a150ea8f35194baa`。不要复制旧 venv 的二进制包，或从 PyPI 安装同名
+`mobileclip`。复用已核验的现有模型权重，不重复下载权重或扩展许可授权。新环境须通过测试、
+API 冒烟及真实图片/文字编码检查，再切换服务；旧 release、venv 和配置保留作回滚。
+Torch/torchvision 仍保留 2.8.0/0.23.0；这不是“整个 ML 依赖零漏洞”的声明：只允许加载固定、
+可信且已验证 SHA-256 的模型文件，模型目录不能被上传接口或低权限账号改写，不接受用户提供
+的 checkpoint、TorchScript 或 `.pt2` 程序。后续 ML 大版本升级需独立验证。
 
 ## 接口
 
@@ -48,6 +61,14 @@ App 业务路由使用现有 PocketBase `Authorization: Bearer …` 登录态，
 `AI_ALLOWED_PB_USER_IDS` 单家庭白名单与按用户限流保护；`X-API-Key` 只保留给 mini 本机维护任务。
 PhotoKit 上传 URL 使用绑定 batch、asset、owner 和有效期的独立能力令牌，不能调用其他接口。
 
+成长电影 `/movie/render` 必须使用 PocketBase 家庭登录：提交时按调用者权限读取
+media 与关联 Entry，确认文件、家庭和删除状态后才允许服务账号下载。排队执行时再次检查
+素材与账号家庭归属；用户 token 不写入任务。`/movie/status/{id}` 与 `/movie/file/{id}`
+仅创建任务的同一账号可读（重新登录换 token 不影响）。维护 `X-API-Key` 不能制作或读取
+家庭电影，其他维护接口不变；现有 App 的 Bearer 登录不需要新增配置。
+旧 Harmony 2.15 源码仍以 `X-API-Key` 调电影接口，会被拒绝；本次未发布或验证鸿蒙升级，
+不可通过重新开放维护 key 的素材权限绕过这一兼容边界。
+
 ## 可靠照片与 SSD 摄取
 
 1. iPhone 只在用户点“收好”后建立批次；未确认的系统相册素材不会上传。
@@ -57,6 +78,10 @@ PhotoKit 上传 URL 使用绑定 batch、asset、owner 和有效期的独立能�
 5. `scan_ssd_inbox.py` 只读扫描 `BUBU_INBOX_ROOT`，不移动、不改名、不删除源文件；候选必须回到 iPhone 确认。
 6. 每次 SSD 扫描会先读取 PocketBase `contentHash` 与 staging 历史 hash 做跨来源去重；事实库不可读时整次延期。
 7. 已提交的中转原片立即清理，失败/取消批次超过 7 天由扫描任务清理；manifest 与哈希审计信息保留到批次过期。
+
+摄取请求会持续检查超时的 `committing` 批次，重启后即使第一次查询早于 5 分钟超时，
+后续查询仍能恢复。提交全过程持有 staging 目录内的每批次 `flock`：只恢复超时且无人
+持锁的批次，慢请求不被误回收；进程退出自动释放锁。不要手工删除正在使用的锁文件。
 
 PocketBase 部署前必须先用全新临时 `pb_data` 跑原子提交集成测试：
 
@@ -78,6 +103,18 @@ mini 需要 `ffmpeg` / `ffprobe`；macOS 自带 `say` 用中性系统声音念�
 作品必须有至少约 3 分钟真实原声，最多约 8 分钟；不会用静音、AI 编故事或克隆布布声音凑时长。
 流程固定为“素材清单 → 家庭确认 → 异步渲染 → 来源时间轴 → 归档”。服务重启或网络中断后，
 失败状态仍保留在 PocketBase，可在 App 用同一作品 id 重试；临时渲染目录始终清理。
+
+## 语义索引更新
+
+PocketBase 的 `semantic_queue.pb.js` 与同目录 `semantic_jobs.js` 共同生成任务。
+签名覆盖照片文件/角色/类型/标签/关联归属，以及 Entry 的标题、正文、第一人称文案、地点、
+日期和删除状态；`updated`、`clientUpdatedAt`、尺寸等同步触碰不会重复排队。
+每种实际输入使用稳定任务键，更正能排在正在运行的旧任务后面，worker 再读当前事实使索引收敛。
+Entry 更新仅影响同家庭的关联媒体；删除、改为原片附件/音频或失去有效 Entry 关联会移除旧索引。
+
+更新这条链路须将两个 hook 文件一起部署并重启 PocketBase，同时重启语义 worker。
+单独更新本切片不需要重启 FastAPI；已有旧索引不会因此自动批量重建，历史修复应另行确认
+`semantic_reconcile.py` 的预览与范围后再操作。
 
 ## 测试
 

@@ -466,7 +466,7 @@ def test_semantic_runtime_is_locked_and_skips_training_dependencies():
     assert "requirements-semantic.lock.txt" in installer
     assert "pip install --no-deps" in installer
     assert "torch==2.8.0" in lock
-    assert "urllib3==1.26.20" in lock
+    assert "urllib3==2.8.0" in lock
     assert "datasets==" not in lock
     assert "clip-benchmark==" not in lock
     assert "pycocoevalcap==" not in lock
@@ -756,11 +756,12 @@ def test_semantic_queue_is_append_only_and_ignores_audio():
     hook = (REPO_ROOT / "server/pocketbase/pb_hooks/semantic_queue.pb.js").read_text(
         encoding="utf-8"
     )
+    helpers = (REPO_ROOT / "server/pocketbase/pb_hooks/semantic_jobs.js").read_text(encoding="utf-8")
 
     # 2026-09-12：jobKey 不再随机——同一记录同一内容只排一次，无关字段更新不入队。
-    assert '$security.randomString' not in hook
-    assert '$security.sha256(content)' in hook
+    assert '$security.randomString' not in hook + helpers
+    assert '$security.sha256(content)' in helpers
     assert 'e.record.original()' in hook
-    assert '["file", "thumbnail", "isDeleted", "resourceRole", "mediaType"]' in hook
-    assert 'findFirstRecordByFilter' not in hook
-    assert 'mediaType !== "photo" && mediaType !== "video"' in hook
+    assert '"media", "entries"' in hook
+    assert 'findFirstRecordByFilter' not in hook + helpers
+    assert 'mediaType !== "photo" && mediaType !== "video"' in helpers
