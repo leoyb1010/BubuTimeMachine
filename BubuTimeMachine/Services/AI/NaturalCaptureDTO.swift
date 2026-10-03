@@ -37,6 +37,23 @@ struct NaturalCaptureItem: Codable, Identifiable, Sendable {
 }
 
 extension NaturalCaptureItem {
+    /// Use the existing DTO numeric-representability guard, not a medical range.
+    /// Only validate fields this domain consumes and the review exposes for editing.
+    /// Missing/null values are allowed; a supplied invalid number must stay editable.
+    var hasInvalidNumericFields: Bool {
+        let keys: [String]
+        switch domain {
+        case .water: keys = ["amount_ml"]
+        case .growth, .checkup: keys = ["height_cm", "weight_kg", "head_circumference_cm"]
+        case .symptom: keys = ["temperature_celsius"]
+        default: keys = [] // Ignore fields this domain does not consume or expose for numeric editing.
+        }
+        return keys.contains { key in
+            guard let value = fields[key], value != .null else { return false }
+            return fields.double(key) == nil
+        }
+    }
+
     /// App 端兜底：不完全相信 LLM。敏感 domain / 低置信度必须人工确认后才能入库。
     var requiresHardConfirmation: Bool {
         if needsConfirmation { return true }

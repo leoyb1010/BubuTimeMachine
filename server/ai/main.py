@@ -1289,32 +1289,61 @@ _SENSITIVE_DOMAINS = {"vaccine", "symptom", "supplement"}
 
 def _safe_confidence(value: Any) -> float:
     """置信度容错：解析不了一律归 0——客户端对低置信强制人工确认，比丢整条记录更安全。"""
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
+    if isinstance(value, bool):
         return 0.0
+    try:
+        confidence = float(value or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return confidence if math.isfinite(confidence) and 0 <= confidence <= 1 else 0.0
+
+
+def _finite_json_fields(value: Any) -> Any:
+    """Keep model facts intact except numbers JSON/native clients cannot represent."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            if not math.isfinite(float(value)):
+                return None
+        except (ValueError, OverflowError):
+            return None
+    if isinstance(value, dict):
+        return {key: _finite_json_fields(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_finite_json_fields(item) for item in value]
+    return value
 
 
 def _sanitize_parse_result(data: dict, original_text: str) -> NaturalParseResp:
     """LLM 输出不可信：逐条清洗。原则是能抢救就抢救（坏字段降级/置空），
     实在构造不出来才丢弃该条，绝不让 ValidationError 变 500。"""
-    warnings = [w for w in data.get("warnings", []) if isinstance(w, str)]
+    raw_warnings = data.get("warnings")
+    warnings = [w for w in raw_warnings if isinstance(w, str)] if isinstance(raw_warnings, list) else []
+    raw_items = data.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = []
+        warnings.append("llm_output_unparseable")
     items: list[ParsedNaturalItem] = []
-    for raw in data.get("items", []):
+    for raw in raw_items:
         if not isinstance(raw, dict):
             continue
         domain = raw.get("domain")
-        if domain not in _ALLOWED_DOMAINS:
+        if not isinstance(domain, str) or domain not in _ALLOWED_DOMAINS:
             domain = "unknown"
             warnings.append("domain_coerced_unknown")
+        raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
+        fields = _finite_json_fields(raw_fields)
+        fields_changed = fields != raw_fields
+        if fields_changed:
+            warnings.append("item_fields_sanitized")
+        raw_tags = raw.get("tags")
         kwargs = dict(
             domain=domain,
             action=raw.get("action") if raw.get("action") in ("create", "update", "complete") else "create",
             title=str(raw.get("title") or "")[:60] or "未命名记录",
             note=raw.get("note") if isinstance(raw.get("note"), str) else None,
             date=raw.get("date"),
-            fields=raw.get("fields") if isinstance(raw.get("fields"), dict) else {},
-            tags=[t for t in (raw.get("tags") or []) if isinstance(t, str)][:8],
+            fields=fields,
+            tags=[t for t in raw_tags if isinstance(t, str)][:8] if isinstance(raw_tags, list) else [],
             confidence=_safe_confidence(raw.get("confidence")),
             needs_confirmation=bool(raw.get("needs_confirmation", True)),
             source_text=str(raw.get("source_text") or original_text)[:200],
@@ -1329,8 +1358,8 @@ def _sanitize_parse_result(data: dict, original_text: str) -> NaturalParseResp:
             except Exception:  # noqa: BLE001
                 warnings.append("item_dropped_invalid")
                 continue
-        if item.domain in _SENSITIVE_DOMAINS:
-            item.needs_confirmation = True  # 服务端兜底：敏感内容永远要确认
+        if item.domain in _SENSITIVE_DOMAINS or item.confidence < 0.82 or fields_changed:
+            item.needs_confirmation = True  # 敏感、低置信或损坏数值必须人工确认
         items.append(item)
     return NaturalParseResp(confidence=_safe_confidence(data.get("confidence")),
                             items=items, warnings=warnings)

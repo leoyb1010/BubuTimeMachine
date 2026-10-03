@@ -598,6 +598,65 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
+    func testNaturalCaptureCancelThenSaveReturnsToTimeline() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-natural-local", "-uitest-natural-fail-save"]
+        app.launch()
+        let globalRecord = app.buttons["root.record"]
+        let record = globalRecord.waitForExistence(timeout: 12) ? globalRecord : app.buttons["home.record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 20))
+        record.tap()
+        let natural = app.buttons["打开一句话智能记录"]
+        XCTAssertTrue(natural.waitForExistence(timeout: 8))
+        natural.tap()
+        // A populated SwiftUI vertical TextField no longer exposes its placeholder
+        // as its identifier after sheet dismissal; use stable semantic identity.
+        let field = app.descendants(matching: .any).matching(identifier: "natural.input").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        field.tap()
+        let note = "Synthetic review audit memory"
+        field.typeText(note)
+        app.buttons["识别并保存这句话"].tap()
+        XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        attachScreenshot("natural-review-before-cancel", to: self)
+        app.navigationBars["确认保存"].buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["识别并保存这句话"].waitForExistence(timeout: 8))
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        XCTAssertEqual(field.value as? String, note, "取消确认页必须保留原文")
+        app.buttons["识别并保存这句话"].tap()
+        XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        app.navigationBars["确认保存"].buttons["保存"].tap()
+        XCTAssertTrue(app.alerts["没能保存"].waitForExistence(timeout: 8))
+        attachScreenshot("natural-review-save-failure-retains-draft", to: self)
+        app.alerts["没能保存"].buttons["返回重试"].tap()
+        XCTAssertTrue(app.alerts["没能保存"].waitForNonExistence(timeout: 8), "错误提示必须真正退出后才能重试")
+        let retrySave = app.navigationBars["确认保存"].buttons["保存"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: retrySave)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed)
+        XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts[note].firstMatch.exists, "保存失败后确认内容不能消失")
+        app.navigationBars["确认保存"].buttons["保存"].tap()
+        let returnedToInput = app.navigationBars["一句话智能记录"].waitForExistence(timeout: 8)
+        if !returnedToInput {
+            attachScreenshot("natural-retry-final-state", to: self)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "natural-retry-final-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertTrue(returnedToInput, "重试保存后应回到智能记录输入页")
+        app.buttons["关闭"].tap()
+        XCTAssertTrue(app.buttons["以后再说"].waitForExistence(timeout: 8))
+        app.buttons["以后再说"].tap()
+        let timeline = element(named: "时光", in: app)
+        XCTAssertTrue(timeline.waitForExistence(timeout: 8))
+        timeline.tap()
+        XCTAssertTrue(app.staticTexts[note].firstMatch.waitForExistence(timeout: 8), "已保存内容必须从真实 SwiftData 回到时光页")
+        attachScreenshot("natural-review-saved-timeline", to: self)
+    }
+
+    @MainActor
     func testTimelineProbeRendersAndSearches() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

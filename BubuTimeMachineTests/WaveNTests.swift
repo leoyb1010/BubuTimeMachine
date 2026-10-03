@@ -168,6 +168,117 @@ struct WaveNTests {
         #expect(try context.fetch(FetchDescriptor<Entry>()).count == 1)
     }
 
+    private enum SaveFailure: Error { case diskFull }
+
+    @Test("智能记录整批保存失败回滚、保留其它页面草稿，重试只新增一批")
+    func batchFailureIsAtomicAndRetryKeepsUnrelatedDraft() throws {
+        let container = try makeContainer()
+        container.mainContext.autosaveEnabled = false
+        let unrelated = Entry(happenedAt: .now, authorRole: "爸爸", note: "另一个页面未保存的草稿")
+        container.mainContext.insert(unrelated)
+        let items = [makeItem(domain: .water, fields: ["amount_ml": .number(120)]),
+                     makeItem(domain: .timeline, title: "审计测试时光")]
+        var attempted: ModelContext?
+        #expect(throws: SaveFailure.self) {
+            try NaturalCaptureRouter.saveBatch(items, authorRole: "妈妈", container: container, save: {
+                attempted = $0
+                #expect(!$0.autosaveEnabled)
+                throw SaveFailure.diskFull
+            })
+        }
+        let failed = try #require(attempted)
+        #expect(!failed.hasChanges)
+        #expect(container.mainContext.hasChanges)
+        #expect(unrelated.note == "另一个页面未保存的草稿")
+        let verification = ModelContext(container)
+        #expect(try verification.fetchCount(FetchDescriptor<Entry>()) == 0)
+        #expect(try verification.fetchCount(FetchDescriptor<HealthRecord>()) == 0)
+        #expect(try verification.fetchCount(FetchDescriptor<FeedEvent>()) == 0)
+        try NaturalCaptureRouter.saveBatch(items, authorRole: "妈妈", container: container)
+        let saved = ModelContext(container)
+        #expect(try saved.fetchCount(FetchDescriptor<Entry>()) == 1)
+        #expect(try saved.fetchCount(FetchDescriptor<HealthRecord>()) == 1)
+        #expect(try saved.fetchCount(FetchDescriptor<FeedEvent>()) == 2)
+        #expect(container.mainContext.hasChanges)
+        container.mainContext.rollback()
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<Entry>()) == 1)
+    }
+
+    @Test("智能体检测量与记录稳定关联；同日第二次记录不会抢占关联")
+    func checkupLinksExactGrowthMeasurement() throws {
+        let container = try makeContainer()
+        try NaturalCaptureRouter.saveBatch([
+            makeItem(domain: .checkup, title: "第一次体检", fields: ["height_cm": .number(90)]),
+            makeItem(domain: .checkup, title: "第二次体检", fields: ["height_cm": .number(91)])
+        ], authorRole: "妈妈", container: container)
+        let context = ModelContext(container)
+        let records = try context.fetch(FetchDescriptor<HealthRecord>())
+        let measurements = try context.fetch(FetchDescriptor<GrowthMeasurement>())
+        #expect(records.count == 2 && measurements.count == 2)
+        #expect(Set(records.compactMap(\.growthMeasurementId)).count == 2)
+        for record in records {
+            let measurement = try #require(measurements.first { $0.id == record.growthMeasurementId })
+            #expect(measurement.heightCm == (record.title == "第一次体检" ? 90 : 91))
+        }
+    }
+
+    @Test("空确认列表无写入；疫苗重试保留去重规则")
+    func emptyBatchAndVaccineRepeatAreSafe() throws {
+        let container = try makeContainer()
+        try NaturalCaptureRouter.saveBatch([], authorRole: "妈妈", container: container)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<FeedEvent>()) == 0)
+        let vaccine = makeItem(domain: .vaccine, title: "卡介苗", fields: ["vaccine_name": .string("卡介苗")])
+        try NaturalCaptureRouter.saveBatch([vaccine], authorRole: "妈妈", container: container)
+        try NaturalCaptureRouter.saveBatch([vaccine], authorRole: "妈妈", container: container)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<VaccineRecord>()) == 1)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<FeedEvent>()) == 1)
+    }
+
+    @Test("非法数量不进入 Int 转换，也不能在确认保存时被静默丢掉")
+    func invalidNumericFieldsRetainReviewAndBlockWrites() throws {
+        let container = try makeContainer()
+        let values: [JSONValue] = [.number(.infinity), .number(.nan), .number(1e100),
+                                   .string("1e100"), .string("NaN"), .string("不确定"),
+                                   .number(1_000_000_000), .array([]), .bool(true)]
+        for value in values {
+            let item = makeItem(domain: .water, fields: ["amount_ml": value])
+            #expect(item.fields.double("amount_ml") == nil)
+            #expect(item.hasInvalidNumericFields)
+            #expect(throws: NaturalCaptureRouter.SaveError.self) {
+                try NaturalCaptureRouter.saveBatch([item], authorRole: "妈妈", container: container)
+            }
+        }
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<HealthRecord>()) == 0)
+        let validFields: [[String: JSONValue]] = [[:], ["amount_ml": .null],
+            ["amount_ml": .number(120)], ["amount_ml": .string("120.5")]]
+        for fields in validFields {
+            #expect(!makeItem(domain: .water, fields: fields).hasInvalidNumericFields)
+        }
+        let repaired = makeItem(domain: .water, fields: ["amount_ml": .string("120.5")])
+        try NaturalCaptureRouter.saveBatch([repaired], authorRole: "妈妈", container: container)
+        let saved = try #require(try ModelContext(container).fetch(FetchDescriptor<HealthRecord>()).first)
+        #expect(saved.amountValue == 120.5)
+    }
+
+    @Test("未消费数量不锁住普通时光；未确认坏项不阻止保存其余已确认项")
+    func irrelevantAndUnconfirmedNumericFieldsDoNotBlockOtherRecords() throws {
+        let container = try makeContainer()
+        let timeline = makeItem(domain: .timeline, title: "普通时光",
+                                fields: ["amount_ml": .string("not used by timeline")])
+        #expect(!timeline.hasInvalidNumericFields)
+        let symptom = makeItem(domain: .symptom,
+                               fields: ["temperature_celsius": .string("待核对")], confidence: 0.1)
+        #expect(symptom.hasInvalidNumericFields && symptom.requiresHardConfirmation)
+        let confirmedIDs: Set<UUID> = []
+        let eligible = [timeline, symptom].filter { !$0.requiresHardConfirmation || confirmedIDs.contains($0.id) }
+        #expect(eligible.count == 1 && !eligible.contains(where: \.hasInvalidNumericFields))
+        try NaturalCaptureRouter.saveBatch(eligible, authorRole: "妈妈", container: container)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<Entry>()) == 1)
+        #expect(try ModelContext(container).fetchCount(FetchDescriptor<HealthRecord>()) == 0)
+        #expect(!makeItem(domain: .vaccine, fields: ["amount_ml": .number(.infinity)]).hasInvalidNumericFields)
+        #expect(!makeItem(domain: .water, fields: ["height_cm": .string("unused")]).hasInvalidNumericFields)
+    }
+
     // MARK: 疫苗旧打卡迁移
 
     @Test("旧打卡迁移：建结构化记录、保留旧键、二次执行幂等")

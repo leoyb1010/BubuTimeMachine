@@ -132,6 +132,19 @@ jobs:
           fi
           echo "零警告 ✅"
 
+      - name: Focused natural capture failure and retry journey
+        timeout-minutes: 8
+        run: |
+          set -o pipefail
+          xcodebuild -project BubuTimeMachine.xcodeproj \
+            BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
+            BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
+            -scheme BubuTimeMachine \
+            -parallel-testing-enabled NO \
+            -destination "id=${{ steps.sim.outputs.device }}" \
+            -only-testing:BubuTimeMachineUITests/BubuTimeMachineUITests/testNaturalCaptureCancelThenSaveReturnsToTimeline \
+            test-without-building 2>&1 | tee /tmp/ui-focused.log
+
       - name: Prepare synthetic PhotosPicker assets
         timeout-minutes: 10
         run: bash scripts/prepare-school-picker-fixtures.sh "${{ steps.sim.outputs.device }}"
@@ -179,41 +192,39 @@ jobs:
               test-without-building 2>&1 | tee /tmp/ui-retry.log
           }
 
-      - name: Preserve synthetic simulator failure evidence
-        if: ${{ failure() || steps.ui.outputs.had_retry == 'true' }}
+      - name: Preserve synthetic simulator evidence
+        if: ${{ always() }}
         timeout-minutes: 4
         continue-on-error: true
         run: |
           mkdir -p /tmp/bubu-ci-diagnostics
-          cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
+          cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
           python3 - <<'PYTHON'
           from pathlib import Path
           import subprocess
           root = Path.home() / "Library/Developer/Xcode/DerivedData"
           export = ["xcrun", "xcresulttool", "export", "attachments"]
-          help_result = subprocess.run(export + ["--help"], capture_output=True, text=True,
-                                       check=False, timeout=15)
-          failure_only = ["--only-failures"] if "--only-failures" in help_result.stdout + help_result.stderr else []
+          # Successful product journeys are evidence too; export their screenshots.
           for result in root.glob("*/Logs/Test/*.xcresult"):
               try:
-                  subprocess.run(export + failure_only + ["--path", str(result),
+                  subprocess.run(export + ["--path", str(result),
                                   "--output-path", str(Path("/tmp/bubu-ci-diagnostics") / result.stem)],
                                  check=False, timeout=45)
               except subprocess.TimeoutExpired:
                   print("Attachment export timed out:", result.name)
           PYTHON
-          for log in /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log; do
+          for log in /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log; do
             if [ -f "$log" ]; then
               grep -E "error:|XCTAssert|Failing tests|Test Case .* failed|PhotosPicker failure" "$log" | tail -60 || true
             fi
           done
 
-      - name: Upload synthetic simulator failure evidence
+      - name: Upload synthetic simulator evidence
         timeout-minutes: 2
-        if: ${{ failure() || steps.ui.outputs.had_retry == 'true' }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: synthetic-${{ matrix.device }}-failure-${{ github.sha }}
+          name: synthetic-${{ matrix.device }}-evidence-${{ github.sha }}
           # Keep screenshots, accessibility text and logs readable without large recordings.
           path: |
             /tmp/bubu-ci-diagnostics/**/*.png

@@ -5,7 +5,7 @@
 
 原生 iOS（SwiftUI + SwiftData）与 HarmonyOS（ArkTS + ArkUI）双端工程，为家庭记录孩子成长、传承一生。离线优先、隐私至上、自托管。
 
-> HarmonyOS 与 iOS 统一发布 2.14.0，同步、档案字段与加密保护共用后端契约；真实进度和边界见
+> 当前源码基线为 iOS 2.19.2 与 HarmonyOS 2.15.0，尚不能宣称双端版本或功能追平。同步、档案字段与加密保护共用后端契约；真实进度和边界见
 > [`harmony/PARITY_MATRIX.md`](harmony/PARITY_MATRIX.md)，不再以“页面存在”代替完成。
 
 ## 当前进度
@@ -30,7 +30,7 @@
 - ⛔ 刻意不做：接送打卡、缴费、请假条——判据是「这条记录，18 岁的布布会想看吗」
 
 **iOS / iPadOS 2.12**
-- ✅ iOS 26 原生 Liquid Glass Tab、滚动收缩与“记录此刻”底部附件；iPad 自动切换系统侧栏
+- ✅ iOS 26 原生 Liquid Glass Tab、四页常驻导航与“记录此刻”底部附件；iPad 自动切换系统侧栏
 - ✅ iPad 多窗口、横竖屏、窄分屏、宽屏内容列与自适应网格；iPad Widget target 已开放
 - ✅ SpeechAnalyzer / SpeechTranscriber 端侧转写，旧 SFSpeechRecognizer 与家庭 Whisper 分层兜底
 - ✅ 可选的 Spotlight 时光实体索引，搜索结果通过 deep link 直达单条旧记录

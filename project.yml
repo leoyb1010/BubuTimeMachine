@@ -12,8 +12,8 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "48H5Y3LNUK"
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "2.19.1"
-    CURRENT_PROJECT_VERSION: "2026100101"
+    MARKETING_VERSION: "2.19.2"
+    CURRENT_PROJECT_VERSION: "2026100301"
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -251,6 +251,14 @@ targets:
         SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
 
 schemes:
+  # 独立手表构建不把配对 iPhone 资源交给 Watch 的机型裁剪器。
+  # 安装仍使用同一 bundle id、签名与 App Group，保留手表已有数据。
+  BubuWatch:
+    build:
+      targets:
+        BubuWatch: all
+    run:
+      config: Debug
   BubuTimeMachine:
     build:
       targets:

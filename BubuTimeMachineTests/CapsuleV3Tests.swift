@@ -13,6 +13,42 @@ struct CapsuleV3Tests {
     private let code = CapsuleRecovery.generate(wordCount: 24)
     private let letter = Data("亲爱的布布，这是用恢复码加密的信。".utf8)
 
+    private enum SaveFailure: Error { case diskFull }
+
+    @Test("胶囊保存失败保留原语音，同一草稿重试提交成功后仅清理一次")
+    func plaintextVoiceCleanupRequiresSuccessfulCommit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("capsule-boundary-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("synthetic-voice.m4a")
+        let bytes = Data("synthetic original voice".utf8)
+        try bytes.write(to: source)
+        var cleaned: [String] = []
+        let cleanup: (String) -> Void = { name in
+            cleaned.append(name)
+            try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
+        }
+        #expect(throws: SaveFailure.self) {
+            try CapsuleCommitBoundary.save(plainVoice: source.lastPathComponent,
+                persist: { throw SaveFailure.diskFull }, removePlaintext: cleanup)
+        }
+        #expect(cleaned.isEmpty)
+        #expect(try Data(contentsOf: source) == bytes)
+        var persisted = false
+        try CapsuleCommitBoundary.save(plainVoice: source.lastPathComponent, persist: { () throws -> Void in
+            let retained = try Data(contentsOf: source)
+            #expect(retained == bytes)
+            persisted = true
+        }, removePlaintext: { name in
+            #expect(persisted)
+            cleanup(name)
+        })
+        #expect(cleaned == [source.lastPathComponent])
+        #expect(!FileManager.default.fileExists(atPath: source.path))
+        try CapsuleCommitBoundary.save(plainVoice: nil, persist: {}, removePlaintext: cleanup)
+        #expect(cleaned.count == 1)
+    }
+
     @Test("v3 恢复码正常加解密")
     func roundTrip() throws {
         let unlockAt = Date(timeIntervalSince1970: 1_000_000_000)

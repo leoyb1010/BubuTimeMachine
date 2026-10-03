@@ -7,6 +7,7 @@ struct CapsuleHomeView: View {
     /// 待确认删除的胶囊。删除会连加密 blob 一起落盘删掉，且这是写给 18 岁布布的信——
     /// 之前是菜单一点即毁，没有确认、没有触觉、没有撤销。
     @State private var pendingDelete: TimeCapsule?
+    @State private var deleteError: String?
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -53,6 +54,10 @@ struct CapsuleHomeView: View {
         } message: { capsule in
             Text("「\(capsule.title)」连同里面的文字和录音会被永久删除，找不回来。")
         }
+        .alert("未能完成删除", isPresented: Binding(get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } })) {
+            Button("知道了", role: .cancel) { deleteError = nil }
+        } message: { Text(deleteError ?? "原信尚未清理，请稍后重试。") }
         .navigationTitle("时间胶囊")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -236,13 +241,14 @@ struct CapsuleHomeView: View {
     }
 
     private func deleteCapsule(_ capsule: TimeCapsule) {
-        BubuHaptics.warning()
-        if let blob = capsule.encryptedBlobFileName {
-            env.mediaStore.deleteMedia(named: blob)
+        do {
+            try FileBackedRecordDeletion.delete(.init(capsule), from: context) { media, thumbnail in
+                env.mediaStore.deleteLocalFiles(media: media, thumbnail: thumbnail)
+            }
+            BubuHaptics.warning()
+            env.syncEngine.syncNow()
+        } catch {
+            deleteError = "删除尚未确认，原信没有被提前清理。请稍后重试。"
         }
-        PendingDeletion.enqueue(collection: "timecapsules", remoteId: capsule.remoteId, in: context)
-        context.delete(capsule)
-        try? context.save()
-        env.syncEngine.syncNow()
     }
 }

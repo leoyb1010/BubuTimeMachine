@@ -1,0 +1,6103 @@
+{
+  "scope": "Conservative source inventory, not proof of behavior. Generated from the current audit working tree. Repeated builder controls may represent multiple runtime buttons; indirect builders/system controls may not be enumerated.",
+  "files": [
+    {
+      "path": "BubuTimeMachine/App/BubuStoreRecoveryView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 60,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 82,
+          "kind": "Button",
+          "source": "Button(\"仍要临时使用（这次记的东西不会保存）\") {"
+        },
+        {
+          "line": 96,
+          "kind": "sheet",
+          "source": ".sheet(item: $shareURL) { url in"
+        },
+        {
+          "line": 99,
+          "kind": "alert",
+          "source": ".alert(\"这次记的东西不会保存\", isPresented: $showBypassConfirm) {"
+        },
+        {
+          "line": 100,
+          "kind": "Button",
+          "source": "Button(\"我知道，先用一下\", role: .destructive) {"
+        },
+        {
+          "line": 104,
+          "kind": "Button",
+          "source": "Button(\"先去导出\", role: .cancel) {}"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/App/BubuTimeMachineApp.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 503,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showFamilyLogin) {"
+        },
+        {
+          "line": 556,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showWhatsNew) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/App/RootTabView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button(action: openQuickCapture) {"
+        },
+        {
+          "line": 95,
+          "kind": "Button",
+          "source": "Button { selection = tab } label: {"
+        },
+        {
+          "line": 122,
+          "kind": "Tab",
+          "source": "Tab(\"首页\", systemImage: \"house.fill\", value: 0) {"
+        },
+        {
+          "line": 130,
+          "kind": "Tab",
+          "source": "Tab(\"时光\", systemImage: \"clock.fill\", value: 1) {"
+        },
+        {
+          "line": 138,
+          "kind": "Tab",
+          "source": "Tab(\"成长\", systemImage: \"chart.xyaxis.line\", value: 2) {"
+        },
+        {
+          "line": 143,
+          "kind": "Tab",
+          "source": "Tab(\"幼儿园\", systemImage: \"house.lodge.fill\", value: 3) {"
+        },
+        {
+          "line": 149,
+          "kind": "Tab",
+          "source": "Tab(\"档案馆\", systemImage: \"archivebox.fill\", value: 4) {"
+        },
+        {
+          "line": 160,
+          "kind": "Button",
+          "source": "Button(\"\") { selection = 0 }.keyboardShortcut(\"1\", modifiers: .command)"
+        },
+        {
+          "line": 161,
+          "kind": "Button",
+          "source": "Button(\"\") { selection = 1 }.keyboardShortcut(\"2\", modifiers: .command)"
+        },
+        {
+          "line": 162,
+          "kind": "Button",
+          "source": "Button(\"\") { selection = 2 }.keyboardShortcut(\"3\", modifiers: .command)"
+        },
+        {
+          "line": 163,
+          "kind": "Button",
+          "source": "Button(\"\") { selection = 3 }.keyboardShortcut(\"4\", modifiers: .command)"
+        },
+        {
+          "line": 165,
+          "kind": "Button",
+          "source": "Button(\"\") { selection = 4 }.keyboardShortcut(\"5\", modifiers: .command)"
+        },
+        {
+          "line": 167,
+          "kind": "Button",
+          "source": "Button(\"\") { openQuickCapture() }.keyboardShortcut(\"n\", modifiers: .command)"
+        },
+        {
+          "line": 236,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/BubuBigActionButton.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 26,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/BubuIOS27Compatibility.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 39,
+          "kind": "Button",
+          "source": "Button(action: onShare) {"
+        },
+        {
+          "line": 43,
+          "kind": "Button",
+          "source": "Button(role: .destructive, action: onDelete) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/CeremonyAnimation.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 43,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/Components/BubuBufferedField.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 58,
+          "kind": "TextField",
+          "source": "TextField(placeholder, text: $draft)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/Components/BubuIdentityCard.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 54,
+          "kind": "Button",
+          "source": "Button(action: flip) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/Components/BubuToast.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 80,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/Components/MediaViewer.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 109,
+          "kind": "Button",
+          "source": "Button { saveToPhotoLibrary() } label: {"
+        },
+        {
+          "line": 122,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 135,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 182,
+          "kind": "sheet",
+          "source": ".sheet(item: $shareURL) { url in"
+        },
+        {
+          "line": 469,
+          "kind": "Button",
+          "source": "Button(\"重试\") {"
+        },
+        {
+          "line": 532,
+          "kind": "Button",
+          "source": "Button(\"重试\") {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/Components/MoodPicker.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 18,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/DesignSystem/Components/VoiceComponents.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 62,
+          "kind": "alert",
+          "source": ".alert(\"需要麦克风权限\", isPresented: $denied) {"
+        },
+        {
+          "line": 63,
+          "kind": "Button",
+          "source": "Button(\"好\") {}"
+        },
+        {
+          "line": 87,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 151,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/AIStudioHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 24,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(\"第一人称日记\") { FirstPersonDiaryView() }"
+        },
+        {
+          "line": 25,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(\"家人合奏\") { FamilyEnsembleView() }"
+        },
+        {
+          "line": 98,
+          "kind": "NavigationLink",
+          "source": "NavigationLink {"
+        },
+        {
+          "line": 154,
+          "kind": "NavigationLink",
+          "source": "NavigationLink {"
+        },
+        {
+          "line": 200,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { BubuQAView() } label: {"
+        },
+        {
+          "line": 269,
+          "kind": "NavigationLink",
+          "source": "NavigationLink {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/BubuQAView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 43,
+          "kind": "navigationDestination",
+          "source": ".navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }"
+        },
+        {
+          "line": 63,
+          "kind": "Button",
+          "source": "Button { ask(s) } label: {"
+        },
+        {
+          "line": 86,
+          "kind": "Button",
+          "source": "Button { jump(to: src.id) } label: {"
+        },
+        {
+          "line": 122,
+          "kind": "TextField",
+          "source": "TextField(\"问问关于\\(childName)的…\", text: $input, axis: .vertical)"
+        },
+        {
+          "line": 126,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/FamilyEnsembleView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 62,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 99,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/FirstPersonDiaryView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 81,
+          "kind": "Button",
+          "source": "return Button {"
+        },
+        {
+          "line": 122,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 187,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/GrowthMoviePlayer.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 125,
+          "kind": "Button",
+          "source": "Button { onClose() } label: {"
+        },
+        {
+          "line": 202,
+          "kind": "Button",
+          "source": "Button { replay() } label: {"
+        },
+        {
+          "line": 209,
+          "kind": "Button",
+          "source": "Button { onClose() } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/GrowthMovieView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 51,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showPlayer) {"
+        },
+        {
+          "line": 58,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showServerPlayer) {"
+        },
+        {
+          "line": 102,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 225,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 238,
+          "kind": "Button",
+          "source": "Button { showPlayer = true } label: {"
+        },
+        {
+          "line": 249,
+          "kind": "Button",
+          "source": "Button { renderTask = Task { await renderOnServer() } } label: {"
+        },
+        {
+          "line": 263,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 537,
+          "kind": "Button",
+          "source": "Button { player?.pause(); onClose() } label: {"
+        },
+        {
+          "line": 543,
+          "kind": "ShareLink",
+          "source": "ShareLink(item: url) {"
+        },
+        {
+          "line": 578,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/SoundRingView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 67,
+          "kind": "navigationDestination",
+          "source": ".navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }"
+        },
+        {
+          "line": 68,
+          "kind": "sheet",
+          "source": ".sheet(item: $sourceDetail) { source in sourceSheet(source) }"
+        },
+        {
+          "line": 69,
+          "kind": "sheet",
+          "source": ".sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }"
+        },
+        {
+          "line": 70,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showAdvancedSettings) {"
+        },
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button(\"完成\") { showAdvancedSettings = false }"
+        },
+        {
+          "line": 80,
+          "kind": "alert",
+          "source": ".alert(\"开始制作声音年轮？\", isPresented: $showRenderConfirmation) {"
+        },
+        {
+          "line": 81,
+          "kind": "Button",
+          "source": "Button(\"开始制作\") { render() }"
+        },
+        {
+          "line": 82,
+          "kind": "Button",
+          "source": "Button(\"再听听原声\", role: .cancel) {}"
+        },
+        {
+          "line": 86,
+          "kind": "alert",
+          "source": ".alert(\"收进档案？\", isPresented: $showArchiveConfirmation) {"
+        },
+        {
+          "line": 87,
+          "kind": "Button",
+          "source": "Button(\"收进档案\") { archive() }"
+        },
+        {
+          "line": 88,
+          "kind": "Button",
+          "source": "Button(\"再看看\", role: .cancel) {}"
+        },
+        {
+          "line": 92,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog("
+        },
+        {
+          "line": 100,
+          "kind": "Button",
+          "source": "Button(\"只从本次清单移除\", role: .destructive) {"
+        },
+        {
+          "line": 105,
+          "kind": "Button",
+          "source": "Button(\"保留\", role: .cancel) { pendingRemovalSourceId = nil }"
+        },
+        {
+          "line": 109,
+          "kind": "alert",
+          "source": ".alert(\"操作没有完成\", isPresented: Binding("
+        },
+        {
+          "line": 113,
+          "kind": "Button",
+          "source": "Button(\"知道了\") { operationError = nil }"
+        },
+        {
+          "line": 225,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 227,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 249,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 264,
+          "kind": "Slider",
+          "source": "Slider("
+        },
+        {
+          "line": 357,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 375,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        },
+        {
+          "line": 396,
+          "kind": "Button",
+          "source": "Button { open(source) } label: {"
+        },
+        {
+          "line": 432,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 449,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 528,
+          "kind": "Button",
+          "source": "Button(\"完成\") { sourceDetail = nil }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/AIStudio/WeeklyReportView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 51,
+          "kind": "navigationDestination",
+          "source": ".navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }"
+        },
+        {
+          "line": 52,
+          "kind": "sheet",
+          "source": ".sheet(item: $sourceDetail) { source in sourceSheet(source) }"
+        },
+        {
+          "line": 53,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showAdvancedSettings) {"
+        },
+        {
+          "line": 58,
+          "kind": "Button",
+          "source": "Button(\"完成\") { showAdvancedSettings = false }"
+        },
+        {
+          "line": 63,
+          "kind": "alert",
+          "source": ".alert(\"收进档案？\", isPresented: $confirmArchive) {"
+        },
+        {
+          "line": 64,
+          "kind": "Button",
+          "source": "Button(\"收进档案\") { archive() }"
+        },
+        {
+          "line": 65,
+          "kind": "Button",
+          "source": "Button(\"再看看\", role: .cancel) {}"
+        },
+        {
+          "line": 69,
+          "kind": "alert",
+          "source": ".alert(\"操作没有完成\", isPresented: Binding("
+        },
+        {
+          "line": 73,
+          "kind": "Button",
+          "source": "Button(\"知道了\") { operationError = nil }"
+        },
+        {
+          "line": 150,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 152,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 175,
+          "kind": "Button",
+          "source": "Button { confirmArchive = true } label: {"
+        },
+        {
+          "line": 209,
+          "kind": "Button",
+          "source": "Button { open(source) } label: {"
+        },
+        {
+          "line": 243,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 299,
+          "kind": "Button",
+          "source": ".toolbar { ToolbarItem(placement: .confirmationAction) { Button(\"完成\") { sourceDetail = nil } } }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Album/AlbumDetailView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 36,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 72,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $viewerRoute) { route in"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Album/AlbumHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 107,
+          "kind": "NavigationLink",
+          "source": "NavigationLink {"
+        },
+        {
+          "line": 171,
+          "kind": "NavigationLink",
+          "source": "NavigationLink {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capsule/CapsuleComposeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 57,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 59,
+          "kind": "Button",
+          "source": "Button { Task { await save() } } label: {"
+        },
+        {
+          "line": 66,
+          "kind": "alert",
+          "source": ".alert(\"封存失败\", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {"
+        },
+        {
+          "line": 67,
+          "kind": "Button",
+          "source": "Button(\"好\") { errorText = nil }"
+        },
+        {
+          "line": 98,
+          "kind": "TextField",
+          "source": "TextField(\"如：写给18岁的你\", text: $title)"
+        },
+        {
+          "line": 109,
+          "kind": "TextField",
+          "source": "TextField(\"亲爱的布布……\", text: $letter, axis: .vertical)"
+        },
+        {
+          "line": 126,
+          "kind": "Button",
+          "source": "Button { pendingVoice = nil } label: {"
+        },
+        {
+          "line": 147,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 164,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"精确到天\", selection: $unlockAt, in: min(unlockAt, Date.now)..., displayedComponents: .date)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capsule/CapsuleHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 45,
+          "kind": "alert",
+          "source": ".alert(\"删掉这封信？\", isPresented: Binding(get: { pendingDelete != nil },"
+        },
+        {
+          "line": 48,
+          "kind": "Button",
+          "source": "Button(\"删掉\", role: .destructive) {"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button(\"留着\", role: .cancel) { pendingDelete = nil }"
+        },
+        {
+          "line": 59,
+          "kind": "Button",
+          "source": "Button { showRecovery = true } label: { Image(systemName: \"key.horizontal.fill\") }"
+        },
+        {
+          "line": 64,
+          "kind": "Button",
+          "source": "Button { showCompose = true } label: { Image(systemName: \"square.and.pencil\") }"
+        },
+        {
+          "line": 69,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showCompose) { CapsuleComposeView() }"
+        },
+        {
+          "line": 70,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showRecovery) { CapsuleRecoveryView() }"
+        },
+        {
+          "line": 71,
+          "kind": "sheet",
+          "source": ".sheet(item: $editing) { capsule in CapsuleComposeView(editing: capsule) }"
+        },
+        {
+          "line": 72,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $unlocking) { capsule in"
+        },
+        {
+          "line": 172,
+          "kind": "Button",
+          "source": "Button { unlocking = capsule } label: { capsuleCard(capsule, open: true, now: now) }"
+        },
+        {
+          "line": 180,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 203,
+          "kind": "Button",
+          "source": "Button { showCompose = true } label: {"
+        },
+        {
+          "line": 234,
+          "kind": "Button",
+          "source": "Button { editing = capsule } label: { Label(\"修改\", systemImage: \"pencil\") }"
+        },
+        {
+          "line": 235,
+          "kind": "Button",
+          "source": "Button(role: .destructive) { pendingDelete = capsule } label: { Label(\"删除\", systemImage: \"trash\") }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capsule/CapsuleRecoveryView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 59,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .confirmationAction) { Button(\"完成\") { dismiss() } }"
+        },
+        {
+          "line": 62,
+          "kind": "sheet",
+          "source": ".sheet(item: $printCard) { url in ShareSheet(items: [url]) }"
+        },
+        {
+          "line": 87,
+          "kind": "Button",
+          "source": "Button(\"现在生成\") {"
+        },
+        {
+          "line": 122,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 145,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 162,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 170,
+          "kind": "TextField",
+          "source": "TextField(\"把 24 个词按顺序输进来，用空格隔开\", text: $restoreInput, axis: .vertical)"
+        },
+        {
+          "line": 175,
+          "kind": "Button",
+          "source": "Button(\"恢复\") { attemptRestore() }"
+        },
+        {
+          "line": 190,
+          "kind": "alert",
+          "source": ".alert(\"覆盖现有恢复码？\", isPresented: $confirmOverwrite) {"
+        },
+        {
+          "line": 191,
+          "kind": "Button",
+          "source": "Button(\"覆盖\", role: .destructive) { doRestore() }"
+        },
+        {
+          "line": 192,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capsule/CapsuleUnlockView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 44,
+          "kind": "Button",
+          "source": "Button { dismiss() } label: {"
+        },
+        {
+          "line": 78,
+          "kind": "Button",
+          "source": "Button { open() } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capture/CaptureHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 88,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { MemoryJournalView(kind: .saying) } label: {"
+        },
+        {
+          "line": 131,
+          "kind": "navigationDestination",
+          "source": ".navigationDestination(for: UUID.self) { entryID in"
+        },
+        {
+          "line": 143,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: Binding(get: { model.showQuickCapture },"
+        },
+        {
+          "line": 179,
+          "kind": "alert",
+          "source": ".alert(\"这是布布的第一次吗？\", isPresented: Binding("
+        },
+        {
+          "line": 182,
+          "kind": "Button",
+          "source": "Button(\"是的，记一笔\") { confirmFirstTime() }"
+        },
+        {
+          "line": 183,
+          "kind": "Button",
+          "source": "Button(\"不是\", role: .cancel) { firstTimeSuggestion = nil }"
+        },
+        {
+          "line": 188,
+          "kind": "alert",
+          "source": ".alert(\"部分照片没导入\", isPresented: Binding("
+        },
+        {
+          "line": 191,
+          "kind": "Button",
+          "source": "Button(\"好\") { model?.partialSaveWarning = nil }"
+        },
+        {
+          "line": 195,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showTodayPhotos) {"
+        },
+        {
+          "line": 203,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showSSDIntakeCandidates) {"
+        },
+        {
+          "line": 211,
+          "kind": "Button",
+          "source": "Button { showSSDIntakeCandidates = true } label: {"
+        },
+        {
+          "line": 262,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 288,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"原片正在后台上传\", isPresented: $showPendingRecallDialog,"
+        },
+        {
+          "line": 290,
+          "kind": "Button",
+          "source": "Button(\"取回照片，重新整理\") { recallPendingUploads() }"
+        },
+        {
+          "line": 291,
+          "kind": "Button",
+          "source": "Button(\"继续等待\", role: .cancel) {}"
+        },
+        {
+          "line": 436,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 521,
+          "kind": "Button",
+          "source": "Button(actionTitle, action: action)"
+        },
+        {
+          "line": 762,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { SettingsView() } label: {"
+        },
+        {
+          "line": 857,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { ChildProfileView() } label: {"
+        },
+        {
+          "line": 889,
+          "kind": "Button",
+          "source": "Button { startQuickCapture() } label: { recordButtonLabel }"
+        },
+        {
+          "line": 895,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { AlbumHomeView() } label: {"
+        },
+        {
+          "line": 904,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { HealthHomeView() } label: {"
+        },
+        {
+          "line": 1034,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 1093,
+          "kind": "Button",
+          "source": "Button { startQuickCapture() } label: {"
+        },
+        {
+          "line": 1125,
+          "kind": "Button",
+          "source": "Button { openTimeline?() } label: {"
+        },
+        {
+          "line": 1132,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(value: entry.id) { momentRow(entry) }"
+        },
+        {
+          "line": 1183,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { OnThisDayView() } label: {"
+        },
+        {
+          "line": 1198,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(value: entry.id) {"
+        },
+        {
+          "line": 1278,
+          "kind": "DatePicker",
+          "source": "DatePicker("
+        },
+        {
+          "line": 1297,
+          "kind": "Button",
+          "source": "Button(\"忽略\", role: .destructive) {"
+        },
+        {
+          "line": 1301,
+          "kind": "Button",
+          "source": "Button(workingID == candidate.id ? \"处理中…\" : \"确认收进\") {"
+        },
+        {
+          "line": 1319,
+          "kind": "Button",
+          "source": "Button(\"完成\") { dismiss() }"
+        },
+        {
+          "line": 1407,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { SyncCenterView() } label: {"
+        },
+        {
+          "line": 1446,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capture/OnThisDayView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 98,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(value: entry.id) { memoryRow(entry) }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capture/QuickCaptureSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 80,
+          "kind": "alert",
+          "source": ".alert(\"保存失败\", isPresented: Binding(get: { model.saveError != nil }, set: { if !$0 { model.saveError = nil } })) {"
+        },
+        {
+          "line": 81,
+          "kind": "Button",
+          "source": "Button(\"好\") { model.saveError = nil }"
+        },
+        {
+          "line": 85,
+          "kind": "alert",
+          "source": ".alert(item: $cameraAlert) { alert in"
+        },
+        {
+          "line": 98,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showCamera) {"
+        },
+        {
+          "line": 106,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showArtworkScanner) {"
+        },
+        {
+          "line": 116,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showVideoCamera) {"
+        },
+        {
+          "line": 124,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showNaturalCapture) {"
+        },
+        {
+          "line": 127,
+          "kind": "sheet",
+          "source": ".sheet(item: $mediaSourceSheet) { source in"
+        },
+        {
+          "line": 142,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"这一笔还没保存\", isPresented: $discardConfirm, titleVisibility: .visible) {"
+        },
+        {
+          "line": 143,
+          "kind": "Button",
+          "source": "Button(\"丢掉这一笔\", role: .destructive) {"
+        },
+        {
+          "line": 147,
+          "kind": "Button",
+          "source": "Button(\"继续记\", role: .cancel) {}"
+        },
+        {
+          "line": 161,
+          "kind": "Button",
+          "source": "Button(\"以后再说\") {"
+        },
+        {
+          "line": 168,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 184,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 220,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 229,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 239,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 249,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 256,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 305,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: includeLocationBinding) {"
+        },
+        {
+          "line": 385,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 418,
+          "kind": "TextField",
+          "source": "TextField(\"此刻的布布……\", text: $model.note, axis: .vertical)"
+        },
+        {
+          "line": 462,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 592,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $pickedItems, maxSelectionCount: 9, matching: matching) {"
+        },
+        {
+          "line": 600,
+          "kind": "Button",
+          "source": "Button(action: onCamera) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Capture/TodayPhotosSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 65,
+          "kind": "Button",
+          "source": "Button(expandedGroupIDs.contains(group.id)"
+        },
+        {
+          "line": 84,
+          "kind": "TextField",
+          "source": "TextField(\"写一句话\", text: $note, axis: .vertical)"
+        },
+        {
+          "line": 99,
+          "kind": "Button",
+          "source": "Button(\"稍后\") { dismiss() }"
+        },
+        {
+          "line": 104,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 124,
+          "kind": "alert",
+          "source": ".alert(\"有照片没能收录\", isPresented: Binding("
+        },
+        {
+          "line": 126,
+          "kind": "Button",
+          "source": "Button(\"知道了\", role: .cancel) {}"
+        },
+        {
+          "line": 130,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"不再提示这段时光？\", isPresented: Binding("
+        },
+        {
+          "line": 134,
+          "kind": "Button",
+          "source": "Button(\"忽略这组\", role: .destructive) {"
+        },
+        {
+          "line": 140,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) { groupToIgnore = nil }"
+        },
+        {
+          "line": 159,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 209,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 210,
+          "kind": "Button",
+          "source": "Button(\"不再提示这组\", role: .destructive) { groupToIgnore = group }"
+        },
+        {
+          "line": 217,
+          "kind": "Button",
+          "source": "Button(allSelected ? \"取消\" : \"全选\") {"
+        },
+        {
+          "line": 256,
+          "kind": "Button",
+          "source": "return Button {"
+        },
+        {
+          "line": 332,
+          "kind": "Button",
+          "source": "Button(\"这是布布\") { Task { await learnIdentity(asset, isChild: true) } }"
+        },
+        {
+          "line": 333,
+          "kind": "Button",
+          "source": "Button(\"不是布布\") { Task { await learnIdentity(asset, isChild: false) } }"
+        },
+        {
+          "line": 530,
+          "kind": "Button",
+          "source": "Button(\"先收这些，剩下的下次继续\") { importCancelled = true }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Feed/FamilyFeedView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 104,
+          "kind": "navigationDestination",
+          "source": ".navigationDestination(for: Entry.self) { EntryDetailView(entry: $0) }"
+        },
+        {
+          "line": 137,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 151,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(value: entry(for: event)) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Growth/GrowthHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 40,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { AIStudioHomeView() } label: {"
+        },
+        {
+          "line": 114,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { GrowthCurveView() } label: {"
+        },
+        {
+          "line": 117,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { MilestonesHomeView() } label: {"
+        },
+        {
+          "line": 120,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { HealthHomeView() } label: {"
+        },
+        {
+          "line": 123,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { VaccineView() } label: {"
+        },
+        {
+          "line": 207,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { MilestonesHomeView() } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/GrowthCurveView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 37,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showGrowthRecorder) {"
+        },
+        {
+          "line": 43,
+          "kind": "Picker",
+          "source": "Picker(\"指标\", selection: $metric) {"
+        },
+        {
+          "line": 56,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/HealthHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 43,
+          "kind": "sheet",
+          "source": ".sheet(item: $composingKind) { kind in"
+        },
+        {
+          "line": 46,
+          "kind": "sheet",
+          "source": ".sheet(item: $editingRecord) { record in"
+        },
+        {
+          "line": 49,
+          "kind": "alert",
+          "source": ".alert(\"删除这条健康记录？\", isPresented: Binding("
+        },
+        {
+          "line": 53,
+          "kind": "Button",
+          "source": "Button(\"删除\", role: .destructive) { deletePendingRecord() }"
+        },
+        {
+          "line": 54,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) { deletingRecord = nil }"
+        },
+        {
+          "line": 79,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 93,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 183,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { GrowthCurveView() } label: {"
+        },
+        {
+          "line": 187,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { VaccineView() } label: {"
+        },
+        {
+          "line": 214,
+          "kind": "Button",
+          "source": "Button { composingKind = kind } label: {"
+        },
+        {
+          "line": 292,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 302,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/HealthRecordSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 65,
+          "kind": "Button",
+          "source": "Button(\"取消\") { dismiss() }"
+        },
+        {
+          "line": 68,
+          "kind": "Button",
+          "source": "Button(\"保存\") { save() }"
+        },
+        {
+          "line": 75,
+          "kind": "alert",
+          "source": ".alert(\"这次没有保存好\", isPresented: Binding("
+        },
+        {
+          "line": 79,
+          "kind": "Button",
+          "source": "Button(\"知道了\") { saveError = nil }"
+        },
+        {
+          "line": 487,
+          "kind": "TextField",
+          "source": "TextField(\"比如：小米粥、鸡蛋羹、青菜碎\", text: $draft.title)"
+        },
+        {
+          "line": 503,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 522,
+          "kind": "TextField",
+          "source": "TextField(\"补充具体零食\", text: $draft.title)"
+        },
+        {
+          "line": 538,
+          "kind": "TextField",
+          "source": "TextField(\"比如：维D、益生菌\", text: $draft.title)"
+        },
+        {
+          "line": 586,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 614,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"入睡\", selection: Binding("
+        },
+        {
+          "line": 618,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"醒来\", selection: Binding("
+        },
+        {
+          "line": 658,
+          "kind": "TextField",
+          "source": "TextField(\"药物、护理或变化备注\", text: $draft.detail, axis: .vertical)"
+        },
+        {
+          "line": 674,
+          "kind": "TextField",
+          "source": "TextField(\"体检项目或疫苗名称\", text: $draft.title)"
+        },
+        {
+          "line": 691,
+          "kind": "TextField",
+          "source": "TextField(\"医生建议、牙齿等补充\", text: $draft.detail, axis: .vertical)"
+        },
+        {
+          "line": 708,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"记录时间\", selection: $draft.recordedAt, displayedComponents: [.date, .hourAndMinute])"
+        },
+        {
+          "line": 709,
+          "kind": "TextField",
+          "source": "TextField(\"补充一点观察，比如吃完状态、睡醒精神……\", text: $draft.detail, axis: .vertical)"
+        },
+        {
+          "line": 801,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 841,
+          "kind": "TextField",
+          "source": "TextField(\"输入\", text: $editingText)"
+        },
+        {
+          "line": 859,
+          "kind": "Stepper",
+          "source": "Stepper(\"\", value: Binding("
+        },
+        {
+          "line": 899,
+          "kind": "Button",
+          "source": "Button(\"完成\") {"
+        },
+        {
+          "line": 951,
+          "kind": "TextField",
+          "source": "TextField(\"输入\", text: $editingText)"
+        },
+        {
+          "line": 962,
+          "kind": "Stepper",
+          "source": "Stepper(\"\", value: Binding("
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/SchoolTeacherSheetView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 57,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: Binding("
+        },
+        {
+          "line": 78,
+          "kind": "Toggle",
+          "source": "Toggle(\"这一页也印出生年月\", isOn: $includeBirthday)"
+        },
+        {
+          "line": 79,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 104,
+          "kind": "sheet",
+          "source": ".sheet(item: $shareURL) { url in ShareSheet(items: [url]) }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/SchoolVaccineCheckView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 48,
+          "kind": "sheet",
+          "source": ".sheet(item: $shareURL) { url in ShareSheet(items: [url]) }"
+        },
+        {
+          "line": 173,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/VaccineQuickLogSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 58,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"接种日期\", selection: $injectedAt, in: ...Date.now,"
+        },
+        {
+          "line": 60,
+          "kind": "TextField",
+          "source": "TextField(\"接种医院/门诊（可选）\", text: $hospital)"
+        },
+        {
+          "line": 61,
+          "kind": "TextField",
+          "source": "TextField(\"接种后反应（可选）\", text: $reaction)"
+        },
+        {
+          "line": 62,
+          "kind": "TextField",
+          "source": "TextField(\"备注（可选）\", text: $note)"
+        },
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        },
+        {
+          "line": 87,
+          "kind": "Button",
+          "source": "Button(\"取消\") { dismiss() }"
+        },
+        {
+          "line": 90,
+          "kind": "Button",
+          "source": "Button(\"保存\") { save() }"
+        },
+        {
+          "line": 94,
+          "kind": "alert",
+          "source": ".alert(\"取消这针的打卡？\", isPresented: $showDeleteConfirm) {"
+        },
+        {
+          "line": 95,
+          "kind": "Button",
+          "source": "Button(\"取消打卡\", role: .destructive) { deleteRecord() }"
+        },
+        {
+          "line": 96,
+          "kind": "Button",
+          "source": "Button(\"再想想\", role: .cancel) {}"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Health/VaccineView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 49,
+          "kind": "alert",
+          "source": ".alert(\"删掉这条接种记录？\", isPresented: Binding(get: { pendingDelete != nil },"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button(\"删掉\", role: .destructive) {"
+        },
+        {
+          "line": 56,
+          "kind": "Button",
+          "source": "Button(\"留着\", role: .cancel) { pendingDelete = nil }"
+        },
+        {
+          "line": 63,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { SchoolVaccineCheckView() } label: {"
+        },
+        {
+          "line": 68,
+          "kind": "sheet",
+          "source": ".sheet(item: $logTarget) { target in"
+        },
+        {
+          "line": 224,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Milestones/BubuConstellationView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 151,
+          "kind": "Button",
+          "source": "return Button { onTapStar(m) } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Milestones/MilestoneSheets.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 33,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 35,
+          "kind": "Button",
+          "source": "Button(\"添加\\(selected.isEmpty ? \"\" : \" \\(selected.count)\")\") { addSelected() }"
+        },
+        {
+          "line": 190,
+          "kind": "TextField",
+          "source": "TextField(\"如：第一次自己走路\", text: $title)"
+        },
+        {
+          "line": 191,
+          "kind": "Picker",
+          "source": "Picker(\"分类\", selection: $category) {"
+        },
+        {
+          "line": 208,
+          "kind": "Toggle",
+          "source": "Toggle(\"已经达成了\", isOn: $achieved.animation())"
+        },
+        {
+          "line": 211,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"达成那天\", selection: $happenedAt,"
+        },
+        {
+          "line": 220,
+          "kind": "TextField",
+          "source": "TextField(\"记下这一刻……\", text: $detail, axis: .vertical)"
+        },
+        {
+          "line": 225,
+          "kind": "Button",
+          "source": "Button(role: .destructive) { confirmDelete = true } label: {"
+        },
+        {
+          "line": 232,
+          "kind": "alert",
+          "source": ".alert(\"没能保存\", isPresented: $saveFailed) {"
+        },
+        {
+          "line": 233,
+          "kind": "Button",
+          "source": "Button(\"知道了\", role: .cancel) {}"
+        },
+        {
+          "line": 237,
+          "kind": "alert",
+          "source": ".alert(\"删掉这个里程碑？\", isPresented: $confirmDelete) {"
+        },
+        {
+          "line": 238,
+          "kind": "Button",
+          "source": "Button(\"删掉\", role: .destructive) { deleteMilestone() }"
+        },
+        {
+          "line": 239,
+          "kind": "Button",
+          "source": "Button(\"留着\", role: .cancel) {}"
+        },
+        {
+          "line": 247,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 249,
+          "kind": "Button",
+          "source": "Button(\"保存\") { save() }.fontWeight(.bold).disabled(title.isEmpty)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Milestones/MilestonesHomeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 73,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 81,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 82,
+          "kind": "Button",
+          "source": "Button { showCustom = true } label: { Label(\"自定义里程碑\", systemImage: \"star.bubble\") }"
+        },
+        {
+          "line": 83,
+          "kind": "Button",
+          "source": "Button { showPicker = true } label: { Label(\"管理预设清单\", systemImage: \"list.bullet\") }"
+        },
+        {
+          "line": 88,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showPicker) { MilestonePickerSheet() }"
+        },
+        {
+          "line": 89,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showCustom) { MilestoneEditSheet(milestone: nil) }"
+        },
+        {
+          "line": 90,
+          "kind": "sheet",
+          "source": ".sheet(item: $detailFor) { MilestoneEditSheet(milestone: $0) }"
+        },
+        {
+          "line": 91,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $ceremonyFor) { milestone in"
+        },
+        {
+          "line": 148,
+          "kind": "TextField",
+          "source": "TextField(\"搜索里程碑，比如 走路、吃饭、睡觉\", text: $searchText)"
+        },
+        {
+          "line": 160,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/NaturalCapture/NaturalCaptureBar.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 46,
+          "kind": "TextField",
+          "source": "TextField(\"写一句或说一句：布布今天……\", text: $text, axis: .vertical)"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 70,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 98,
+          "kind": "Button",
+          "source": "Button(\"重试转写\") {"
+        },
+        {
+          "line": 117,
+          "kind": "sheet",
+          "source": ".sheet(item: $reviewPayload) { payload in"
+        },
+        {
+          "line": 140,
+          "kind": "Button",
+          "source": "Button(\"取消\") {"
+        },
+        {
+          "line": 289,
+          "kind": "Button",
+          "source": "Button(\"关闭\") { dismiss() }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/NaturalCapture/NaturalCaptureReviewSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 94,
+          "kind": "Button",
+          "source": "Button(\"取消\") { dismiss() }"
+        },
+        {
+          "line": 97,
+          "kind": "Button",
+          "source": "Button(unconfirmedCount == 0 ? \"保存\" : \"保存 \\(savableItems.count) 条\") {"
+        },
+        {
+          "line": 108,
+          "kind": "alert",
+          "source": ".alert(\"没能保存\", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {"
+        },
+        {
+          "line": 109,
+          "kind": "Button",
+          "source": "Button(\"返回重试\", role: .cancel) { saveError = nil }"
+        },
+        {
+          "line": 113,
+          "kind": "alert",
+          "source": ".alert(\"还有 \\(unconfirmedCount) 条需要确认\", isPresented: $showUnconfirmedAlert) {"
+        },
+        {
+          "line": 114,
+          "kind": "Button",
+          "source": "Button(\"仍然保存其余 \\(savableItems.count) 条\") { saveAll() }"
+        },
+        {
+          "line": 115,
+          "kind": "Button",
+          "source": "Button(\"返回确认\", role: .cancel) {}"
+        },
+        {
+          "line": 181,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 224,
+          "kind": "Button",
+          "source": "Button(editing ? \"完成\" : \"编辑\") {"
+        },
+        {
+          "line": 233,
+          "kind": "Button",
+          "source": "Button(confirmed ? \"取消确认\" : \"确认无误\") {"
+        },
+        {
+          "line": 247,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 267,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 269,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 291,
+          "kind": "TextField",
+          "source": "TextField(\"标题\", text: item.title)"
+        },
+        {
+          "line": 297,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"时间\", selection: dateBinding(item), in: ...Date.now,"
+        },
+        {
+          "line": 321,
+          "kind": "TextField",
+          "source": "TextField(\"未填写\", text: numericFieldBinding(item, key: key))"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Onboarding/OnboardingView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 86,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 110,
+          "kind": "TextField",
+          "source": "TextField(\"布布\", text: $childName)"
+        },
+        {
+          "line": 116,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"生日\", selection: $birthday, in: ...Date.now, displayedComponents: .date)"
+        },
+        {
+          "line": 142,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 163,
+          "kind": "TextField",
+          "source": "TextField(\"也可以填你的名字（选填）\", text: $memberName)"
+        },
+        {
+          "line": 181,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/PhotoFrame/PhotoFrameView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 167,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 186,
+          "kind": "Button",
+          "source": "Button(\"返回\") { dismiss() }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/School/MemoryJournalComposer.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 71,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"发生在\", selection: $date, in: ...Date.now,"
+        },
+        {
+          "line": 93,
+          "kind": "Button",
+          "source": "Button(\"从原文整理餐睡草稿\") { suggestFields() }"
+        },
+        {
+          "line": 109,
+          "kind": "Button",
+          "source": "Button(\"移除\", role: .destructive) { remove(file) }.font(.caption)"
+        },
+        {
+          "line": 129,
+          "kind": "Toggle",
+          "source": "Toggle(\"已对照原表核对，未确认项留空\", isOn: Binding("
+        },
+        {
+          "line": 140,
+          "kind": "Button",
+          "source": "Button(importing != nil ? \"停止导入\" : (transcription == nil ? \"以后再说\" : \"停止识别\")) {"
+        },
+        {
+          "line": 156,
+          "kind": "Button",
+          "source": "Button(\"收好\") { save() }.fontWeight(.bold)"
+        },
+        {
+          "line": 164,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"这一笔还没收好\", isPresented: $discard, titleVisibility: .visible) {"
+        },
+        {
+          "line": 166,
+          "kind": "Button",
+          "source": "Button(\"留在草稿，下次继续\") {"
+        },
+        {
+          "line": 171,
+          "kind": "Button",
+          "source": "Button(\"丢弃草稿\", role: .destructive) { discarded = true; closeComposer() }"
+        },
+        {
+          "line": 172,
+          "kind": "Button",
+          "source": "Button(\"继续记录\", role: .cancel) {}"
+        },
+        {
+          "line": 224,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $reportItems, maxSelectionCount: 1, matching: .images, preferredItemEncoding: .current) {"
+        },
+        {
+          "line": 228,
+          "kind": "Button",
+          "source": "Button { importingReportFile = true; showFiles = true } label: {"
+        },
+        {
+          "line": 234,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $selected, maxSelectionCount: 50, matching: .any(of: [.images, .videos]), preferredItemEncoding: .current) {"
+        },
+        {
+          "line": 238,
+          "kind": "Button",
+          "source": "Button { importingReportFile = false; showFiles = true } label: { Label(\"素材文件\", systemImage: \"folder\") }"
+        },
+        {
+          "line": 241,
+          "kind": "Button",
+          "source": "Button(\"没有图片，直接填亲子桥\") { schoolReport = SchoolDailyReport() }"
+        },
+        {
+          "line": 256,
+          "kind": "Button",
+          "source": "Button(\"识别成文字草稿\") {"
+        },
+        {
+          "line": 262,
+          "kind": "Button",
+          "source": "Button(\"重试保存已录声音\") { keepRecording(result) }"
+        },
+        {
+          "line": 264,
+          "kind": "Button",
+          "source": "Button { Task { await toggleRecording() } } label: {"
+        },
+        {
+          "line": 281,
+          "kind": "TextField",
+          "source": "TextField(prompt, text: text, axis: .vertical).lineLimit(2...8)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/School/MemoryJournalView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 23,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { MemoryJournalView(kind: .saying) } label: {"
+        },
+        {
+          "line": 40,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { VoiceArchiveView() } label: {"
+        },
+        {
+          "line": 56,
+          "kind": "Button",
+          "source": "Button { composing = true } label: {"
+        },
+        {
+          "line": 61,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $composing) { MemoryJournalComposer(kind: kind) }"
+        },
+        {
+          "line": 78,
+          "kind": "Button",
+          "source": "Button { composing = true } label: {"
+        },
+        {
+          "line": 121,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { EntryDetailView(entry: entry) } label: {"
+        },
+        {
+          "line": 160,
+          "kind": "Button",
+          "source": "if entries.count == limit { Button(\"再看一些\") { more() }.frame(maxWidth: .infinity, minHeight: 44) }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/School/SchoolJournalHome.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 30,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { SchoolJournalHistory() } label: {"
+        },
+        {
+          "line": 33,
+          "kind": "Button",
+          "source": "Button { composing = true } label: {"
+        },
+        {
+          "line": 45,
+          "kind": "Button",
+          "source": "Button { calendarOpen = true } label: {"
+        },
+        {
+          "line": 57,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { MemoryJournalView(kind: .saying) } label: {"
+        },
+        {
+          "line": 83,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $composing) {"
+        },
+        {
+          "line": 86,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $calendarOpen) {"
+        },
+        {
+          "line": 88,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"回看哪一天\", selection: Binding(get: { day }, set: { value in selectDay(value) }), in: ...Date.now, displayedComponents: .date)"
+        },
+        {
+          "line": 91,
+          "kind": "Button",
+          "source": ".toolbar { ToolbarItem(placement: .confirmationAction) { Button(\"看这天\") { calendarOpen = false } } }"
+        },
+        {
+          "line": 139,
+          "kind": "Button",
+          "source": "Button { shiftWeek(-7) } label: {"
+        },
+        {
+          "line": 146,
+          "kind": "Button",
+          "source": "Button { selectDay(date) } label: {"
+        },
+        {
+          "line": 159,
+          "kind": "Button",
+          "source": "Button { shiftWeek(7) } label: {"
+        },
+        {
+          "line": 254,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { EntryDetailView(entry: entry) } label: {"
+        },
+        {
+          "line": 268,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(\"这一天还有更多，去历史记录查看\") { SchoolJournalHistory() }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/School/SchoolReportCard.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 42,
+          "kind": "Button",
+          "source": "Button { correctionOpen = true } label: { Image(systemName: \"pencil\").frame(width: 44, height: 44) }"
+        },
+        {
+          "line": 45,
+          "kind": "Button",
+          "source": "Button { originalOpen = true } label: {"
+        },
+        {
+          "line": 59,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 76,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { EntryDetailView(entry: entry) } label: {"
+        },
+        {
+          "line": 85,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { EntryDetailView(entry: entry) } label: {"
+        },
+        {
+          "line": 95,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $originalOpen) {"
+        },
+        {
+          "line": 98,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $correctionOpen) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/School/SchoolReportCorrection.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 33,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"发生在\", selection: $date, in: ...Date.now, displayedComponents: .date)"
+        },
+        {
+          "line": 44,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 46,
+          "kind": "Button",
+          "source": "Button(\"保存修改\") {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/School/SchoolReportEditor.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 22,
+          "kind": "Button",
+          "source": "Button { showingOriginal = true } label: {"
+        },
+        {
+          "line": 26,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showingOriginal) {"
+        },
+        {
+          "line": 73,
+          "kind": "Menu",
+          "source": "Menu(\"选老师勾的\") {"
+        },
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button(choice) { report.choose(choice, for: field) }"
+        },
+        {
+          "line": 77,
+          "kind": "Button",
+          "source": "Button(\"留空\") { report[field] = \"\" }"
+        },
+        {
+          "line": 81,
+          "kind": "TextField",
+          "source": "TextField(field.prompt, text: Binding(get: { report[field] }, set: { report[field] = $0 }), axis: .vertical)"
+        },
+        {
+          "line": 86,
+          "kind": "Button",
+          "source": "Button { report[field] = candidate } label: {"
+        },
+        {
+          "line": 103,
+          "kind": "TextField",
+          "source": "TextField(\"如 90%\", text: Binding(get: { SchoolMeal(report[field]).amount },"
+        },
+        {
+          "line": 111,
+          "kind": "Picker",
+          "source": "Picker(\"\\(field.rawValue)食量评价\", selection: Binding(get: { SchoolMeal(report[field]).rating },"
+        },
+        {
+          "line": 117,
+          "kind": "Picker",
+          "source": "Picker(\"\\(field.rawValue)进食速度\", selection: Binding(get: { SchoolMeal(report[field]).speed },"
+        },
+        {
+          "line": 124,
+          "kind": "Button",
+          "source": "Button { report.setMealAmount(candidate, for: field) } label: {"
+        },
+        {
+          "line": 163,
+          "kind": "Button",
+          "source": ".toolbar { ToolbarItem(placement: .confirmationAction) { Button(\"看好了\") { dismiss() } } }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/AccountView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 52,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }"
+        },
+        {
+          "line": 53,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showRecovery) { CapsuleRecoveryView() }"
+        },
+        {
+          "line": 54,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"要退出这个账号吗？\", isPresented: $showLogoutConfirm, titleVisibility: .visible) {"
+        },
+        {
+          "line": 55,
+          "kind": "Button",
+          "source": "Button(\"退出登录\", role: .destructive) { performLogout() }"
+        },
+        {
+          "line": 56,
+          "kind": "Button",
+          "source": "Button(\"再想想\", role: .cancel) {}"
+        },
+        {
+          "line": 135,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 188,
+          "kind": "TextField",
+          "source": "TextField(\"用户名（如 yuanbo）\", text: $username)"
+        },
+        {
+          "line": 225,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 244,
+          "kind": "Picker",
+          "source": "Picker(\"我是\", selection: $roleIndex) {"
+        },
+        {
+          "line": 274,
+          "kind": "Button",
+          "source": "Button(\"先进去看看\") {"
+        },
+        {
+          "line": 392,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 394,
+          "kind": "Button",
+          "source": "Button { Task { await submit() } } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/AdvancedSettingsView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 50,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 69,
+          "kind": "Toggle",
+          "source": "Toggle(\"让 AI 帮忙写故事\", isOn: $config.aiEnabled)"
+        },
+        {
+          "line": 75,
+          "kind": "Toggle",
+          "source": "Toggle(\"用 DeepSeek 自动读亲子桥\", isOn: $config.schoolVisionEnabled)"
+        },
+        {
+          "line": 79,
+          "kind": "Toggle",
+          "source": "Toggle(\"搜索照片里的画面\", isOn: $config.semanticSearchEnabled)"
+        },
+        {
+          "line": 80,
+          "kind": "TextField",
+          "source": "TextField(ServerConfig.aiBaseURLPlaceholder, text: $config.aiBaseURLString)"
+        },
+        {
+          "line": 82,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/ChildIdentitySettingsView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 23,
+          "kind": "Toggle",
+          "source": "Toggle(\"在这台 iPhone 认出布布\", isOn: Binding("
+        },
+        {
+          "line": 41,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 60,
+          "kind": "Button",
+          "source": "Button(\"清除本机识别模型\", role: .destructive) {"
+        },
+        {
+          "line": 84,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"清除这台 iPhone 上的识别模型？\", isPresented: $showClearConfirmation,"
+        },
+        {
+          "line": 86,
+          "kind": "Button",
+          "source": "Button(\"清除模型\", role: .destructive) { clearModel() }"
+        },
+        {
+          "line": 87,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/ChildProfileView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 51,
+          "kind": "alert",
+          "source": ".alert(\"这张照片没能处理成头像\", isPresented: $avatarLoadFailed) {"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button(\"知道了\", role: .cancel) { }"
+        },
+        {
+          "line": 67,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $avatarPick, matching: .images) {"
+        },
+        {
+          "line": 91,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        },
+        {
+          "line": 114,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"生日\", selection: Binding("
+        },
+        {
+          "line": 134,
+          "kind": "Picker",
+          "source": "Picker(\"性别\", selection: optionalStringBinding(\\.gender, on: profile)) {"
+        },
+        {
+          "line": 138,
+          "kind": "Picker",
+          "source": "Picker(\"血型\", selection: optionalStringBinding(\\.bloodType, on: profile)) {"
+        },
+        {
+          "line": 145,
+          "kind": "Toggle",
+          "source": "Toggle(\"已经上幼儿园了\", isOn: Binding("
+        },
+        {
+          "line": 155,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"第一天\", selection: Binding("
+        },
+        {
+          "line": 206,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $heroPick, matching: .images) {"
+        },
+        {
+          "line": 211,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/ExportView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 52,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showShare) {"
+        },
+        {
+          "line": 57,
+          "kind": "alert",
+          "source": ".alert(\"这份档案还不完整\", isPresented: $showIncompleteExportAlert) {"
+        },
+        {
+          "line": 58,
+          "kind": "Button",
+          "source": "Button(\"仍然分享不完整包\", role: .destructive) { showShare = true }"
+        },
+        {
+          "line": 59,
+          "kind": "Button",
+          "source": "Button(\"先不分享\", role: .cancel) {}"
+        },
+        {
+          "line": 114,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/MacArchiveWorkspaceView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 198,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"将选中的 \\(selectedIDs.count) 条时光移入归档？\", isPresented: $showArchiveConfirmation) {"
+        },
+        {
+          "line": 199,
+          "kind": "Button",
+          "source": "Button(\"移入归档\", role: .destructive) { applyArchive(true) }"
+        },
+        {
+          "line": 200,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        },
+        {
+          "line": 224,
+          "kind": "Button",
+          "source": "Button(selectedIDs.count == visibleEntries.count && !visibleEntries.isEmpty"
+        },
+        {
+          "line": 243,
+          "kind": "Picker",
+          "source": "Picker(\"范围\", selection: $filter) {"
+        },
+        {
+          "line": 257,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 388,
+          "kind": "Button",
+          "source": "Button { applyStorybook(true) } label: { Label(\"收进绘本\", systemImage: \"book.closed.fill\") }"
+        },
+        {
+          "line": 390,
+          "kind": "Button",
+          "source": "Button { applyStorybook(false) } label: { Label(\"移出绘本\", systemImage: \"book.closed\") }"
+        },
+        {
+          "line": 393,
+          "kind": "Button",
+          "source": "Button { applyArchive(false) } label: { Label(\"恢复到时光轴\", systemImage: \"arrow.uturn.backward\") }"
+        },
+        {
+          "line": 396,
+          "kind": "Button",
+          "source": "Button { showArchiveConfirmation = true } label: { Label(\"移入归档\", systemImage: \"archivebox\") }"
+        },
+        {
+          "line": 425,
+          "kind": "Button",
+          "source": "Button { applyStorybook(!entry.inStorybook) } label: {"
+        },
+        {
+          "line": 431,
+          "kind": "Button",
+          "source": "Button { applyArchive(false) } label: { Label(\"恢复到时光轴\", systemImage: \"arrow.uturn.backward\") }"
+        },
+        {
+          "line": 434,
+          "kind": "Button",
+          "source": "Button { showArchiveConfirmation = true } label: { Label(\"移入归档\", systemImage: \"archivebox\") }"
+        },
+        {
+          "line": 453,
+          "kind": "Button",
+          "source": "Button { showArchiveImporter = true } label: {"
+        },
+        {
+          "line": 484,
+          "kind": "Button",
+          "source": "Button { showArchiveImporter = true } label: { Label(\"校验档案\", systemImage: \"checkmark.shield\") }"
+        },
+        {
+          "line": 485,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { ExportView() } label: { Label(\"导出完整档案\", systemImage: \"square.and.arrow.up\") }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/MembersView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 32,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 44,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showingAdd) {"
+        },
+        {
+          "line": 47,
+          "kind": "sheet",
+          "source": ".sheet(item: $editing) { member in"
+        },
+        {
+          "line": 50,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"要删除这位家人吗？\", isPresented: Binding("
+        },
+        {
+          "line": 53,
+          "kind": "Button",
+          "source": "Button(\"删除「\\(member.name)」\", role: .destructive) { confirmDelete(member) }"
+        },
+        {
+          "line": 54,
+          "kind": "Button",
+          "source": "Button(\"再想想\", role: .cancel) { pendingDelete = nil }"
+        },
+        {
+          "line": 58,
+          "kind": "alert",
+          "source": ".alert(\"提示\", isPresented: Binding("
+        },
+        {
+          "line": 60,
+          "kind": "Button",
+          "source": "Button(\"好\", role: .cancel) {}"
+        },
+        {
+          "line": 72,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 101,
+          "kind": "Button",
+          "source": "Button { editing = member } label: {"
+        },
+        {
+          "line": 113,
+          "kind": "Button",
+          "source": "Button(role: .destructive) { requestDelete(member) } label: {"
+        },
+        {
+          "line": 190,
+          "kind": "Picker",
+          "source": "Picker(\"关系\", selection: $relation) {"
+        },
+        {
+          "line": 193,
+          "kind": "TextField",
+          "source": "TextField(\"显示名字\", text: $name)"
+        },
+        {
+          "line": 204,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 206,
+          "kind": "Button",
+          "source": "Button(\"保存\") { save() }.fontWeight(.bold)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/SettingsView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 63,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: $photoInboxEnabled) {"
+        },
+        {
+          "line": 70,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: $spotlightEnabled) {"
+        },
+        {
+          "line": 84,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: Binding(get: { soundOn }, set: { soundOn = $0; BubuSound.isEnabled = $0 })) {"
+        },
+        {
+          "line": 92,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: $config.simpleModeEnabled) {"
+        },
+        {
+          "line": 101,
+          "kind": "Button",
+          "source": "Button { showFrame = true } label: {"
+        },
+        {
+          "line": 111,
+          "kind": "Picker",
+          "source": "Picker(\"每张停留\", selection: $frameDwell) {"
+        },
+        {
+          "line": 131,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { AdvancedSettingsView() } label: {"
+        },
+        {
+          "line": 157,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showFrame) { PhotoFrameView() }"
+        },
+        {
+          "line": 163,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { MembersView() } label: {"
+        },
+        {
+          "line": 203,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { SyncCenterView() } label: {"
+        },
+        {
+          "line": 234,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: Binding(get: { config.dailyReminderEnabled },"
+        },
+        {
+          "line": 288,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { destination() } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/SyncCenterView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 46,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"重新拉取全部内容？\", isPresented: $confirmFullPull, titleVisibility: .visible) {"
+        },
+        {
+          "line": 47,
+          "kind": "Button",
+          "source": "Button(\"重新拉取\", role: .destructive) { performFullPull() }"
+        },
+        {
+          "line": 48,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        },
+        {
+          "line": 52,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"把本机内容全部重传一遍？\", isPresented: $confirmFullPush, titleVisibility: .visible) {"
+        },
+        {
+          "line": 53,
+          "kind": "Button",
+          "source": "Button(\"开始重传\", role: .destructive) { Task { await performFullPush() } }"
+        },
+        {
+          "line": 54,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        },
+        {
+          "line": 58,
+          "kind": "alert",
+          "source": ".alert(\"同步\", isPresented: Binding("
+        },
+        {
+          "line": 60,
+          "kind": "Button",
+          "source": "Button(\"好\", role: .cancel) {}"
+        },
+        {
+          "line": 294,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        },
+        {
+          "line": 360,
+          "kind": "NavigationLink",
+          "source": "NavigationLink { ExportView() } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/ThemeSettingsView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 37,
+          "kind": "Picker",
+          "source": "Picker(\"背景模式\", selection: Binding("
+        },
+        {
+          "line": 59,
+          "kind": "Button",
+          "source": "return Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/VoiceArchiveView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 46,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 47,
+          "kind": "Button",
+          "source": "Button { recordKind = .childVoice; showRecorder = true } label: {"
+        },
+        {
+          "line": 50,
+          "kind": "Button",
+          "source": "Button { recordKind = .familyVoice; showRecorder = true } label: {"
+        },
+        {
+          "line": 57,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showRecorder) {"
+        },
+        {
+          "line": 149,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 177,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 179,
+          "kind": "Button",
+          "source": "Button(\"收好\") { save() }.fontWeight(.bold).disabled(pending == nil)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/WhatsNewView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/WidgetWallpaperView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 63,
+          "kind": "confirmationDialog",
+          "source": ".confirmationDialog(\"移除桌面壁纸？\", isPresented: $showRemoveConfirm, titleVisibility: .visible) {"
+        },
+        {
+          "line": 64,
+          "kind": "Button",
+          "source": "Button(\"移除\", role: .destructive) { remove() }"
+        },
+        {
+          "line": 65,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        },
+        {
+          "line": 109,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $pickerItem, matching: .images) {"
+        },
+        {
+          "line": 207,
+          "kind": "Picker",
+          "source": "Picker(\"尺寸\", selection: $slot) {"
+        },
+        {
+          "line": 219,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: $enabled) {"
+        },
+        {
+          "line": 237,
+          "kind": "Button",
+          "source": "Button(role: .destructive) { showRemoveConfirm = true } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Settings/YearbookView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 39,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showShare) {"
+        },
+        {
+          "line": 69,
+          "kind": "Button",
+          "source": "Button { selectedYear = year } label: {"
+        },
+        {
+          "line": 109,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Share/ShareCardSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 48,
+          "kind": "Button",
+          "source": "Button(\"取消\") { dismiss() }"
+        },
+        {
+          "line": 61,
+          "kind": "sheet",
+          "source": ".sheet(item: Binding(get: { shareURL.map { ShareItem(url: $0) } },"
+        },
+        {
+          "line": 91,
+          "kind": "Picker",
+          "source": "Picker(\"版式\", selection: $layout) {"
+        },
+        {
+          "line": 100,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: $showAge) {"
+        },
+        {
+          "line": 115,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/SimpleMode/SimpleModeView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 87,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showCamera) {"
+        },
+        {
+          "line": 94,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showVoice) { voiceSheet }"
+        },
+        {
+          "line": 95,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: $showTimeline) { SimpleTimelineView() }"
+        },
+        {
+          "line": 167,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 211,
+          "kind": "Button",
+          "source": "Button(\"取消\") { showVoice = false }"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/SimpleMode/SimpleTimelineView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 39,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(item: $viewer) { target in"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 77,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Story/BubuStoryReaderView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button { dismiss() } label: {"
+        },
+        {
+          "line": 132,
+          "kind": "Button",
+          "source": "Button(action: action) {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Story/BubuStoryView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 27,
+          "kind": "NavigationLink",
+          "source": "NavigationLink {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Timeline/CommentComposeSheet.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 31,
+          "kind": "TextField",
+          "source": "TextField(\"这一刻，我记得……\", text: $text, axis: .vertical)"
+        },
+        {
+          "line": 41,
+          "kind": "Button",
+          "source": "Button { voice = nil } label: {"
+        },
+        {
+          "line": 61,
+          "kind": "Button",
+          "source": "ToolbarItem(placement: .cancellationAction) { Button(\"取消\") { dismiss() } }"
+        },
+        {
+          "line": 63,
+          "kind": "Button",
+          "source": "Button(\"添加\") { save() }.fontWeight(.bold)"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Timeline/EntryDetailView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 79,
+          "kind": "alert",
+          "source": ".alert(\"移除这张素材？\", isPresented: Binding(get: { pendingMediaDelete != nil },"
+        },
+        {
+          "line": 82,
+          "kind": "Button",
+          "source": "Button(\"移除\", role: .destructive) { deleteMedia(media); pendingMediaDelete = nil }"
+        },
+        {
+          "line": 83,
+          "kind": "Button",
+          "source": "Button(\"留着\", role: .cancel) { pendingMediaDelete = nil }"
+        },
+        {
+          "line": 85,
+          "kind": "alert",
+          "source": ".alert(\"删掉这段语音？\", isPresented: Binding(get: { pendingVoiceDelete != nil },"
+        },
+        {
+          "line": 88,
+          "kind": "Button",
+          "source": "Button(\"删掉\", role: .destructive) { deleteVoice(voice); pendingVoiceDelete = nil }"
+        },
+        {
+          "line": 89,
+          "kind": "Button",
+          "source": "Button(\"留着\", role: .cancel) { pendingVoiceDelete = nil }"
+        },
+        {
+          "line": 94,
+          "kind": "Button",
+          "source": "Button(editing ? \"完成\" : \"编辑\") {"
+        },
+        {
+          "line": 106,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 116,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 124,
+          "kind": "Button",
+          "source": "Button(role: .destructive) {"
+        },
+        {
+          "line": 132,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showShareCard) {"
+        },
+        {
+          "line": 158,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showCommentSheet) {"
+        },
+        {
+          "line": 161,
+          "kind": "fullScreenCover",
+          "source": ".fullScreenCover(isPresented: Binding("
+        },
+        {
+          "line": 173,
+          "kind": "alert",
+          "source": ".alert(\"删除这条记录？\", isPresented: $showDeleteConfirm) {"
+        },
+        {
+          "line": 174,
+          "kind": "Button",
+          "source": "Button(\"删除\", role: .destructive) { deleteEntry() }"
+        },
+        {
+          "line": 175,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) {}"
+        },
+        {
+          "line": 206,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 217,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 237,
+          "kind": "PhotosPicker",
+          "source": "PhotosPicker(selection: $appendPick, maxSelectionCount: 9,"
+        },
+        {
+          "line": 275,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 331,
+          "kind": "DatePicker",
+          "source": "DatePicker(\"发生时间\", selection: Self.editingBinding(for: entry, \\.happenedAt), displayedComponents: [.date, .hourAndMinute])"
+        },
+        {
+          "line": 334,
+          "kind": "Toggle",
+          "source": "Toggle(isOn: locationBinding) {"
+        },
+        {
+          "line": 376,
+          "kind": "TextField",
+          "source": "TextField(\"此刻的布布……\", text: Self.noteBinding(for: entry), axis: .vertical)"
+        },
+        {
+          "line": 412,
+          "kind": "Button",
+          "source": "Button { pendingVoiceDelete = voice } label: {"
+        },
+        {
+          "line": 489,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Timeline/Reaction.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 100,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuTimeMachine/Features/Timeline/TimelineView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 155,
+          "kind": "Menu",
+          "source": "Menu {"
+        },
+        {
+          "line": 156,
+          "kind": "Picker",
+          "source": "Picker(\"排序方式\", selection: $sortModeRaw) {"
+        },
+        {
+          "line": 166,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 182,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showFamilyFeed) {"
+        },
+        {
+          "line": 185,
+          "kind": "sheet",
+          "source": ".sheet(item: $entryPendingShare) { entry in"
+        },
+        {
+          "line": 188,
+          "kind": "alert",
+          "source": ".alert(\"删除这条记录？\", isPresented: Binding("
+        },
+        {
+          "line": 192,
+          "kind": "Button",
+          "source": "Button(\"删除\", role: .destructive) { deletePendingEntry() }"
+        },
+        {
+          "line": 193,
+          "kind": "Button",
+          "source": "Button(\"取消\", role: .cancel) { entryPendingDelete = nil }"
+        },
+        {
+          "line": 278,
+          "kind": "navigationDestination",
+          "source": ".navigationDestination(for: UUID.self) { entryID in"
+        },
+        {
+          "line": 295,
+          "kind": "NavigationLink",
+          "source": "NavigationLink(value: entry.id) {"
+        },
+        {
+          "line": 312,
+          "kind": "Button",
+          "source": "Button { entryPendingShare = entry } label: {"
+        },
+        {
+          "line": 315,
+          "kind": "Button",
+          "source": "Button(role: .destructive) { entryPendingDelete = entry } label: {"
+        }
+      ]
+    },
+    {
+      "path": "BubuWatch/Views/WatchMoodView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 31,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuWatch/Views/WatchQuickLogView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 49,
+          "kind": "Button",
+          "source": "return Button {"
+        },
+        {
+          "line": 129,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "BubuWatch/Views/WatchRecordView.swift",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 44,
+          "kind": "sheet",
+          "source": ".sheet(isPresented: $showMood) { WatchMoodView() }"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 90,
+          "kind": "TextField",
+          "source": "TextField(\"写一句…\", text: $text)"
+        },
+        {
+          "line": 92,
+          "kind": "Button",
+          "source": "Button {"
+        },
+        {
+          "line": 128,
+          "kind": "Button",
+          "source": "Button {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/BubuGlassTabBar.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 90,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 125,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/BubuIdentityCard.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 119,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.flip(); })"
+        },
+        {
+          "line": 311,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.flip(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/BubuMovedHint.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 28,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.dismiss(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/CeremonyAnimation.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 73,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onDismiss(); })"
+        },
+        {
+          "line": 106,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onDismiss(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MediaViewer.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 84,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.saveCurrent(); })"
+        },
+        {
+          "line": 89,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.shareCurrent(); })"
+        },
+        {
+          "line": 102,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onDismiss) this.onDismiss(); })"
+        },
+        {
+          "line": 331,
+          "kind": "Button",
+          "source": "Button('重试').fontColor(Color.White).backgroundColor('#29FFFFFF')"
+        },
+        {
+          "line": 332,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.loadRemote(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MoodPicker.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 55,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/VoiceComponents.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 167,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.toggle(); })"
+        },
+        {
+          "line": 245,
+          "kind": "onClick",
+          "source": ".onClick(() => { AudioPlayer.shared.toggle(this.path()); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DataProtectionPage.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 23,
+          "kind": "Button",
+          "source": "Button('关闭 App 后重试')"
+        },
+        {
+          "line": 29,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/RootPage.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 191,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showWhatsNew = false; })"
+        },
+        {
+          "line": 199,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showWhatsNew = false; })"
+        },
+        {
+          "line": 202,
+          "kind": "Button",
+          "source": "Button('好的，知道啦')"
+        },
+        {
+          "line": 205,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showWhatsNew = false; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/AIStudioView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 128,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.route = ''; this.tabBarVisible = true; })"
+        },
+        {
+          "line": 202,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.tabBarVisible = false; this.route = 'qa'; })"
+        },
+        {
+          "line": 275,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.tabBarVisible = false; this.route = 'story'; })"
+        },
+        {
+          "line": 323,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.tabBarVisible = false; this.route = 'capsule'; })"
+        },
+        {
+          "line": 414,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.tabBarVisible = false; this.route = tile.route; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/AccountView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 65,
+          "kind": "Button",
+          "source": "Button('修改密码').width('100%').backgroundColor(BubuColor.card).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 66,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showChangePassword = true; })"
+        },
+        {
+          "line": 67,
+          "kind": "Button",
+          "source": "Button('家庭恢复码').width('100%').backgroundColor(BubuColor.card).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 68,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showRecovery = true; })"
+        },
+        {
+          "line": 69,
+          "kind": "Button",
+          "source": "Button('退出当前账号').width('100%').backgroundColor('#FFE5E5').fontColor('#D9534F')"
+        },
+        {
+          "line": 70,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirmLogout(); })"
+        },
+        {
+          "line": 73,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.username, placeholder: '用户名（如 yuanbo）' })"
+        },
+        {
+          "line": 77,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.password, placeholder: '密码' })"
+        },
+        {
+          "line": 105,
+          "kind": "Button",
+          "source": "Button(this.busy ? '处理中…' : '登录')"
+        },
+        {
+          "line": 109,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.submit(); })"
+        },
+        {
+          "line": 133,
+          "kind": "Button",
+          "source": "Button('返回').onClick(() => { this.showChangePassword = false; })"
+        },
+        {
+          "line": 137,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.oldPassword, placeholder: '当前密码' }).type(InputType.Password).height(48)"
+        },
+        {
+          "line": 138,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.newPassword, placeholder: '新密码（至少 8 位）' }).type(InputType.Password).height(48)"
+        },
+        {
+          "line": 139,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.confirmPassword, placeholder: '再输一次新密码' }).type(InputType.Password).height(48)"
+        },
+        {
+          "line": 143,
+          "kind": "Button",
+          "source": "Button(this.busy ? '保存中…' : '保存新密码')"
+        },
+        {
+          "line": 145,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.changePassword(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/AdvancedSettingsView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 51,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 54,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose!(); })"
+        },
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button('立即同步')"
+        },
+        {
+          "line": 78,
+          "kind": "onClick",
+          "source": ".onClick(() => { SyncEngine.shared.start(); SafePrompt.toast(this.getUIContext(), { message: '正在同步…' }); })"
+        },
+        {
+          "line": 85,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.baseURL, placeholder: ServerConfig.baseURLPlaceholder })"
+        },
+        {
+          "line": 91,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.email, placeholder: 'username@bubu.family' })"
+        },
+        {
+          "line": 97,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.password, placeholder: '留空则沿用已保存密码' })"
+        },
+        {
+          "line": 111,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.childName }).width(160).textAlign(TextAlign.End)"
+        },
+        {
+          "line": 121,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.aiEnabled })"
+        },
+        {
+          "line": 132,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.semanticSearchEnabled })"
+        },
+        {
+          "line": 139,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.aiBaseURL, placeholder: ServerConfig.aiBaseURLPlaceholder })"
+        },
+        {
+          "line": 145,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.aiAPIKey, placeholder: '服务端 AI_API_KEY' })"
+        },
+        {
+          "line": 152,
+          "kind": "Button",
+          "source": "Button('保存并立即同步')"
+        },
+        {
+          "line": 154,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.saveAndSync(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/AlbumDetailView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 54,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onBack) this.onBack(); })"
+        },
+        {
+          "line": 85,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.viewerInitialID = item.media.id; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/AlbumView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 232,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.detailAlbum = album; })"
+        },
+        {
+          "line": 300,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.detailAlbum = album; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/BubuConstellationView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 248,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/BubuQAView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 66,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.input, placeholder: '问问关于布布的…' })"
+        },
+        {
+          "line": 69,
+          "kind": "Button",
+          "source": "Button('发送')"
+        },
+        {
+          "line": 75,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.ask(this.input); })"
+        },
+        {
+          "line": 87,
+          "kind": "Button",
+          "source": "Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(action)"
+        },
+        {
+          "line": 105,
+          "kind": "Button",
+          "source": "Button(sample)"
+        },
+        {
+          "line": 109,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.ask(sample); })"
+        },
+        {
+          "line": 127,
+          "kind": "Button",
+          "source": "Button(`${source.dateText} · ${source.snippet}`)"
+        },
+        {
+          "line": 132,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openSource(source.id); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/BubuStoryReaderView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 73,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        },
+        {
+          "line": 152,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (enabled) { action(); } })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/BubuStoryView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 146,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.readerStart = index; this.readerOpen = true; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/CapsuleComposeView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 99,
+          "kind": "Button",
+          "source": "Button('取消')"
+        },
+        {
+          "line": 102,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.cancel(); })"
+        },
+        {
+          "line": 109,
+          "kind": "Button",
+          "source": "Button('封存')"
+        },
+        {
+          "line": 113,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        },
+        {
+          "line": 150,
+          "kind": "Button",
+          "source": "Button('删除语音').backgroundColor(BubuColor.softFill).fontColor(BubuColor.secondaryText)"
+        },
+        {
+          "line": 151,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.removeVoice(); })"
+        },
+        {
+          "line": 184,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.emoji = e; })"
+        },
+        {
+          "line": 198,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.title, placeholder: '如：写给18岁的你' })"
+        },
+        {
+          "line": 215,
+          "kind": "TextArea",
+          "source": "TextArea({ text: $$this.letter, placeholder: '亲爱的布布……' })"
+        },
+        {
+          "line": 242,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 256,
+          "kind": "Button",
+          "source": "Button(BubuDateFormat.longDate(new Date(this.unlockMs)))"
+        },
+        {
+          "line": 260,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/CapsuleRecoveryView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 47,
+          "kind": "Button",
+          "source": "Button('完成')"
+        },
+        {
+          "line": 50,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        },
+        {
+          "line": 107,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 162,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.copyCode(); })"
+        },
+        {
+          "line": 174,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 178,
+          "kind": "TextArea",
+          "source": "TextArea({ text: $$this.restoreInput, placeholder: '把 24 个词按顺序输进来，用空格隔开' })"
+        },
+        {
+          "line": 191,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/CapsuleUnlockView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 101,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        },
+        {
+          "line": 113,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 147,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.open(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/CapsuleView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 101,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.route = 'recovery'; })"
+        },
+        {
+          "line": 106,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.editing = null; this.route = 'compose'; })"
+        },
+        {
+          "line": 221,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 239,
+          "kind": "Menu",
+          "source": "Menu() {"
+        },
+        {
+          "line": 241,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.editing = c; this.route = 'compose'; })"
+        },
+        {
+          "line": 243,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirmDelete(c); })"
+        },
+        {
+          "line": 267,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.editing = null; this.route = 'compose'; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/ChildProfileView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 77,
+          "kind": "Button",
+          "source": "Button('选择布布头像').onClick(() => { this.pickImage('avatar'); })"
+        },
+        {
+          "line": 88,
+          "kind": "Button",
+          "source": "Button('选择首页照片背景').onClick(() => { this.pickImage('hero'); })"
+        },
+        {
+          "line": 91,
+          "kind": "Button",
+          "source": "Button('恢复主题背景').fontColor(BubuColor.danger).onClick(() => { this.heroFileName = undefined; })"
+        },
+        {
+          "line": 100,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.name }).layoutWeight(1).textAlign(TextAlign.End)"
+        },
+        {
+          "line": 107,
+          "kind": "Button",
+          "source": "Button(this.dateText(this.birthdayMs))"
+        },
+        {
+          "line": 109,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 121,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.birthPlace, placeholder: '选填' }).layoutWeight(1).textAlign(TextAlign.End)"
+        },
+        {
+          "line": 149,
+          "kind": "Button",
+          "source": "Button(this.schoolStartMs > 0 ? this.dateText(this.schoolStartMs) : '选择日期')"
+        },
+        {
+          "line": 150,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickSchoolDate(); })"
+        },
+        {
+          "line": 152,
+          "kind": "Button",
+          "source": "Button('清除').onClick(() => { this.schoolStartMs = 0; this.schoolEdited = true; })"
+        },
+        {
+          "line": 155,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.allergies, placeholder: '过敏信息（可选）' })"
+        },
+        {
+          "line": 157,
+          "kind": "TextArea",
+          "source": "TextArea({ text: this.medicalNotes, placeholder: '需要老师知道的健康备注（可选）' })"
+        },
+        {
+          "line": 162,
+          "kind": "Button",
+          "source": "Button('保存档案')"
+        },
+        {
+          "line": 165,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/CommentComposeSheet.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 40,
+          "kind": "Button",
+          "source": "Button('取消')"
+        },
+        {
+          "line": 44,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onClose) this.onClose(); })"
+        },
+        {
+          "line": 49,
+          "kind": "Button",
+          "source": "Button('添加')"
+        },
+        {
+          "line": 54,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        },
+        {
+          "line": 71,
+          "kind": "TextArea",
+          "source": "TextArea({ text: this.text, placeholder: '这一刻，我记得……' })"
+        },
+        {
+          "line": 95,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.voice = null; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/EntryDetailView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 159,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showReactionPicker = false; })"
+        },
+        {
+          "line": 191,
+          "kind": "Button",
+          "source": "Button(this.editing ? '完成' : '编辑')"
+        },
+        {
+          "line": 193,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.toggleEditing(); })"
+        },
+        {
+          "line": 194,
+          "kind": "Button",
+          "source": "Button('分享这一刻')"
+        },
+        {
+          "line": 196,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showShareCard = true; })"
+        },
+        {
+          "line": 197,
+          "kind": "Button",
+          "source": "Button(this.entry.inStorybook ? '移出绘本' : '收进绘本')"
+        },
+        {
+          "line": 199,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.toggleStorybook(); })"
+        },
+        {
+          "line": 201,
+          "kind": "Button",
+          "source": "Button('🗑 删除记录')"
+        },
+        {
+          "line": 203,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirmDelete(); })"
+        },
+        {
+          "line": 233,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (!this.editing) this.viewingMediaID = m.id; })"
+        },
+        {
+          "line": 241,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.deleteMedia(m); })"
+        },
+        {
+          "line": 280,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickAppendMedia(video); })"
+        },
+        {
+          "line": 296,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showReactionPicker = true; })"
+        },
+        {
+          "line": 312,
+          "kind": "Button",
+          "source": "Button(BubuDateFormat.shortDate(new Date(this.draftHappenedAt)))"
+        },
+        {
+          "line": 314,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickHappenedDate(); })"
+        },
+        {
+          "line": 315,
+          "kind": "Button",
+          "source": "Button(BubuDateFormat.shortTime(new Date(this.draftHappenedAt)))"
+        },
+        {
+          "line": 317,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickHappenedTime(); })"
+        },
+        {
+          "line": 355,
+          "kind": "TextArea",
+          "source": "TextArea({ text: this.draftNote, placeholder: '此刻的布布……' })"
+        },
+        {
+          "line": 395,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.deleteVoice(voice); })"
+        },
+        {
+          "line": 473,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showCommentSheet = true; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/ExportView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 100,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 102,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose!(); })"
+        },
+        {
+          "line": 141,
+          "kind": "Button",
+          "source": "Button() {"
+        },
+        {
+          "line": 150,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.runExport(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/FamilyEnsembleView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 86,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        },
+        {
+          "line": 148,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 191,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (!this.generating) { this.synthesize(c); } })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/FamilyFeedView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 77,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 79,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.detailEntry = null; this.reload(); })"
+        },
+        {
+          "line": 102,
+          "kind": "Button",
+          "source": "Button('关闭')"
+        },
+        {
+          "line": 104,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onClose) this.onClose(); })"
+        },
+        {
+          "line": 174,
+          "kind": "onClick",
+          "source": ".onClick(() => { action(); })"
+        },
+        {
+          "line": 210,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/FirstPersonDiaryView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 85,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        },
+        {
+          "line": 181,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 227,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (!this.generating) { this.generate(); } })"
+        },
+        {
+          "line": 293,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.saveBack(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/GrowthCurveView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 99,
+          "kind": "Button",
+          "source": "Button('+ 记一次').backgroundColor(BubuColor.primary).fontColor(Color.White)"
+        },
+        {
+          "line": 100,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.heightStr = ''; this.weightStr = ''; this.headStr = ''; this.showAdd = true; })"
+        },
+        {
+          "line": 115,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.metric = m; this.redraw(); })"
+        },
+        {
+          "line": 331,
+          "kind": "Button",
+          "source": "Button('返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 332,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showAdd = false; })"
+        },
+        {
+          "line": 340,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.heightStr, placeholder: '如 78.5' })"
+        },
+        {
+          "line": 347,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.weightStr, placeholder: '如 10.2' })"
+        },
+        {
+          "line": 354,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.headStr, placeholder: '如 46.5' })"
+        },
+        {
+          "line": 358,
+          "kind": "Button",
+          "source": "Button('保存').width('100%').backgroundColor(BubuColor.primary).fontColor(Color.White)"
+        },
+        {
+          "line": 359,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/GrowthHomeView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 101,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.route = 'milestones'; })"
+        },
+        {
+          "line": 113,
+          "kind": "Button",
+          "source": "Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(action)"
+        },
+        {
+          "line": 132,
+          "kind": "onClick",
+          "source": ".backgroundColor(BubuColor.card).borderRadius(BubuRadius.card).onClick(action)"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/GrowthMoviePlayer.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 70,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (!this.isFinished()) { this.togglePlay(); } })"
+        },
+        {
+          "line": 130,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose(); })"
+        },
+        {
+          "line": 215,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.replay(); })"
+        },
+        {
+          "line": 223,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/GrowthMovieView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 92,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showRenderedMovie = false; })"
+        },
+        {
+          "line": 135,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        },
+        {
+          "line": 211,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.selectedTemplate = t.raw; this.draft = null; })"
+        },
+        {
+          "line": 284,
+          "kind": "onClick",
+          "source": ".onClick(() => { onTap(); })"
+        },
+        {
+          "line": 381,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.canGenerate()) { this.generateDraft(); } })"
+        },
+        {
+          "line": 393,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showPlayer = true; })"
+        },
+        {
+          "line": 401,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.renderStatus?.status !== 'rendering') this.startServerRender(); })"
+        },
+        {
+          "line": 408,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showRenderedMovie = true; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/GrowthReportView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 102,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onBack(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/HealthHomeView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 96,
+          "kind": "Button",
+          "source": "Button('返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(onBack)"
+        },
+        {
+          "line": 190,
+          "kind": "Button",
+          "source": "Button('醒啦').backgroundColor(BubuColor.primary).fontColor(Color.White)"
+        },
+        {
+          "line": 191,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.endSleep(); })"
+        },
+        {
+          "line": 207,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.startSleep(); })"
+        },
+        {
+          "line": 277,
+          "kind": "onClick",
+          "source": ".onClick(onTap)"
+        },
+        {
+          "line": 291,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.composingKind = k; })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/HealthRecordSheet.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 125,
+          "kind": "Button",
+          "source": "Button('取消').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 126,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onCancel(); })"
+        },
+        {
+          "line": 130,
+          "kind": "Button",
+          "source": "Button('保存').fontWeight(FontWeight.Bold)"
+        },
+        {
+          "line": 134,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        },
+        {
+          "line": 215,
+          "kind": "onClick",
+          "source": ".onClick(onTap)"
+        },
+        {
+          "line": 238,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.draftTitle, placeholder: '比如：小米粥、鸡蛋羹、青菜碎' })"
+        },
+        {
+          "line": 261,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 268,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.draftTitle, placeholder: '补充具体零食' })"
+        },
+        {
+          "line": 280,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.draftTitle, placeholder: '比如：维D、益生菌' })"
+        },
+        {
+          "line": 317,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 340,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickDateTime(true); })"
+        },
+        {
+          "line": 347,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickDateTime(false); })"
+        },
+        {
+          "line": 371,
+          "kind": "TextArea",
+          "source": "TextArea({ text: $$this.draftDetail, placeholder: '药物、护理或变化备注' })"
+        },
+        {
+          "line": 381,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.draftTitle, placeholder: '体检项目或疫苗名称' })"
+        },
+        {
+          "line": 392,
+          "kind": "TextArea",
+          "source": "TextArea({ text: $$this.draftDetail, placeholder: '医生建议、头围、体重、牙齿等补充' })"
+        },
+        {
+          "line": 407,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickRecordedAt(); })"
+        },
+        {
+          "line": 410,
+          "kind": "TextArea",
+          "source": "TextArea({ text: $$this.draftDetail, placeholder: '补充一点观察，比如吃完状态、睡醒精神……' })"
+        },
+        {
+          "line": 435,
+          "kind": "TextInput",
+          "source": "TextInput({"
+        },
+        {
+          "line": 450,
+          "kind": "Button",
+          "source": "Button('−').width(34).height(34).backgroundColor('#1AF28C9E').fontColor(BubuColor.primary)"
+        },
+        {
+          "line": 451,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 455,
+          "kind": "Button",
+          "source": "Button('+').width(34).height(34).backgroundColor(BubuColor.primary).fontColor(Color.White)"
+        },
+        {
+          "line": 456,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 470,
+          "kind": "TextInput",
+          "source": "TextInput({ text: value, placeholder: placeholder })"
+        },
+        {
+          "line": 493,
+          "kind": "TextInput",
+          "source": "TextInput({"
+        },
+        {
+          "line": 508,
+          "kind": "Button",
+          "source": "Button('−').width(34).height(34).backgroundColor('#1ADB3B47').fontColor(BubuColor.danger)"
+        },
+        {
+          "line": 509,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 513,
+          "kind": "Button",
+          "source": "Button('+').width(34).height(34).backgroundColor(BubuColor.danger).fontColor(Color.White)"
+        },
+        {
+          "line": 514,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/HomeView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 367,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.route = HomeRoute.profile; })"
+        },
+        {
+          "line": 451,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 473,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.navigate(HomeRoute.ssdIntake); })"
+        },
+        {
+          "line": 492,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.navigate(HomeRoute.photoInbox); })"
+        },
+        {
+          "line": 505,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.navigate(HomeRoute.syncCenter); })"
+        },
+        {
+          "line": 546,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 573,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 615,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.startQuickCapture(); })"
+        },
+        {
+          "line": 653,
+          "kind": "onClick",
+          "source": ".onClick(action)"
+        },
+        {
+          "line": 676,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 694,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.startQuickCapture(); })"
+        },
+        {
+          "line": 717,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 774,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 797,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 847,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 883,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 939,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.navigate(HomeRoute.naturalCapture); })"
+        },
+        {
+          "line": 969,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 972,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.closePanel(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/MembersView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 50,
+          "kind": "Button",
+          "source": "Button('+ 添加').backgroundColor(BubuColor.primary)"
+        },
+        {
+          "line": 51,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 78,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.switchTo(m); })"
+        },
+        {
+          "line": 81,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.beginEdit(m); }).accessibilityText(`编辑${m.name}`)"
+        },
+        {
+          "line": 83,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.requestRemove(m); }).accessibilityText(`删除${m.name}`)"
+        },
+        {
+          "line": 99,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 102,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showAdd = false; })"
+        },
+        {
+          "line": 109,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.newName, placeholder: '名字，如「王芳」或「妈妈」' })"
+        },
+        {
+          "line": 123,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.emojiIndex = i; })"
+        },
+        {
+          "line": 126,
+          "kind": "Button",
+          "source": "Button('保存').width('100%').backgroundColor(BubuColor.primary)"
+        },
+        {
+          "line": 127,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/MilestoneSheets.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 54,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onCancel(); })"
+        },
+        {
+          "line": 62,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 107,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.toggle(tpl.title); })"
+        },
+        {
+          "line": 200,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onCancel(); })"
+        },
+        {
+          "line": 208,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        },
+        {
+          "line": 221,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.title, placeholder: '如：第一次自己走路' })"
+        },
+        {
+          "line": 236,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.category = cat; })"
+        },
+        {
+          "line": 252,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.emoji = e; })"
+        },
+        {
+          "line": 266,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.achieved })"
+        },
+        {
+          "line": 276,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 299,
+          "kind": "TextArea",
+          "source": "TextArea({ text: this.detail, placeholder: '记下这一刻……' })"
+        },
+        {
+          "line": 311,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.deleteMilestone(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/MilestonesView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 242,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 259,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 273,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showAddMenu = false; this.showCustom = true; })"
+        },
+        {
+          "line": 277,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showAddMenu = false; this.showPicker = true; })"
+        },
+        {
+          "line": 325,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.searchText, placeholder: '搜索里程碑，比如 走路、吃饭、睡觉' })"
+        },
+        {
+          "line": 342,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 417,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/NaturalCaptureBar.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 70,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.cancelRecording(); })"
+        },
+        {
+          "line": 88,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.text, placeholder: '写一句：布布今天……' })"
+        },
+        {
+          "line": 104,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 116,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 143,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.transcribeAndParse(this.pendingAudioFileName!); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/NaturalCaptureReviewSheet.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 91,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onDismiss) this.onDismiss(); })"
+        },
+        {
+          "line": 103,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onTapSave(); })"
+        },
+        {
+          "line": 252,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.removeItem(item.id); })"
+        },
+        {
+          "line": 286,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.editingID = this.editingID === item.id ? null : item.id; })"
+        },
+        {
+          "line": 296,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.toggleConfirm(item.id); })"
+        },
+        {
+          "line": 306,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 371,
+          "kind": "TextInput",
+          "source": "TextInput({ text: item.title, placeholder: '标题' })"
+        },
+        {
+          "line": 385,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickDate(item); })"
+        },
+        {
+          "line": 408,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.numericText(item, key), placeholder: '未填写' })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/OnThisDayView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 196,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onSelect?.(entry); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/OnboardingView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 34,
+          "kind": "Button",
+          "source": "Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 35,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (!this.restoring) this.showFamilyRestore = false; })"
+        },
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button('已有 iOS 家庭档案？登录后全部恢复')"
+        },
+        {
+          "line": 78,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showFamilyRestore = true; })"
+        },
+        {
+          "line": 148,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.childName, placeholder: '布布' })"
+        },
+        {
+          "line": 166,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickBirthday(); })"
+        },
+        {
+          "line": 209,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.selectedRelation = rel; })"
+        },
+        {
+          "line": 219,
+          "kind": "TextInput",
+          "source": "TextInput({ text: this.memberName, placeholder: '也可以填你的名字（选填）' })"
+        },
+        {
+          "line": 244,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.advance(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/PhotoFrameView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 115,
+          "kind": "Button",
+          "source": "Button('返回').onClick(() => { this.onClose(); })"
+        },
+        {
+          "line": 120,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showControls = !this.showControls; })"
+        },
+        {
+          "line": 150,
+          "kind": "Button",
+          "source": "Button('关闭').onClick(() => { this.onClose(); })"
+        },
+        {
+          "line": 156,
+          "kind": "Button",
+          "source": "Button('上一张').onClick(() => { this.advance(-1); })"
+        },
+        {
+          "line": 157,
+          "kind": "Button",
+          "source": "Button(this.paused ? '继续' : '暂停').onClick(() => { this.paused = !this.paused; this.restartSlideTimer(); })"
+        },
+        {
+          "line": 158,
+          "kind": "Button",
+          "source": "Button('下一张').onClick(() => { this.advance(1); })"
+        },
+        {
+          "line": 159,
+          "kind": "Button",
+          "source": "Button(`${this.dwell} 秒`).onClick(() => { this.cycleDwell(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/PhotoInboxView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 24,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 27,
+          "kind": "onClick",
+          "source": ".onClick(this.onClose)"
+        },
+        {
+          "line": 52,
+          "kind": "Button",
+          "source": "Button(this.scanning ? '正在扫描…' : '扫描最近 14 天')"
+        },
+        {
+          "line": 58,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.scan(); })"
+        },
+        {
+          "line": 66,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.identityEnabled })"
+        },
+        {
+          "line": 139,
+          "kind": "Button",
+          "source": "Button('忽略这组')"
+        },
+        {
+          "line": 144,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.ignore(group); })"
+        },
+        {
+          "line": 145,
+          "kind": "Button",
+          "source": "Button(this.processingGroupId === group.id ? '正在收好…' : '收进时光机')"
+        },
+        {
+          "line": 150,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.accept(group); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/QuickCaptureSheet.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 114,
+          "kind": "Button",
+          "source": "Button('以后再说')"
+        },
+        {
+          "line": 117,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 128,
+          "kind": "Button",
+          "source": "Button(this.model.isSaving ? '保存中…' : '保存')"
+        },
+        {
+          "line": 133,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.doSave(); })"
+        },
+        {
+          "line": 214,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 270,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 302,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 339,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickPhotos(); })"
+        },
+        {
+          "line": 397,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.model.removePickedItem(preview.index); })"
+        },
+        {
+          "line": 434,
+          "kind": "TextArea",
+          "source": "TextArea({ placeholder: '此刻的布布……', text: $$this.model.note })"
+        },
+        {
+          "line": 495,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.model.clearPendingVoice(); })"
+        },
+        {
+          "line": 523,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.model.includeLocation })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/Reaction.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 138,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onPick) this.onPick(r); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/SSDIntakeView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 19,
+          "kind": "Button",
+          "source": "Button('返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(this.onClose)"
+        },
+        {
+          "line": 64,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickDate(candidate); })"
+        },
+        {
+          "line": 71,
+          "kind": "Button",
+          "source": "Button('忽略').layoutWeight(1).height(48)"
+        },
+        {
+          "line": 73,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.cancel(candidate); })"
+        },
+        {
+          "line": 74,
+          "kind": "Button",
+          "source": "Button(this.workingId === candidate.id ? '处理中…' : '确认收进').layoutWeight(1).height(48)"
+        },
+        {
+          "line": 76,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirm(candidate); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/SettingsView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 136,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 139,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showMembers = false; })"
+        },
+        {
+          "line": 158,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 161,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showAccount = false; })"
+        },
+        {
+          "line": 186,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 189,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showWhatsNew = false; })"
+        },
+        {
+          "line": 208,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 211,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showProfile = false; })"
+        },
+        {
+          "line": 232,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 235,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose!(); })"
+        },
+        {
+          "line": 275,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showMembers = true; })"
+        },
+        {
+          "line": 315,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 318,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.showTheme = false; })"
+        },
+        {
+          "line": 416,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.simpleModeEnabled })"
+        },
+        {
+          "line": 427,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.soundEnabled })"
+        },
+        {
+          "line": 458,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.dailyReminderEnabled })"
+        },
+        {
+          "line": 489,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.photoInboxBackgroundEnabled })"
+        },
+        {
+          "line": 567,
+          "kind": "onClick",
+          "source": ".onClick(action)"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/ShareCardSheet.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 123,
+          "kind": "Button",
+          "source": "Button('取消').backgroundColor('#00000000').fontColor(BubuColor.secondaryText)"
+        },
+        {
+          "line": 124,
+          "kind": "onClick",
+          "source": ".onClick(() => { if (this.onClose) this.onClose(); })"
+        },
+        {
+          "line": 158,
+          "kind": "Toggle",
+          "source": "Toggle({ type: ToggleType.Switch, isOn: this.showAge })"
+        },
+        {
+          "line": 168,
+          "kind": "Button",
+          "source": "Button(this.rendering ? '正在生成…' : '分享图片')"
+        },
+        {
+          "line": 172,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.share(); })"
+        },
+        {
+          "line": 187,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.layout = value; BubuHaptics.selection(); this.renderPreview(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/SimpleModeView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 93,
+          "kind": "Button",
+          "source": "Button('切换到完整版').height(52).fontSize(17)"
+        },
+        {
+          "line": 95,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.exit(); })"
+        },
+        {
+          "line": 114,
+          "kind": "onClick",
+          "source": ".onClick(() => { BubuHaptics.tapLight(); action(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/SimpleTimelineView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 26,
+          "kind": "Button",
+          "source": "Button('关闭').height(48).backgroundColor(BubuColor.primary).fontColor(Color.White).onClick(this.onClose)"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/SoundRingView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 35,
+          "kind": "Button",
+          "source": "Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 36,
+          "kind": "onClick",
+          "source": ".onClick(() => { AudioPlayer.shared.stop(); this.onBack(); })"
+        },
+        {
+          "line": 71,
+          "kind": "Button",
+          "source": "Button(`${item.summary} · ${this.statusText(item.status)}`)"
+        },
+        {
+          "line": 73,
+          "kind": "onClick",
+          "source": ".borderRadius(BubuRadius.small).onClick(() => { this.ring = item; this.audioPath = ''; })"
+        },
+        {
+          "line": 89,
+          "kind": "Button",
+          "source": "Button(this.operation === 'drafting' ? '正在整理…' : '整理一圈声音')"
+        },
+        {
+          "line": 94,
+          "kind": "onClick",
+          "source": ".borderRadius(BubuRadius.button).onClick(() => { this.createDraft(); })"
+        },
+        {
+          "line": 108,
+          "kind": "Button",
+          "source": "Button(this.operation === 'downloading' ? '正在取回音频…' : (this.playing ? '暂停' : '播放完整音频章'))"
+        },
+        {
+          "line": 111,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.play(ring.id); })"
+        },
+        {
+          "line": 119,
+          "kind": "Button",
+          "source": "Button('刷新').height(44).onClick(() => { this.refreshStatus(ring.id); })"
+        },
+        {
+          "line": 129,
+          "kind": "Button",
+          "source": "Button(this.operation === 'rendering' ? '正在开始制作…' : '确认清单并开始制作')"
+        },
+        {
+          "line": 132,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.render(ring.id); })"
+        },
+        {
+          "line": 135,
+          "kind": "Button",
+          "source": "Button(this.operation === 'archiving' ? '正在归档…' : '收进档案')"
+        },
+        {
+          "line": 138,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.archive(ring.id); })"
+        },
+        {
+          "line": 156,
+          "kind": "Button",
+          "source": "Button('只从本次清单移除')"
+        },
+        {
+          "line": 158,
+          "kind": "onClick",
+          "source": ".borderRadius(12).onClick(() => { this.removeClip(ring.id, clip.sourceId); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/SyncCenterView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 35,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 38,
+          "kind": "onClick",
+          "source": ".onClick(this.onClose)"
+        },
+        {
+          "line": 90,
+          "kind": "Button",
+          "source": "Button(this.running ? '正在同步…' : '立即同步')"
+        },
+        {
+          "line": 96,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.syncNow(); })"
+        },
+        {
+          "line": 98,
+          "kind": "Button",
+          "source": "Button('重新核对服务器全部内容')"
+        },
+        {
+          "line": 104,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pullAll(); })"
+        },
+        {
+          "line": 106,
+          "kind": "Button",
+          "source": "Button('本机内容全部重新上传')"
+        },
+        {
+          "line": 112,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirmFullPush(); })"
+        },
+        {
+          "line": 139,
+          "kind": "Button",
+          "source": "Button('现在导出一份完整档案')"
+        },
+        {
+          "line": 141,
+          "kind": "onClick",
+          "source": ".onClick(this.onOpenExport)"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/ThemeSettingsView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 85,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 115,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/TimelineView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 217,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 219,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.detailEntry = null; this.tabBarVisible = true; this.reload(); })"
+        },
+        {
+          "line": 246,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.toggleSortMode(); })"
+        },
+        {
+          "line": 262,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.tabBarVisible = false; this.showFamilyFeed = true; })"
+        },
+        {
+          "line": 399,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openDetail(entry); })"
+        },
+        {
+          "line": 405,
+          "kind": "Menu",
+          "source": "Menu() {"
+        },
+        {
+          "line": 407,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.shareEntry = entry; BubuHaptics.selection(); })"
+        },
+        {
+          "line": 409,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.shareEntryLink(entry); })"
+        },
+        {
+          "line": 411,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirmDelete(entry); })"
+        },
+        {
+          "line": 427,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.restoreDeletedEntry(); })"
+        },
+        {
+          "line": 506,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openDetail(entry); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/VaccineQuickLogSheet.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 75,
+          "kind": "Button",
+          "source": "Button('取消').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown)"
+        },
+        {
+          "line": 76,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onCancel(); })"
+        },
+        {
+          "line": 80,
+          "kind": "Button",
+          "source": "Button('保存').fontWeight(FontWeight.Bold).backgroundColor(BubuColor.primary).fontColor(Color.White)"
+        },
+        {
+          "line": 81,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        },
+        {
+          "line": 95,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.pickDate(); })"
+        },
+        {
+          "line": 101,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.hospital, placeholder: '门诊（可选）' }).width(180).textAlign(TextAlign.End)"
+        },
+        {
+          "line": 107,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.reaction, placeholder: '可选' }).width(160).textAlign(TextAlign.End)"
+        },
+        {
+          "line": 113,
+          "kind": "TextInput",
+          "source": "TextInput({ text: $$this.note, placeholder: '可选' }).width(180).textAlign(TextAlign.End)"
+        },
+        {
+          "line": 122,
+          "kind": "Button",
+          "source": "Button('取消打卡 / 删除记录')"
+        },
+        {
+          "line": 124,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.confirmDelete(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/VaccineView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 192,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        },
+        {
+          "line": 225,
+          "kind": "onClick",
+          "source": ".onClick(() => {"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/VoiceArchiveView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 76,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 78,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose!(); })"
+        },
+        {
+          "line": 83,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openRecorder(VoiceMemoKind.childVoice); })"
+        },
+        {
+          "line": 89,
+          "kind": "Button",
+          "source": "Button('录布布的声音')"
+        },
+        {
+          "line": 91,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openRecorder(VoiceMemoKind.childVoice); })"
+        },
+        {
+          "line": 92,
+          "kind": "Button",
+          "source": "Button('家人对她说')"
+        },
+        {
+          "line": 94,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openRecorder(VoiceMemoKind.familyVoice); })"
+        },
+        {
+          "line": 182,
+          "kind": "Button",
+          "source": "Button('取消')"
+        },
+        {
+          "line": 184,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.closeRecorder(); })"
+        },
+        {
+          "line": 187,
+          "kind": "Button",
+          "source": "Button('收好')"
+        },
+        {
+          "line": 190,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.save(); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/WeeklyReportView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 67,
+          "kind": "Button",
+          "source": "Button(`${this.weekText(item)} · ${item.status === 'archived' ? '已归档' : '待确认'}`)"
+        },
+        {
+          "line": 71,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.report = item; })"
+        },
+        {
+          "line": 83,
+          "kind": "Button",
+          "source": "Button('‹ 返回').backgroundColor(BubuColor.softFill).fontColor(BubuColor.warmBrown).onClick(action)"
+        },
+        {
+          "line": 99,
+          "kind": "Button",
+          "source": "Button(this.operation === 'generating' ? '正在生成…' : '生成上周周报')"
+        },
+        {
+          "line": 105,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.generate(); })"
+        },
+        {
+          "line": 128,
+          "kind": "Button",
+          "source": "Button(this.sourceTitle(this.sourceFor(report, sourceId)!))"
+        },
+        {
+          "line": 132,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.openSource(this.sourceFor(report, sourceId)!); })"
+        },
+        {
+          "line": 141,
+          "kind": "Button",
+          "source": "Button(this.operation === 'archiving' ? '正在收进档案…' : '确认并收进档案')"
+        },
+        {
+          "line": 146,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.archive(report.id); })"
+        }
+      ]
+    },
+    {
+      "path": "harmony/entry/src/main/ets/view/YearbookView.ets",
+      "verification": "source-inventory-only; runtime coverage is listed separately in coverage-ledger.md",
+      "controls": [
+        {
+          "line": 96,
+          "kind": "Button",
+          "source": "Button('返回')"
+        },
+        {
+          "line": 98,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.onClose!(); })"
+        },
+        {
+          "line": 130,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.selectedYear = year; })"
+        },
+        {
+          "line": 150,
+          "kind": "Button",
+          "source": "Button() {"
+        },
+        {
+          "line": 159,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.generate(); })"
+        },
+        {
+          "line": 167,
+          "kind": "Button",
+          "source": "Button('分享 / 打印 PDF')"
+        },
+        {
+          "line": 170,
+          "kind": "onClick",
+          "source": ".onClick(() => { this.shareResult(); })"
+        }
+      ]
+    }
+  ],
+  "serverRoutes": [
+    {
+      "line": 293,
+      "route": "@app.post(\"/school-report/recognize\", response_model=school_report.SchoolReportResp)"
+    },
+    {
+      "line": 616,
+      "route": "@app.get(\"/health\")"
+    },
+    {
+      "line": 638,
+      "route": "@app.post(\"/intake/batches\")"
+    },
+    {
+      "line": 685,
+      "route": "@app.get(\"/intake/batches/{batch_id}\")"
+    },
+    {
+      "line": 693,
+      "route": "@app.get(\"/intake/candidates\")"
+    },
+    {
+      "line": 699,
+      "route": "@app.post(\"/intake/confirm\")"
+    },
+    {
+      "line": 726,
+      "route": "@app.post(\"/intake/candidates/update\")"
+    },
+    {
+      "line": 741,
+      "route": "@app.post(\"/intake/cancel\")"
+    },
+    {
+      "line": 754,
+      "route": "@app.put(\"/intake/upload/{batch_id}/{asset_key}\")"
+    },
+    {
+      "line": 852,
+      "route": "@app.post(\"/intake/commit\")"
+    },
+    {
+      "line": 869,
+      "route": "@app.post(\"/rewrite-first-person\", response_model=RewriteResp,"
+    },
+    {
+      "line": 895,
+      "route": "@app.post(\"/classify\", response_model=ClassifyResp,"
+    },
+    {
+      "line": 916,
+      "route": "@app.post(\"/detect-first-time\", response_model=DetectFirstResp,"
+    },
+    {
+      "line": 936,
+      "route": "@app.post(\"/movie-narration\", response_model=MovieResp,"
+    },
+    {
+      "line": 952,
+      "route": "@app.post(\"/ask\", response_model=AskResp, dependencies=[Depends(require_api_key)])"
+    },
+    {
+      "line": 982,
+      "route": "@app.post(\"/semantic/search\", response_model=SemanticSearchResp,"
+    },
+    {
+      "line": 1019,
+      "route": "@app.get(\"/weekly-report/latest\", response_model=WeeklyReportResp,"
+    },
+    {
+      "line": 1030,
+      "route": "@app.get(\"/weekly-report/history\", response_model=list[WeeklyReportResp],"
+    },
+    {
+      "line": 1039,
+      "route": "@app.post(\"/weekly-report/generate\", response_model=WeeklyReportResp,"
+    },
+    {
+      "line": 1051,
+      "route": "@app.post(\"/weekly-report/archive\", response_model=WeeklyReportResp,"
+    },
+    {
+      "line": 1062,
+      "route": "@app.get(\"/weekly-report/events\", dependencies=[Depends(require_api_key)])"
+    },
+    {
+      "line": 1098,
+      "route": "@app.get(\"/sound-ring/latest\", response_model=SoundRingResp,"
+    },
+    {
+      "line": 1108,
+      "route": "@app.get(\"/sound-ring/history\", response_model=list[SoundRingResp],"
+    },
+    {
+      "line": 1116,
+      "route": "@app.post(\"/sound-ring/draft\", response_model=SoundRingResp,"
+    },
+    {
+      "line": 1128,
+      "route": "@app.post(\"/sound-ring/render\", response_model=SoundRingResp,"
+    },
+    {
+      "line": 1137,
+      "route": "@app.post(\"/sound-ring/remove\", response_model=SoundRingResp,"
+    },
+    {
+      "line": 1150,
+      "route": "@app.get(\"/sound-ring/status/{artifact_id}\", response_model=SoundRingResp,"
+    },
+    {
+      "line": 1158,
+      "route": "@app.post(\"/sound-ring/archive\", response_model=SoundRingResp,"
+    },
+    {
+      "line": 1166,
+      "route": "@app.get(\"/sound-ring/file/{artifact_id}\", dependencies=[Depends(require_api_key)])"
+    },
+    {
+      "line": 1220,
+      "route": "@app.post(\"/movie/render\", response_model=MovieRenderResp,"
+    },
+    {
+      "line": 1232,
+      "route": "@app.get(\"/movie/status/{job_id}\", response_model=MovieRenderResp,"
+    },
+    {
+      "line": 1241,
+      "route": "@app.get(\"/movie/file/{job_id}\", dependencies=[Depends(require_api_key)])"
+    },
+    {
+      "line": 1368,
+      "route": "@app.post(\"/parse-natural-capture\", response_model=NaturalParseResp,"
+    },
+    {
+      "line": 1455,
+      "route": "@app.post(\"/transcribe\", dependencies=[Depends(require_api_key)])"
+    }
+  ]
+}

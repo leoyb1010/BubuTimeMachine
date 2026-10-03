@@ -20,6 +20,8 @@ struct NaturalCaptureReviewSheet: View {
     @State private var expandedIDs: Set<UUID>
     @State private var editingID: UUID?
     @State private var showUnconfirmedAlert = false
+    @State private var saveError: String?
+    @State private var didSave = false
 
     init(result: NaturalCaptureResult, originalText: String, onSaved: @escaping () -> Void) {
         self.result = result
@@ -97,8 +99,13 @@ struct NaturalCaptureReviewSheet: View {
                         }
                     }
                     .fontWeight(.bold)
-                    .disabled(savableItems.isEmpty)
+                    .disabled(savableItems.isEmpty || didSave || savableItems.contains(where: \.hasInvalidNumericFields))
                 }
+            }
+            .alert("没能保存", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("返回重试", role: .cancel) { saveError = nil }
+            } message: {
+                Text(saveError ?? "请稍后再试，已确认的内容仍保留在这里。")
             }
             .alert("还有 \(unconfirmedCount) 条需要确认", isPresented: $showUnconfirmedAlert) {
                 Button("仍然保存其余 \(savableItems.count) 条") { saveAll() }
@@ -180,6 +187,12 @@ struct NaturalCaptureReviewSheet: View {
                         .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.5))
                 }
                 .accessibilityLabel("删除这条")
+            }
+
+            if value.hasInvalidNumericFields {
+                Text("有数量无法保存，请点「编辑」修正数值，或删除这条记录。")
+                    .font(BubuTheme.Font.caption)
+                    .foregroundStyle(BubuTheme.Color.danger)
             }
 
             if editing {
@@ -325,6 +338,7 @@ struct NaturalCaptureReviewSheet: View {
         Binding(
             get: {
                 if let value = item.wrappedValue.fields.double(key) { return trimNumber(value) }
+                if case .number(let value)? = item.wrappedValue.fields[key] { return String(value) }
                 return item.wrappedValue.fields.string(key) ?? ""
             },
             set: { newValue in
@@ -334,7 +348,7 @@ struct NaturalCaptureReviewSheet: View {
                     .bubuTrimmed
                 if trimmed.isEmpty {
                     item.wrappedValue.fields[key] = nil
-                } else if let number = Double(trimmed) {
+                } else if let number = [key: JSONValue.string(trimmed)].double(key) {
                     item.wrappedValue.fields[key] = .number(number)
                 } else {
                     item.wrappedValue.fields[key] = .string(trimmed)
@@ -385,12 +399,35 @@ struct NaturalCaptureReviewSheet: View {
     }
 
     private func saveAll() {
-        let router = NaturalCaptureRouter(context: context,
-                                          authorRole: env.config.currentRole.rawValue)
-        for item in savableItems {
-            router.save(item)
+        guard !didSave, !savableItems.isEmpty else { return }
+        do {
+            try NaturalCaptureRouter.saveBatch(savableItems,
+                authorRole: env.config.currentRole.rawValue, container: context.container) { batchContext in
+                    #if DEBUG
+                    try NaturalCaptureUITestSaveFault.injectOnce(in: batchContext.container)
+                    #endif
+                    try batchContext.save()
+                }
+        } catch {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+               ProcessInfo.processInfo.arguments.contains("-uitest-natural-fail-save") {
+                let failure = error as NSError
+                print("[NaturalCaptureUITest] save error: \(failure.domain) / \(failure.code); injected=\(NaturalCaptureUITestSaveFault.didInject)")
+            }
+            #endif
+            saveError = "保存失败，内容还在这里。请检查可用存储空间后重试。"
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+               ProcessInfo.processInfo.arguments.contains("-uitest-natural-fail-save") {
+                let failure = error as NSError
+                saveError! += " [synthetic: \(failure.domain)/\(failure.code), injected=\(NaturalCaptureUITestSaveFault.didInject)]"
+            }
+            #endif
+            return
         }
-        try? context.save()
+        didSave = true
+        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
         BubuHaptics.success()
@@ -399,3 +436,23 @@ struct NaturalCaptureReviewSheet: View {
         dismiss()
     }
 }
+
+#if DEBUG
+/// The synthetic disk fault belongs to the launched test process, not a sheet's
+/// view state, which SwiftUI can reconstruct after a model-context rollback.
+@MainActor
+private enum NaturalCaptureUITestSaveFault {
+    static var didInject = false
+
+    static func injectOnce(in container: ModelContainer) throws {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-uitest-in-memory"),
+              arguments.contains("-uitest-natural-fail-save"),
+              !container.configurations.isEmpty,
+              container.configurations.allSatisfy({ $0.isStoredInMemoryOnly }),
+              !didInject else { return }
+        didInject = true
+        throw CocoaError(.fileWriteOutOfSpace)
+    }
+}
+#endif

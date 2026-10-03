@@ -263,11 +263,6 @@ struct CapsuleComposeView: View {
             // v3 真 E2E：用家庭恢复码派生密钥加密，密钥不随记录同步。
             let recoveryCode = CapsuleRecovery.currentOrCreate()
             let blobName = try env.vault.sealV3(payload, recoveryCode: recoveryCode, salt: capsule.id.uuidString)
-            // 加密闭环（R4 G-5）：语音已嵌入加密 blob，删除沙盒里的明文副本——
-            // 「加密的信」不该旁边躺着一份能直接播放的原文件
-            if let plainVoice = payload.voiceFileName {
-                env.mediaStore.deleteMedia(named: plainVoice)
-            }
             capsule.encryptedBlobFileName = blobName
             // 编辑一封已到期的信不重新上锁；只有开启日期在未来才是锁着的。
             capsule.isLocked = sealedUnlockAt > .now
@@ -276,7 +271,11 @@ struct CapsuleComposeView: View {
             capsule.cryptoVersion = 3
             capsule.syncState = .local
             if editing == nil { context.insert(capsule) }
-            try context.save()
+            // The encrypted file alone is not a committed capsule. A disk error must
+            // leave the draft's original voice available for playback and retry.
+            try CapsuleCommitBoundary.save(plainVoice: payload.voiceFileName,
+                persist: { try context.save() },
+                removePlaintext: { env.mediaStore.deleteMedia(named: $0) })
             // 封存要有「盖章」的确定感：触觉 + 音效 + 蜡章落下动画三拍齐（R4 C2）
             BubuHaptics.stamp()
             BubuSound.play(.seal)
@@ -329,5 +328,16 @@ struct CapsuleComposeView: View {
         .onAppear {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.52)) { sealStamped = true }
         }
+    }
+}
+
+
+/// Narrow file-ownership boundary; it does not make the caller's model edits atomic.
+@MainActor
+enum CapsuleCommitBoundary {
+    static func save(plainVoice: String?, persist: () throws -> Void,
+                     removePlaintext: (String) -> Void) throws {
+        try persist()
+        if let plainVoice { removePlaintext(plainVoice) }
     }
 }
