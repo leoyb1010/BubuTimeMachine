@@ -572,7 +572,9 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-uitest-sayings") {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-members") {
+            NavigationStack { MembersView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-sayings") {
             NavigationStack { MemoryJournalView(kind: .saying) }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-simple") {
             SimpleModeView()

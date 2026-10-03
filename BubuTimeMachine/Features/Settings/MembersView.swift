@@ -129,15 +129,23 @@ struct MembersView: View {
     private func confirmDelete(_ member: FamilyMember) {
         pendingDelete = nil
         guard members.count > 1 else { return }
-        if member.id == env.currentMemberId {
-            let fallback = members.first { $0.id != member.id }
-            env.currentMemberId = fallback?.id
-            // 同步署名身份，否则会卡在已删成员的角色（长辈时还会卡在简单模式）。
-            if let relation = fallback?.relation { env.config.currentRoleRaw = relation }
+        do {
+            let fallback = try FamilyMemberMutation.delete(id: member.id, container: context.container) { transaction in
+                #if DEBUG
+                try MemberMutationUITestFault.injectOnce("delete", in: transaction.container)
+                #endif
+                try transaction.save()
+            }
+            // 已持久删除后再更新 UI context 与当前署名，失败时两者都原样保留。
+            context.delete(member)
+            if member.id == env.currentMemberId {
+                env.currentMemberId = fallback.id
+                env.config.currentRoleRaw = fallback.relation
+            }
+        } catch {
+            notice = "没能删除这位家人，身份和记录都没有改变。请检查可用存储空间后重试。"
+            return
         }
-        PendingDeletion.enqueue(collection: "members", remoteId: member.remoteId, in: context)
-        context.delete(member)
-        try? context.save()
         env.syncEngine.syncNow()
         BubuHaptics.success()
     }
@@ -150,6 +158,9 @@ struct MemberEditSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
+    @State private var draftID = UUID()
+    @State private var saveError: String?
+    @State private var didSave = false
     @State private var name = ""
     @State private var relation: Relation = .mama
     @State private var emoji = "🙂"
@@ -207,6 +218,10 @@ struct MemberEditSheet: View {
                 }
             }
             .onAppear(perform: load)
+            .alert("没有保存成功", isPresented: Binding(
+                get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("好", role: .cancel) {}
+            } message: { Text(saveError ?? "") }
         }
     }
 
@@ -223,21 +238,27 @@ struct MemberEditSheet: View {
     }
 
     private func save() {
-        // 去掉首尾空白：纯空格名字过去能存进去，成员列表会出现一行空白
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalName = trimmed.isEmpty ? relation.rawValue : trimmed
-        if let member {
-            member.name = finalName
-            member.relation = relation.rawValue
-            member.avatarEmoji = emoji
-            member.themeColorHex = colorHex
-            member.syncState = .local
-        } else {
-            let m = FamilyMember(name: finalName, relation: relation.rawValue,
-                                 avatarEmoji: emoji, themeColorHex: colorHex)
-            context.insert(m)
+        guard !didSave else { return }
+        let draft = FamilyMemberMutation.Draft(name: name, relation: relation.rawValue,
+                                               emoji: emoji, colorHex: colorHex)
+        do {
+            try FamilyMemberMutation.save(id: member?.id, newID: draftID, draft: draft, container: context.container) { transaction in
+                #if DEBUG
+                try MemberMutationUITestFault.injectOnce("save", in: transaction.container)
+                #endif
+                try transaction.save()
+            }
+        } catch {
+            saveError = "填写的内容还在这里。请检查可用存储空间后再点保存。"
+            return
         }
-        try? context.save()
+        // 只镜像已提交成员，不保存/回滚其它页面在主 context 中尚未提交的工作。
+        if let member {
+            draft.apply(to: member)
+            if member.id == env.currentMemberId { env.config.currentRoleRaw = relation.rawValue }
+        }
+        didSave = true
+        env.syncEngine.syncNow()
         dismiss()
     }
 }

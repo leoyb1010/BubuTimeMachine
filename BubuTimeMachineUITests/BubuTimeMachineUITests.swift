@@ -3,6 +3,64 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testMemberSaveFailureRetainsDraftAndRetryAddsExactlyOnce() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-members", "-uitest-member-fail-save"]
+        app.launch()
+        XCTAssertTrue(app.buttons["添加家庭成员"].waitForExistence(timeout: 12))
+        app.buttons["添加家庭成员"].tap()
+        let name = app.textFields["显示名字"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        attachScreenshot("members-editor-before-save", to: self)
+        name.tap(); name.typeText("测试家人")
+        app.buttons["保存"].tap()
+        let failure = app.alerts["没有保存成功"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        attachScreenshot("members-save-failure-retains-draft", to: self)
+        failure.buttons["好"].tap()
+        XCTAssertEqual(name.value as? String, "测试家人")
+        app.buttons["保存"].tap()
+        let added = app.buttons["切换到测试家人"]
+        XCTAssertTrue(added.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "切换到测试家人").count, 1)
+        app.buttons["编辑测试家人"].tap()
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "测试家人")
+        app.buttons["取消"].tap()
+        XCTAssertTrue(added.waitForExistence(timeout: 5))
+        attachScreenshot("members-save-retry-once-and-reopen", to: self)
+    }
+
+    @MainActor
+    func testCurrentMemberDeleteFailureKeepsIdentityUntilRetry() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-members", "-uitest-member-fail-delete"]
+        app.launch()
+        let current = app.buttons["切换到妈妈"]
+        XCTAssertTrue(current.waitForExistence(timeout: 12))
+        current.tap()
+        let cell = app.cells.containing(.button, identifier: "切换到妈妈").firstMatch
+        XCTAssertTrue(cell.exists)
+        XCTAssertTrue(cell.staticTexts["当前"].exists)
+        cell.swipeLeft()
+        app.buttons["删除"].tap()
+        app.buttons["删除「妈妈」"].tap()
+        let failure = app.alerts["提示"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        attachScreenshot("members-delete-failure-preserves-identity", to: self)
+        failure.buttons["好"].tap()
+        XCTAssertTrue(current.exists)
+        XCTAssertTrue(cell.staticTexts["当前"].exists)
+        cell.swipeLeft(); app.buttons["删除"].tap(); app.buttons["删除「妈妈」"].tap()
+        XCTAssertTrue(current.waitForNonExistence(timeout: 5))
+        let fallback = app.cells.containing(.button, identifier: "切换到姥姥").firstMatch
+        XCTAssertTrue(fallback.staticTexts["当前"].waitForExistence(timeout: 5))
+        attachScreenshot("members-delete-retry-switches-after-save", to: self)
+    }
+
+    @MainActor
     func testRootTabsRemainSelectableInsideChildRecognitionSettings() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
