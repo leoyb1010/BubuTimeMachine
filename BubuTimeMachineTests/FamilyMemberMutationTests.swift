@@ -115,7 +115,7 @@ struct FamilyMemberMutationTests {
             #expect(try ModelContext(store).fetchCount(FetchDescriptor<FamilyMember>()) == 2)
             #expect(try ModelContext(store).fetchCount(FetchDescriptor<PendingDeletion>()) == 0)
             #expect(other.name == "另一页面未提交草稿" && main.hasChanges)
-            try FamilyMemberMutation.delete(id: first.id, container: store)
+            _ = try FamilyMemberMutation.delete(id: first.id, container: store)
             let independent = try ModelContext(store).fetch(FetchDescriptor<FamilyMember>())
             #expect(independent.count == 1 && independent.first?.name == "原另一成员")
             // Match the successful UI mirror, then model a later independent main save.
