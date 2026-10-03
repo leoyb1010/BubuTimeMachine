@@ -263,3 +263,28 @@ jobs:
           echo '054cdf8c52712c4fcab1c515f0e4d9cc0e31d4f4f3bd81d8455b663178e2f146  /tmp/pocketbase.zip' | sha256sum -c -
           unzip -q /tmp/pocketbase.zip -d /tmp/bubu-pocketbase
           POCKETBASE_BIN=/tmp/bubu-pocketbase/pocketbase python -m unittest discover -s server/pocketbase/tests -v
+
+  watch-product-audit:
+    name: Native Watch photo reading (synthetic IO)
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select Xcode and install project generator
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Capture actual watchOS production view
+        run: bash scripts/watch-product-audit/run.sh current WORKTREE
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: native-watch-product-${{ github.sha }}
+          path: |
+            watch-product-audit-results/**/*.png
+            watch-product-audit-results/**/*.json
+            watch-product-audit-results/**/*.txt
+            watch-product-audit-results/**/*.log
+          retention-days: 14
+          if-no-files-found: error
