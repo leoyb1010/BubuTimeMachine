@@ -99,7 +99,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(stableSamples, 3, "All 12 real target frames must be nonempty and stable before collision checks")
         attachScreenshot(largeText ? "milestone-stars-large-text-targets" : "milestone-stars-normal-targets", to: self)
         let elements = stars.allElementsBoundByIndex
-        let frames = elements.map { ["id": $0.identifier, "label": $0.label, "frame": NSStringFromCGRect($0.frame)] }
+        let frames = elements.map { ["id": $0.identifier, "label": $0.label, "frame": String(describing: $0.frame)] }
         let data = try JSONSerialization.data(withJSONObject: frames, options: [.prettyPrinted, .sortedKeys])
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
         attachment.name = largeText ? "milestone-stars-large-frames" : "milestone-stars-normal-frames"
