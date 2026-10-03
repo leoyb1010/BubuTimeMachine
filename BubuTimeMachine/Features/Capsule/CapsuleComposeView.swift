@@ -25,6 +25,8 @@ struct CapsuleComposeView: View {
     /// 封存成功的「盖蜡章」仪式（触觉/音效早有，视觉是第三拍）。
     @State private var showSealCeremony = false
     @State private var sealStamped = false
+    @State private var draftID = UUID()
+    @State private var loadedIdentity: CapsuleDraftCommit.Identity?
 
     private var theme: Color { env.theme.theme.primary }
     private var profile: ChildProfile? { profiles.first }
@@ -54,13 +56,15 @@ struct CapsuleComposeView: View {
             .navigationTitle(editing == nil ? "写给未来的布布" : "修改时间胶囊")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }.disabled(saving || showSealCeremony)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { Task { await save() } } label: {
                         if saving { ProgressView() }
                         else { Text("封存").font(BubuTheme.Font.headline.weight(.bold)) }
                     }
-                    .disabled(!canSave || saving)
+                    .disabled(!canSave || saving || showSealCeremony)
                 }
             }
             .alert("封存失败", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
@@ -69,6 +73,7 @@ struct CapsuleComposeView: View {
                 Text(errorText ?? "")
             }
             .onAppear(perform: loadEditing)
+            .interactiveDismissDisabled(saving || showSealCeremony)
         }
     }
 
@@ -203,6 +208,7 @@ struct CapsuleComposeView: View {
 
     private func loadEditing() {
         guard let editing, title.isEmpty else { return }
+        loadedIdentity = CapsuleDraftCommit.Identity(editing)
         title = editing.title
         emoji = editing.coverEmoji ?? "💌"
         // 已到期的信保留它历史上的开启日期（比如"18 岁生日"），不能被编辑一次就改写成"现在"并重新上锁。
@@ -227,24 +233,27 @@ struct CapsuleComposeView: View {
     }
 
     private func save() async {
+        guard !saving, !showSealCeremony else { return }
         saving = true
         defer { saving = false }
 
         // 规整到整秒：密钥派生与服务器存储格式一致，同步往返不会破坏解密。
         let sealedUnlockAt = CapsuleCrypto.normalized(unlockAt)
-        let capsule = editing ?? TimeCapsule(title: title, fromRole: env.config.currentRole.rawValue, unlockAt: sealedUnlockAt)
-        capsule.title = title
-        capsule.coverEmoji = emoji
+        let capsuleID = editing?.id ?? draftID
+        var draft = CapsuleDraftCommit.Draft(id: capsuleID, title: title,
+            fromRole: env.config.currentRole.rawValue, emoji: emoji, unlockAt: sealedUnlockAt,
+            blobName: nil, rewritesPayload: canRewritePayload)
 
         if editing != nil, !canRewritePayload {
-            capsule.syncState = .local
-            try? context.save()
-            env.syncEngine.syncNow()
-            dismiss()
+            do {
+                try CapsuleDraftCommit.save(draft, editing: editing, in: context, expected: loadedIdentity)
+                env.syncEngine.syncNow()
+                dismiss()
+            } catch {
+                errorText = "修改还没有保存，请稍后重试。原信仍然保留。"
+            }
             return
         }
-
-        capsule.unlockAt = sealedUnlockAt
 
         // 在原 payload 基础上改（编辑场景），只覆盖本页真正编辑过的字段；
         // 照片、内嵌语音等不在本页编辑的内容原样保留，不会因"换个封面"而丢。
@@ -259,22 +268,17 @@ struct CapsuleComposeView: View {
         payload.voiceFileName = pendingVoice?.fileName
         payload.voiceDuration = pendingVoice?.duration ?? 0
         payload.voiceWaveform = pendingVoice?.waveform ?? []
+        var newBlobName: String?
         do {
             // v3 真 E2E：用家庭恢复码派生密钥加密，密钥不随记录同步。
             let recoveryCode = CapsuleRecovery.currentOrCreate()
-            let blobName = try env.vault.sealV3(payload, recoveryCode: recoveryCode, salt: capsule.id.uuidString)
-            capsule.encryptedBlobFileName = blobName
-            // 编辑一封已到期的信不重新上锁；只有开启日期在未来才是锁着的。
-            capsule.isLocked = sealedUnlockAt > .now
-            // 新信一律是 v3。记下版本号之后，这封信永远不再接受 v1/v2 的 blob——
-            // 那两版的密钥只由随记录同步的明文字段派生，可被持库者伪造。
-            capsule.cryptoVersion = 3
-            capsule.syncState = .local
-            if editing == nil { context.insert(capsule) }
+            let blobName = try env.vault.sealV3(payload, recoveryCode: recoveryCode, salt: capsuleID.uuidString)
+            newBlobName = blobName
+            draft.blobName = blobName
             // The encrypted file alone is not a committed capsule. A disk error must
             // leave the draft's original voice available for playback and retry.
             try CapsuleCommitBoundary.save(plainVoice: payload.voiceFileName,
-                persist: { try context.save() },
+                persist: { try CapsuleDraftCommit.save(draft, editing: editing, in: context, expected: loadedIdentity) },
                 removePlaintext: { env.mediaStore.deleteMedia(named: $0) })
             // 封存要有「盖章」的确定感：触觉 + 音效 + 蜡章落下动画三拍齐（R4 C2）
             BubuHaptics.stamp()
@@ -286,6 +290,7 @@ struct CapsuleComposeView: View {
                 dismiss()
             }
         } catch {
+            if let newBlobName { env.mediaStore.deleteMedia(named: newBlobName) }
             errorText = "这封信还没有封存成功：\(error.localizedDescription)。录好的语音仍保留在手机里，可以稍后再试。"
         }
     }

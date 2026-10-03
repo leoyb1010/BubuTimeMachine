@@ -27,6 +27,11 @@ struct EntryDetailView: View {
     @State private var showReactionPicker = false
     @State private var showShareCard = false
     @State private var storybookToast: String?
+    @State private var operationMessage: String?
+    @State private var failedAppendItems: [PhotosPickerItem] = []
+    #if DEBUG
+    @State private var didInjectEditFailure = false
+    #endif
 
     private var profile: ChildProfile? { profiles.first }
     private var schoolReport: SchoolDailyReport? { SchoolDailyReport.from(note: entry.note) }
@@ -54,6 +59,20 @@ struct EntryDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ageBadge
+                if let operationMessage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(operationMessage).font(BubuTheme.Font.body)
+                            .accessibilityIdentifier("entry.operation-message")
+                        if !failedAppendItems.isEmpty {
+                            Button("重试未添加的素材") { Task { await appendMedia(failedAppendItems) } }
+                                .disabled(appendMediaStatus != nil)
+                        }
+                    }
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small))
+                }
                 if let schoolReport, !editing {
                     SchoolReportCard(entry: entry, report: schoolReport, showsDetailLink: false, profileName: profile?.name, profileBirthday: profile?.birthday)
                 }
@@ -99,13 +118,29 @@ struct EntryDetailView: View {
                 Button(editing ? "完成" : "编辑") {
                     if editing {
                         markEntryDirty()
-                        try? context.save()
+                        do {
+                            #if DEBUG
+                            if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+                               ProcessInfo.processInfo.arguments.contains("-uitest-entry-edit-fail-save"),
+                               !didInjectEditFailure {
+                                didInjectEditFailure = true
+                                throw CocoaError(.fileWriteOutOfSpace)
+                            }
+                            #endif
+                            try context.save()
+                        } catch {
+                            operationMessage = "修改还没有保存，内容仍在这里。请检查存储空间后再点「完成」。"
+                            return
+                        }
+                        operationMessage = nil
                         refreshWidgets()
                         env.syncEngine.syncNow()
                     }
                     withAnimation(.smooth) { editing.toggle() }
                 }
                 .fontWeight(.semibold)
+                .accessibilityIdentifier("entry.edit")
+                .disabled(appendMediaStatus != nil)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -248,6 +283,7 @@ struct EntryDetailView: View {
                     .padding(.vertical, 12)
                     .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
             }
+            .disabled(appendMediaStatus != nil)
         }
     }
 
@@ -379,6 +415,7 @@ struct EntryDetailView: View {
                 .foregroundStyle(BubuTheme.Color.warmBrown)
             if editing {
                 TextField("此刻的布布……", text: Self.noteBinding(for: entry), axis: .vertical)
+                    .accessibilityIdentifier("entry.note")
                     .font(BubuTheme.Font.body)
                     .lineLimit(3...8)
                     .padding()
@@ -534,9 +571,13 @@ struct EntryDetailView: View {
     // MARK: 操作
 
     private func appendMedia(_ items: [PhotosPickerItem]) async {
-        appendMediaStatus = items.isEmpty ? nil : "正在整理新照片/视频…"
+        guard !items.isEmpty, appendMediaStatus == nil else { return }
+        appendMediaStatus = "正在整理新照片/视频…"
+        operationMessage = nil
         appendTotal = items.count
         appendDone = 0
+        var preparedMedia: [Media] = []
+        var failedItems: [PhotosPickerItem] = []
         defer {
             appendMediaStatus = nil
             appendTotal = 0
@@ -544,16 +585,20 @@ struct EntryDetailView: View {
         }
         for item in items {
             defer { appendDone += 1 }
-            if let movie = try? await item.loadTransferable(type: MovieTransfer.self),
-               let imported = try? await env.mediaStore.importVideoForSync(from: movie.url) {
+            if Task.isCancelled { failedItems.append(item); continue }
+            if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
+                defer { try? FileManager.default.removeItem(at: movie.url) }
+                guard let imported = try? await env.mediaStore.importVideoForSync(from: movie.url) else {
+                    failedItems.append(item)
+                    continue
+                }
                 let fileName = imported.fileName
                 let media = Media(type: .video, localFileName: fileName)
                 if imported.wasCompressed {
                     media.aiTags = ["已压缩", "视频"]
                 }
                 media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: fileName)
-                media.entry = entry
-                context.insert(media)
+                preparedMedia.append(media)
                 continue
             }
             if let data = try? await item.loadTransferable(type: Data.self) {
@@ -567,16 +612,30 @@ struct EntryDetailView: View {
                 if let prepared {
                     let media = Media(type: .photo, localFileName: prepared.fileName)
                     media.thumbnailFileName = prepared.thumbnail
-                    media.entry = entry
-                    context.insert(media)
+                    preparedMedia.append(media)
+                } else {
+                    failedItems.append(item)
                 }
+            } else {
+                failedItems.append(item)
             }
         }
         appendPick = []
-        markEntryDirty()
-        try? context.save()
-        refreshWidgets()
-        env.syncEngine.syncNow()
+        do {
+            try EntryMediaAppendCommit.save(preparedMedia, to: entry.id, in: context,
+                removeFiles: { env.mediaStore.deleteLocalFiles(media: $0, thumbnail: $1) })
+            failedAppendItems = failedItems
+            if !failedItems.isEmpty {
+                operationMessage = "已添加 \(preparedMedia.count) 项，\(failedItems.count) 项未能添加。请连接网络、确认存储空间后重试。"
+            }
+            if !preparedMedia.isEmpty {
+                refreshWidgets()
+                env.syncEngine.syncNow()
+            }
+        } catch {
+            failedAppendItems = items
+            operationMessage = "素材还没有添加成功，原来的记录未改变。请稍后重试。"
+        }
     }
 
     private func deleteMedia(_ media: Media) {

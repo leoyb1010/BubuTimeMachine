@@ -51,6 +51,20 @@ struct NaturalCaptureReviewSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if let saveError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("没能保存", systemImage: "exclamationmark.triangle")
+                                .font(BubuTheme.Font.headline)
+                            Text(saveError).font(BubuTheme.Font.body)
+                            Button("返回重试") { self.saveError = nil }
+                                .buttonStyle(.bordered)
+                        }
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small))
+                        .accessibilityIdentifier("natural.save-error")
+                    }
                     if editableItems.isEmpty {
                         emptyState
                     } else {
@@ -101,11 +115,6 @@ struct NaturalCaptureReviewSheet: View {
                     .fontWeight(.bold)
                     .disabled(savableItems.isEmpty || didSave || savableItems.contains(where: \.hasInvalidNumericFields))
                 }
-            }
-            .alert("没能保存", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
-                Button("返回重试", role: .cancel) { saveError = nil }
-            } message: {
-                Text(saveError ?? "请稍后再试，已确认的内容仍保留在这里。")
             }
             .alert("还有 \(unconfirmedCount) 条需要确认", isPresented: $showUnconfirmedAlert) {
                 Button("仍然保存其余 \(savableItems.count) 条") { saveAll() }

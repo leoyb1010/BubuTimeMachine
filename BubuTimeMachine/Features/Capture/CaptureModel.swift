@@ -12,13 +12,29 @@ import AVFoundation
 @Observable
 @MainActor
 final class CaptureModel {
-    var showQuickCapture = false
+    /// Narrow I/O seams: tests use synthetic files/stores without opening the App Group.
+    struct SaveOperations {
+        var save: (ModelContext) throws -> Void = { try $0.save() }
+        var importCameraPhoto: ((SelectedCameraPhoto, Bool) async -> (Media, PhotoAnalysis?)?)?
+        var removeFiles: ((String?, String?) -> Void)?
+        var transcribe: ((String) async -> String?)?
+        var didCommit: ((ModelContext) -> Void)?
+    }
+
+    private var capturePresented = false
+    var showQuickCapture: Bool {
+        get { capturePresented }
+        set {
+            guard !isSaving else { return }
+            capturePresented = newValue
+        }
+    }
     var pickedItems: [PhotosPickerItem] = []
     var cameraPhotos: [SelectedCameraPhoto] = []
     var cameraVideos: [SelectedCameraVideo] = []
     var selectedPreviews: [SelectedMediaPreview] = []
     var isLoadingPreviews = false
-    var isSaving = false
+    private(set) var isSaving = false
     var saveError: String?
     /// 部分媒体导入失败：面板已关（记录已存），提示上移到首页层展示，避免随面板一起消失。
     var partialSaveWarning: String?
@@ -44,22 +60,39 @@ final class CaptureModel {
 
     private let mediaStore: MediaStore
     private let analyzer: PhotoAnalyzer
+    private let operations: SaveOperations
+    /// Copy every input before the first suspension; asynchronous callbacks and role
+    /// changes cannot alter a record which is already being imported.
+    private struct SaveDraft {
+        let note: String
+        let mood: Mood?
+        let role: FamilyRole
+        let photos: [SelectedCameraPhoto]
+        let videos: [SelectedCameraVideo]
+        let pickedItems: [PhotosPickerItem]
+        let voice: (fileName: String, duration: Double, waveform: [Float])?
+        let includeLocation: Bool
+        let currentLocation: CapturedLocation?
+    }
     /// 署名身份。可变：切换家庭成员后由视图层刷新，避免新记录署到旧身份头上。
     var role: FamilyRole
 
     /// 预览加载单飞任务：新选择会取消旧任务，防止两个任务交错后网格与底层数组错位。
     private var previewTask: Task<Void, Never>?
 
-    init(mediaStore: MediaStore, analyzer: PhotoAnalyzer, role: FamilyRole) {
+    init(mediaStore: MediaStore, analyzer: PhotoAnalyzer, role: FamilyRole,
+         operations: SaveOperations = SaveOperations()) {
         self.mediaStore = mediaStore
         self.analyzer = analyzer
         self.role = role
+        self.operations = operations
     }
 
     /// 丢弃未保存的待存语音：删掉已 importFile 落盘的 m4a，再清引用，避免孤儿文件。
     /// 仅用于「用户主动丢弃」或「开新记录前清残留」；保存成功后语音已归属 entry，
     /// 走 pendingVoice = nil 而非此方法，切勿误删。
     func discardPendingVoice() {
+        guard !isSaving else { return }
         if let v = pendingVoice {
             mediaStore.deleteMedia(named: v.fileName)
         }
@@ -67,6 +100,7 @@ final class CaptureModel {
     }
 
     func startQuickCapture(prefillNote: String = "") {
+        guard !isSaving else { return }
         note = prefillNote
         mood = nil
         includeLocation = false
@@ -96,15 +130,34 @@ final class CaptureModel {
 
     /// 保存为一个 Entry。返回是否成功。
     @discardableResult
-    func savePickedItems(into context: ModelContext) async -> Bool {
-        guard canSave else { return false }
+    func savePickedItems(into uiContext: ModelContext) async -> Bool {
+        guard !isSaving, canSave, !Task.isCancelled else { return false }
         isSaving = true
-        defer { isSaving = false }
+        saveError = nil
+        let draft = SaveDraft(note: trimmedNote, mood: mood, role: role,
+                              photos: cameraPhotos, videos: cameraVideos, pickedItems: pickedItems,
+                              voice: pendingVoice, includeLocation: includeLocation, currentLocation: currentLocation)
+        let context = ModelContext(uiContext.container)
+        context.autosaveEnabled = false
+        var importedFiles: [(String?, String?)] = []
+        var committed = false
+        defer {
+            if !committed {
+                context.rollback()
+                // Original draft audio is not in this list. Only this attempt's
+                // newly imported media and thumbnails may be discarded.
+                for (media, thumbnail) in importedFiles {
+                    if let remove = operations.removeFiles { remove(media, thumbnail) }
+                    else { mediaStore.deleteLocalFiles(media: media, thumbnail: thumbnail) }
+                }
+            }
+            analyzingHint = nil
+            isSaving = false
+        }
 
-        let noteText = trimmedNote
-        let entry = Entry(happenedAt: .now, authorRole: role.rawValue,
-                          note: noteText.isEmpty ? nil : noteText)
-        entry.mood = mood
+        let entry = Entry(happenedAt: .now, authorRole: draft.role.rawValue,
+                          note: draft.note.isEmpty ? nil : draft.note)
+        entry.mood = draft.mood
         context.insert(entry)
 
         // 媒体 + 分析聚合
@@ -114,8 +167,16 @@ final class CaptureModel {
         var coordinate: (Double, Double)?
 
         var savedCount = 0
-        for photo in cameraPhotos {
-            guard let (media, analysis) = await persist(cameraPhoto: photo) else { continue }
+        for photo in draft.photos {
+            guard !Task.isCancelled else { return false }
+            let imported: (Media, PhotoAnalysis?)?
+            if let importPhoto = operations.importCameraPhoto {
+                imported = await importPhoto(photo, draft.includeLocation)
+            } else {
+                imported = await persist(cameraPhoto: photo, includeLocation: draft.includeLocation)
+            }
+            guard let (media, analysis) = imported else { continue }
+            importedFiles.append((media.localFileName, media.thumbnailFileName))
             media.entry = entry
             context.insert(media)
             savedCount += 1
@@ -129,8 +190,10 @@ final class CaptureModel {
                 }
             }
         }
-        for item in pickedItems {
-            guard let (media, analysis) = await persist(item: item) else { continue }
+        for item in draft.pickedItems {
+            guard !Task.isCancelled else { return false }
+            guard let (media, analysis) = await persist(item: item, includeLocation: draft.includeLocation) else { continue }
+            importedFiles.append((media.localFileName, media.thumbnailFileName))
             media.entry = entry
             context.insert(media)
             savedCount += 1
@@ -147,34 +210,29 @@ final class CaptureModel {
                 }
             }
         }
-        for video in cameraVideos {
+        for video in draft.videos {
+            guard !Task.isCancelled else { return false }
             guard let media = await persist(cameraVideo: video) else { continue }
+            importedFiles.append((media.localFileName, media.thumbnailFileName))
             media.entry = entry
             context.insert(media)
             savedCount += 1
         }
 
         // 语音
-        if let v = pendingVoice {
+        var voiceID: UUID?
+        if let v = draft.voice {
             let voice = VoiceNote(localFileName: v.fileName, durationSeconds: v.duration,
-                                  authorRole: role.rawValue, waveformSamples: v.waveform)
+                                  authorRole: draft.role.rawValue, waveformSamples: v.waveform)
             voice.entry = entry
             context.insert(voice)
-            // 端侧自动转写（尽力而为）：成功后这段话就能被搜索/问答找到（R4 E-1）
-            let url = mediaStore.mediaURL(for: v.fileName)
-            Task { @MainActor in
-                if let text = await VoiceTranscriber.transcribe(url: url) {
-                    voice.transcript = text
-                    try? context.save()
-                }
-            }
+            voiceID = voice.id
         }
 
-        let expectedMedia = cameraPhotos.count + cameraVideos.count + pickedItems.count
+        let expectedMedia = draft.photos.count + draft.videos.count + draft.pickedItems.count
         let failedMedia = expectedMedia - savedCount
 
-        guard savedCount > 0 || !noteText.isEmpty || pendingVoice != nil else {
-            context.delete(entry)
+        guard savedCount > 0 || !draft.note.isEmpty || draft.voice != nil else {
             saveError = expectedMedia > 0
                 ? "选中的 \(expectedMedia) 个媒体都没能导入（照片可能还在 iCloud 上没下载，连上网络后再试）。"
                 : "没有成功导入媒体或文字，请重新选择。"
@@ -185,40 +243,42 @@ final class CaptureModel {
         if let capture = earliestCapture { entry.happenedAt = capture }
         // 反向地理编码只对首张有 GPS 的照片做一次（各张分析时已跳过，这里统一补一次），
         // 避免多选照片时每张各发一次反向地理编码。
-        if includeLocation, locationName == nil, let (lat, lon) = coordinate {
+        if draft.includeLocation, locationName == nil, let (lat, lon) = coordinate {
             locationName = await analyzer.locationName(latitude: lat, longitude: lon)
         }
-        if includeLocation,
+        if draft.includeLocation,
            locationName == nil,
            coordinate == nil,
-           let currentLocation {
+           let currentLocation = draft.currentLocation {
             locationName = currentLocation.name
             coordinate = (currentLocation.latitude, currentLocation.longitude)
         }
-        if includeLocation, let loc = locationName { entry.locationName = loc }
-        if includeLocation, let (lat, lon) = coordinate { entry.latitude = lat; entry.longitude = lon }
+        if draft.includeLocation, let loc = locationName { entry.locationName = loc }
+        if draft.includeLocation, let (lat, lon) = coordinate { entry.latitude = lat; entry.longitude = lon }
 
         let uniqueTags = Array(Set(aggregatedTags)).prefix(6)
         detectedTags = Array(uniqueTags)
-        detectedLocation = includeLocation ? locationName : nil
+        detectedLocation = draft.includeLocation ? locationName : nil
 
-        do { try context.save() } catch {
-            // 保存失败：回滚本次插入的 entry/media/voice，避免脏对象留在 context，
-            // 否则用户重试会再插一条新 entry → 重复记录。
-            context.rollback()
+        guard !Task.isCancelled else { return false }
+        let event = FeedEvent(kind: .entryCreated, actorRole: draft.role.rawValue,
+                              summary: draft.note.isEmpty ? "记录了布布的一个新瞬间" : "记录了：\(draft.note)",
+                              targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt)
+        context.insert(event)
+        do { try operations.save(context) } catch {
             saveError = "保存失败：\(error.localizedDescription)"
             return false
         }
-        let event = FeedEvent(kind: .entryCreated, actorRole: role.rawValue,
-                              summary: noteText.isEmpty ? "记录了布布的一个新瞬间" : "记录了：\(noteText)",
-                              targetLocalId: entry.id.uuidString, happenedAt: entry.happenedAt)
-        context.insert(event)
-        try? context.save()
-        refreshWidgetSnapshot(context: context)
+        committed = true
+        if let voiceID, let voice = draft.voice {
+            transcribeCommittedVoice(id: voiceID, entryID: entry.id, fileName: voice.fileName, container: uiContext.container)
+        }
+        if let didCommit = operations.didCommit { didCommit(context) }
+        else { refreshWidgetSnapshot(context: context) }
 
         lastSavedEntryID = entry.id
         let mediaText = savedCount > 0 ? " · \(savedCount) 个媒体" : ""
-        let voiceText = pendingVoice == nil ? "" : " · 1 段语音"
+        let voiceText = draft.voice == nil ? "" : " · 1 段语音"
         lastSavedSummary = "已保存到手机\(mediaText)\(voiceText)"
         // 部分媒体失败：诚实告知，不再"静默丢照片装成功"。
         // 面板随即关闭（记录已存），提示走 partialSaveWarning 在首页层弹出，否则 alert 随面板一起消失、用户看不到。
@@ -232,9 +292,32 @@ final class CaptureModel {
         note = ""
         mood = nil
         pendingVoice = nil
-        showQuickCapture = false
-        flashSaved()
+        capturePresented = false
+        if operations.didCommit == nil { flashSaved() }
         return true
+    }
+
+    /// No uncommitted model escapes into speech recognition. A late result must not
+    /// resurrect a deleted voice or overwrite a user's correction made while waiting.
+    private func transcribeCommittedVoice(id: UUID, entryID: UUID, fileName: String, container: ModelContainer) {
+        Task { @MainActor [mediaStore, operations] in
+            let text: String?
+            if let transcribe = operations.transcribe { text = await transcribe(fileName) }
+            else { text = await VoiceTranscriber.transcribe(url: mediaStore.mediaURL(for: fileName)) }
+            guard let text, !Task.isCancelled else { return }
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            do {
+                guard let voice = try context.fetch(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == id })).first,
+                      voice.entry?.id == entryID, voice.localFileName == fileName,
+                      voice.transcript == nil else { return }
+                voice.transcript = text
+                voice.syncState = .local
+                try context.save()
+            } catch {
+                context.rollback() // Best-effort transcription never rolls back the saved record.
+            }
+        }
     }
 
     /// 重建预览网格。单飞：再次调用会取消上一次，收尾前检查取消位，
@@ -287,6 +370,7 @@ final class CaptureModel {
     }
 
     func removePickedItem(at index: Int) {
+        guard !isSaving else { return }
         if cameraPhotos.indices.contains(index) {
             cameraPhotos.remove(at: index)
         } else if index - cameraPhotos.count >= 0 && index - cameraPhotos.count < cameraVideos.count {
@@ -303,6 +387,7 @@ final class CaptureModel {
     }
 
     func addCameraPhoto(_ image: UIImage) {
+        guard !isSaving else { return }
         cameraPhotos.append(SelectedCameraPhoto(image: image))
         updatePreviews()
     }
@@ -311,7 +396,7 @@ final class CaptureModel {
     /// OCR 结果只作为正文**初稿**：正文为空时才填，绝不覆盖家长已经写下的字。
     /// 识别错了家长删掉就好；覆盖掉人写的东西是不可接受的。
     func addScannedArtwork(pages: [UIImage], recognizedText: String) {
-        guard !pages.isEmpty else { return }
+        guard !isSaving, !pages.isEmpty else { return }
         for page in pages {
             cameraPhotos.append(SelectedCameraPhoto(image: page))
         }
@@ -324,8 +409,10 @@ final class CaptureModel {
 
     /// 直接录像：拷入沙盒临时位置，生成缩略图，加入待保存列表。
     func addCameraVideo(url: URL) {
+        guard !isSaving else { return }
         Task {
             let thumb = await Self.videoPreviewImage(url: url)
+            guard !isSaving else { return }
             cameraVideos.append(SelectedCameraVideo(url: url, thumbnail: thumb))
             updatePreviews()
         }
@@ -342,7 +429,7 @@ final class CaptureModel {
         return media
     }
 
-    private func persist(cameraPhoto: SelectedCameraPhoto) async -> (Media, PhotoAnalysis?)? {
+    private func persist(cameraPhoto: SelectedCameraPhoto, includeLocation: Bool) async -> (Media, PhotoAnalysis?)? {
         guard let data = cameraPhoto.image.jpegData(compressionQuality: 0.92),
               let fileName = try? mediaStore.savePhoto(data) else { return nil }
         let media = Media(type: .photo, localFileName: fileName)
@@ -384,7 +471,7 @@ final class CaptureModel {
     }
 
     /// 单个 PhotosPickerItem → 落沙盒 + 缩略图 + 端侧分析。
-    private func persist(item: PhotosPickerItem) async -> (Media, PhotoAnalysis?)? {
+    private func persist(item: PhotosPickerItem, includeLocation: Bool) async -> (Media, PhotoAnalysis?)? {
         // 视频（暂不分析，仅缩略图 + 拍摄时间）
         if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
             analyzingHint = "正在整理这段视频，太大时会先压缩…"

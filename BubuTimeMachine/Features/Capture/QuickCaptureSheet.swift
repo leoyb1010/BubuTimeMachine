@@ -72,6 +72,7 @@ struct QuickCaptureSheet: View {
                         }
                     }
                 }
+                .disabled(model.isSaving)
 
                 if let hint = model.analyzingHint {
                     analyzingOverlay(hint)
@@ -141,6 +142,7 @@ struct QuickCaptureSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("这一笔还没保存", isPresented: $discardConfirm, titleVisibility: .visible) {
                 Button("丢掉这一笔", role: .destructive) {
+                    guard !model.isSaving else { return }
                     BubuHaptics.warning()
                     model.showQuickCapture = false
                 }
@@ -155,13 +157,14 @@ struct QuickCaptureSheet: View {
             // 会把 note / pickedItems / mood / pendingVoice 全部清零，不是「草稿留着」，是真丢。
             // 有内容时禁掉下滑关闭，走「以后再说」的二次确认。
             // 本仓录音中已有同款保护（VoiceComponents 的 interactiveDismissDisabled）。
-            .interactiveDismissDisabled(model.canSave && !model.isSaving)
+            .interactiveDismissDisabled(model.canSave || model.isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("以后再说") {
                         if model.canSave { discardConfirm = true }
                         else { model.showQuickCapture = false }
                     }
+                    .disabled(model.isSaving)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 ToolbarItem(placement: .confirmationAction) {

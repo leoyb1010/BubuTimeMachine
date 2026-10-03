@@ -18,6 +18,9 @@ struct VaccineQuickLogSheet: View {
     @State private var reaction: String
     @State private var note: String
     @State private var showDeleteConfirm = false
+    @State private var draftID = UUID()
+    @State private var saveError: String?
+    @State private var completed = false
 
     private var isEditing: Bool { record != nil }
 
@@ -89,6 +92,7 @@ struct VaccineQuickLogSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
                         .fontWeight(.bold)
+                        .disabled(completed)
                 }
             }
             .alert("取消这针的打卡？", isPresented: $showDeleteConfirm) {
@@ -97,43 +101,182 @@ struct VaccineQuickLogSheet: View {
             } message: {
                 Text("删除后家人设备也会同步移除这条记录。")
             }
+            .alert("还没有保存成功", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("好") { saveError = nil }
+            } message: {
+                Text(saveError ?? "")
+            }
         }
     }
 
     private func save() {
-        if let record {
-            record.injectedAt = injectedAt
-            record.hospital = hospital.bubuTrimmed.isEmpty ? nil : hospital.bubuTrimmed
-            record.reaction = reaction.bubuTrimmed.isEmpty ? nil : reaction.bubuTrimmed
-            record.note = note.bubuTrimmed.isEmpty ? nil : note.bubuTrimmed   // 迁移「待确认」标记随之摘除
-            record.updatedAt = .now
-            record.syncState = .local
-        } else {
-            let vaccineName = dose?.vaccine ?? "疫苗接种"
-            let newRecord = VaccineRecord(vaccineName: vaccineName, injectedAt: injectedAt, source: "manual")
-            newRecord.doseId = dose?.id
-            newRecord.doseLabel = dose?.doseLabel
-            newRecord.hospital = hospital.bubuTrimmed.isEmpty ? nil : hospital.bubuTrimmed
-            newRecord.reaction = reaction.bubuTrimmed.isEmpty ? nil : reaction.bubuTrimmed
-            newRecord.note = note.bubuTrimmed.isEmpty ? nil : note.bubuTrimmed
-            newRecord.syncState = .local
-            context.insert(newRecord)
+        guard !completed else { return }
+        let draft = VaccineQuickLogPersistence.Draft(id: record?.id ?? draftID,
+            editing: record.map(VaccineQuickLogPersistence.Target.init),
+            vaccineName: dose?.vaccine ?? record?.vaccineName ?? "疫苗接种", doseID: dose?.id,
+            doseLabel: dose?.doseLabel, injectedAt: injectedAt, hospital: hospital, reaction: reaction, note: note)
+        do {
+            try VaccineQuickLogPersistence.save(draft, in: context, didCommit: didCommit)
+        } catch {
+            saveError = "接种记录还没有保存：\(error.localizedDescription)。填写的内容仍保留，请稍后再试。"
         }
-        try? context.save()
-        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }   // 打卡后自动排下一针
+    }
+
+    private func deleteRecord() {
+        guard !completed, let record else { return }
+        do {
+            try VaccineQuickLogPersistence.delete(.init(record), in: context, didCommit: didCommit)
+        } catch {
+            saveError = "这条接种记录还没有删除：\(error.localizedDescription)。请稍后再试。"
+        }
+    }
+
+    private func didCommit(_ committedContext: ModelContext) {
+        completed = true
+        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: committedContext) }
         BubuHaptics.success()
         env.syncEngine.syncNow()
         dismiss()
     }
+}
 
-    private func deleteRecord() {
-        guard let record else { return }
-        let collection = record.sourceRaw == "health-fallback" ? "healthrecords" : "vaccinerecords"
-        PendingDeletion.enqueue(collection: collection, remoteId: record.remoteId, in: context)
-        context.delete(record)
-        try? context.save()
-        Task { await ReminderScheduler.shared.refreshVaccineReminders(context: context) }   // 打卡后自动排下一针
-        env.syncEngine.syncNow()
-        dismiss()
+@MainActor
+enum VaccineQuickLogPersistence {
+    struct Target: Equatable {
+        let id: UUID
+        let remoteID: String?
+        let source: String
+        let updatedAt: Date
+        init(_ record: VaccineRecord) {
+            id = record.id; remoteID = record.remoteId; source = record.sourceRaw; updatedAt = record.updatedAt
+        }
+    }
+    struct Draft {
+        let id: UUID
+        var editing: Target? = nil
+        let vaccineName: String
+        var doseID: String? = nil
+        var doseLabel: String? = nil
+        let injectedAt: Date
+        var hospital = ""
+        var reaction = ""
+        var note = ""
+    }
+    enum SaveError: LocalizedError {
+        case missingRecord, changedRecord, missingLegacySource
+        var errorDescription: String? {
+            switch self {
+            case .missingRecord: "这条接种记录已被移除，请返回确认。"
+            case .changedRecord: "这条接种记录已有其他修改，请重新打开后确认。"
+            case .missingLegacySource: "旧版接种记录的同步来源暂时无法确认，请先完成同步再删除。"
+            }
+        }
+    }
+
+    static func save(_ draft: Draft, in uiContext: ModelContext,
+                     persist: (ModelContext) throws -> Void = { try $0.save() },
+                     didCommit: (ModelContext) -> Void = { _ in }) throws {
+        let context = ModelContext(uiContext.container)
+        context.autosaveEnabled = false
+        do {
+            let id = draft.id
+            let record: VaccineRecord
+            if let target = draft.editing {
+                try rejectPendingTargetEdits(id, in: uiContext)
+                guard target.id == id,
+                      let existing = try context.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == id })).first else {
+                    throw SaveError.missingRecord
+                }
+                guard Target(existing) == target else { throw SaveError.changedRecord }
+                record = existing
+            } else if let existing = try context.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == id })).first {
+                // Same view retry after an already committed write must not add a second dose.
+                guard existing.vaccineName == draft.vaccineName, existing.doseId == draft.doseID,
+                      existing.doseLabel == draft.doseLabel, existing.injectedAt == draft.injectedAt,
+                      existing.hospital == optionalText(draft.hospital), existing.reaction == optionalText(draft.reaction),
+                      existing.note == optionalText(draft.note) else { throw SaveError.changedRecord }
+                didCommit(context)
+                return
+            } else {
+                record = VaccineRecord(vaccineName: draft.vaccineName, injectedAt: draft.injectedAt, source: "manual")
+                record.id = draft.id
+                record.doseId = draft.doseID
+                record.doseLabel = draft.doseLabel
+                context.insert(record)
+            }
+            record.injectedAt = draft.injectedAt
+            record.hospital = optionalText(draft.hospital)
+            record.reaction = optionalText(draft.reaction)
+            record.note = optionalText(draft.note) // Clear a migration placeholder only after a successful commit.
+            record.updatedAt = .now
+            record.syncState = .local
+            try persist(context)
+            didCommit(context)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    static func delete(_ target: Target, in uiContext: ModelContext,
+                       persist: (ModelContext) throws -> Void = { try $0.save() },
+                       didCommit: (ModelContext) -> Void = { _ in }) throws {
+        let id = target.id
+        let isLegacy = target.source == "health-fallback"
+        try rejectPendingTargetEdits(id, in: uiContext, includingHealth: isLegacy)
+        // Retain only the rows to mirror after commit, not a whole UI-context rollback.
+        let visibleRecord = try uiContext.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == id })).first
+        let visibleHealth = isLegacy
+            ? try uiContext.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == id })).first : nil
+        let context = ModelContext(uiContext.container)
+        context.autosaveEnabled = false
+        do {
+            guard let record = try context.fetch(FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == id })).first else {
+                throw SaveError.missingRecord
+            }
+            guard Target(record) == target else { throw SaveError.changedRecord }
+            var remoteID = record.remoteId.flatMap { $0.isEmpty ? nil : $0 }
+            if isLegacy {
+                // Older servers represented vaccines as HealthRecord. Their locally
+                // backfilled VaccineRecord may have no remoteId at all.
+                if let health = try context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == id })).first {
+                    guard health.tags.contains("疫苗") || health.title.contains("疫苗") else { throw SaveError.changedRecord }
+                    let healthRemoteID = health.remoteId.flatMap { $0.isEmpty ? nil : $0 }
+                    if let remoteID, let healthRemoteID, remoteID != healthRemoteID { throw SaveError.changedRecord }
+                    remoteID = healthRemoteID ?? remoteID
+                    context.delete(health)
+                }
+                guard remoteID != nil else { throw SaveError.missingLegacySource }
+            }
+            let collection = isLegacy ? "healthrecords" : "vaccinerecords"
+            if let remoteID {
+                let query = FetchDescriptor<PendingDeletion>(predicate: #Predicate {
+                    $0.collection == collection && $0.remoteId == remoteID
+                })
+                if try context.fetchCount(query) == 0 {
+                    context.insert(PendingDeletion(collection: collection, remoteId: remoteID))
+                }
+            }
+            context.delete(record)
+            try persist(context)
+            if let visibleRecord { uiContext.delete(visibleRecord) }
+            if let visibleHealth { uiContext.delete(visibleHealth) }
+            didCommit(context)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    private static func optionalText(_ value: String) -> String? {
+        let trimmed = value.bubuTrimmed
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func rejectPendingTargetEdits(_ id: UUID, in context: ModelContext, includingHealth: Bool = false) throws {
+        let changed = context.changedModelsArray + context.deletedModelsArray
+        guard !changed.contains(where: {
+            ($0 as? VaccineRecord)?.id == id || (includingHealth && ($0 as? HealthRecord)?.id == id)
+        }) else { throw SaveError.changedRecord }
     }
 }
