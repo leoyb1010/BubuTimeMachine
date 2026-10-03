@@ -123,6 +123,69 @@ final class BubuTimeMachineUITests: XCTestCase {
     }
 
     @MainActor
+    func testDiaryRegenerationFailureRetainsUnsavedDraft() throws {
+        continueAfterFailure = false
+        let app = controlledDiary()
+        let a = "00000000-0000-4000-8000-000000000001"
+        app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.buttons["diary-audit.success.A1"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.success.A1"].tap(); waitForDiaryReplies(1, in: app)
+        XCTAssertTrue(app.buttons["diary.save"].waitForExistence(timeout: 8))
+        app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.buttons["diary-audit.failure.A2"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["diary.output"].label, "合成回复A1")
+        app.buttons["diary-audit.failure.A2"].tap(); waitForDiaryReplies(2, in: app)
+        XCTAssertTrue(app.staticTexts["diary.error"].exists)
+        saveDiary("合成回复A1", in: app)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "合成回复A1")
+        attachScreenshot("diary-regeneration-failure-preserves-previous-draft", to: self)
+    }
+
+    @MainActor
+    func testDiaryLeavingCancelsAllRequestsWithoutSavingLateReplies() throws {
+        continueAfterFailure = false
+        let app = controlledDiary()
+        let a = "00000000-0000-4000-8000-000000000001", b = "00000000-0000-4000-8000-000000000002"
+        app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.buttons["diary-audit.success.A1"].waitForExistence(timeout: 5))
+        app.buttons["diary.entry." + b].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.buttons["diary-audit.success.B2"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.toggle-view"].tap()
+        XCTAssertTrue(app.staticTexts["diary-audit.left"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.success.A1"].tap()
+        app.buttons["diary-audit.failure.B2"].tap(); waitForDiaryReplies(2, in: app)
+        XCTAssertEqual(app.staticTexts["diary-audit.cancelled-count"].label, "2")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>")
+        app.buttons["diary-audit.toggle-view"].tap()
+        XCTAssertTrue(app.buttons["diary.entry." + a].waitForExistence(timeout: 5))
+        app.buttons["diary.entry." + a].tap()
+        XCTAssertFalse(app.staticTexts["diary.output"].exists)
+        attachScreenshot("diary-leave-cancels-all-no-late-save", to: self)
+    }
+
+    @MainActor
+    func testDiaryArchivedOriginRejectsSaveAndKeepsCopyableDraft() throws {
+        continueAfterFailure = false
+        let app = controlledDiary()
+        let a = "00000000-0000-4000-8000-000000000001", b = "00000000-0000-4000-8000-000000000002"
+        app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.buttons["diary-audit.success.A1"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.success.A1"].tap(); waitForDiaryReplies(1, in: app)
+        app.buttons["diary-audit.archive-A"].tap()
+        XCTAssertEqual(app.staticTexts["diary-audit.archive-result"].label, "archived")
+        saveDiary("合成回复A1", in: app)
+        let failure = app.alerts["没有保存成功"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        XCTAssertTrue(failure.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "原记录已归档或移除")).firstMatch.exists)
+        failure.buttons["好"].tap()
+        XCTAssertEqual(app.staticTexts["diary.output"].label, "合成回复A1")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>")
+        attachScreenshot("diary-archived-origin-rejected-draft-kept", to: self)
+    }
+
+    @MainActor
     func testMemberAppearanceHasReachableNamedTargetsAndCancelRestoresDraft() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

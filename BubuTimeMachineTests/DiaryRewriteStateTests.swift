@@ -62,4 +62,33 @@ struct DiaryRewriteStateTests {
         #expect(state.succeed("Next", for: id, request: next, revealImmediately: true))
         #expect(state.draft(for: id).displayed == "Next")
     }
+    @Test("重新生成失败或取消保留上一份未保存输出")
+    func regenerationPreservesPreviousDraft() throws {
+        var state = DiaryRewriteState(); let id = UUID()
+        let first = try #require(state.begin(for: id))
+        #expect(state.succeed("Original draft", for: id, request: first, revealImmediately: true))
+        let second = try #require(state.begin(for: id))
+        #expect(state.draft(for: id).output == "Original draft")
+        #expect(state.fail("Retry failed", for: id, request: second))
+        #expect(state.draft(for: id).displayed == "Original draft")
+        #expect(!state.draft(for: id).saved)
+        _ = try #require(state.begin(for: id))
+        state.cancel(for: id)
+        #expect(state.draft(for: id).output == "Original draft")
+    }
+
+    @Test("离开视图取消所有请求并保留已生成完整文字")
+    func leavingRetiresAllRequests() throws {
+        var state = DiaryRewriteState(); let a = UUID(), b = UUID()
+        let first = try #require(state.begin(for: a))
+        #expect(state.succeed("ABC", for: a, request: first, revealImmediately: false))
+        #expect(state.append("A", for: a, presentation: first))
+        let second = try #require(state.begin(for: b))
+        state.cancelAll()
+        #expect(state.draft(for: a).displayed == "ABC")
+        #expect(!state.append("B", for: a, presentation: first))
+        #expect(!state.succeed("late B", for: b, request: second, revealImmediately: true))
+        #expect(!state.fail("late B error", for: b, request: second))
+    }
+
 }

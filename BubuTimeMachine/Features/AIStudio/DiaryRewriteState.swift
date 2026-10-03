@@ -19,7 +19,13 @@ struct DiaryRewriteState {
     mutating func begin(for entryID: UUID) -> UUID? {
         guard drafts[entryID]?.activeRequest == nil else { return nil }
         let token = UUID()
-        drafts[entryID] = Draft(activeRequest: token)
+        var draft = drafts[entryID] ?? Draft()
+        draft.activeRequest = token
+        draft.presentation = nil
+        draft.displayed = draft.output
+        draft.error = nil
+        draft.saveError = nil
+        drafts[entryID] = draft
         return token
     }
 
@@ -35,7 +41,8 @@ struct DiaryRewriteState {
     @discardableResult
     mutating func fail(_ message: String, for entryID: UUID, request: UUID) -> Bool {
         guard drafts[entryID]?.activeRequest == request else { return false }
-        drafts[entryID] = Draft(error: message)
+        drafts[entryID]?.activeRequest = nil
+        drafts[entryID]?.error = message
         return true
     }
 
@@ -45,6 +52,10 @@ struct DiaryRewriteState {
         draft.presentation = nil
         draft.displayed = draft.output
         drafts[entryID] = draft
+    }
+
+    mutating func cancelAll() {
+        for entryID in Array(drafts.keys) { cancel(for: entryID) }
     }
 
     mutating func finishPresentation(for entryID: UUID) {

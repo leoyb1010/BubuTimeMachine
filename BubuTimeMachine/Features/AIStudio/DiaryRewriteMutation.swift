@@ -3,7 +3,7 @@ import SwiftData
 
 @MainActor
 enum DiaryRewriteMutation {
-    enum MutationError: Error { case missingEntry }
+    enum MutationError: Error, Equatable { case missingEntry, archivedEntry }
 
     /// Commit only the chosen diary text. A failure leaves every UI draft alone.
     static func save(entryID: UUID, text: String, container: ModelContainer,
@@ -13,6 +13,7 @@ enum DiaryRewriteMutation {
         var descriptor = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == entryID })
         descriptor.fetchLimit = 1
         guard let entry = try transaction.fetch(descriptor).first else { throw MutationError.missingEntry }
+        guard !entry.isArchived else { throw MutationError.archivedEntry }
         let timestamp = Date.now
         entry.firstPersonNote = text
         entry.editedAt = timestamp

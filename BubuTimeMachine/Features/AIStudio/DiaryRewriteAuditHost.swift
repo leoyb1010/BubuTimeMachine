@@ -14,12 +14,14 @@ private final class DiaryRewriteAuditResponder {
     var pending: [Request] = []
     var completed: [String] = []
     var processed = 0
+    var cancelledRequests: [String] = []
     private var sequence = 0
     @ObservationIgnored private var replies: [String: CheckedContinuation<String, any Error>] = [:]
 
     func rewrite(note: String, childName: String) async throws -> String {
         sequence += 1
         let id = (note.contains("沙发") ? "A" : "B") + String(sequence)
+        defer { if Task.isCancelled { cancelledRequests.append(id) } }
         return try await withCheckedThrowingContinuation { reply in
             replies[id] = reply
             pending.append(Request(id: id, note: note))
@@ -39,12 +41,34 @@ private final class DiaryRewriteAuditResponder {
 /// This route is reachable only with both explicit DEBUG/in-memory launch flags.
 struct DiaryRewriteAuditHost: View {
     @State private var responder = DiaryRewriteAuditResponder()
+    @State private var showingDiary = true
+    @State private var archiveResult = ""
+    @Environment(\.modelContext) private var context
     @Query(sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
 
     var body: some View {
-        FirstPersonDiaryView(auditRewrite: responder.rewrite, auditDidHandleReply: { responder.processed += 1 })
+        Group {
+            if showingDiary {
+                FirstPersonDiaryView(auditRewrite: responder.rewrite, auditDidHandleReply: { responder.processed += 1 })
+            } else {
+                Text("已离开合成日记场景").accessibilityIdentifier("diary-audit.left")
+            }
+        }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 4) {
+                    HStack {
+                        Button(showingDiary ? "离开日记" : "返回日记") { showingDiary.toggle() }
+                            .accessibilityIdentifier("diary-audit.toggle-view")
+                        Button("归档A") {
+                            guard let entry = entries.first(where: { $0.id.uuidString.hasSuffix("000000000001") }) else { return }
+                            entry.isArchived = true
+                            do { try context.save(); archiveResult = "archived" }
+                            catch { archiveResult = "failed" }
+                        }.accessibilityIdentifier("diary-audit.archive-A")
+                    }
+                    Text(archiveResult).accessibilityIdentifier("diary-audit.archive-result")
+                    Text(String(responder.cancelledRequests.count)).accessibilityIdentifier("diary-audit.cancelled-count")
                     ForEach(responder.pending) { request in
                         HStack {
                             Text("pending " + request.id)

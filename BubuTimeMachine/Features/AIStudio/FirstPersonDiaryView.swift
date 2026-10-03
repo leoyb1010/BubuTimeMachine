@@ -72,8 +72,9 @@ struct FirstPersonDiaryView: View {
             } message: { Text(selectedDraft.saveError ?? "") }
         .onDisappear {
             typeTask?.cancel()
-            if let selected { rewriteState.finishPresentation(for: selected.id) }
-            for entryID in Array(generationTasks.keys) { cancelRewrite(for: entryID) }
+            rewriteState.cancelAll()
+            for pending in generationTasks.values { pending.task.cancel() }
+            generationTasks.removeAll()
         }
     }
 
@@ -234,6 +235,7 @@ struct FirstPersonDiaryView: View {
                     .foregroundStyle(theme)
                 Text(displayed)
                     .accessibilityIdentifier("diary.output")
+                    .textSelection(.enabled)
                     .font(BubuTheme.Font.scaled(18, weight: .regular))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineSpacing(6)
@@ -249,7 +251,7 @@ struct FirstPersonDiaryView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("diary.save")
-                    .disabled(selectedDraft.saved)
+                    .disabled(selectedDraft.saved || generating)
                 }
             }
             .padding(16)
@@ -318,7 +320,7 @@ struct FirstPersonDiaryView: View {
     private func saveBack() {
         guard let entry = selected else { return }
         let draft = rewriteState.draft(for: entry.id)
-        guard !draft.saved, !draft.output.isEmpty, draft.displayed == draft.output else { return }
+        guard draft.activeRequest == nil, !draft.saved, !draft.output.isEmpty, draft.displayed == draft.output else { return }
         do {
             let savedAt = try DiaryRewriteMutation.save(entryID: entry.id, text: draft.output,
                                                         container: context.container) { transaction in
@@ -331,6 +333,8 @@ struct FirstPersonDiaryView: View {
             entry.editedAt = savedAt
             entry.syncState = .local
             rewriteState.saved(for: entry.id)
+        } catch is DiaryRewriteMutation.MutationError {
+            rewriteState.saveFailed(for: entry.id, message: "原记录已归档或移除。改写内容仍在这里，可以选择复制；请先回时光确认原记录的状态。")
         } catch {
             rewriteState.saveFailed(for: entry.id, message: "改写内容还在这里，尚未保存到记录。请检查可用存储空间后重试。")
         }
