@@ -13,6 +13,7 @@ private final class DiaryRewriteAuditResponder {
     enum SyntheticError: Error { case rejected }
     var pending: [Request] = []
     var completed: [String] = []
+    var processed = 0
     private var sequence = 0
     @ObservationIgnored private var replies: [String: CheckedContinuation<String, any Error>] = [:]
 
@@ -41,7 +42,7 @@ struct DiaryRewriteAuditHost: View {
     @Query(sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
 
     var body: some View {
-        FirstPersonDiaryView(auditRewrite: responder.rewrite)
+        FirstPersonDiaryView(auditRewrite: responder.rewrite, auditDidHandleReply: { responder.processed += 1 })
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 4) {
                     ForEach(responder.pending) { request in
@@ -56,6 +57,8 @@ struct DiaryRewriteAuditHost: View {
                     }
                     Text(responder.completed.joined(separator: "|"))
                         .accessibilityIdentifier("diary-audit.completed")
+                    Text(String(responder.processed)).accessibilityIdentifier("diary-audit.processed")
+                    Text(String(responder.pending.count)).accessibilityIdentifier("diary-audit.pending-count")
                     ForEach(entries.prefix(2)) { entry in
                         Text((entry.firstPersonNote ?? "<empty>"))
                             .accessibilityIdentifier("diary-audit.saved." + entry.id.uuidString)

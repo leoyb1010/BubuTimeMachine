@@ -3,39 +3,123 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
-    func testDiaryLateReplyCannotSaveIntoAnotherSelectedEntry() throws {
-        continueAfterFailure = false
+    private func controlledDiary(failSave: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-diary-controlled"]
+        if failSave { app.launchArguments.append("-uitest-diary-fail-save") }
         app.launch()
+        XCTAssertTrue(app.buttons["diary.entry.00000000-0000-4000-8000-000000000001"].waitForExistence(timeout: 12))
+        return app
+    }
+
+    @MainActor
+    private func waitForDiaryReplies(_ count: Int, in app: XCUIApplication) {
+        // DEBUG observer fires only after the real generation handler has applied
+        // or rejected the reply. Releasing the IO continuation alone is too early.
+        let handled = expectation(for: NSPredicate(format: "label == %@", String(count)),
+                                  evaluatedWith: app.staticTexts["diary-audit.processed"])
+        wait(for: [handled], timeout: 8)
+    }
+
+    @MainActor
+    private func saveDiary(_ output: String, in app: XCUIApplication) {
+        let save = app.buttons["diary.save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 8))
+        for _ in 0..<3 where !save.isHittable { app.swipeUp() }
+        XCTAssertEqual(app.staticTexts["diary.output"].label, output)
+        save.tap()
+    }
+
+    @MainActor
+    func testDiaryLateReplyCannotSaveIntoAnotherSelectedEntry() throws {
+        continueAfterFailure = false
+        let app = controlledDiary()
         let a = "00000000-0000-4000-8000-000000000001"
         let b = "00000000-0000-4000-8000-000000000002"
-        let first = app.buttons["diary.entry." + a]
-        let second = app.buttons["diary.entry." + b]
-        XCTAssertTrue(first.waitForExistence(timeout: 12))
-        first.tap()
-        app.buttons["diary.generate"].tap()
+        let first = app.buttons["diary.entry." + a], second = app.buttons["diary.entry." + b]
+        first.tap(); app.buttons["diary.generate"].tap()
         XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
         second.tap()
-        XCTAssertTrue(second.isSelected, "B must be selected before releasing A's response")
-        XCTAssertFalse(app.buttons["diary.generate"].isEnabled, "Original pending request must be observable")
+        XCTAssertTrue(second.isSelected)
+        XCTAssertTrue(app.buttons["diary.generate"].isEnabled, "B has its own draft and may generate independently")
         attachScreenshot("diary-A-pending-B-selected", to: self)
         app.buttons["diary-audit.success.A1"].tap()
-        let finished = app.staticTexts["diary-audit.completed"]
-        let completed = expectation(for: NSPredicate(format: "label CONTAINS %@", "A1-success"), evaluatedWith: finished)
-        wait(for: [completed], timeout: 5)
-        let handled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["diary.generate"])
-        wait(for: [handled], timeout: 5)
-        let save = app.buttons["diary.save"]
-        if save.waitForExistence(timeout: 4) {
-            for _ in 0..<3 where !save.isHittable { app.swipeUp() }
-            attachScreenshot("diary-late-A-visible-while-B-selected", to: self)
-            save.tap()
-        }
-        attachScreenshot("diary-late-A-save-target-readback", to: self)
-        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
-        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>", "A's late rewrite must never be saved into B")
+        waitForDiaryReplies(1, in: app)
         XCTAssertFalse(app.staticTexts["diary.output"].exists, "B must not display A's late rewrite")
+        XCTAssertFalse(app.buttons["diary.save"].exists)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>")
+        attachScreenshot("diary-late-A-isolated-from-B", to: self)
+        first.tap()
+        saveDiary("合成回复A1", in: app)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "合成回复A1")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>")
+        attachScreenshot("diary-A-draft-returns-and-saves-only-A", to: self)
+    }
+
+    @MainActor
+    func testDiaryLateFailureKeepsOtherRequestAndDraft() throws {
+        continueAfterFailure = false
+        let app = controlledDiary()
+        let a = "00000000-0000-4000-8000-000000000001", b = "00000000-0000-4000-8000-000000000002"
+        app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
+        app.buttons["diary.entry." + b].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.staticTexts["diary-audit.pending.B2"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.failure.A1"].tap(); waitForDiaryReplies(1, in: app)
+        XCTAssertFalse(app.staticTexts["diary.error"].exists)
+        XCTAssertFalse(app.buttons["diary.generate"].isEnabled, "A's error must not end B's pending request")
+        app.buttons["diary-audit.success.B2"].tap(); waitForDiaryReplies(2, in: app)
+        saveDiary("合成回复B2", in: app)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "合成回复B2")
+        attachScreenshot("diary-late-A-failure-keeps-B-result", to: self)
+        app.buttons["diary.entry." + a].tap()
+        XCTAssertTrue(app.staticTexts["diary.error"].exists)
+        XCTAssertFalse(app.staticTexts["diary.output"].exists)
+    }
+
+    @MainActor
+    func testDiaryCancelThenRetryRejectsLateOldCompletion() throws {
+        continueAfterFailure = false
+        let app = controlledDiary()
+        let a = "00000000-0000-4000-8000-000000000001"
+        app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].doubleTap()
+        XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["diary-audit.pending-count"].label, "1", "Repeated generation taps admit exactly one request")
+        app.buttons["diary.cancel"].tap()
+        XCTAssertTrue(app.buttons["diary.generate"].isEnabled)
+        app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.staticTexts["diary-audit.pending.A2"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.success.A1"].tap(); waitForDiaryReplies(1, in: app)
+        XCTAssertFalse(app.staticTexts["diary.output"].exists)
+        XCTAssertFalse(app.buttons["diary.generate"].isEnabled)
+        app.buttons["diary-audit.success.A2"].tap(); waitForDiaryReplies(2, in: app)
+        saveDiary("合成回复A2", in: app)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "合成回复A2")
+        attachScreenshot("diary-cancel-retry-only-new-result-saved", to: self)
+    }
+
+    @MainActor
+    func testDiaryRejectedSaveRetainsResultAndRetryCommitsOnlyOrigin() throws {
+        continueAfterFailure = false
+        let app = controlledDiary(failSave: true)
+        let a = "00000000-0000-4000-8000-000000000001", b = "00000000-0000-4000-8000-000000000002"
+        app.buttons["diary.entry." + a].tap(); app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
+        app.buttons["diary-audit.success.A1"].tap(); waitForDiaryReplies(1, in: app)
+        saveDiary("合成回复A1", in: app)
+        let failure = app.alerts["没有保存成功"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        attachScreenshot("diary-save-rejection-preserves-result", to: self)
+        failure.buttons["好"].tap()
+        XCTAssertEqual(app.staticTexts["diary.output"].label, "合成回复A1")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
+        saveDiary("合成回复A1", in: app)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "合成回复A1")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>")
+        XCTAssertFalse(app.buttons["diary.save"].isEnabled)
+        attachScreenshot("diary-save-retry-origin-only", to: self)
     }
 
     @MainActor
@@ -52,8 +136,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         for target in [avatar, color] {
             for _ in 0..<4 where !target.isHittable { app.swipeUp() }
             XCTAssertTrue(target.isHittable)
-            XCTAssertGreaterThanOrEqual(target.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(target.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(target.frame.width + 0.000001, 44, "Only floating-point representation tolerance; never a smaller target")
+            XCTAssertGreaterThanOrEqual(target.frame.height + 0.000001, 44)
             XCTAssertGreaterThanOrEqual(target.frame.minX, 0)
             XCTAssertLessThanOrEqual(target.frame.maxX, app.frame.maxX)
             target.tap()
@@ -61,6 +145,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         }
         attachScreenshot("members-appearance-large-text-selected", to: self)
         app.buttons["取消"].tap()
+        XCTAssertTrue(app.navigationBars["添加成员"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["添加家庭成员"].waitForExistence(timeout: 5))
         app.buttons["添加家庭成员"].tap()
         let initial = app.buttons["member-editor.color.F28C9E"]
@@ -69,7 +154,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertEqual(color.value as? String, "未选择")
         let defaultAvatar = app.buttons["member-editor.avatar.👩"]
         for _ in 0..<4 where !defaultAvatar.isHittable { app.swipeDown() }
-        XCTAssertEqual(defaultAvatar.value as? String, "已选择")
+        let loaded = expectation(for: NSPredicate(format: "value == %@", "已选择"), evaluatedWith: defaultAvatar)
+        wait(for: [loaded], timeout: 5)
         XCTAssertEqual(avatar.value as? String, "未选择")
         attachScreenshot("members-appearance-cancelled-draft-reset", to: self)
         app.buttons["取消"].tap()

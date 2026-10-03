@@ -6,21 +6,31 @@ import SwiftData
 struct FirstPersonDiaryView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Query(filter: #Predicate<Entry> { !$0.isArchived },
            sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
 
     @State private var selected: Entry?
     @State private var typeTask: Task<Void, Never>?
-    @State private var generating = false
-    @State private var output = ""
-    @State private var displayed = ""
-    @State private var errorText: String?
+    @State private var rewriteState = DiaryRewriteState()
+    @State private var generationTasks: [UUID: (id: UUID, task: Task<Void, Never>)] = [:]
+
+    private var selectedDraft: DiaryRewriteState.Draft {
+        selected.map { rewriteState.draft(for: $0.id) } ?? .init()
+    }
+    private var generating: Bool { selectedDraft.activeRequest != nil }
+    private var output: String { selectedDraft.output }
+    private var displayed: String { selectedDraft.displayed }
+    private var errorText: String? { selectedDraft.error }
 
     #if DEBUG
     private var auditRewrite: (@MainActor (String, String) async throws -> String)?
+    private var auditDidHandleReply: (@MainActor () -> Void)?
 
-    init(auditRewrite: @escaping @MainActor (String, String) async throws -> String) {
+    init(auditRewrite: @escaping @MainActor (String, String) async throws -> String,
+         auditDidHandleReply: (@MainActor () -> Void)? = nil) {
         self.auditRewrite = auditRewrite
+        self.auditDidHandleReply = auditDidHandleReply
     }
     #endif
 
@@ -55,6 +65,16 @@ struct FirstPersonDiaryView: View {
         .background(background.ignoresSafeArea())
         .navigationTitle("第一人称日记")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("没有保存成功", isPresented: Binding(
+            get: { selectedDraft.saveError != nil },
+            set: { shown in if !shown, let selected { rewriteState.saveFailed(for: selected.id, message: nil) } })) {
+                Button("好", role: .cancel) {}
+            } message: { Text(selectedDraft.saveError ?? "") }
+        .onDisappear {
+            typeTask?.cancel()
+            if let selected { rewriteState.finishPresentation(for: selected.id) }
+            for entryID in Array(generationTasks.keys) { cancelRewrite(for: entryID) }
+        }
     }
 
     @ViewBuilder
@@ -103,8 +123,9 @@ struct FirstPersonDiaryView: View {
     private func entryChip(_ entry: Entry) -> some View {
         let isSel = selected?.id == entry.id
         return Button {
-            typeTask?.cancel()   // 切换记录先掐掉上一条的打字机，残尾不再拼进新文本
-            withAnimation { selected = entry; output = ""; displayed = ""; errorText = nil }
+            typeTask?.cancel()
+            if let previous = selected { rewriteState.finishPresentation(for: previous.id) }
+            withAnimation(reduceMotion ? nil : .default) { selected = entry }
         } label: {
             HStack(alignment: .top, spacing: 10) {
                 entryAvatar(entry, size: 42)
@@ -146,7 +167,7 @@ struct FirstPersonDiaryView: View {
     private var generateArea: some View {
         VStack(alignment: .leading, spacing: 16) {
             Button {
-                Task { await generate() }
+                startRewrite()
             } label: {
                 HStack {
                     if generating { ProgressView().tint(.white) }
@@ -163,6 +184,11 @@ struct FirstPersonDiaryView: View {
             .disabled(generating)
             .accessibilityIdentifier("diary.generate")
 
+            if generating, let selected {
+                Button("停止等待") { cancelRewrite(for: selected.id) }
+                    .accessibilityIdentifier("diary.cancel")
+            }
+
             if generating && displayed.isEmpty {
                 thinkingBubble
             }
@@ -171,6 +197,7 @@ struct FirstPersonDiaryView: View {
                 HStack(alignment: .top, spacing: 10) {
                     BubuMascotBadge(size: 44, expression: .shy)
                     Text(errorText)
+                        .accessibilityIdentifier("diary.error")
                         .font(BubuTheme.Font.caption)
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                 }
@@ -215,13 +242,14 @@ struct FirstPersonDiaryView: View {
                     Button {
                         saveBack()
                     } label: {
-                        Label("保存到这条记录", systemImage: "tray.and.arrow.down")
+                        Label(selectedDraft.saved ? "已保存到这条记录" : "保存到这条记录", systemImage: selectedDraft.saved ? "checkmark.circle" : "tray.and.arrow.down")
                             .font(BubuTheme.Font.caption.weight(.semibold))
                             .foregroundStyle(theme)
                             .padding(.top, 4)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("diary.save")
+                    .disabled(selectedDraft.saved)
                 }
             }
             .padding(16)
@@ -236,49 +264,76 @@ struct FirstPersonDiaryView: View {
         }
     }
 
-    private func generate() async {
+    private func startRewrite() {
         guard let entry = selected else { return }
-        generating = true
-        displayed = ""
-        errorText = nil
-        defer { generating = false }
+        let entryID = entry.id
         let note = entry.note ?? ""
-        // AI 未配置时 env.aiService 是 Mock，会返回一段模板日记；它一旦被"存回记录"就成了布布的正文并同步全家。
+        // Admit synchronously. Two taps in the same render cannot issue two AI requests.
+        guard let request = rewriteState.begin(for: entryID) else { return }
+        typeTask?.cancel()
         guard rewriteAvailable else {
-            output = ""
-            errorText = "先在设置里连接家里的 AI 服务，再来写第一人称日记。"
+            rewriteState.fail("先在设置里连接家里的 AI 服务，再来写第一人称日记。", for: entryID, request: request)
             return
         }
+        let task = Task { await generate(entryID: entryID, note: note, request: request) }
+        generationTasks[entryID] = (request, task)
+    }
+
+    private func cancelRewrite(for entryID: UUID) {
+        // Invalidate the token first; cancellation alone cannot stop every IO callback.
+        rewriteState.cancel(for: entryID)
+        generationTasks.removeValue(forKey: entryID)?.task.cancel()
+    }
+
+    private func generate(entryID: UUID, note: String, request: UUID) async {
+        defer {
+            if generationTasks[entryID]?.id == request { generationTasks[entryID] = nil }
+            #if DEBUG
+            auditDidHandleReply?()
+            #endif
+        }
         do {
-            let text = try await requestRewrite(
-                note: note, childName: env.config.childName)
-            output = text
-            typewriter(text)
+            let text = try await requestRewrite(note: note, childName: env.config.childName)
+            let immediate = reduceMotion || selected?.id != entryID
+            guard rewriteState.succeed(text, for: entryID, request: request,
+                                       revealImmediately: immediate) else { return }
+            if !immediate { typewriter(text, entryID: entryID, presentation: request) }
         } catch {
-            output = ""
-            errorText = "AI 暂时没想好，稍后再试一次。"
+            rewriteState.fail("AI 暂时没想好，稍后再试一次。", for: entryID, request: request)
         }
     }
 
-    /// 打字机动效逐字显示（可取消：切换记录/重新生成时旧任务立即停）。
-    private func typewriter(_ text: String) {
+    /// Each animation also carries its origin; a late tick cannot change another draft.
+    private func typewriter(_ text: String, entryID: UUID, presentation: UUID) {
         typeTask?.cancel()
         typeTask = Task {
-            displayed = ""
             for ch in text {
-                guard !Task.isCancelled else { return }
-                displayed.append(ch)
+                guard !Task.isCancelled,
+                      rewriteState.append(ch, for: entryID, presentation: presentation) else { return }
                 try? await Task.sleep(for: .milliseconds(18))
             }
         }
     }
 
     private func saveBack() {
-        guard !output.isEmpty else { return }
-        selected?.firstPersonNote = output
-        selected?.editedAt = .now
-        selected?.syncState = .local
-        try? context.save()
+        guard let entry = selected else { return }
+        let draft = rewriteState.draft(for: entry.id)
+        guard !draft.saved, !draft.output.isEmpty, draft.displayed == draft.output else { return }
+        do {
+            let savedAt = try DiaryRewriteMutation.save(entryID: entry.id, text: draft.output,
+                                                        container: context.container) { transaction in
+                #if DEBUG
+                try DiaryRewriteUITestFault.injectOnce(in: transaction.container)
+                #endif
+                try transaction.save()
+            }
+            entry.firstPersonNote = draft.output
+            entry.editedAt = savedAt
+            entry.syncState = .local
+            rewriteState.saved(for: entry.id)
+        } catch {
+            rewriteState.saveFailed(for: entry.id, message: "改写内容还在这里，尚未保存到记录。请检查可用存储空间后重试。")
+        }
     }
 }
 
