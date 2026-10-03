@@ -370,6 +370,12 @@ struct BubuTimeMachineApp: App {
 
         try? context.save()
         env.currentMemberId = mama.id
+        if Self.usesInMemoryUITestStore {
+            // 合成角色测试会切到姥姥，角色偏好比内存数据库活得更久。
+            // 新种子身份与界面模式必须一致，不能让下一用例继承上一次的长辈模式。
+            env.config.currentRoleRaw = mama.relation
+            env.config.simpleModeEnabled = false
+        }
         env.hasCompletedOnboarding = true
     }
     /// 压测种子：`-uitest-seed-big` 再铺 400 条记录 × 2 媒体行。

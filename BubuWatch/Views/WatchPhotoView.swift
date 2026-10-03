@@ -20,6 +20,7 @@ struct WatchPhotoView: View {
         let updatedAt: Date?
         let photoVersion: Int
         let active: Bool
+        let emptyDeck: Bool
     }
     private var cards: [WatchMemory] { photos.map(\.memory) }
     private var previewType: DynamicTypeSize {
@@ -98,8 +99,20 @@ struct WatchPhotoView: View {
             if phase == .active { session += 1; focused = photos.count > 1 }
         }
         .task(id: LoadKey(session: session, updatedAt: connector.snapshot?.updatedAt,
-                          photoVersion: connector.photoVersion, active: scenePhase == .active)) {
-            guard scenePhase == .active, loadedSession != session || photos.isEmpty else { return }
+                          photoVersion: connector.photoVersion, active: scenePhase == .active,
+                          emptyDeck: connector.snapshot?.photoCards?.isEmpty == true)) {
+            guard scenePhase == .active else { return }
+            // 明确空清单是撤回，不是普通换批；即使当前会话冻结、时间戳同秒也要立即清空。
+            // 空态进入 task identity 也会取消正在解码的旧批次，避免它随后把撤回照片放回来。
+            if connector.snapshot?.photoCards?.isEmpty == true {
+                photos = []
+                selection.reconcile(with: [])
+                crown = 0
+                loadedSession = session
+                focused = false
+                return
+            }
+            guard loadedSession != session || photos.isEmpty else { return }
             let candidates = WatchReadModel.memories(from: connector.snapshot)
             let bytes = await Task.detached(priority: .utility) {
                 candidates.compactMap { card -> (WatchMemory, Data)? in

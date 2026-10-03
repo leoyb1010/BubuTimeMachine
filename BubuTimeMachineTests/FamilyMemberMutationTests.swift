@@ -91,4 +91,44 @@ struct FamilyMemberMutationTests {
         #expect(members.first?.name == "测试姥姥")
     }
 
+    @Test("磁盘删除失败无墓碑；成功后主 context 再保存也不复活")
+    func diskDeleteRollbackAndMainContextMirror() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("delete.store")
+        let deletedID: UUID
+        do {
+            let store = try ModelContainer(for: FamilyMember.self, PendingDeletion.self,
+                                           configurations: ModelConfiguration(url: url))
+            let main = store.mainContext
+            main.autosaveEnabled = false
+            let first = FamilyMember(name: "原成员", relation: "爸爸")
+            first.remoteId = "synthetic-remote"
+            let other = FamilyMember(name: "原另一成员", relation: "妈妈")
+            main.insert(first); main.insert(other); try main.save()
+            deletedID = first.id
+            other.name = "另一页面未提交草稿"
+            #expect(throws: Fault.self) {
+                try FamilyMemberMutation.delete(id: first.id, container: store) { _ in throw Fault.diskFull }
+            }
+            #expect(try ModelContext(store).fetchCount(FetchDescriptor<FamilyMember>()) == 2)
+            #expect(try ModelContext(store).fetchCount(FetchDescriptor<PendingDeletion>()) == 0)
+            #expect(other.name == "另一页面未提交草稿" && main.hasChanges)
+            try FamilyMemberMutation.delete(id: first.id, container: store)
+            let independent = try ModelContext(store).fetch(FetchDescriptor<FamilyMember>())
+            #expect(independent.count == 1 && independent.first?.name == "原另一成员")
+            // Match the successful UI mirror, then model a later independent main save.
+            main.delete(first)
+            try main.save()
+        }
+        let reopened = try ModelContainer(for: FamilyMember.self, PendingDeletion.self,
+                                          configurations: ModelConfiguration(url: url))
+        let saved = try reopened.mainContext.fetch(FetchDescriptor<FamilyMember>())
+        #expect(saved.count == 1 && !saved.contains(where: { $0.id == deletedID }))
+        #expect(saved.first?.name == "另一页面未提交草稿")
+        let tombstones = try reopened.mainContext.fetch(FetchDescriptor<PendingDeletion>())
+        #expect(tombstones.count == 1 && tombstones.first?.remoteId == "synthetic-remote")
+    }
+
 }

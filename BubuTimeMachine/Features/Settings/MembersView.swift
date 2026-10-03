@@ -97,6 +97,8 @@ struct MembersView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("切换到\(member.name)")
+            .accessibilityValue(isCurrent ? "当前身份，\(env.config.currentRoleRaw)" : member.relation)
+            .accessibilityAddTraits(isCurrent ? .isSelected : [])
 
             Button { editing = member } label: {
                 Image(systemName: "pencil.circle.fill")
@@ -201,6 +203,7 @@ struct MemberEditSheet: View {
                     Picker("关系", selection: $relation) {
                         ForEach(Relation.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
+                    .accessibilityIdentifier("member-editor.relation")
                     TextField("显示名字", text: $name)
                         .focused($nameFocused)
                         .submitLabel(.done)

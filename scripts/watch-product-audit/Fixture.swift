@@ -17,16 +17,20 @@ import Observation
                     ageText: "测试", photoFileName: "synthetic-\($0).png")
             })
     }
-    func withdraw() {
+    func withdraw(keepTimestamp: Bool = false) {
         snapshot?.photoCards = []
-        snapshot?.updatedAt = .now
-        print("AUDIT_AUTHORITATIVE_EMPTY_SNAPSHOT_APPLIED")
+        if !keepTimestamp { snapshot?.updatedAt = .now }
+        FileHandle.standardOutput.write(Data("AUDIT_AUTHORITATIVE_EMPTY_SNAPSHOT_APPLIED\n".utf8))
     }
 }
 nonisolated enum WatchPhotoStore {
     static func data(for name: String?) -> Data? {
         guard name != nil, !ProcessInfo.processInfo.arguments.contains("-audit-missing"),
               let url = Bundle.main.url(forResource: "synthetic", withExtension: "png") else { return nil }
+        if ProcessInfo.processInfo.arguments.contains("-audit-withdraw-during-load") {
+            Thread.sleep(forTimeInterval: 3)
+            FileHandle.standardOutput.write(Data("AUDIT_PHOTO_DATA_READ \(name ?? "nil")\n".utf8))
+        }
         return try? Data(contentsOf: url)
     }
 }
@@ -37,9 +41,9 @@ nonisolated enum WatchPhotoStore {
             WatchPhotoView()
                 .environment(connector)
                 .task {
-                    if ProcessInfo.processInfo.arguments.contains("-audit-withdraw") {
+                    if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-audit-withdraw") }) {
                         try? await Task.sleep(for: .seconds(6))
-                        connector.withdraw()
+                        connector.withdraw(keepTimestamp: !ProcessInfo.processInfo.arguments.contains("-audit-withdraw"))
                     }
                 }
         }

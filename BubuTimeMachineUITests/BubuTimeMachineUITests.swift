@@ -3,6 +3,52 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testCurrentMemberRelationChangesOnlyAfterSuccessfulSave() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-members", "-uitest-member-fail-save"]
+        app.launch()
+        let current = app.buttons["切换到妈妈"]
+        XCTAssertTrue(current.waitForExistence(timeout: 12))
+        current.tap()
+        XCTAssertEqual(current.value as? String, "当前身份，妈妈")
+        app.buttons["编辑妈妈"].tap()
+        app.buttons["member-editor.relation"].tap()
+        app.buttons["爸爸"].tap()
+        app.buttons["保存"].tap()
+        let failure = app.alerts["没有保存成功"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        failure.buttons["好"].tap()
+        attachScreenshot("members-current-relation-save-rejected", to: self)
+        app.buttons["保存"].tap()
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        XCTAssertEqual(current.value as? String, "当前身份，爸爸")
+        attachScreenshot("members-current-relation-committed", to: self)
+    }
+
+    @MainActor
+    func testFullProductSurfaceSweepUsesActualAppViews() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let pages = [
+            ("-uitest-growth", "成长"), ("-uitest-milestones", "里程碑"),
+            ("-uitest-capsule", "时间胶囊"), ("-uitest-ai", "回忆与作品"),
+            ("-uitest-diary", "第一人称日记"), ("-uitest-movie", "年度成长电影"),
+            ("-uitest-voice", "成长之声"), ("-uitest-export", "开放阅读档案"),
+            ("-uitest-advanced-settings", "高级 · 自托管"), ("-uitest-members", "家庭成员")
+        ]
+        for (index, page) in pages.enumerated() {
+            app.launchArguments = ["-uitest-in-memory", "-uitest-seed", page.0]
+            app.launch()
+            XCTAssertTrue(app.navigationBars[page.1].waitForExistence(timeout: 12), "Actual app failed to render " + page.1)
+            attachScreenshot("full-surface-\(index)-\(page.1)", to: self)
+            app.swipeUp()
+            attachScreenshot("full-surface-\(index)-scrolled", to: self)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testMemberSaveFailureRetainsDraftAndRetryAddsExactlyOnce() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

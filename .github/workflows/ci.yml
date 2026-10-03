@@ -181,15 +181,30 @@ jobs:
             test-without-building 2>&1 | tee /tmp/ui-first.log \
           || {
             echo "had_retry=true" >> "$GITHUB_OUTPUT"
-            echo "UI 回归第一次失败，保留首次日志并按原有策略重试一次"
+            echo "UI 首次失败：保留完整第一次结果，只重试明确失败且已执行的用例"
+            python3 scripts/select-ui-retries.py --self-test
+            python3 scripts/select-ui-retries.py --device '${{ matrix.device }}' \
+              --source BubuTimeMachineUITests/BubuTimeMachineUITests.swift \
+              --first-log /tmp/ui-first.log --output /tmp/bubu-ui-attempts || exit 1
+            RETRY=()
+            while IFS= read -r test; do
+              RETRY+=("-only-testing:BubuTimeMachineUITests/BubuTimeMachineUITests/$test")
+            done < /tmp/bubu-ui-attempts/retry-tests.txt
+            [ "${#RETRY[@]}" -gt 0 ] || exit 1
+            retry_status=0
             xcodebuild -project BubuTimeMachine.xcodeproj \
               BUBU_DEFAULT_BASE_URL=https://bubu-test.invalid \
               BUBU_DEFAULT_AI_BASE_URL=https://bubu-test.invalid \
               -scheme BubuTimeMachine \
               -parallel-testing-enabled NO \
               -destination "id=${{ steps.sim.outputs.device }}" \
-              -only-testing:BubuTimeMachineUITests \
-              test-without-building 2>&1 | tee /tmp/ui-retry.log
+              "${RETRY[@]}" \
+              test-without-building 2>&1 | tee /tmp/ui-retry.log || retry_status=$?
+            python3 scripts/select-ui-retries.py --device '${{ matrix.device }}' \
+              --source BubuTimeMachineUITests/BubuTimeMachineUITests.swift \
+              --first-log /tmp/ui-first.log --retry-log /tmp/ui-retry.log \
+              --output /tmp/bubu-ui-attempts || exit 1
+            [ "$retry_status" -eq 0 ] || exit "$retry_status"
           }
 
       - name: Preserve synthetic simulator evidence
@@ -198,6 +213,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p /tmp/bubu-ci-diagnostics
+          cp /tmp/bubu-ui-attempts/*.json /tmp/bubu-ui-attempts/*.txt /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
           cp /tmp/build.log /tmp/unit.log /tmp/ui-first.log /tmp/ui-retry.log /tmp/ui-focused.log /tmp/bubu-ci-diagnostics/ 2>/dev/null || true
           python3 - <<'PYTHON'
           from pathlib import Path
@@ -270,13 +286,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Select Xcode and install project generator
         run: |
           XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
           sudo xcode-select -s "$XCODE"
           command -v xcodegen >/dev/null || brew install xcodegen
       - name: Capture actual watchOS production view
-        run: bash scripts/watch-product-audit/run.sh current WORKTREE
+        run: |
+          bash scripts/watch-product-audit/run.sh baseline 274df2d27508645a0a95cedabd0d76794774f5bb
+          bash scripts/watch-product-audit/run.sh current WORKTREE
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
