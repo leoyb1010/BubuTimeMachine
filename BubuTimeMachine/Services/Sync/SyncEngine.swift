@@ -2302,51 +2302,11 @@ final class SyncEngine {
     }
 
     private func mergeRemoteTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> Bool {
-        guard let context = modelContext, let localId = UUID(uuidString: dto.localId) else { return modelContext != nil }
+        guard let context = modelContext else { return false }
         if try isPendingDeletion(collection: "timecapsules", remoteId: dto.id, context: context) { return true }
-        let descriptor = FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == localId })
-        if let existing = try context.fetch(descriptor).first {
-            if existing.syncState == .synced {
-                Self.apply(dto, to: existing)
-                existing.remoteId = dto.id
-                await ensureLocalCapsuleBlob(for: existing, dto: dto)
-            } else { return false }
-        } else {
-            let item = TimeCapsule(title: dto.title, fromRole: dto.fromRole, unlockAt: dto.unlockAt)
-            item.id = localId
-            Self.apply(dto, to: item)
-            item.remoteId = dto.id
-            item.syncState = .synced
-            context.insert(item)
-            await ensureLocalCapsuleBlob(for: item, dto: dto)
-        }
-        saveAndRefresh(context)
-        return true
-    }
-
-    private func ensureLocalCapsuleBlob(for capsule: TimeCapsule, dto: TimeCapsuleDTO) async {
-        if let fileName = capsule.encryptedBlobFileName,
-           mediaStore.fileExists(forMedia: fileName) {
-            return
-        }
-        guard let context = modelContext, let remoteURL = dto.encryptedBlobRemoteURL else { return }
-        let localId = capsule.id
-        let remoteId = capsule.remoteId
-        let state = capsule.syncState
-        let cryptoVersion = capsule.cryptoVersion
-        let unlockAt = capsule.unlockAt
-        let isLocked = capsule.isLocked
-        let expectedFileName = capsule.encryptedBlobFileName
-        do {
-            let fileName = try await downloadRemoteFile(remoteURL, preferredExtension: "capsule")
-            try Self.completeFileDownload(fileName, in: context, store: mediaStore,
-                descriptor: FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == localId }),
-                localFile: \.encryptedBlobFileName, expectedFileName: expectedFileName, isCurrent: {
-                    self.isCurrentRun && $0.remoteId == remoteId && $0.syncState == state && $0.cryptoVersion == cryptoVersion &&
-                    $0.unlockAt == unlockAt && $0.isLocked == isLocked
-                })
-        } catch {
-            recordFailure(error, item: "下载时间胶囊")
+        return try await CapsuleRemoteMerge.merge(dto, in: context, directory: BubuStorage.mediaDirectory,
+            resolveFile: { self.mediaStore.mediaURL(for: $0) }, isCurrent: { self.isCurrentRun }) { remote in
+            try await self.apiClient.downloadFileToTemporaryURL(from: remote)
         }
     }
 
@@ -2649,22 +2609,6 @@ final class SyncEngine {
                        fromRole: item.fromRole, unlockAt: item.unlockAt, isLocked: item.isLocked,
                        encryptedBlobRemoteURL: nil, coverEmoji: item.coverEmoji,
                        cryptoVersion: item.cryptoVersion, createdAt: item.createdAt)
-    }
-
-    private static func apply(_ dto: TimeCapsuleDTO, to item: TimeCapsule) {
-        item.title = dto.title
-        item.fromRole = dto.fromRole
-        // 不覆盖 unlockAt：封存后不可变，密钥派生依赖它；
-        // 远端 ISO 序列化会截断亚秒，覆盖会让旧版(v1)胶囊永久解不开。
-        // 新建路径由 TimeCapsule(init:) 直接用远端值，不经过这里。
-        item.isLocked = dto.isLocked
-        item.coverEmoji = dto.coverEmoji
-        // 加密版本只升不降。服务器是不可信的一方：能替换 blob 的人也能改这个数字，
-        // 所以这里绝不接受「远端说版本更低」——否则版本锁自己就成了降级攻击的入口。
-        if let remote = dto.cryptoVersion, remote > (item.cryptoVersion ?? 0) {
-            item.cryptoVersion = remote
-        }
-        item.createdAt = dto.createdAt
     }
 
     private static func apply(_ dto: EntryDTO, to entry: Entry) {
