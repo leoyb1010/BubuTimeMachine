@@ -425,6 +425,13 @@ struct NaturalCaptureReviewSheet: View {
             }
             #endif
             saveError = "保存失败，内容还在这里。请检查可用存储空间后重试。"
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
+               ProcessInfo.processInfo.arguments.contains("-uitest-natural-fail-save") {
+                let failure = error as NSError
+                saveError! += " [synthetic: \(failure.domain)/\(failure.code), injected=\(injectedSaveFailure)]"
+            }
+            #endif
             return
         }
         didSave = true

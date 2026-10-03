@@ -516,6 +516,10 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.alerts["没能保存"].waitForExistence(timeout: 8))
         attachScreenshot("natural-review-save-failure-retains-draft", to: self)
         app.alerts["没能保存"].buttons["返回重试"].tap()
+        XCTAssertTrue(app.alerts["没能保存"].waitForNonExistence(timeout: 8), "错误提示必须真正退出后才能重试")
+        let retrySave = app.navigationBars["确认保存"].buttons["保存"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: retrySave)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed)
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts[note].firstMatch.exists, "保存失败后确认内容不能消失")
         app.navigationBars["确认保存"].buttons["保存"].tap()
