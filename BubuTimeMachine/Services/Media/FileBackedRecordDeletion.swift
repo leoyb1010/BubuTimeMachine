@@ -52,9 +52,33 @@ enum FileBackedRecordDeletion {
             }
         }
         guard !dirtyTarget else { throw DeletionError.changedRecord }
+        let id = request.id
+        // Keep the already-loaded UI object before another context removes its row.
+        // SwiftData does not refresh a dirty parent's inverse relationship on its own.
+        let mirrorDeletion: () -> Void
+        switch request.kind {
+        case .media:
+            let value = try uiContext.fetch(FetchDescriptor<Media>(predicate: #Predicate { $0.id == id })).first
+            mirrorDeletion = {
+                if let value {
+                    value.entry?.media.removeAll { $0.id == id }
+                    uiContext.delete(value)
+                }
+            }
+        case .voice:
+            let value = try uiContext.fetch(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.id == id })).first
+            mirrorDeletion = {
+                if let value {
+                    value.entry?.voiceNotes.removeAll { $0.id == id }
+                    uiContext.delete(value)
+                }
+            }
+        case .capsule:
+            let value = try uiContext.fetch(FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == id })).first
+            mirrorDeletion = { if let value { uiContext.delete(value) } }
+        }
         let context = ModelContext(container)
         context.autosaveEnabled = false
-        let id = request.id
         do {
             var parent: Entry?
             switch request.kind {
@@ -108,6 +132,8 @@ enum FileBackedRecordDeletion {
                 if let name = media, try referencesMedia(name, excluding: request, in: reader) { media = nil }
                 if let name = thumbnail, try referencesThumbnail(name, excluding: request, in: reader) { thumbnail = nil }
             }
+            // Mirror only the committed deletion, never save/rollback unrelated UI drafts.
+            mirrorDeletion()
             if media != nil || thumbnail != nil { removeFiles(media, thumbnail) }
         } catch {
             context.rollback() // Only this dedicated context, never the UI's draft context.
