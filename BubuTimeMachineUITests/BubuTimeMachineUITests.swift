@@ -115,6 +115,18 @@ final class BubuTimeMachineUITests: XCTestCase {
             app.launch()
             XCTAssertTrue(app.navigationBars[page.1].waitForExistence(timeout: 12), "Actual app failed to render " + page.1)
             attachScreenshot("full-surface-\(index)-\(page.1)", to: self)
+            if page.0 == "-uitest-milestones" {
+                let ceremony = app.buttons["收好这一刻"]
+                XCTAssertTrue(ceremony.waitForExistence(timeout: 5))
+                ceremony.tap()
+                XCTAssertTrue(ceremony.waitForNonExistence(timeout: 5))
+                let wall = app.buttons["切换到奖章墙"]
+                XCTAssertTrue(wall.waitForExistence(timeout: 5))
+                attachScreenshot("full-surface-1-constellation-after-ceremony", to: self)
+                wall.tap()
+                XCTAssertTrue(app.buttons["切换到星盘视图"].waitForExistence(timeout: 5))
+                attachScreenshot("full-surface-1-medallion-wall", to: self)
+            }
             app.swipeUp()
             attachScreenshot("full-surface-\(index)-scrolled", to: self)
             app.terminate()
@@ -628,6 +640,14 @@ final class BubuTimeMachineUITests: XCTestCase {
             XCTAssertTrue(field.waitForExistence(timeout: 5))
             revealSchoolControl(field, in: app)
             field.tap(); field.typeText(amount)
+            if app.keyboards.firstMatch.exists {
+                let done = app.buttons["school.keyboard.done"]
+                XCTAssertTrue(done.waitForExistence(timeout: 5))
+                if name == "上午点心" { attachScreenshot("school-explicit-keyboard-done", to: self) }
+                done.tap()
+                XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+                XCTAssertEqual(field.value as? String, amount, "Dismissing the keyboard must keep the entered amount")
+            }
             let appetite = app.segmentedControls["school.appetite.\(name)"]
             revealSchoolControl(appetite, in: app)
             appetite.buttons["佳"].tap()

@@ -5,6 +5,7 @@ struct SchoolReportEditor: View {
     let sourceFile: JournalMediaFile?
     @Environment(AppEnvironment.self) private var env
     @State private var showingOriginal = false
+    @FocusState private var editingField: SchoolReportField?
     @State private var expandedSection: String? = "一天四餐"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -57,6 +58,17 @@ struct SchoolReportEditor: View {
         }
         .padding(16)
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md))
+        .toolbar {
+            if editingField != nil {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成输入") { editingField = nil }
+                        .fontWeight(.semibold)
+                        .accessibilityIdentifier("school.keyboard.done")
+                        .accessibilityHint("保留已填写的内容并收起键盘，继续核对表单")
+                }
+            }
+        }
     }
 
     private func fields(_ fields: [SchoolReportField]) -> some View {
@@ -81,6 +93,7 @@ struct SchoolReportEditor: View {
                     TextField(field.prompt, text: Binding(get: { report[field] }, set: { report[field] = $0 }), axis: .vertical)
                         .lineLimit(1...3).font(BubuTheme.Font.body)
                         .padding(10).background(BubuTheme.Color.background, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs))
+                        .focused($editingField, equals: field)
                         .accessibilityIdentifier("school.field.\(field.rawValue)")
                     if let candidate = report.candidates[field.rawValue], report[field].isEmpty {
                         Button { report[field] = candidate } label: {
@@ -104,6 +117,9 @@ struct SchoolReportEditor: View {
                     set: { report.setMealAmount($0, for: field) }))
                     .font(BubuTheme.Font.body).padding(10)
                     .background(BubuTheme.Color.background, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs))
+                    .focused($editingField, equals: field)
+                    .submitLabel(.done)
+                    .onSubmit { editingField = nil }
                     .accessibilityIdentifier("school.field.\(field.rawValue)")
             }
             VStack(alignment: .leading, spacing: 8) {
