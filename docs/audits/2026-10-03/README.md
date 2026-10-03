@@ -57,3 +57,7 @@ These are source-traced gaps, **not reproduced hardware failures**, and were not
 ## Recovery / review boundary
 
 This patch is isolated to the existing audit branch. Do not merge or deploy until final-SHA native results and the unresolved release-parity contract are reviewed. New records use existing fields only; no migration or mass rewrite is required. A code revert does not require deleting or transforming user data. Do not reset an iPhone database or point tests at the running Mac mini to validate this branch.
+
+## Additional deletion boundary verification
+
+The detail photo/voice and capsule delete entry points now use a dedicated persistent ModelContext. They commit the deletion and remote tombstone before allowing file cleanup, reject stale ownership/remote/parent references and in-memory recovery stores, preserve shared file owners and unrelated UI drafts, and show failure instead of silently claiming success. New disk-backed synthetic SwiftData tests cover injected save failure, retry, ineffective save, stale file identity, unsaved shared ownership, post-commit error, recovery stores and changed parent/remote identity. These tests must pass native CI; their presence alone is not execution evidence. Remaining silent-save/capture-flow risks above are unchanged. The previous native build failed in a throwing assertion in CapsuleV3Tests; its closure now has an explicit throwing signature and reads bytes before asserting.

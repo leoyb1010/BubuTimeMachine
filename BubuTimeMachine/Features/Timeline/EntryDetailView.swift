@@ -8,6 +8,7 @@ struct EntryDetailView: View {
     /// 编辑态下删照片/语音此前是「一点即删本地文件」，无确认无触觉。
     @State private var pendingMediaDelete: Media?
     @State private var pendingVoiceDelete: VoiceNote?
+    @State private var resourceDeleteError: String?
     @Bindable var entry: Entry
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
@@ -88,6 +89,10 @@ struct EntryDetailView: View {
             Button("删掉", role: .destructive) { deleteVoice(voice); pendingVoiceDelete = nil }
             Button("留着", role: .cancel) { pendingVoiceDelete = nil }
         } message: { _ in Text("录音文件会一起删掉，找不回来。") }
+        .alert("未能完成移除", isPresented: Binding(get: { resourceDeleteError != nil },
+                set: { if !$0 { resourceDeleteError = nil } })) {
+            Button("知道了", role: .cancel) { resourceDeleteError = nil }
+        } message: { Text(resourceDeleteError ?? "原文件尚未清理，请稍后重试。") }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -575,25 +580,24 @@ struct EntryDetailView: View {
     }
 
     private func deleteMedia(_ media: Media) {
-        BubuHaptics.warning()
-        PendingDeletion.enqueue(collection: "media", remoteId: media.remoteId, in: context)
-        env.mediaStore.deleteLocalFiles(media: media.localFileName, thumbnail: media.thumbnailFileName)
-        context.delete(media)
-        markEntryDirty()
-        try? context.save()
-        refreshWidgets()
-        env.syncEngine.syncNow()
+        deleteResource(FileBackedRecordDeletion.Request(media))
     }
 
     private func deleteVoice(_ voice: VoiceNote) {
-        BubuHaptics.warning()
-        PendingDeletion.enqueue(collection: "voicenotes", remoteId: voice.remoteId, in: context)
-        env.mediaStore.deleteLocalFiles(media: voice.localFileName)
-        context.delete(voice)
-        markEntryDirty()
-        try? context.save()
-        refreshWidgets()
-        env.syncEngine.syncNow()
+        deleteResource(FileBackedRecordDeletion.Request(voice))
+    }
+
+    private func deleteResource(_ request: FileBackedRecordDeletion.Request) {
+        do {
+            try FileBackedRecordDeletion.delete(request, from: context) { media, thumbnail in
+                env.mediaStore.deleteLocalFiles(media: media, thumbnail: thumbnail)
+            }
+            BubuHaptics.warning()
+            refreshWidgets()
+            env.syncEngine.syncNow()
+        } catch {
+            resourceDeleteError = "删除尚未确认，原文件没有被提前清理。请先完成正在编辑的内容，再重试。"
+        }
     }
 
     // 用户每次修改都立即标脏；仅更新内存元数据，不逐字保存、刷新小组件或触发同步。

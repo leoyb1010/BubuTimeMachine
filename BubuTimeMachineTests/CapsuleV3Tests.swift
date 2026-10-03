@@ -35,8 +35,9 @@ struct CapsuleV3Tests {
         #expect(cleaned.isEmpty)
         #expect(try Data(contentsOf: source) == bytes)
         var persisted = false
-        try CapsuleCommitBoundary.save(plainVoice: source.lastPathComponent, persist: {
-            #expect(try Data(contentsOf: source) == bytes)
+        try CapsuleCommitBoundary.save(plainVoice: source.lastPathComponent, persist: { () throws -> Void in
+            let retained = try Data(contentsOf: source)
+            #expect(retained == bytes)
             persisted = true
         }, removePlaintext: { name in
             #expect(persisted)
