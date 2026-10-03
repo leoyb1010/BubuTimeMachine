@@ -627,10 +627,10 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["识别并保存这句话"].tap()
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
         app.navigationBars["确认保存"].buttons["保存"].tap()
-        XCTAssertTrue(app.alerts["没能保存"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["没能保存"].waitForExistence(timeout: 8))
         attachScreenshot("natural-review-save-failure-retains-draft", to: self)
-        app.alerts["没能保存"].buttons["返回重试"].tap()
-        XCTAssertTrue(app.alerts["没能保存"].waitForNonExistence(timeout: 8), "错误提示必须真正退出后才能重试")
+        app.buttons["返回重试"].tap()
+        XCTAssertTrue(app.staticTexts["没能保存"].waitForNonExistence(timeout: 8), "错误提示必须真正退出后才能重试")
         let retrySave = app.navigationBars["确认保存"].buttons["保存"]
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: retrySave)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed)
@@ -654,6 +654,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         timeline.tap()
         XCTAssertTrue(app.staticTexts[note].firstMatch.waitForExistence(timeout: 8), "已保存内容必须从真实 SwiftData 回到时光页")
         attachScreenshot("natural-review-saved-timeline", to: self)
+        let textCard = app.buttons.matching(NSPredicate(format:
+            "identifier BEGINSWITH %@ AND label CONTAINS %@", "timeline.memory.", note)).firstMatch
+        XCTAssertTrue(textCard.waitForExistence(timeout: 5))
+        XCTAssertLessThan(textCard.frame.height, 190, "没有照片的记录不应显示大块照片占位")
+        textCard.tap()
+        XCTAssertTrue(app.buttons["entry.edit"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts[note].firstMatch.exists)
     }
 
     @MainActor
@@ -679,6 +686,31 @@ final class BubuTimeMachineUITests: XCTestCase {
         let note = app.staticTexts["布布今天第一次自己扶着沙发站起来了！"]
         XCTAssertTrue(note.waitForExistence(timeout: 10), "冷启动系统搜索必须直达具体时光，不能停在空白页")
         attachScreenshot("moment-deeplink", to: self)
+    }
+
+    @MainActor
+    func testEntryEditingFailureKeepsDraftForRetry() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-open-first-moment", "-uitest-entry-edit-fail-save"]
+        app.launch()
+        let edit = app.buttons["entry.edit"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 12))
+        edit.tap()
+        let note = app.descendants(matching: .any).matching(identifier: "entry.note").firstMatch
+        for _ in 0..<4 { if note.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(note.isHittable)
+        note.tap()
+        note.typeText(" Synthetic retry edit")
+        edit.tap()
+        XCTAssertEqual(edit.label, "完成", "失败不能退出编辑")
+        let message = app.staticTexts["entry.operation-message"]
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        XCTAssertTrue((note.value as? String ?? "").contains("Synthetic retry edit"))
+        attachScreenshot("entry-edit-failure-keeps-draft", to: self)
+        edit.tap()
+        XCTAssertTrue(edit.wait(for: \.label, toEqual: "编辑", timeout: 5))
+        XCTAssertFalse(message.exists)
     }
 
     @MainActor
@@ -769,7 +801,13 @@ final class BubuTimeMachineUITests: XCTestCase {
                 bottom = min(bottom, reviewBar.frame.minY - 12)
             }
             let target = element.frame
-            if element.isHittable && target.minY >= top && target.maxY <= bottom { return }
+            // A segmented-control container can report nonhittable on iPad even
+            // while its visible buttons are tappable. The test taps a button,
+            // not the container; keep the same full-viewport bounds requirement.
+            let canTap = element.elementType == .segmentedControl
+                ? element.buttons.allElementsBoundByIndex.contains { $0.isHittable }
+                : element.isHittable
+            if canTap && target.minY >= top && target.maxY <= bottom { return }
             guard lastScrollBounds != nil, bottom - top > 60, bounds.width > 48 else { break }
             let origin = app.coordinate(withNormalizedOffset: .zero)
             let x = bounds.maxX - 24 - appBounds.minX
