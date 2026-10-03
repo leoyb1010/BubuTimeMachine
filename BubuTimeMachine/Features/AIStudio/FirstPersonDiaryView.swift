@@ -16,6 +16,30 @@ struct FirstPersonDiaryView: View {
     @State private var displayed = ""
     @State private var errorText: String?
 
+    #if DEBUG
+    private var auditRewrite: (@MainActor (String, String) async throws -> String)?
+
+    init(auditRewrite: @escaping @MainActor (String, String) async throws -> String) {
+        self.auditRewrite = auditRewrite
+    }
+    #endif
+
+    init() {}
+
+    private var rewriteAvailable: Bool {
+        #if DEBUG
+        if auditRewrite != nil { return true }
+        #endif
+        return env.config.isAIConfigured
+    }
+
+    private func requestRewrite(note: String, childName: String) async throws -> String {
+        #if DEBUG
+        if let auditRewrite { return try await auditRewrite(note, childName) }
+        #endif
+        return try await env.aiService.rewriteFirstPerson(note: note, childName: childName)
+    }
+
     private var theme: Color { env.theme.theme.primary }
     private var candidates: [Entry] { entries.filter { ($0.note?.isEmpty == false) } }
 
@@ -102,6 +126,8 @@ struct FirstPersonDiaryView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("diary.entry.\(entry.id.uuidString)")
+        .accessibilityAddTraits(isSel ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -135,6 +161,7 @@ struct FirstPersonDiaryView: View {
             }
             .buttonStyle(.plain)
             .disabled(generating)
+            .accessibilityIdentifier("diary.generate")
 
             if generating && displayed.isEmpty {
                 thinkingBubble
@@ -179,6 +206,7 @@ struct FirstPersonDiaryView: View {
                     .font(BubuTheme.Font.scaled(12, weight: .semibold))
                     .foregroundStyle(theme)
                 Text(displayed)
+                    .accessibilityIdentifier("diary.output")
                     .font(BubuTheme.Font.scaled(18, weight: .regular))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineSpacing(6)
@@ -193,6 +221,7 @@ struct FirstPersonDiaryView: View {
                             .padding(.top, 4)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("diary.save")
                 }
             }
             .padding(16)
@@ -215,13 +244,13 @@ struct FirstPersonDiaryView: View {
         defer { generating = false }
         let note = entry.note ?? ""
         // AI 未配置时 env.aiService 是 Mock，会返回一段模板日记；它一旦被"存回记录"就成了布布的正文并同步全家。
-        guard env.config.isAIConfigured else {
+        guard rewriteAvailable else {
             output = ""
             errorText = "先在设置里连接家里的 AI 服务，再来写第一人称日记。"
             return
         }
         do {
-            let text = try await env.aiService.rewriteFirstPerson(
+            let text = try await requestRewrite(
                 note: note, childName: env.config.childName)
             output = text
             typewriter(text)

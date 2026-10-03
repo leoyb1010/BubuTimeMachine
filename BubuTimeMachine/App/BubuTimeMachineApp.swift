@@ -578,7 +578,10 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-uitest-members") {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-diary-controlled"),
+           ProcessInfo.processInfo.arguments.contains("-uitest-in-memory") {
+            NavigationStack { DiaryRewriteAuditHost() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-members") {
             NavigationStack { MembersView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-sayings") {
             NavigationStack { MemoryJournalView(kind: .saying) }

@@ -170,34 +170,51 @@ struct MemberEditSheet: View {
     @FocusState private var nameFocused: Bool
 
     private let emojiChoices = ["👩","👨","👵","👴","🧑","👧","🧒","🙂","🌷","⭐️","🐻","🦊"]
+    private let colorNames = ["#F28C9E": "玫瑰粉", "#5B8DEF": "天空蓝", "#F2B705": "向日葵黄", "#5BB98C": "草木绿", "#8E7CC3": "薰衣草紫", "#FF9F8E": "蜜桃橙", "#E08D79": "陶土红", "#73C2FB": "晴空蓝"]
     private let colorChoices = ["#F28C9E","#5B8DEF","#F2B705","#5BB98C","#8E7CC3","#FF9F8E","#E08D79","#73C2FB"]
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("头像") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 64), spacing: 12)], spacing: 12) {
                         ForEach(emojiChoices, id: \.self) { e in
-                            Text(e)
-                                // 头像选择格内的单 emoji，随字号放大会溢出 44pt 格，保持固定
-                                .font(.system(size: 30))
-                                .frame(width: 44, height: 44)
-                                .background(emoji == e ? Color(hex: colorHex).opacity(0.2) : .clear, in: Circle())
-                                .overlay { Circle().stroke(emoji == e ? Color(hex: colorHex) : .clear, lineWidth: 2) }
-                                .onTapGesture { emoji = e }
+                            Button { emoji = e } label: {
+                                Text(e)
+                                    // 单 emoji 保持固定尺寸；按钮始终提供 44pt 命中区。
+                                    .font(.system(size: 30))
+                                    .frame(width: 44, height: 44)
+                                    .background(emoji == e ? Color(hex: colorHex).opacity(0.2) : .clear, in: Circle())
+                                    .overlay { Circle().stroke(emoji == e ? Color(hex: colorHex) : .clear, lineWidth: 2) }
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("头像，\(e)")
+                            .accessibilityValue(emoji == e ? "已选择" : "未选择")
+                            .accessibilityAddTraits(emoji == e ? .isSelected : [])
+                            .accessibilityIdentifier("member-editor.avatar.\(e)")
                         }
                     }
                     .padding(.vertical, 4)
                 }
                 Section("专属颜色") {
-                    HStack(spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 64), spacing: 12)], spacing: 12) {
                         ForEach(colorChoices, id: \.self) { c in
-                            Circle().fill(Color(hex: c)).frame(width: 34, height: 34)
-                                .overlay { Circle().stroke(.white, lineWidth: colorHex == c ? 3 : 0) }
-                                .overlay { Circle().stroke(Color(hex: c), lineWidth: colorHex == c ? 2 : 0).padding(-3) }
-                                .onTapGesture { colorHex = c }
+                            Button { colorHex = c } label: {
+                                Circle().fill(Color(hex: c)).frame(width: 34, height: 34)
+                                    .overlay { Circle().stroke(.white, lineWidth: colorHex == c ? 3 : 0) }
+                                    .overlay { Circle().stroke(Color(hex: c), lineWidth: colorHex == c ? 2 : 0).padding(-3) }
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("专属颜色，\(colorNames[c] ?? c)")
+                            .accessibilityValue(colorHex == c ? "已选择" : "未选择")
+                            .accessibilityAddTraits(colorHex == c ? .isSelected : [])
+                            .accessibilityIdentifier("member-editor.color.\(c.dropFirst())")
                         }
                     }
+                    .padding(.vertical, 4)
                 }
                 Section("身份") {
                     Picker("关系", selection: $relation) {

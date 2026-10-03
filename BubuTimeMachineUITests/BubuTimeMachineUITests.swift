@@ -3,6 +3,79 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testDiaryLateReplyCannotSaveIntoAnotherSelectedEntry() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-diary-controlled"]
+        app.launch()
+        let a = "00000000-0000-4000-8000-000000000001"
+        let b = "00000000-0000-4000-8000-000000000002"
+        let first = app.buttons["diary.entry." + a]
+        let second = app.buttons["diary.entry." + b]
+        XCTAssertTrue(first.waitForExistence(timeout: 12))
+        first.tap()
+        app.buttons["diary.generate"].tap()
+        XCTAssertTrue(app.staticTexts["diary-audit.pending.A1"].waitForExistence(timeout: 5))
+        second.tap()
+        XCTAssertTrue(second.isSelected, "B must be selected before releasing A's response")
+        XCTAssertFalse(app.buttons["diary.generate"].isEnabled, "Original pending request must be observable")
+        attachScreenshot("diary-A-pending-B-selected", to: self)
+        app.buttons["diary-audit.success.A1"].tap()
+        let finished = app.staticTexts["diary-audit.completed"]
+        let completed = expectation(for: NSPredicate(format: "label CONTAINS %@", "A1-success"), evaluatedWith: finished)
+        wait(for: [completed], timeout: 5)
+        let handled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["diary.generate"])
+        wait(for: [handled], timeout: 5)
+        let save = app.buttons["diary.save"]
+        if save.waitForExistence(timeout: 4) {
+            for _ in 0..<3 where !save.isHittable { app.swipeUp() }
+            attachScreenshot("diary-late-A-visible-while-B-selected", to: self)
+            save.tap()
+        }
+        attachScreenshot("diary-late-A-save-target-readback", to: self)
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + a].label, "<empty>")
+        XCTAssertEqual(app.staticTexts["diary-audit.saved." + b].label, "<empty>", "A's late rewrite must never be saved into B")
+        XCTAssertFalse(app.staticTexts["diary.output"].exists, "B must not display A's late rewrite")
+    }
+
+    @MainActor
+    func testMemberAppearanceHasReachableNamedTargetsAndCancelRestoresDraft() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-members",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["添加家庭成员"].waitForExistence(timeout: 12))
+        app.buttons["添加家庭成员"].tap()
+        let avatar = app.buttons["member-editor.avatar.🐻"]
+        let color = app.buttons["member-editor.color.73C2FB"]
+        for target in [avatar, color] {
+            for _ in 0..<4 where !target.isHittable { app.swipeUp() }
+            XCTAssertTrue(target.isHittable)
+            XCTAssertGreaterThanOrEqual(target.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(target.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(target.frame.minX, 0)
+            XCTAssertLessThanOrEqual(target.frame.maxX, app.frame.maxX)
+            target.tap()
+            XCTAssertEqual(target.value as? String, "已选择")
+        }
+        attachScreenshot("members-appearance-large-text-selected", to: self)
+        app.buttons["取消"].tap()
+        XCTAssertTrue(app.buttons["添加家庭成员"].waitForExistence(timeout: 5))
+        app.buttons["添加家庭成员"].tap()
+        let initial = app.buttons["member-editor.color.F28C9E"]
+        for _ in 0..<4 where !initial.isHittable { app.swipeUp() }
+        XCTAssertEqual(initial.value as? String, "已选择", "Cancelled appearance must not leak into a new draft")
+        XCTAssertEqual(color.value as? String, "未选择")
+        let defaultAvatar = app.buttons["member-editor.avatar.👩"]
+        for _ in 0..<4 where !defaultAvatar.isHittable { app.swipeDown() }
+        XCTAssertEqual(defaultAvatar.value as? String, "已选择")
+        XCTAssertEqual(avatar.value as? String, "未选择")
+        attachScreenshot("members-appearance-cancelled-draft-reset", to: self)
+        app.buttons["取消"].tap()
+    }
+
+    @MainActor
     func testCurrentMemberRelationChangesOnlyAfterSuccessfulSave() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
