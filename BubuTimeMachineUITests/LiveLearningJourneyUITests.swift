@@ -78,8 +78,17 @@ final class LiveLearningJourneyUITests: XCTestCase {
 
         let course = app.buttons["learning.course"].firstMatch
         XCTAssertTrue(course.waitForExistence(timeout: 300), "上传后应出现这节课")
+        // iPad shows the upload form as a sheet; tap only once it has fully gone away.
+        let gone = NSPredicate(format: "exists == false")
+        expectation(for: gone, evaluatedWith: submit)
+        waitForExpectations(timeout: 30)
         shot("12-course-listed", app)
-        course.tap()
+        let detail = app.descendants(matching: .any)["learning.course.detail"]
+        for _ in 0..<3 where !detail.exists {
+            if course.isHittable { course.tap() }
+            _ = detail.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(detail.exists, "点课程应打开课程详情")
 
         // 服务端完整解析老师原声并生成互动；家长核对按钮出现即为草稿就绪。
         let publish = app.buttons["learning.review.publish"]

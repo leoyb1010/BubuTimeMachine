@@ -111,7 +111,9 @@ struct LearningPlayView: View {
     private func choices(_ item: LearningPlayItem) -> some View {
         let activity = item.activity
         return VStack(spacing: BubuTheme.Spacing.m) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: 14)], spacing: 14) {
+            // Column count follows the choices so two or three cards stay centred on iPad too.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(maximum: 280), spacing: 14),
+                                     count: max(1, min(activity.choices.count, 3))), spacing: 14) {
                 ForEach(activity.choices) { choice in
                     Button {
                         guard !answered else { return }
