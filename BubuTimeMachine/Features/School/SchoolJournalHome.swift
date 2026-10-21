@@ -53,13 +53,13 @@ struct SchoolJournalHome: View {
                         weekStrip.frame(width: 158)
                     }.padding(.bottom, 18)
                 }.frame(height: typeSize.isAccessibilitySize ? 140 : 52)
-                NavigationLink { SchoolLearningView(day: day) } label: {
+                NavigationLink { DailyLearningHomeView(initialDay: day) } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "sparkles").foregroundStyle(env.theme.theme.textAccent)
+                        Image(systemName: "graduationcap.fill").foregroundStyle(env.theme.theme.textAccent)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(Calendar.current.isDateInToday(day) ? "今天一起学" : "这一天一起学")
+                            Text(Calendar.current.isDateInToday(day) ? "今天的每日学习" : "这一天的每日学习")
                                 .font(BubuTheme.Font.body.weight(.semibold))
-                            Text("第二大脑整理素材，家人点开一起玩")
+                            Text("家长上传课程视频，核对后和布布一起玩")
                                 .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                         }
                         Spacer(minLength: 0)

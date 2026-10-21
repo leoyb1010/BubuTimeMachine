@@ -579,7 +579,9 @@ struct RootView: View {
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-capture") {
             DebugQuickCapturePreviewView()
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-timeline") {
-            NavigationStack { TimelineView() }
+            NavigationStack { OnlineTimelineView() }
+        } else if ProcessInfo.processInfo.arguments.contains("-uitest-learning") {
+            NavigationStack { DailyLearningHomeView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-ai") {
             NavigationStack { AIStudioHomeView() }
         } else if ProcessInfo.processInfo.arguments.contains("-uitest-movie") {

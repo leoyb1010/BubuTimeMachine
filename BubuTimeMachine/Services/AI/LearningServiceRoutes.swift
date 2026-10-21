@@ -14,7 +14,7 @@ nonisolated enum LearningServiceError: LocalizedError, Equatable {
     var invalidatesCache: Bool { self == .unauthorized || self == .unavailableMedia }
 }
 
-/// Caller supplies ServerConfig.aiBaseURL only after isAIConfigured succeeds.
+/// Caller supplies the trusted ServerConfig.aiBaseURL after checking the feature’s access policy.
 nonisolated struct LearningServiceRoutes: Sendable {
     let root: URL
     init(baseURL: URL) {

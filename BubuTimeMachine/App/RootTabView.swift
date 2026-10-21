@@ -20,6 +20,9 @@ struct RootTabView: View {
         selection == 3 && !isWide ? .hidden : .visible
     }
 
+    /// 每日学习是独立入口；用独立 tag，避免改动已有 0~4 的直达参数。
+    static let learningTab = 5
+
     private var maximumSelectableTab: Int {
         #if targetEnvironment(macCatalyst)
         4
@@ -76,7 +79,7 @@ struct RootTabView: View {
                 if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),
                    i + 1 < ProcessInfo.processInfo.arguments.count,
                    let tab = Int(ProcessInfo.processInfo.arguments[i + 1]) {
-                    selection = min(max(tab, 0), maximumSelectableTab)
+                    selection = tab == Self.learningTab ? tab : min(max(tab, 0), maximumSelectableTab)
                 }
                 if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-openurl"),
                    i + 1 < ProcessInfo.processInfo.arguments.count,
@@ -137,11 +140,19 @@ struct RootTabView: View {
 
             Tab("时光", systemImage: "clock.fill", value: 1) {
                 NavigationStack(path: $timelinePath) {
-                    TimelineView()
+                    OnlineTimelineView()
                         .onAppear { openPendingTimelineEntryIfReady() }
+                        // 通知/小组件/搜索直达的家人记录仍可打开，但不再作为时光主列表。
+                        .navigationDestination(for: UUID.self) { TimelineEntryDestination(entryID: $0) }
                 }
                     .toolbar(systemTabBarVisibility, for: .tabBar)
                     .bubuTabContentTransition(isActive: selection == 1)
+            }
+
+            Tab("学习", systemImage: "graduationcap.fill", value: Self.learningTab) {
+                NavigationStack { DailyLearningHomeView() }
+                    .toolbar(systemTabBarVisibility, for: .tabBar)
+                    .bubuTabContentTransition(isActive: selection == Self.learningTab)
             }
 
             Tab("成长", systemImage: "chart.xyaxis.line", value: 2) {
@@ -176,6 +187,7 @@ struct RootTabView: View {
             #if targetEnvironment(macCatalyst)
             Button("") { selection = 4 }.keyboardShortcut("5", modifiers: .command)
             #endif
+            Button("") { selection = Self.learningTab }.keyboardShortcut("l", modifiers: .command)
             Button("") { openQuickCapture() }.keyboardShortcut("n", modifiers: .command)
         }
         .opacity(0)

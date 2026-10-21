@@ -903,7 +903,7 @@ struct TimelineList: View {
 
 /// Spotlight 可能打开 200 条分页窗口之外的旧记录；目标页按 id 单条查询，
 /// 不为一次深链把整个时光轴扩成全量常驻。
-private struct TimelineEntryDestination: View {
+struct TimelineEntryDestination: View {
     @Query private var entries: [Entry]
 
     init(entryID: UUID) {
