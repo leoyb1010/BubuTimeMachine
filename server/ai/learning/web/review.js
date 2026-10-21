@@ -30,7 +30,7 @@ export function sourcePanel(source, {canReview, reload, fail, notice}) {
     const text=el('textarea',{rows:'2','aria-label':`${segment.id} 转写文字`},segment.text);
     fields.push({segment,start,end,text}); editor.append(el('div',{class:'segment-row'},el('span',{},segment.id),el('label',{},'起始秒',start),el('label',{},'结束秒',end),el('label',{class:'segment-text'},'原声转写',text)));
   }
-  const date=el('input',{type:'date',value:source.school_date,'aria-label':'素材授课日期'});
+  const date=el('input',{type:'date',value:source.school_date,readonly:'','aria-label':'课程上课日期'});
   const checked=el('input',{type:'checkbox'});
   const save=button('保存校正，重新核对课程',async()=>{
     if(!checked.checked){notice('请先对照原片确认转写与授课日期。');return;}

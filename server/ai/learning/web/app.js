@@ -56,81 +56,113 @@ function renderAccount(){
 function navigate(date,period=state.period){if(!date)return;state.date=date;state.period=period;state.inLesson=false;notice('');loadDay();}
 function shell(){
   const name=state.context.children.find(x=>x.id===state.child)?.name || '宝贝';
-  const date=el('input',{type:'date',value:state.date,'aria-label':'选择授课日期',onchange:event=>navigate(event.target.value)});
+  const date=el('input',{type:'date',value:state.date,'aria-label':'选择上课日期',onchange:event=>navigate(event.target.value)});
   const navigation=el('div',{class:'date-navigation'},button('‹',()=>navigate(shiftDay(state.date,-1)),'date-arrow'),date,button('›',()=>navigate(shiftDay(state.date,1)),'date-arrow'),button('今天',()=>navigate(dayString()),'quiet'));
   navigation.querySelectorAll('.date-arrow').forEach((node,i)=>node.setAttribute('aria-label',i?'后一天':'前一天'));
-  const tabs=el('nav',{class:'period-tabs','aria-label':'学习与重温'});
-  for(const [period,label] of [['day','按日期学'],['week','近 7 天重温'],['month','近 30 天重温']]){const tab=button(label,()=>navigate(state.date,period));tab.setAttribute('aria-current',state.period===period?'page':'false');tabs.append(tab);}
-  const header=el('section',{class:'page-heading'},el('div',{},el('p',{class:'eyebrow'},'每天一点点 · 一起慢慢长大'),el('h1',{},`${name}，今天一起学`),el('p',{class:'intro'},'听老师的原声，把幼儿园的小发现玩一遍。')),navigation);
-  const body=el('div',{id:'day-body','aria-busy':'true'},empty('正在找这一天的小发现…','正在读取已确认的课程。'));
+  const tabs=el('nav',{class:'period-tabs','aria-label':'学习与复习'});
+  for(const [period,label] of [['day','按日期学'],['week','本周复习'],['month','本月复习']]){const tab=button(label,()=>navigate(state.date,period));tab.setAttribute('aria-current',state.period===period?'page':'false');tabs.append(tab);}
+  const header=el('section',{class:'page-heading'},el('div',{},el('p',{class:'eyebrow'},'每日学习'),el('h1',{},`${name}的每日学习`),el('p',{class:'intro'},'家长上传幼儿园课程视频，核对老师原声后，就可以一起玩。')),navigation);
+  const body=el('div',{id:'day-body','aria-busy':'true'},empty('正在找这一天的课程…','请稍等。'));
   main.replaceChildren(header,tabs,body);return body;
 }
 async function loadDay(){
   document.body.classList.remove('is-learning');
   if(!state.context)return;
+  clearTimeout(state.refreshTimer);
   state.inLesson=false;player.stop();const generation=++state.generation;const body=shell();
   const params=new URLSearchParams({child_id:state.child,date:state.date});
   try{
     if(state.period!=='day'){
       const review=await api(`reviews?${params}&period=${state.period}`);if(generation!==state.generation)return;renderReview(body,review);return;
     }
-    const [packs,sources,days]=await Promise.all([api(`packs?${params}`),api(`sources?${params}`),api(`days?${new URLSearchParams({child_id:state.child,start:shiftDay(state.date,-3),end:shiftDay(state.date,3)})}`)]);
+    const range=new URLSearchParams({child_id:state.child,start:shiftDay(state.date,-3),end:shiftDay(state.date,3)});
+    const [list,days]=await Promise.all([api(`courses?${new URLSearchParams({child_id:state.child,start:state.date,end:state.date})}`),api(`days?${range}`)]);
+    const courses=await Promise.all((list.items || []).map(course=>api(`courses/${encodeURIComponent(course.id)}`)));
     if(generation!==state.generation)return;
-    renderDay(body,packs.items || [],sources.items || [],days.days || []);
+    renderDay(body,courses,days.days || []);
+    if(courses.some(course=>course.state==='processing'))state.refreshTimer=setTimeout(()=>{if(generation===state.generation && !state.inLesson)loadDay();},8000);
   }catch(error){if(generation!==state.generation)return;if(error.status===401){fail(error);return;}body.replaceChildren(empty(error.status===403?'暂时没有访问权限':'课程暂时没加载出来',error.message));if(error.status!==403)body.append(button('重新加载',loadDay,'primary'));}
   finally{body.setAttribute('aria-busy','false');}
 }
 function launch(items,title){
-  if(!items.length)return;state.generation++;state.inLesson=true;notice('');
+  if(!items.length)return;state.generation++;state.inLesson=true;notice('');clearTimeout(state.refreshTimer);
   const queue=state.queue;
   openLesson({container:main,items,title,childId:state.child,player,saveAttempt:attempt=>queue.add(attempt),close:loadDay,notify:notice});
 }
 function renderReview(body,data){
   const items=data.items || [];
-  body.replaceChildren(el('p',{class:'window-label'},`${data.window_start} — ${data.window_end} · 只复习已经确认的活动`));
-  if(!items.length){body.append(empty('这段时间还没有可重温的活动','先完成家长核对并发布课程。之后的小发现会按日期积累在这里。'));return;}
-  body.append(el('section',{class:'review-start'},el('div',{},el('p',{class:'eyebrow'},state.period==='week'?'再见，老朋友':'这个月的小发现'),el('h2',{},`${items.length} 个熟悉的小活动`),el('p',{},'不用重新学一遍，挑熟悉的原声再玩一次。')),button('开始一起重温',()=>launch(items,'一起重温'),'primary')));
-  for(const item of items)body.append(el('article',{class:'review-list-item'},el('div',{},el('h3',{},item.activity?.title || item.concept),el('p',{class:'muted'},item.reason || '已确认的学习内容')),button('只玩这个',()=>launch([item],item.activity.title),'secondary')));
+  body.replaceChildren(el('p',{class:'window-label'},`${data.window_start} — ${data.window_end} · 只复习家长已开放的课程`));
+  if(!items.length){body.append(empty('这段时间还没有可复习的内容','家长上传课程并核对开放后，会按日期积累在这里。'));return;}
+  body.append(el('section',{class:'review-start'},el('div',{},el('p',{class:'eyebrow'},state.period==='week'?'本周复习':'本月复习'),el('h2',{},`${items.length} 段老师原声`),el('p',{},'挑出还没玩过、或上次需要提示的内容，再玩一次。')),button('开始复习',()=>launch(items,'一起复习'),'primary')));
+  for(const item of items)body.append(el('article',{class:'review-list-item'},el('div',{},el('h3',{},item.activity?.title || item.concept),el('p',{class:'muted'},item.reason || '已开放的学习内容')),button('只玩这个',()=>launch([item],item.activity.title),'secondary')));
 }
-function renderDay(body,packs,sources,days){
+const KIND_LABELS={teaching:'教学',practice:'练习',song:'儿歌'};
+const STATE_LABELS={processing:'解析中',draft:'待家长核对',published:'可以一起学',no_lesson:'没找到原声题',failed:'解析失败',waiting:'准备中'};
+function uploadForm(){
+  const title=el('input',{name:'title',required:'',maxlength:'60',placeholder:'例如：水果单词'});
+  const kind=el('select',{name:'kind'},...Object.entries(KIND_LABELS).map(([value,label])=>el('option',{value},label)));
+  const language=el('select',{name:'language'},el('option',{value:'en-US'},'英文'),el('option',{value:'zh-CN'},'中文'));
+  const files=el('input',{type:'file',name:'files',multiple:'',required:'',accept:'video/*,audio/*,image/jpeg,image/png,image/heic'});
+  const progress=el('progress',{max:'100',value:'0',hidden:true});
+  const submit=el('button',{type:'submit',class:'primary'},'上传并开始解析');
+  const form=el('form',{class:'upload-form',onsubmit:event=>{
+    event.preventDefault();
+    const chosen=[...files.files];
+    if(!title.value.trim()||!chosen.length){notice('请填写课程名称并选择文件。');return;}
+    if(chosen.length>8){notice('每节课最多 8 个文件。');return;}
+    if(!chosen.some(f=>/^(video|audio)\//.test(f.type))){notice('至少需要一段有老师声音的视频或录音。');return;}
+    const data=new FormData();
+    data.append('child_id',state.child);data.append('school_date',state.date);data.append('title',title.value.trim());
+    data.append('kind',kind.value);data.append('language',language.value);
+    for(const file of chosen)data.append('files',file,file.name);
+    const request=new XMLHttpRequest();
+    request.open('POST','/learning/api/courses');request.setRequestHeader('X-Bubu-Learning','1');request.withCredentials=true;
+    request.upload.onprogress=e=>{if(e.lengthComputable){progress.hidden=false;progress.value=Math.round(e.loaded/e.total*100);}};
+    request.onload=()=>{submit.disabled=false;progress.hidden=true;
+      if(request.status>=200&&request.status<300){notice('已上传，正在解析老师原声。几分钟后会出现在下面。');loadDay();}
+      else if(request.status===401)fail({status:401,message:'登录已过期，请重新登录。'});
+      else if(request.status===413)notice('文件太大了，单个文件请小于 256 MB。');
+      else notice('上传没有完成，请检查文件格式后重试。');};
+    request.onerror=()=>{submit.disabled=false;progress.hidden=true;notice('上传中断，请检查网络后重试。');};
+    submit.disabled=true;notice('正在上传…');request.send(data);
+  }},el('label',{class:'field'},'课程名称',title),el('div',{class:'field-row'},el('label',{class:'field'},'课程类型',kind),el('label',{class:'field'},'老师讲的语言',language)),el('label',{class:'field'},'课程视频、录音或教具照片（最多 8 个）',files),el('p',{class:'muted'},`上课日期：${state.date}。一次上传就是一节课；素材只用于每日学习，不进入时光。`),progress,submit);
+  return el('details',{class:'upload-card'},el('summary',{},'＋ 上传这一天的课程'),form);
+}
+function renderDay(body,courses,days){
   const strip=el('nav',{class:'day-strip','aria-label':'附近日期'});
   for(let offset=-3;offset<=3;offset++){
     const date=shiftDay(state.date,offset), data=days.find(x=>x.date===date);
     const day=button('',()=>navigate(date));day.setAttribute('aria-current',date===state.date?'date':'false');
-    day.append(el('small',{},new Date(`${date}T12:00:00`).toLocaleDateString('zh-CN',{weekday:'short'})),el('strong',{},String(Number(date.slice(-2)))),el('span',{class:data?.published_count?'has-lesson':'',title:data?.published_count?'有可玩的课程':''},data?.published_count?'可学':data?.source_count?'待整理':'—'));strip.append(day);
+    day.append(el('small',{},new Date(`${date}T12:00:00`).toLocaleDateString('zh-CN',{weekday:'short'})),el('strong',{},String(Number(date.slice(-2)))),el('span',{class:data?.published_count?'has-lesson':''},data?.published_count?'可学':data?.course_count?'整理中':'—'));strip.append(day);
   }
   body.replaceChildren(strip);
-  const sync=state.context.source_status || {};
-  const syncButton=button('检查新素材',async()=>{
-    syncButton.disabled=true;try{await api('sync',{method:'POST',body:{}});notice('已请求检查第二大脑的新素材，分析和编课需要一点时间。');}catch(error){fail(error);}finally{syncButton.disabled=false;}
-  },'quiet');
-  body.append(el('section',{class:'sync-strip'},el('div',{},el('strong',{},'第二大脑 · 自动整理中'),el('p',{class:'muted'},sync.error ? `最近同步未完成：${sync.error}` : sync.last_sync ? `上次同步：${new Date(sync.last_sync).toLocaleString('zh-CN')} · 教学材料来自「${state.context.school_inbox_display || '布布幼儿园'}」` : `等待「${state.context.school_inbox_display || '布布幼儿园'}」中的教学材料。`)),syncButton));
-  if(!packs.length)body.append(empty('这一天还没有互动课程',sources.length?'素材已经收到。分析后会进入家长核对，确认题目和答案后孩子就能玩。':'把老师的教学材料放进「布布幼儿园」收件夹，第二大脑会自动分析。日常照片会进入时光，不会硬编成题目。'));
-  for(const pack of packs){
-    const activities=pack.payload?.activities || [],published=pack.status==='published';
-    const statusLabel={published:'已核对 · 可以玩',draft:'待家长核对',no_lesson:'日常材料 · 无互动课程',revoked:'素材已改 · 需重新生成',superseded:'已有更新的课程',failed:'生成未完成',queued:'等待生成',processing:'正在生成'}[pack.status] || '等待整理';
-    const card=el('article',{class:'pack-card'},el('div',{class:'pack-heading'},el('div',{},el('p',{class:'eyebrow'},`${pack.school_date} · ${activities.length} 个小活动`),el('h2',{},pack.title || pack.payload?.title || '这一天的小发现')),el('span',{class:`pill ${published?'ready':'pending'}`},statusLabel)));
-    if(pack.status==='no_lesson')card.append(el('p',{class:'muted'},'这份材料没有可核对的教学目标，已作为日常记录保留。'));
-    if(pack.status==='revoked')card.append(el('p',{class:'warning'},'原素材已校正，之前的课程暂停使用。请根据当前素材重新生成并核对。'));
-    if(pack.payload?.summary)card.append(el('p',{class:'pack-summary'},pack.payload.summary));
-    if(pack.payload?.warnings?.length)card.append(el('p',{class:'warning'},pack.payload.warnings.join('；')));
-    const kinds={listen_choice:'听音找图',color_choice:'选颜色',sort:'放一放',speak:'说一说',music:'一起唱'};
-    card.append(el('div',{class:'activity-chips'},activities.map(a=>el('span',{},kinds[a.kind] || a.kind))));
-    if(published && activities.length)card.append(button('开始今天的小发现 →',()=>launch(activities.map(activity=>({pack_id:pack.id,activity})),pack.title),'primary start-lesson'));
-    else if(!state.context.user.can_review)card.append(el('p',{class:'muted'},'等家长确认题目后，这里就可以开始啦。'));
-    if(state.context.user.can_review){
-      if(pack.status==='draft' && activities.length)card.append(reviewPanel(pack,{player,sources,reload:loadDay,fail,notice}));
-      const regenerate=button('根据当前素材重新生成',async()=>{
-        regenerate.disabled=true;try{await api(`packs/${encodeURIComponent(pack.id)}/regenerate`,{method:'POST',body:{}});notice('已请求重新生成。新课程需要重新核对，稍后点击刷新查看。');await loadDay();}catch(error){fail(error);}finally{regenerate.disabled=false;}
-      },'quiet');
-      card.append(el('details',{class:'manage-pack'},el('summary',{},'课程整理选项'),el('p',{class:'muted'},'转写校正或题目不合适时可重新生成。新版本需重新核对。'),regenerate));
+  const canReview=state.context.user.can_review;
+  if(canReview)body.append(uploadForm());
+  if(!courses.length)body.append(empty('这一天还没有课程',canReview?'点上面的「上传这一天的课程」，选老师的课堂视频。':'等家长上传并核对后，这里就可以开始啦。'));
+  for(const course of courses){
+    const pack=course.pack, activities=pack?.payload?.activities || [];
+    const card=el('article',{class:'pack-card'},el('div',{class:'pack-heading'},el('div',{},el('p',{class:'eyebrow'},`${course.school_date} · ${KIND_LABELS[course.kind]||'课程'} · ${course.source_count} 个文件`),el('h2',{},course.title)),el('span',{class:`pill state-${course.state}`},STATE_LABELS[course.state]||course.state)));
+    if(course.state==='processing')card.append(el('p',{class:'muted'},'家里的服务器正在完整听老师原声、看课堂画面。几分钟后自动刷新。'));
+    if(course.state==='failed')card.append(el('p',{class:'warning'},'素材没能完整解析，可以删除后重新上传原片。'));
+    if(course.state==='no_lesson')card.append(el('p',{class:'muted'},pack?.payload?.summary || '没有找到可核对的老师原声。'));
+    if(course.state==='waiting')card.append(el('p',{class:'muted'},'等家长核对后，这里就可以开始啦。'));
+    if(activities.length){
+      const kinds={listen_choice:'听音找图',color_choice:'选颜色',sort:'放一放',speak:'说一说',music:'一起唱'};
+      card.append(el('div',{class:'activity-chips'},activities.map(a=>el('span',{},kinds[a.kind] || a.kind))));
+    }
+    if(course.state==='published'&&activities.length)card.append(button('开始一起学 →',()=>launch(activities.map(activity=>({pack_id:pack.id,activity})),course.title),'primary start-lesson'));
+    if(canReview){
+      if(course.state==='draft'&&activities.length)card.append(reviewPanel(pack,{player,sources:course.sources||[],reload:loadDay,fail,notice}));
+      const actions=el('div',{class:'page-actions'});
+      if(pack){const regenerate=button('重新生成互动',async()=>{regenerate.disabled=true;try{await api(`packs/${encodeURIComponent(pack.id)}/regenerate`,{method:'POST',body:{}});notice('已开始重新生成，稍后刷新查看。');}catch(error){fail(error);}finally{regenerate.disabled=false;}},'quiet');actions.append(regenerate);}
+      const remove=button('删除这节课',async()=>{if(!confirm('删除这节课？素材和互动会从每日学习中移除。'))return;try{await api(`courses/${encodeURIComponent(course.id)}`,{method:'DELETE'});notice('已删除。');loadDay();}catch(error){fail(error);}},'danger-text');actions.append(remove);
+      const sources=el('details',{class:'sources'},el('summary',{},`课程素材与转写 · ${(course.sources||[]).length} 份`));
+      for(const source of course.sources||[])sources.append(sourcePanel(source,{canReview,reload:loadDay,fail,notice}));
+      card.append(sources,actions);
     }
     body.append(card);
   }
-  const original=el('details',{class:'sources'},el('summary',{},`素材与转写 · ${sources.length} 份`,el('span',{class:'muted'},'家长对照原片')));
-  if(!sources.length)original.append(el('p',{},'这一天还没有已同步素材。'));
-  for(const source of sources)original.append(sourcePanel(source,{canReview:state.context.user.can_review,reload:loadDay,fail,notice}));body.append(original);
-  const refresh=button('刷新这一天',loadDay,'secondary');body.append(el('div',{class:'page-actions'},refresh,button('补传本机学习记录',flush,'quiet')));
+  body.append(el('div',{class:'page-actions'},button('刷新这一天',loadDay,'secondary'),button('补传本机学习记录',flush,'quiet')));
 }
 window.addEventListener('online',()=>{if(state.queue)flush();});
 window.addEventListener('pagehide',()=>player.stop());
