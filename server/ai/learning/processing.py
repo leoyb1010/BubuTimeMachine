@@ -87,12 +87,19 @@ class MediaProcessor:
             if not math.isfinite(duration) or duration <= 0 or duration > 1800:
                 raise ValueError()
             streams = value.get("streams", [])
+            video_duration = None
             for stream in streams:
                 if stream.get("codec_type") == "video":
                     width, height = int(stream.get("width") or 0), int(stream.get("height") or 0)
                     if width <= 0 or height <= 0 or width * height > MAX_FRAME_PIXELS:
                         raise ValueError()
-            return {"duration": duration, "has_audio": any(s.get("codec_type") == "audio" for s in streams),
+                    if video_duration is None:
+                        raw_duration = stream.get("duration")
+                        measured = duration if raw_duration in {None, "", "N/A"} else float(raw_duration)
+                        if not math.isfinite(measured) or measured <= 0:
+                            raise ValueError()
+                        video_duration = min(duration, measured)
+            return {"duration": duration, "video_duration": video_duration, "has_audio": any(s.get("codec_type") == "audio" for s in streams),
                     "has_video": any(s.get("codec_type") == "video" for s in streams)}
         except (ValueError, TypeError, KeyError) as exc:
             raise ProcessingUnavailable("暂只处理可校验时长且不超过30分钟的教学素材。") from exc
@@ -212,8 +219,12 @@ class MediaProcessor:
             if abs(transcript["processed_duration"] - info["duration"]) > .5 or any(segment["end"] > info["duration"] + .15 for segment in transcript["segments"]):
                 raise ProcessingUnavailable("音轨覆盖不完整或时间码超界，不会用片头代替整段教学。")
         if info["has_video"]:
-            duration = info["duration"]
-            times = [min(duration-.1, max(.05, duration*i/7)) for i in range(8)]
+            # A container may have an audio-only tail. Sampling its last tenth
+            # of a second can seek beyond the final video frame and fail an
+            # otherwise complete analysis. Keep audio coverage independent.
+            video_duration = info.get("video_duration") or info["duration"]
+            safe_end = video_duration - min(.5, video_duration / 2)
+            times = [safe_end*i/7 for i in range(8)]
         else:
             times = [0] if asset["mime"].startswith("image/") else []
         frames = [{"time": round(t, 3), "resource": self.frame(family, asset, t)} for t in times]
