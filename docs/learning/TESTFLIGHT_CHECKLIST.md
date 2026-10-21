@@ -1,6 +1,6 @@
 # 2.23.0 TestFlight 候选检查
 
-检查日期：2026-10-21（上海）。开发基线：`d99c63e / 2.22.0`；本轮候选：`2.23.0 (2026102101)`。这是准备与剩余门禁记录，不是上传或发布成功证明。
+检查日期：2026-10-21（上海）。开发基线：`d99c63e / 2.22.0`；本轮候选：`2.23.0 (2026102101)`。最终已生成通过本地深度签名校验的 App Store 分发 IPA；尚未上传或发布。
 
 本轮未提取或展示私钥、口令、App Store Connect API key，也没有上传构建或邀请测试者。初始签名检查为只读；随后使用现有Xcode账号请求自动补齐分发配置，以进行本地导出。主任务的第 3 次完整 `build-for-testing`、441 项 Unit，以及 iPhone 课程入口/筛选 UI 旅程已通过；这些证据来自本轮资源/版本更新前的生成工程。iPad、后端联调、generic Archive 与分发验证需以主任务最终日志为准。
 
@@ -13,7 +13,9 @@
 - 仓库既有门禁来自 `.github/workflows/ci.yml`：重复源码检查、clean build、Unit、iPhone/iPad 用户路径、源码零 warning、后端及跨端合同检查。现有 `scripts/install-iphone-wifi.sh` 只构建并覆盖安装真机 Debug 包，不是 TestFlight 发布脚本。
 - 延续 `docs/RELEASE_2.14.0.md` 的数据保护原则：保持 bundle ID、App Group 与原有存储，不卸载清数据；不把开发签名包或签名材料提交公开仓库。
 
-## 分发签名状态（只读检查）
+## 分发签名状态（初始检查与最终结果）
+
+最终结果：使用现有开发者账号的自动配置导出成功，五个bundle均为Apple Distribution签名，App Store描述文件包含App Group，get-task-allow关闭。IPA在非FileProvider临时目录解包后通过codesign深度严格验证。以下证书/profile表记录的是导出前的初始状态。
 
 本机找到 3 个与项目团队匹配的有效 Apple Development 签名身份，证书有效至 2027-06-07；未找到 Apple Distribution 或 iPhone Distribution 签名身份。现有开发签名可用，不代表分发签名链已完成。
 
@@ -27,11 +29,11 @@
 
 App Store 型判断依据为 `get-task-allow=false`、无设备清单、非企业全设备、`beta-reports-active=true`；只记录当前本机缓存状态，未查询 Developer Portal。所有匹配 profile 的团队均与项目一致。未在当前仓库或同项目原始检出目录找到可直接复用的 ExportOptions.plist。
 
-- [ ] 在现有 Apple 开发者账户下验证 Automatic/cloud-managed distribution signing，或使用已授权的分发签名身份；不得把没有本地 Distribution identity 等同于云端一定不可用。
-- [ ] 导出时补齐五个 bundle 对应的有效分发描述文件、App Group 权益及签名链；不更换 bundle ID 来绕过签名问题。
+- [x] 现有账户Automatic分发导出成功；此前没有本地Distribution identity并不代表无法由Xcode完成分发配置。
+- [x] 五个bundle均已取得对应App Store分发描述文件、App Group权益与Apple Distribution签名链；bundle ID保持不变。
 - [ ] 核对 ASC 应用记录、开发者协议状态、上传权限和候选 build 是否重复；本轮未读取这些账号状态。
 
-首次本地导出已实际失败：主App与iOS Widget的缓存App Store profile缺少App Group能力/权益；Watch、Watch Widget及PhotoUpload缺少App Store profile。已继续尝试现有账号的自动配置导出，最终结果以候选交付记录为准。
+首次本地导出已实际失败：主App与iOS Widget的缓存App Store profile缺少App Group能力/权益；Watch、Watch Widget及PhotoUpload缺少App Store profile。随后以 `-allowProvisioningUpdates` 使用现有账号补齐配置，本地 `destination=export` 导出成功。没有执行上传。
 
 当前 Xcode 的 `-exportOptionsPlist` 帮助支持 `method=app-store-connect`。建议先设置 `destination=export`、`signingStyle=automatic`、`manageAppVersionAndBuildNumber=false`，使本地导出保留已核对的版本，不意外执行上传。`teamID` 取项目现有值。家人若通过外部 TestFlight 测试，不应将包限定为 `testFlightInternalTestingOnly=true`；外部测试按 ASC 流程完成所需 Beta App Review。[TestFlight 流程](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/)。
 
@@ -64,7 +66,7 @@ reason 逐项核对 Apple 当前官方说明：CA92.1 对应本应用偏好；1C
 
 - [x] `git ls-files work` 为空；主任务已在 `.gitignore` 加入 `/work/`，`work/learning-web-proof/*.png` 当前被忽略。
 - [x] 根 `.gitignore` 已排除 `__pycache__/`、`*.py[cod]`、`.pytest_cache/`；HTTP测试已移到 `server/ai/tests/learning`，纳入现有CI。
-- [ ] 采用显式路径暂存，检查 `git diff --cached --name-only`；确认公开示例没有真实账号、令牌、设备标识或家庭原文。
+- [x] 显式路径暂存并检查：97个源码/测试/文档文件；真实媒体、SQLite、缓存、实际.env、签名私密材料和构建产物均未入Git。
 - [x] `harmony/tests/PlatformVersionConsistency.test.mjs` 通过：project.yml、Changelog 顶部和 iOS baseline 一致，Harmony 自身版本与 `parityVerified=false` 保持真实。
 
 ## 交给主任务的剩余门禁

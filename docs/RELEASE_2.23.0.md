@@ -1,6 +1,6 @@
 # 2.23.0 测试版候选
 
-候选版本：`2.23.0 (2026102101)`。开发基线为 `origin/main d99c63e`；已核对它与现有服务器 2.22.0 的运行代码一致。此次完成源码接入和发布准备，尚未切换生产服务或上传 TestFlight。
+候选版本：`2.23.0 (2026102101)`。开发基线为 `origin/main d99c63e`；已核对它与现有服务器 2.22.0 的运行代码一致。此次完成源码接入和发布准备，已生成App Store分发IPA；尚未切换生产服务或上传TestFlight。
 
 ## 本次变化
 
@@ -27,7 +27,7 @@
 | 真实 HTTP / 浏览器资源 | 使用实际生成的原声/图片及真实学习库；0.78秒Corn词语、2.64秒颜色问句，10次资源请求成功，2次互动落库；认证在该隔离夹具中替换，生产PB鉴权另有独立测试 |
 | 真实 iCloud 入口 | 只读查询到10月19日起8份教学候选，均取得Photos保存时间；未导入生产课程库 |
 | 备份恢复 | 实际课程、原件及派生资源导出后，在独立目录恢复并通过hash核验 |
-| Release归档 | 正常开发签名Archive成功，五个bundle版本/隐私资源一致，codesign深度严格验证通过，正式HTTPS入口正确 |
+| Release归档与分发导出 | Archive成功；随后Xcode自动补齐分发配置并导出IPA。五个bundle均为Apple Distribution签名，App Group/版本/隐私资源一致，codesign深度严格验证通过，正式HTTPS入口正确 |
 
 全量AI测试出现一条上游 Starlette TestClient/httpx 弃用提示；没有把它归类为本仓源码编译警告。Release归档产生一条ExtensionKit相对嵌入路径警告；归档内照片扩展实际位于主App `Extensions/`，签名验证通过，仍需在Apple分发Validate中核对该警告。
 
@@ -42,8 +42,8 @@
 
 ## 尚未完成的发布步骤
 
-- 本地归档使用Apple Development身份，不等于已经取得可分发IPA。签名及导出结果详见[候选检查清单](learning/TESTFLIGHT_CHECKLIST.md)。
-- 生产学习服务/worker开关仍关闭；需要按[部署说明](learning/DEPLOYMENT.md)核对当前家庭、孩子、权限、状态目录与备份，再激活。
+- 分发IPA已生成并通过本地校验；App Store Connect Validate/上传、处理状态、TestFlight分组及需要的Beta审核尚未执行。详见[候选检查清单](learning/TESTFLIGHT_CHECKLIST.md)。
+- 生产尚未部署本轮学习服务/worker，候选默认关闭；需要按[部署说明](learning/DEPLOYMENT.md)核对当前家庭、孩子、权限、状态目录与备份，再激活。
 - 真机覆盖升级、首次PB Bearer到Web会话、实际家人设备和外部TestFlight审核/分组尚未验证。未卸载或清理现有用户数据。
 - 本轮验证的是完整音轨与有界画面采样；不把采样描述宣称为逐帧完整视频理解，也不把互动次数当作儿童能力评分。
 
