@@ -19,6 +19,7 @@
 
 - `LEARNING_STATE_DIR`：项目独立的持久目录，必须位于外置盘挂载可用或稳定的本地应用支持路径。不能放在版本化 release 目录。
 - `LEARNING_FAMILY_ID` / `LEARNING_CHILD_ID`：分别为当前家庭ID和 ChildProfile 的 `localId`。其他模块的家庭配置必须一致。
+  配置 `LEARNING_CHILD_ID` 后，学习会话仅返回当前家庭中仍有效的该份孩子资料；不存在、已删除或属于其他家庭时返回 503，不猜测替代资料，也不删除、合并历史 profile。未配置时保留多孩子行为。
 - `LEARNING_REVIEWER_USER_IDS`：明确允许核对/开放课程的 PB 用户ID列表。
 - `LEARNING_BRAIN_ROOT`：现有第二大脑资料库根目录。
 - `LEARNING_BRAIN_PYTHON`：能运行第二大脑代码的解释器；其现有代码要求 Python 3.12+，不能直接沿用本服务的 Python 3.11 venv。

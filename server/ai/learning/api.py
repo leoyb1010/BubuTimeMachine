@@ -159,9 +159,10 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         # An expired cookie must not trap the user outside the login page. An
         # explicitly supplied native Bearer is still verified and never ignored.
         if request.headers.get('authorization') is not None:
-            scope = request.app.state.learning_auth.authenticate(request)
-            if request.query_params.get('child'):
-                scope.require_child(request.query_params['child'])
+            request.app.state.learning_auth.authenticate(request)
+        # This is only the public shell. An older native build can carry a
+        # historical profile ID; Web boot selects solely from verified context.
+        # Every data/resource API keeps its own strict family/child checks.
         return FileResponse(WEB_ROOT / 'index.html', media_type='text/html')
 
     app.mount('/learning/web', StaticFiles(directory=WEB_ROOT), name='learning-web')

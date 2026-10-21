@@ -111,6 +111,13 @@ class PocketBaseAuthenticator:
                     children.append({'id': identifier, 'name': str(child.get('name') or '孩子')[:100]})
             if page >= pages:
                 break
+        configured_child = os.environ.get('LEARNING_CHILD_ID', '').strip()
+        if configured_child:
+            # Keep historical profiles intact. The configured learning child
+            # must first survive the current PB family/deletion checks above.
+            children = [child for child in children if child['id'] == configured_child]
+            if not children:
+                raise HTTPException(503, '学习孩子配置暂不可用，请联系管理员核对。')
         reviewer_name = 'LEARNING_REVIEWER_USER_IDS' if 'LEARNING_REVIEWER_USER_IDS' in os.environ else 'INTAKE_ALLOWED_PB_USER_IDS'
         return FamilyScope(user_id=user_id, family_id=family, children=children,
                            can_review=user_id in _members(reviewer_name))

@@ -39,8 +39,10 @@ def setup(tmp_path,monkeypatch):
     monkeypatch.setenv('INTAKE_FAMILY_ID','family-a')
     monkeypatch.setenv('AI_API_KEY','maintenance-key')
     monkeypatch.setenv('SCHOOL_VISION_TOKEN','school-only-key')
-    for key in ('SEMANTIC_FAMILY_ID','WEEKLY_REPORT_FAMILY_ID','SOUND_RING_FAMILY_ID','LEARNING_FAMILY_ID'):monkeypatch.delenv(key,raising=False)
+    for key in ('SEMANTIC_FAMILY_ID','WEEKLY_REPORT_FAMILY_ID','SOUND_RING_FAMILY_ID','LEARNING_FAMILY_ID','LEARNING_CHILD_ID'):monkeypatch.delenv(key,raising=False)
     state={'user':'mom','family':'family-a','calls':0,'password_ok':True,'child_token':None}
+    state['children']=[{'id':'pbchild','localId':'child-local','name':'布布','familyId':'family-a'},
+                       {'id':'foreign','localId':'other-child','name':'外家','familyId':'family-b'}]
     def pb(request):
         state['calls']+=1
         if request.url.path.endswith('/auth-with-password'):
@@ -51,7 +53,8 @@ def setup(tmp_path,monkeypatch):
             return httpx.Response(200,json={'token':'refreshed-token','record':{'id':state['user'],'familyId':state['family']}})
         state['child_token']=request.headers.get('Authorization')
         assert request.url.path.endswith('/childprofile/records')
-        return httpx.Response(200,json={'items':[{'id':'pbchild','localId':'child-local','name':'布布','familyId':'family-a'},{'id':'foreign','localId':'other-child','name':'外家','familyId':'family-b'}],'totalPages':1})
+        pages=state.get('child_pages',[state['children']])
+        return httpx.Response(200,json={'items':pages[int(request.url.params['page'])-1],'totalPages':len(pages)})
     app=FastAPI();service=FakeService(tmp_path);(tmp_path/'media.wav').write_bytes(b'0123456789')
     install_learning(app,lambda:service)
     app.state.learning_auth=PocketBaseAuthenticator(client_factory=lambda:httpx.Client(transport=httpx.MockTransport(pb),timeout=5,trust_env=False))
@@ -192,3 +195,58 @@ def test_csp_no_cors_and_query_validation(setup):
     assert 'access-control-allow-origin' not in response.headers
     response=client.get('/learning/api/timeline/search?limit=999999&kind=bad',headers=BEARER)
     assert response.status_code==422 and '999999' not in response.text
+
+
+def test_configured_child_limits_scope_after_paginated_family_validation(setup,monkeypatch):
+    client,state,service=setup
+    historical=[{'id':'profile'+str(n),'localId':'old-child-'+str(n),'name':'历史资料'+str(n),'familyId':'family-a'} for n in range(7)]
+    current={'id':'current-profile','localId':'configured-child','name':'布布','familyId':'family-a'}
+    state['child_pages']=[historical,[current]]
+    monkeypatch.setenv('LEARNING_CHILD_ID','configured-child')
+    response=client.get('/learning/api/context',headers=BEARER)
+    assert response.status_code==200
+    assert response.json()['children']==[{'id':'configured-child','name':'布布'}]
+    assert response.json()['default_child']=='configured-child'
+    assert client.get('/learning/api/days?child_id=old-child-0&start=2026-10-01&end=2026-10-21').status_code==403
+    assert not service.calls
+    assert client.get('/learning/api/days?start=2026-10-01&end=2026-10-21').status_code==200
+    assert service.calls==[('days','family-a','configured-child')]
+
+
+@pytest.mark.parametrize('configured',['other-child','nonexistent-child','pbchild'])
+def test_configured_child_must_be_a_live_family_local_id(setup,monkeypatch,configured):
+    client,_,service=setup
+    monkeypatch.setenv('LEARNING_CHILD_ID',configured)
+    response=client.get('/learning/api/context',headers=BEARER)
+    assert response.status_code==503
+    assert configured not in response.text
+    assert not service.calls
+
+
+@pytest.mark.parametrize('deleted', [{'isDeleted':True},{'deletedAt':'2026-10-21'},{'deleted':True}])
+def test_deleted_configured_child_never_falls_back_to_historical_copy(setup,monkeypatch,deleted):
+    client,state,_=setup
+    state['children'][0].update(deleted)
+    state['children'].append({'id':'old-profile','localId':'old-child','name':'旧资料','familyId':'family-a'})
+    monkeypatch.setenv('LEARNING_CHILD_ID','child-local')
+    assert client.get('/learning/api/context',headers=BEARER).status_code==503
+
+
+def test_unconfigured_child_preserves_multiple_family_profiles(setup):
+    client,state,_=setup
+    state['children'].append({'id':'second-profile','localId':'second-child','name':'另一份资料','familyId':'family-a'})
+    response=client.get('/learning/api/context',headers=BEARER)
+    assert response.status_code==200
+    assert [child['id'] for child in response.json()['children']]==['child-local','second-child']
+    assert response.json()['default_child']=='child-local'
+
+
+def test_old_native_query_only_selects_public_shell_not_old_child_resources(setup,monkeypatch):
+    client,state,_=setup
+    state['children'].append({'id':'old-profile','localId':'old-child','name':'历史资料','familyId':'family-a'})
+    monkeypatch.setenv('LEARNING_CHILD_ID','child-local')
+    assert client.get('/learning?child=old-child',headers=BEARER).status_code==200
+    context=client.get('/learning/api/context').json()
+    assert context['children']==[{'id':'child-local','name':'布布'}]
+    assert client.get('/learning/api/packs?child_id=old-child&date=2026-10-21').status_code==403
+    assert client.get('/learning?child=old-child',headers={'Authorization':'Bearer invalid-token'}).status_code==401
