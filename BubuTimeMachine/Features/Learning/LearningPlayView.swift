@@ -251,8 +251,11 @@ struct ChoiceTile: View {
                     }
                 }
             } else if let image = choice.imageUrl {
-                LearningRemoteImage(path: image, client: client, label: choice.label, contentMode: .fill)
+                // A fixed-height clear frame keeps an aspect-fill picture from widening the tile.
+                Color.clear
+                    .frame(maxWidth: .infinity)
                     .frame(height: compact ? 80 : 130)
+                    .overlay { LearningRemoteImage(path: image, client: client, label: choice.label, contentMode: .fill) }
                     .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.xs))
             }
             Text(choice.label).font(compact ? BubuTheme.Font.body.weight(.semibold) : BubuTheme.Font.headline)

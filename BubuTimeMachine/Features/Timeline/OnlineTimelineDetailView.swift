@@ -33,7 +33,7 @@ struct OnlineTimelineDetailPager: View {
     private var title: String {
         guard let item = items.first(where: { $0.id == current }) ?? Optional(initial),
               let date = item.capturedDate else { return "布布的时光" }
-        return date.formatted(.dateTime.year().month().day())
+        return date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))
     }
 }
 
@@ -96,7 +96,7 @@ struct OnlineTimelineDetailPage: View {
         VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
             HStack(spacing: BubuTheme.Spacing.s) {
                 Image(systemName: item.isVideo ? "video.fill" : "photo.fill").foregroundStyle(BubuTheme.Color.deepRose)
-                Text(item.capturedDate?.formatted(.dateTime.year().month().day().weekday().hour().minute()) ?? "拍摄时间未知")
+                Text(item.capturedDate?.formatted(.dateTime.year().month().day().weekday().hour().minute().locale(Locale(identifier: "zh_CN"))) ?? "拍摄时间未知")
                     .font(BubuTheme.Font.body.weight(.semibold))
                 Spacer(minLength: 0)
             }

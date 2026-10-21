@@ -236,6 +236,18 @@ final class ServerConfig {
         let storedRole = FamilyRole(rawValue: UserDefaults.standard.string(forKey: Self.roleKey) ?? "") ?? .mama
         self.simpleModeEnabled = UserDefaults.standard.object(forKey: Self.simpleModeKey) as? Bool ?? storedRole.isElder
         self.roleBeforeElderRaw = UserDefaults.standard.string(forKey: Self.roleBeforeElderKey)
+        #if DEBUG
+        // 联调专用：UI 测试把模拟器指向本机回环的测试服务（测试账号来自测试环境变量，绝不用于正式包）。
+        let environment = ProcessInfo.processInfo.environment
+        if ProcessInfo.processInfo.arguments.contains("-uitest-server-config"),
+           let pb = environment["BUBU_UITEST_PB_URL"], let ai = environment["BUBU_UITEST_AI_URL"],
+           let email = environment["BUBU_UITEST_EMAIL"], let password = environment["BUBU_UITEST_PASSWORD"] {
+            self.baseURLString = pb
+            self.aiBaseURLString = ai
+            self.accountEmail = email
+            self.accountPassword = password
+        }
+        #endif
         // didSet 不在 init 内触发，显式把身份/名字镜像到 App Group，供 Intent/Widget 首次即可读。
         SharedDefaults.mirror(role: FamilyRole(rawValue: currentRoleRaw) ?? .mama, childName: childName)
         consumeSchoolVisionSetup()

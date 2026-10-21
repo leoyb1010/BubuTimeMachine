@@ -3,7 +3,7 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
-    func testLearningEntryAndTimelineFiltersRemainUsableOffline() throws {
+    func testLearningEntryAndOnlineTimelineStayUsableOffline() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
@@ -12,31 +12,19 @@ final class BubuTimeMachineUITests: XCTestCase {
         let learning = app.buttons["school.learning-entry"]
         XCTAssertTrue(learning.waitForExistence(timeout: 12))
         learning.tap()
-        XCTAssertTrue(app.navigationBars["一起学"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["每日学习"].waitForExistence(timeout: 5))
         attachScreenshot("learning-entry-offline", to: self)
         if app.frame.width > 700 {
             XCUIDevice.shared.orientation = .landscapeLeft
-            XCTAssertTrue(app.navigationBars["一起学"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars["每日学习"].waitForExistence(timeout: 5))
             attachScreenshot("learning-entry-ipad-landscape", to: self)
         }
         app.navigationBars.buttons.firstMatch.tap()
         rootNavigationButton(named: "时光", in: app).tap()
-        let filters = app.buttons["timeline.filters"]
-        XCTAssertTrue(filters.waitForExistence(timeout: 5))
-        filters.tap()
-        XCTAssertTrue(app.navigationBars["筛选时光"].waitForExistence(timeout: 5))
-        let dateToggle = app.switches["限定拍摄日期"]
-        XCTAssertTrue(dateToggle.exists)
-        let dateControl = dateToggle.switches.firstMatch
-        XCTAssertTrue(dateControl.exists)
-        dateControl.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["timeline.start-date"].firstMatch.waitForExistence(timeout: 5))
-        attachScreenshot("timeline-filter-dates", to: self)
-        app.buttons["应用"].tap()
-        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 5))
-        filters.tap()
-        app.buttons["清除全部筛选"].tap()
-        app.buttons["应用"].tap()
+        // 未连接家庭服务时，在线时光给出明确的连接提示，而不是空白或旧的本机列表。
+        XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["连接家庭服务后查看"].waitForExistence(timeout: 5))
+        attachScreenshot("timeline-online-offline", to: self)
         assertRootNavigation(in: app)
         XCUIDevice.shared.orientation = .portrait
     }
@@ -58,7 +46,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         assertRootNavigation(in: app)
         attachScreenshot("tabs-visible-in-recognition-settings", to: self)
         rootNavigationButton(named: "时光", in: app).tap()
-        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 5))
         assertRootNavigation(in: app)
         rootNavigationButton(named: "首页", in: app).tap()
         assertRootNavigation(in: app)
@@ -97,7 +85,7 @@ final class BubuTimeMachineUITests: XCTestCase {
             assertRootNavigation(in: app)
         }
         rootNavigationButton(named: "时光", in: app).tap()
-        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 5))
         attachScreenshot("tabs-restored-after-recording", to: self)
     }
 
@@ -561,8 +549,10 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["journal.save"].tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.waitForExistence(timeout: 8))
         attachScreenshot("school-saved", to: self)
+        // 时光主流程只读第二大脑的布布专属素材；幼儿园记录留在幼儿园页，不混入时光。
         element(named: "时光", in: app).tap()
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.exists)
     }
 
     @MainActor
@@ -691,15 +681,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         let timeline = element(named: "时光", in: app)
         XCTAssertTrue(timeline.waitForExistence(timeout: 8))
         timeline.tap()
-        XCTAssertTrue(app.staticTexts[note].firstMatch.waitForExistence(timeout: 8), "已保存内容必须从真实 SwiftData 回到时光页")
+        XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 8))
         attachScreenshot("natural-review-saved-timeline", to: self)
-        let textCard = app.buttons.matching(NSPredicate(format:
-            "identifier BEGINSWITH %@ AND label CONTAINS %@", "timeline.memory.", note)).firstMatch
-        XCTAssertTrue(textCard.waitForExistence(timeout: 5))
-        XCTAssertLessThan(textCard.frame.height, 190, "没有照片的记录不应显示大块照片占位")
-        textCard.tap()
-        XCTAssertTrue(app.buttons["entry.edit"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts[note].firstMatch.exists)
     }
 
     @MainActor
@@ -709,9 +692,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-timeline"]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(element(named: "2026年8月", in: app).exists || app.scrollViews.firstMatch.exists)
+        XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["连接家庭服务后查看"].waitForExistence(timeout: 5))
         attachScreenshot("timeline", to: self)
     }
 

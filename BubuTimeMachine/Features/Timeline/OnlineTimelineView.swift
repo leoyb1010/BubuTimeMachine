@@ -43,7 +43,7 @@ nonisolated enum OnlineTimelineRange: Hashable, Sendable {
         case .last30: "近 30 天"
         case .thisYear: "今年"
         case .custom(let start, let end):
-            "\(start.formatted(.dateTime.year().month().day())) – \(end.formatted(.dateTime.month().day()))"
+            "\(start.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_CN")))) – \(end.formatted(.dateTime.month().day().locale(Locale(identifier: "zh_CN"))))"
         }
     }
     func bounds(now: Date = .now) -> (String?, String?) {

@@ -61,7 +61,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="2.23.0")
+app = FastAPI(title="布布时光机 AI 服务", version="2.24.0")
 
 from learning.api import install_learning
 from learning.runtime import get_service as get_learning_service

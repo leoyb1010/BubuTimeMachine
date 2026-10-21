@@ -123,7 +123,7 @@ struct DailyLearningHome: View {
                                     in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(date.formatted(.dateTime.month().day()) + (weekDays.contains(key) ? "，有课程" : ""))
+                    .accessibilityLabel(date.formatted(.dateTime.month().day().locale(Locale(identifier: "zh_CN"))) + (weekDays.contains(key) ? "，有课程" : ""))
                 }
             }
             HStack {
@@ -131,6 +131,7 @@ struct DailyLearningHome: View {
                 Spacer()
                 DatePicker("日期", selection: $day, in: ...Date.now.addingTimeInterval(86_400 * 30), displayedComponents: .date)
                     .labelsHidden()
+                    .environment(\.locale, Locale(identifier: "zh_CN"))
                 Spacer()
                 Button { shift(7) } label: { Label("下一周", systemImage: "chevron.right").labelStyle(.titleAndIcon) }
             }
@@ -362,6 +363,7 @@ struct CourseUploadSheet: View {
             Form {
                 Section {
                     DatePicker("上课日期", selection: $day, in: ...Date.now.addingTimeInterval(86_400), displayedComponents: .date)
+                        .environment(\.locale, Locale(identifier: "zh_CN"))
                         .accessibilityIdentifier("learning.upload.date")
                     TextField("课程名称，例如：水果单词", text: $title)
                         .accessibilityIdentifier("learning.upload.title")
@@ -420,6 +422,14 @@ struct CourseUploadSheet: View {
                 }
             }
             .interactiveDismissDisabled(uploading)
+            #if DEBUG
+            .task {
+                // UI 测试无法操作系统相册面板；用测试环境变量直接放入宿主机上的测试视频。
+                guard ProcessInfo.processInfo.arguments.contains("-uitest-server-config"),
+                      let paths = ProcessInfo.processInfo.environment["BUBU_UITEST_COURSE_FILES"], files.isEmpty else { return }
+                importFiles(paths.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
+            }
+            #endif
             .onChange(of: pickerItems) { _, items in Task { await importPicked(items) } }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.movie, .audio, .image], allowsMultipleSelection: true) { result in
                 if case .success(let urls) = result { importFiles(urls) }
