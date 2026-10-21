@@ -37,6 +37,9 @@ DEFAULT_SCHOOL_TOKENS = (
 )
 
 
+GENERIC_ALIASES = {"女儿", "我女儿", "儿子", "我儿子", "宝宝", "孩子"}
+
+
 class BrainUnavailable(RuntimeError):
     pass
 
@@ -143,8 +146,43 @@ class BrainBridge:
                 item.update(provenance=provenance, confidence=confidence)
                 item["source_revision"] = _digest([item["source_revision"], provenance, confidence, row["at"]])
                 items.append(item)
+            items.extend(self._subject_videos(connection, names, {i["file_id"] for i in items}, excluded))
             snapshot_id = _digest([subject_id, [(i["file_id"], i["source_revision"]) for i in items], excluded])
             return {"complete": True, "snapshot_id": snapshot_id, "items": items, "excluded": excluded}
+
+    def _subject_videos(self, connection, names: list[str], seen: set[str], excluded: dict) -> list[dict]:
+        """Videos whose existing second-brain video analysis names the subject.
+
+        The library has no person labels for videos. Its own completed video
+        summaries/tags naming the child are the pipeline's evidence; no new face
+        matching happens here. Generic kinship words are not identifying names.
+        """
+        strong = [n for n in names if len(n) >= 2 and n not in GENERIC_ALIASES]
+        if not strong:
+            return []
+        predicate = " OR ".join("instr(lower(coalesce(v.summary,'') || ' ' || coalesce(v.tags,'')),?)>0" for _ in strong)
+        rows = connection.execute(
+            "SELECT v.file_id FROM media_video_gemini v JOIN media_assets m ON m.file_id=v.file_id "
+            "WHERE v.state='completed' AND m.media_kind='video' AND (" + predicate + ") "
+            "AND EXISTS(SELECT 1 FROM media_locations l WHERE l.file_id=v.file_id AND l.available=1 "
+            "AND l.hash_state='verified' AND coalesce(l.variant,'original')!='live_motion') ORDER BY v.file_id",
+            [n.casefold() for n in strong],
+        ).fetchall()
+        ids = [row["file_id"] for row in rows if row["file_id"] not in seen]
+        hidden = self._sensitive_ids(connection, ids)
+        result = []
+        for fid in ids:
+            if fid in hidden:
+                excluded["sensitive"] += 1
+                continue
+            item = self._item(connection, fid)
+            if item is None or item["media_type"] != "video":
+                excluded["unavailable"] += 1
+                continue
+            item.update(provenance="video_analysis_mention", confidence=None)
+            item["source_revision"] = _digest([item["source_revision"], "video_analysis_mention"])
+            result.append(item)
+        return result
 
     def lookup_hash(self, sha: str) -> dict | None:
         """Exact reuse for a file whose Bubu ownership the caller already proved.

@@ -24,9 +24,8 @@ class FakeService:
     def save_attempt(self,s,body): self.calls.append(('attempt',body));return body
     def source_file(self,s,sid): return self.tmp/'media.wav','audio/wav'
     def resource(self,s,pid,name): return self.tmp/'media.wav','audio/wav'
-    def sync(self,s):return {'queued':True}
     def __getattr__(self,name):
-        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search'}: raise AttributeError(name)
+        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search','courses','course','delete_course','create_course'}: raise AttributeError(name)
         def forward(scope,*args):
             self.calls.append((name,args))
             return {'method':name}
@@ -96,8 +95,9 @@ def test_maintenance_and_school_keys_never_become_family_session(setup):
 def test_csrf_and_child_guard(setup):
     client,_,service=setup
     client.get('/learning',headers=BEARER)
-    assert client.post('/learning/api/sync',json={}).status_code==403
-    assert client.post('/learning/api/sync',json={},headers=CSRF).status_code==200
+    assert client.delete('/learning/api/courses/c1').status_code==403
+    assert client.delete('/learning/api/courses/c1',headers=CSRF).status_code==200
+    service.calls.clear()
     assert client.get('/learning/api/days?child_id=other-child&start=2026-10-01&end=2026-10-21').status_code==403
     assert not service.calls
     assert client.get('/learning/api/days?child_id=child-local&start=2026-10-01&end=2026-10-21').status_code==200
@@ -250,3 +250,21 @@ def test_old_native_query_only_selects_public_shell_not_old_child_resources(setu
     assert context['children']==[{'id':'child-local','name':'布布'}]
     assert client.get('/learning/api/packs?child_id=old-child&date=2026-10-21').status_code==403
     assert client.get('/learning?child=old-child',headers={'Authorization':'Bearer invalid-token'}).status_code==401
+
+
+def test_course_upload_is_multipart_reviewer_only_and_not_capped_like_json(setup):
+    client,state,service=setup
+    received={}
+    def create_course(scope,child,day,title,kind,language,files):
+        received.update(child=child,day=day,title=title,kind=kind,language=language,
+                        files=[(name,mime,Path(path).read_bytes()) for name,path,mime in files])
+        return {'id':'course-1'}
+    service.create_course=create_course
+    big=b'v'*(300*1024)
+    form={'school_date':'2026-10-21','title':'Fruit words','kind':'teaching'}
+    upload=[('files',('words.mov',big,'video/quicktime')),('files',('card.jpg',b'card','image/jpeg'))]
+    response=client.post('/learning/api/courses',data=form,files=upload,headers={**BEARER,**CSRF})
+    assert response.status_code==200 and response.json()=={'id':'course-1'}
+    assert received['child']=='child-local' and received['files'][0]==('words.mov','video/quicktime',big)
+    state['user']='grandma'
+    assert client.post('/learning/api/courses',data=form,files=upload,headers={**BEARER,**CSRF}).status_code==403

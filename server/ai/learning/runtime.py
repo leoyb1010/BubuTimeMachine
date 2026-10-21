@@ -43,13 +43,13 @@ def components():
 def get_service():
     from .service import LearningService
     store,bridge,processor,pocketbase,timeline,family,child=components()
-    return LearningService(store,processor,brain_sync=timeline,pocketbase=pocketbase)
+    from .online_timeline import OnlineTimeline
+    service=LearningService(store,processor,brain_sync=timeline,pocketbase=pocketbase)
+    service.online_timeline=OnlineTimeline(bridge,processor,store,family,child,required("LEARNING_SUBJECT_ID"))
+    return service
 
 
 def create_worker():
     from .worker import LearningWorker
     store,bridge,processor,pocketbase,timeline,family,child=components()
-    inbox=os.environ.get('LEARNING_INBOX','').strip()
-    return LearningWorker(store,bridge,processor,family=family,child=child,
-                          since_day=required('LEARNING_SINCE_DATE'),
-                          inbox=Path(inbox) if inbox else None,timeline=timeline,pocketbase=pocketbase)
+    return LearningWorker(store,bridge,processor,family=family,child=child,pocketbase=pocketbase)

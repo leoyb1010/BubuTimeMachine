@@ -388,3 +388,22 @@ def test_trashed_photos_instances_are_not_school_candidates(library):
     photos_received(library, [(1, "2026-10-21T18:00:00+08:00", 1)])
     result = BrainBridge(library[0]).school_snapshot("2026-10-21")
     assert result["items"] == [] and result["excluded"]["trashed"] == 1
+
+
+def test_videos_named_by_existing_video_analysis_join_the_subject(library):
+    root, db, _ = library
+    photo, _, _ = add(library)
+    named, _, _ = add(library, 20, subject=OTHER, media_type="video", description="布布在唱南瓜儿歌")
+    alias, _, _ = add(library, 21, subject=OTHER, media_type="video", description="BUBU dancing")
+    add(library, 22, subject=OTHER, media_type="video", description="其他小朋友在跳舞")
+    add(library, 23, subject=OTHER, media_type="video", description="女儿在跳舞")  # generic kinship word only
+    add(library, 24, subject=OTHER, media_type="video", description="布布的体检单", sensitive=1)
+    motion, _, _ = add(library, 25, subject=OTHER, media_type="video", description="布布笑了")
+    db.execute("UPDATE media_locations SET variant='live_motion' WHERE file_id=?", (motion,))
+    db.commit()
+    result = BrainBridge(root).subject_snapshot(SUBJECT)
+    by_id = {i["file_id"]: i for i in result["items"]}
+    assert set(by_id) == {photo, named, alias}
+    assert by_id[named]["provenance"] == "video_analysis_mention" and by_id[named]["media_type"] == "video"
+    assert by_id[named]["confidence"] is None
+    assert result["excluded"]["sensitive"] == 1

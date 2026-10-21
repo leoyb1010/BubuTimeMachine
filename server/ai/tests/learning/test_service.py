@@ -73,7 +73,9 @@ def app(tmp_path):
 
 def lesson(app, *, day="2026-10-20", child=CHILD, family=FAMILY):
     store, processor, _, service = app
-    source = store.add_source(family, child, day, "save-" + day, "lesson.mp4", b"teacher original " + day.encode(), "video/mp4")
+    course = store.create_course(family, child, day, "Corn and pumpkin", "teaching")
+    source = store.add_source(family, child, day, "course:" + course["id"] + ":0", "lesson.mp4", b"teacher original " + day.encode(),
+                              "video/mp4", kind="teaching", course_id=course["id"])
     segments = [{"id": "intro", "start": 0, "end": 1, "text": "Hello everyone."},
                 {"id": "question", "start": 2, "end": 3, "text": "What is it?"},
                 {"id": "corn", "start": 5, "end": 6, "text": "Corn."},
@@ -106,7 +108,7 @@ def lesson(app, *, day="2026-10-20", child=CHILD, family=FAMILY):
                     value["image_resource"] = processor.save(family, b"frame " + value["segment_id"].encode(), ".jpg")
         for choice in activity["choices"]:
             choice["image_resource"] = processor.save(family, choice["id"].encode(), ".jpg")
-    pack = store.create_pack(family, child, day, payload, [source["id"]])
+    pack = store.create_pack(family, child, day, payload, [source["id"]], course_id=course["id"])
     return source, pack
 
 
@@ -207,7 +209,7 @@ def test_exclude_stale_page_cannot_overwrite_a_concurrently_created_pack(app, mo
     read = service._pack
     def concurrent_revision(*args, **kwargs):
         old = read(*args, **kwargs)
-        store.create_pack(FAMILY, CHILD, pack["school_date"], {**pack["payload"], "title": "并发生成的新课程"}, pack["source_ids"])
+        store.create_pack(FAMILY, CHILD, pack["school_date"], {**pack["payload"], "title": "并发生成的新课程"}, pack["source_ids"], course_id=pack["course_id"])
         return old
     monkeypatch.setattr(service, "_pack", concurrent_revision)
     with pytest.raises(Conflict):
@@ -219,24 +221,25 @@ def test_nonempty_invalid_image_reference_cannot_be_silently_published(app):
     _, pack = lesson(app)
     payload = copy.deepcopy(pack["payload"])
     payload["activities"][1]["prompt"]["image_resource"] = "../private.jpg"
-    changed = app[0].create_pack(FAMILY, CHILD, pack["school_date"], payload, pack["source_ids"])
+    changed = app[0].create_pack(FAMILY, CHILD, pack["school_date"], payload, pack["source_ids"], course_id=pack["course_id"])
     with pytest.raises(Conflict):
         publish(app[3], changed)
 
 
-def test_segment_correction_uses_revision_cas_and_moves_only_occurrence(app):
+def test_segment_correction_uses_revision_cas_and_keeps_course_date(app):
     source, pack = lesson(app)
     store, _, _, service = app
     analysis = store.analysis(FAMILY, source["asset_id"])
     publish(service, pack)
     changed = copy.deepcopy(analysis["payload"]["segments"])
     changed[2]["text"] = "Corn!"
-    revised = service.update_segments(scope(), source["id"], analysis["revision"], changed, "2026-10-19", True)
-    assert revised["school_date"] == "2026-10-19" and revised["date_confirmed"] is True
-    assert revised["id"] != source["id"]
+    with pytest.raises(ValueError):
+        service.update_segments(scope(), source["id"], analysis["revision"], changed, "2026-10-19", True)
+    revised = service.update_segments(scope(), source["id"], analysis["revision"], changed, "2026-10-20", True)
+    assert revised["school_date"] == "2026-10-20" and revised["date_confirmed"] is True
     assert store.pack(FAMILY, pack["id"])["status"] == "revoked"
     with pytest.raises(Conflict):
-        service.update_segments(scope(), revised["id"], analysis["revision"], changed, "2026-10-19", True)
+        service.update_segments(scope(), revised["id"], analysis["revision"], changed, "2026-10-20", True)
 
 
 @pytest.mark.parametrize("activity,kind,choice,event", [
@@ -332,12 +335,9 @@ def test_timeline_search_excludes_auto_candidates_and_stale_or_foreign_facts(app
     assert result["total"] == 1 and result["has_more"] is False
 
 
-def test_sync_and_context_use_worker_status_keys_without_exposing_paths(app):
+def test_context_reports_pending_jobs_without_paths(app):
     store, _, _, service = app
-    key = "school-status:" + digest([FAMILY, CHILD])
-    store.set_cursor(key, {"last_sync": "2026-10-21T00:00:00Z", "imported": 3, "pending": 2, "error": "private /disk/path"})
+    store.add_source(FAMILY, CHILD, "2026-10-20", "x", "a.jpg", b"pending", "image/jpeg")
     context = service.context(scope(review=False))
-    assert context["source_status"]["imported"] == 3
-    assert "/disk/path" not in repr(context)
-    assert service.sync(scope(review=False)) == {"queued": True}
-    assert store.get_cursor("school-sync-request:" + digest([FAMILY, CHILD]))
+    assert context["source_status"]["pending"] == 1
+    assert [k["id"] for k in context["course_kinds"]] == ["teaching", "practice", "song"]

@@ -266,21 +266,29 @@ class MediaProcessor:
             name, sha = self._save(family, target, ".m4a")
         return {**params, "audio_resource": name, "audio_hash": sha}
 
-    def compose(self, family: str, sources: list[dict], nonce: str = "") -> dict:
+    def compose(self, family: str, sources: list[dict], nonce: str = "", course: dict | None = None) -> dict:
         source_map = {}
         for source in sources:
             record = self.store.analysis(family, source["asset_id"])
             if not record or record["state"] != "ready":
                 raise ProcessingUnavailable("还有素材尚未完整解析。")
-            source_map[source["id"]] = {**source, "analysis": record["payload"], "analysis_revision": record["revision"]}
+            analysis = dict(record["payload"])
+            # A parent explicitly uploaded this file as lesson material; that
+            # declaration, not the model's guess, decides it is course material.
+            if course and source.get("kind") in {"teaching", "practice", "song"}:
+                analysis["material_kind"] = source["kind"]
+            source_map[source["id"]] = {**source, "analysis": analysis, "analysis_revision": record["revision"]}
         eligible = {sid: s for sid, s in source_map.items() if s["analysis"].get("material_kind") in {"teaching", "practice", "song"}}
         fingerprint = digest([(s["id"], s["hash"], s["analysis_revision"]) for s in source_map.values()])
         if not eligible or not any(s["analysis"].get("segments") for s in eligible.values()):
-            return {"title": "这一天暂不生成互动课", "summary": "没有可核对的教学原声，不把普通照片或照护表强行变成题目。",
+            return {"title": course["title"] if course else "这一天暂不生成互动课",
+                    "summary": "没有找到可核对的老师原声，暂不生成互动题。可以补传带声音的课堂视频后重新生成。",
                     "material_kind": "uncertain", "activities": [], "warnings": ["等待明确的教学材料或原声。"],
                     "source_fingerprint": fingerprint, "generation_nonce": nonce, "model_version": MODEL_VERSION}
         brief = [{"source_id": sid, "kind": s["analysis"]["material_kind"], "description": s["analysis"].get("description", ""),
                   "ocr": s["analysis"].get("ocr", ""), "segments": s["analysis"].get("segments", [])} for sid, s in eligible.items()]
+        if course:
+            brief = {"course_title": course["title"], "course_kind": course["kind"], "materials": brief}
         text = json.dumps(brief, ensure_ascii=False)
         if len(text.encode()) > 180_000:
             raise ProcessingUnavailable("这批教学内容过多，请分成较小的学习主题。")
@@ -337,4 +345,6 @@ class MediaProcessor:
                     choice["colors"] = label_colors(choice["label"])
         payload.update(source_fingerprint=fingerprint, generation_nonce=nonce, model_version=MODEL_VERSION,
                        pipeline_version=PIPELINE_VERSION)
+        if course:
+            payload["title"] = course["title"]
         return payload

@@ -35,6 +35,13 @@ def digest(value: Any) -> str:
     return hashlib.sha256(encoded(value).encode()).hexdigest()
 
 
+COURSE_KINDS = {"teaching", "practice", "song"}
+
+
+def compose_key(child: str, day: str, course_id: str = "") -> str:
+    return child + ":" + day + (":" + course_id if course_id else "")
+
+
 def valid_day(value: str) -> str:
     if date.fromisoformat(value).isoformat() != value:
         raise ValueError("日期格式必须为 YYYY-MM-DD")
@@ -93,6 +100,12 @@ class LearningStore:
                     source_id TEXT PRIMARY KEY, family_id TEXT NOT NULL, replacement_id TEXT NOT NULL,
                     old_day TEXT NOT NULL, new_day TEXT NOT NULL, moved_at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS cursors (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS courses (
+                    id TEXT PRIMARY KEY, family_id TEXT NOT NULL, child_id TEXT NOT NULL,
+                    school_date TEXT NOT NULL, title TEXT NOT NULL, kind TEXT NOT NULL,
+                    language TEXT NOT NULL DEFAULT 'en-US', created_by TEXT NOT NULL DEFAULT '',
+                    deleted INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL);
+                CREATE INDEX IF NOT EXISTS course_day ON courses(family_id,child_id,school_date,deleted);
             """)
             # Additive migration: preserve originals, prior confirmations, and every
             # existing row. Legacy dates are unconfirmed until a parent verifies them.
@@ -101,6 +114,11 @@ class LearningStore:
                 db.execute("ALTER TABLE sources ADD COLUMN date_confirmed INTEGER NOT NULL DEFAULT 0")
             if "analysis_revisions" not in {r["name"] for r in db.execute("PRAGMA table_info(packs)")}:
                 db.execute("ALTER TABLE packs ADD COLUMN analysis_revisions TEXT NOT NULL DEFAULT '{}'")
+            # One parent upload is one lesson. Legacy automatic candidates keep
+            # course_id='' and are no longer shown in the learning views.
+            for table in ("sources", "packs"):
+                if "course_id" not in {r["name"] for r in db.execute("PRAGMA table_info(" + table + ")")}:
+                    db.execute("ALTER TABLE " + table + " ADD COLUMN course_id TEXT NOT NULL DEFAULT ''")
             db.execute("INSERT OR IGNORE INTO analysis_history SELECT * FROM analyses")
             db.execute("COMMIT")
 
@@ -122,7 +140,8 @@ class LearningStore:
 
     def add_source(self, family: str, child: str, day: str, origin: str,
                    name: str, content: bytes | Path, mime: str, *,
-                   kind: str = "auto", language: str = "en-US", media_ref: dict | None = None) -> dict:
+                   kind: str = "auto", language: str = "en-US", media_ref: dict | None = None,
+                   course_id: str = "") -> dict:
         valid_day(day)
         if not family or not child or not origin or len(origin) > 250:
             raise ValueError("素材缺少家庭、孩子或来源标识")
@@ -174,11 +193,15 @@ class LearningStore:
                         aid, family, sha, str(final.relative_to(self.root)), mime, size,
                         encoded(media_ref or {}), time.time()))
                 sid = uuid.uuid4().hex
-                db.execute("INSERT INTO sources(id,family_id,child_id,school_date,origin_key,asset_id,name,kind,language,created_at) "
-                           "VALUES(?,?,?,?,?,?,?,?,?,?)", (sid, family, child, day, origin, aid, name, kind, language, time.time()))
+                if course_id:
+                    course = db.execute("SELECT * FROM courses WHERE id=? AND family_id=? AND deleted=0", (course_id, family)).fetchone()
+                    if not course or course["child_id"] != child or course["school_date"] != day:
+                        raise ValueError("课程与素材的孩子或日期不一致")
+                db.execute("INSERT INTO sources(id,family_id,child_id,school_date,origin_key,asset_id,name,kind,language,course_id,created_at) "
+                           "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (sid, family, child, day, origin, aid, name, kind, language, course_id, time.time()))
                 analyzed = db.execute("SELECT state FROM analyses WHERE asset_id=? AND family_id=?", (aid, family)).fetchone()
                 if analyzed and analyzed["state"] == "ready":
-                    self._enqueue(db, family, "compose", child+":"+day, {"child_id": child, "school_date": day}, force=True)
+                    self._enqueue_compose(db, family, child, day, course_id)
                 else:
                     self._enqueue(db, family, "analyze", aid, {"asset_id": aid})
                 db.execute("COMMIT")
@@ -208,12 +231,14 @@ class LearningStore:
             raise Missing("来源不存在")
         return dict(row)
 
-    def sources(self, family: str, child: str, day: str | None = None) -> list[dict]:
+    def sources(self, family: str, child: str, day: str | None = None, *, course_id: str | None = None) -> list[dict]:
         query = "SELECT s.*,a.hash,a.mime,a.size FROM sources s JOIN assets a ON a.id=s.asset_id " \
                 "WHERE s.family_id=? AND s.child_id=? AND s.deleted=0"
         values = [family, child]
         if day is not None:
             query += " AND s.school_date=?"; values.append(valid_day(day))
+        if course_id is not None:
+            query += " AND s.course_id=?"; values.append(course_id)
         with self.db() as db:
             return [dict(r) for r in db.execute(query + " ORDER BY s.school_date DESC,s.created_at", values)]
 
@@ -261,11 +286,10 @@ class LearningStore:
         db.execute("INSERT INTO analyses VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET "
                    "revision=excluded.revision,state=excluded.state,payload=excluded.payload,error=excluded.error,updated_at=excluded.updated_at", values)
         db.execute("INSERT INTO analysis_history VALUES(?,?,?,?,?,?,?,?)", values)
-        for source in db.execute("SELECT id,child_id,school_date FROM sources WHERE family_id=? AND asset_id=? AND deleted=0", (family, aid)).fetchall():
+        for source in db.execute("SELECT id,child_id,school_date,course_id FROM sources WHERE family_id=? AND asset_id=? AND deleted=0", (family, aid)).fetchall():
             self._revoke_source(db, family, source["id"])
             if state == "ready":
-                child, day = source["child_id"], source["school_date"]
-                self._enqueue(db, family, "compose", child+":"+day, {"child_id": child, "school_date": day}, force=True)
+                self._enqueue_compose(db, family, source["child_id"], source["school_date"], source["course_id"])
         return {"asset_id": aid, "family_id": family, "source_hash": asset["hash"], "revision": revision,
                 "state": state, "payload": payload, "error": error[:250], "updated_at": values[-1]}
 
@@ -293,6 +317,8 @@ class LearningStore:
 
     def _move_source_date(self, db, family: str, sid: str, day: str, date_confirmed: bool) -> str:
         source = self._source_in(db, family, sid)
+        if source["course_id"] and source["school_date"] != day:
+            raise ValueError("课程素材的日期由整节课决定")
         if source["school_date"] == day:
             db.execute("UPDATE sources SET date_confirmed=? WHERE id=? AND family_id=?", (int(date_confirmed), sid, family))
             if not date_confirmed:
@@ -323,7 +349,7 @@ class LearningStore:
         self._revoke_source(db, family, sid)
         child = source["child_id"]
         for changed_day in {source["school_date"], day}:
-            self._enqueue(db, family, "compose", child+":"+changed_day, {"child_id": child, "school_date": changed_day}, force=True)
+            self._enqueue_compose(db, family, child, changed_day, "")
         return replacement
 
     def move_source_date(self, family: str, sid: str, school_date: str, *, date_confirmed: bool = False,
@@ -353,6 +379,61 @@ class LearningStore:
             self._set_analysis(db, family, source["asset_id"], payload, "ready", "", expected_revision)
             db.execute("COMMIT")
         return self.source(family, replacement)
+
+    @classmethod
+    def _enqueue_compose(cls, db, family: str, child: str, day: str, course_id: str = "", nonce: str = "") -> str:
+        payload = {"child_id": child, "school_date": day}
+        if course_id:
+            payload["course_id"] = course_id
+        if nonce:
+            payload["nonce"] = nonce
+        return cls._enqueue(db, family, "compose", compose_key(child, day, course_id), payload, force=True)
+
+    def enqueue_compose(self, family: str, child: str, day: str, course_id: str = "", nonce: str = "") -> str:
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            jid = self._enqueue_compose(db, family, child, day, course_id, nonce)
+            db.execute("COMMIT")
+        return jid
+
+    # Parent-declared lessons. A course groups exactly the files of one upload.
+    def create_course(self, family: str, child: str, day: str, title: str, kind: str,
+                      language: str = "en-US", created_by: str = "") -> dict:
+        valid_day(day)
+        title = " ".join(str(title).split())[:60]
+        if not family or not child or not title:
+            raise ValueError("课程缺少名称")
+        if kind not in COURSE_KINDS or language not in {"en-US", "zh-CN"}:
+            raise ValueError("课程类型或语言无效")
+        cid = uuid.uuid4().hex
+        with self.db() as db:
+            db.execute("INSERT INTO courses(id,family_id,child_id,school_date,title,kind,language,created_by,created_at) "
+                       "VALUES(?,?,?,?,?,?,?,?,?)", (cid, family, child, day, title, kind, language, created_by[:100], time.time()))
+        return self.course(family, cid)
+
+    def course(self, family: str, cid: str) -> dict:
+        with self.db() as db:
+            row = db.execute("SELECT * FROM courses WHERE id=? AND family_id=? AND deleted=0", (cid, family)).fetchone()
+        if not row:
+            raise Missing("课程不存在")
+        return dict(row)
+
+    def courses(self, family: str, child: str, start: str, end: str) -> list[dict]:
+        valid_day(start); valid_day(end)
+        with self.db() as db:
+            return [dict(r) for r in db.execute(
+                "SELECT * FROM courses WHERE family_id=? AND child_id=? AND deleted=0 AND school_date>=? AND school_date<=? "
+                "ORDER BY school_date DESC,created_at DESC LIMIT 500", (family, child, start, end))]
+
+    def remove_course(self, family: str, cid: str) -> None:
+        self.course(family, cid)
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE courses SET deleted=1 WHERE id=? AND family_id=?", (cid, family))
+            db.execute("UPDATE sources SET deleted=1 WHERE course_id=? AND family_id=?", (cid, family))
+            db.execute("UPDATE packs SET status='revoked' WHERE course_id=? AND family_id=? AND status IN ('draft','published','no_lesson')", (cid, family))
+            db.execute("DELETE FROM jobs WHERE family_id=? AND kind='compose' AND state!='running' AND job_key LIKE ?", (family, "%:" + cid))
+            db.execute("COMMIT")
 
     @staticmethod
     def _enqueue(db, family: str, kind: str, key: str, payload: dict, *, force: bool = False) -> str:
@@ -433,7 +514,8 @@ class LearningStore:
             result[key] = json.loads(result[key])
         return result
 
-    def create_pack(self, family: str, child: str, day: str, payload: dict, source_ids: list[str]) -> dict:
+    def create_pack(self, family: str, child: str, day: str, payload: dict, source_ids: list[str],
+                    course_id: str = "") -> dict:
         valid_day(day)
         if not source_ids or len(source_ids) > 100 or len(set(source_ids)) != len(source_ids):
             raise ValueError("课程缺少来源、来源重复或来源过多")
@@ -442,8 +524,8 @@ class LearningStore:
             revisions, fingerprints = {}, []
             for sid in source_ids:
                 source = self._source_in(db, family, sid)
-                if source["child_id"] != child or source["school_date"] != day:
-                    raise ValueError("课程来源不属于同一个孩子和授课日")
+                if source["child_id"] != child or source["school_date"] != day or source["course_id"] != course_id:
+                    raise ValueError("课程来源不属于同一个孩子、授课日和课程")
                 analysis = db.execute("SELECT revision,state FROM analyses WHERE asset_id=? AND family_id=?",
                                       (source["asset_id"], family)).fetchone()
                 if not analysis or analysis["state"] != "ready":
@@ -459,14 +541,14 @@ class LearningStore:
                                (family, child, day, fingerprint)).fetchone()
             if prior:
                 db.execute("COMMIT"); return self._pack_row(prior)
-            revision = db.execute("SELECT coalesce(max(revision),0)+1 FROM packs WHERE family_id=? AND child_id=? AND school_date=?",
-                                  (family, child, day)).fetchone()[0]
+            revision = db.execute("SELECT coalesce(max(revision),0)+1 FROM packs WHERE family_id=? AND child_id=? AND school_date=? AND course_id=?",
+                                  (family, child, day, course_id)).fetchone()[0]
             pid = uuid.uuid4().hex
             status = "draft" if payload.get("activities") else "no_lesson"
-            db.execute("UPDATE packs SET status='superseded' WHERE family_id=? AND child_id=? AND school_date=? AND status IN ('draft','published')",
-                       (family, child, day))
-            db.execute("INSERT INTO packs(id,family_id,child_id,school_date,revision,fingerprint,status,payload,source_ids,analysis_revisions,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                       (pid, family, child, day, revision, fingerprint, status, encoded(payload), encoded(source_ids), encoded(revisions), time.time()))
+            db.execute("UPDATE packs SET status='superseded' WHERE family_id=? AND child_id=? AND school_date=? AND course_id=? "
+                       "AND status IN ('draft','published','no_lesson')", (family, child, day, course_id))
+            db.execute("INSERT INTO packs(id,family_id,child_id,school_date,revision,fingerprint,status,payload,source_ids,analysis_revisions,created_at,course_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (pid, family, child, day, revision, fingerprint, status, encoded(payload), encoded(source_ids), encoded(revisions), time.time(), course_id))
             db.execute("COMMIT")
         return self.pack(family, pid)
 
@@ -488,15 +570,16 @@ class LearningStore:
             payload["activities"] = [activity for activity in activities if activity["id"] != activity_id]
             payload["generation_nonce"] = "excluded:" + uuid.uuid4().hex
             fingerprint = digest({"payload": payload, "sources": sorted(pack["source_ids"]), "analyses": pack["analysis_revisions"]})
-            new_revision = db.execute("SELECT coalesce(max(revision),0)+1 FROM packs WHERE family_id=? AND child_id=? AND school_date=?",
-                                      (family, pack["child_id"], pack["school_date"])).fetchone()[0]
+            course_id = pack["course_id"]
+            new_revision = db.execute("SELECT coalesce(max(revision),0)+1 FROM packs WHERE family_id=? AND child_id=? AND school_date=? AND course_id=?",
+                                      (family, pack["child_id"], pack["school_date"], course_id)).fetchone()[0]
             new_id = uuid.uuid4().hex
             status = "draft" if payload["activities"] else "no_lesson"
-            db.execute("UPDATE packs SET status='superseded' WHERE family_id=? AND child_id=? AND school_date=? AND status IN ('draft','published')",
-                       (family, pack["child_id"], pack["school_date"]))
-            db.execute("INSERT INTO packs(id,family_id,child_id,school_date,revision,fingerprint,status,payload,source_ids,analysis_revisions,created_at) "
-                       "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (new_id, family, pack["child_id"], pack["school_date"], new_revision, fingerprint, status,
-                        encoded(payload), encoded(pack["source_ids"]), encoded(pack["analysis_revisions"]), time.time()))
+            db.execute("UPDATE packs SET status='superseded' WHERE family_id=? AND child_id=? AND school_date=? AND course_id=? AND status IN ('draft','published')",
+                       (family, pack["child_id"], pack["school_date"], course_id))
+            db.execute("INSERT INTO packs(id,family_id,child_id,school_date,revision,fingerprint,status,payload,source_ids,analysis_revisions,created_at,course_id) "
+                       "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (new_id, family, pack["child_id"], pack["school_date"], new_revision, fingerprint, status,
+                        encoded(payload), encoded(pack["source_ids"]), encoded(pack["analysis_revisions"]), time.time(), course_id))
             db.execute("COMMIT")
         return self.pack(family, new_id)
 
@@ -508,7 +591,8 @@ class LearningStore:
                 source = self._source_in(db, family, sid)
             except Missing as exc:
                 raise Conflict("课程来源已撤回") from exc
-            if source["child_id"] != pack["child_id"] or source["school_date"] != pack["school_date"]:
+            if (source["child_id"] != pack["child_id"] or source["school_date"] != pack["school_date"]
+                    or source["course_id"] != pack.get("course_id", "")):
                 raise Conflict("来源日期或孩子已经变化，请重新生成")
             if dates_confirmed and not source["date_confirmed"]:
                 raise Conflict("授课日期尚未确认")
@@ -528,11 +612,16 @@ class LearningStore:
                 self._check_pack_sources(db, family, result)
         return result
 
-    def packs(self, family: str, child: str, day: str | None = None, *, published_only: bool = False) -> list[dict]:
+    def packs(self, family: str, child: str, day: str | None = None, *, published_only: bool = False,
+              course_id: str | None = None, courses_only: bool = False) -> list[dict]:
         where = "family_id=? AND child_id=?"
         args = [family, child]
         if day:
             where += " AND school_date=?"; args.append(valid_day(day))
+        if course_id is not None:
+            where += " AND course_id=?"; args.append(course_id)
+        elif courses_only:
+            where += " AND course_id!=''"
         if published_only:
             where += " AND status='published'"
         with self.db() as db:

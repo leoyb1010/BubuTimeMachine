@@ -20,13 +20,15 @@ from fastapi import HTTPException
 from memory_query import PocketBaseMemoryStore, _pb_quote
 from .models import Draft, Segment, ground_draft, label_colors, normalize
 from .processing import MediaProcessor, ProcessingUnavailable
-from .store import Conflict, Missing, digest, valid_day
+from .store import COURSE_KINDS, Conflict, Missing, digest, valid_day
 
 
 RESOURCE = re.compile(r"^[a-f0-9]{64}\.(?:jpg|m4a)$")
 HASH = re.compile(r"^[a-f0-9]{64}$")
 CHOICE_KINDS = {"listen_choice", "color_choice", "sort"}
 CURRENT_PACKS = {"draft", "published", "no_lesson"}
+UPLOAD_MIMES = {"image/jpeg", "image/png", "image/heic", "image/heif", "video/mp4", "video/quicktime",
+                "audio/mp4", "audio/mpeg", "audio/wav"}
 
 
 def _iso(value):
@@ -66,15 +68,11 @@ class LearningService:
         return self.pocketbase
 
     def context(self, scope):
-        statuses = [self.store.get_cursor("school-status:" + digest([scope.family_id, child["id"]]), {}) for child in scope.children]
-        last = sorted(filter(None, (_iso(s.get("last_sync")) for s in statuses)))
+        pending = sum(job["state"] in {"queued", "running"} for job in self.store.jobs(scope.family_id))
         return {"user": {"id": scope.user_id, "can_review": scope.can_review}, "children": scope.children,
                 "default_child": scope.children[0]["id"] if scope.children else None,
-                "source_status": {"last_sync": last[-1] if last else None,
-                    "imported": sum(max(0, int(s.get("imported") or 0)) for s in statuses),
-                    "pending": sum(max(0, int(s.get("pending") or 0)) for s in statuses),
-                    "error": "部分素材暂未完成，请稍后重试。" if any(s.get("error") for s in statuses) else ""},
-                "school_inbox_display": str(self.school_inbox_display)[:300]}
+                "source_status": {"last_sync": None, "imported": 0, "pending": pending, "error": ""},
+                "course_kinds": [{"id": "teaching", "label": "教学"}, {"id": "practice", "label": "练习"}, {"id": "song", "label": "儿歌"}]}
 
     def _pack(self, scope, pid, *, published=False):
         pack = self.store.pack(scope.family_id, pid)
@@ -88,36 +86,22 @@ class LearningService:
     def days(self, scope, child_id, start, end):
         scope.require_child(child_id)
         valid_day(start); valid_day(end)
-        if not 0 <= (Date.fromisoformat(end) - Date.fromisoformat(start)).days <= 365:
+        if not 0 <= (Date.fromisoformat(end) - Date.fromisoformat(start)).days <= 400:
             raise ValueError("日期范围无效")
         result = {}
-        with self.store.db() as db:
-            if scope.can_review:
-                for row in db.execute("SELECT school_date,count(*) n FROM sources WHERE family_id=? AND child_id=? "
-                    "AND deleted=0 AND school_date>=? AND school_date<=? GROUP BY school_date", (scope.family_id, child_id, start, end)):
-                    result[row["school_date"]] = {"date": row["school_date"], "source_count": row["n"], "pack_count": 0, "published_count": 0}
-            pids = [r[0] for r in db.execute("SELECT id FROM packs WHERE family_id=? AND child_id=? AND school_date>=? AND school_date<=? "
-                    "AND status IN ('draft','published','no_lesson')", (scope.family_id, child_id, start, end))]
-        sources_by_day = {}
-        for pid in pids:
-            try:
-                pack = self._pack(scope, pid)
-            except (Missing, Conflict):
-                continue
-            day = pack["school_date"]
-            counts = result.setdefault(day, {"date": day, "source_count": 0, "pack_count": 0, "published_count": 0})
-            counts["pack_count"] += 1
-            counts["published_count"] += int(pack["status"] == "published")
-            sources_by_day.setdefault(day, set()).update(pack["source_ids"])
-        if not scope.can_review:
-            for day, ids in sources_by_day.items():
-                result[day]["source_count"] = len(ids)
+        for course in self.courses(scope, child_id, start, end)["items"]:
+            counts = result.setdefault(course["school_date"], {"date": course["school_date"], "course_count": 0,
+                                                              "source_count": 0, "pack_count": 0, "published_count": 0})
+            counts["course_count"] += 1
+            counts["source_count"] += course["source_count"]
+            counts["pack_count"] += int(course["pack"] is not None)
+            counts["published_count"] += int(course["state"] == "published")
         return {"days": [result[key] for key in sorted(result)]}
 
     def packs(self, scope, child_id, day):
         scope.require_child(child_id); valid_day(day)
         result = []
-        for pack in self.store.packs(scope.family_id, child_id, day, published_only=not scope.can_review):
+        for pack in self.store.packs(scope.family_id, child_id, day, published_only=not scope.can_review, courses_only=True):
             if pack["status"] not in CURRENT_PACKS:
                 continue
             try:
@@ -157,6 +141,7 @@ class LearningService:
     def _public_pack(self, pack):
         payload = pack["payload"]
         return {key: pack[key] for key in ("id", "child_id", "school_date", "revision", "status")} | {
+            "course_id": pack.get("course_id", ""),
             "title": payload.get("title", "学习内容"),
             "payload": {"title": payload.get("title", "学习内容"), "summary": payload.get("summary", ""),
                         "activities": [self._public_activity(pack["id"], a) for a in payload.get("activities", [])],
@@ -301,8 +286,9 @@ class LearningService:
     def regenerate(self, scope, pid):
         scope.require_review()
         pack = self._pack(scope, pid)
-        self.store.enqueue(scope.family_id, "compose", pack["child_id"] + ":" + pack["school_date"],
-                           {"child_id": pack["child_id"], "school_date": pack["school_date"], "nonce": uuid.uuid4().hex}, force=True)
+        if not pack.get("course_id"):
+            raise Conflict("旧的自动课程已停用")
+        self.store.enqueue_compose(scope.family_id, pack["child_id"], pack["school_date"], pack["course_id"], uuid.uuid4().hex)
         return {"queued": True}
 
     def update_segments(self, scope, sid, revision, segments, school_date, date_confirmed):
@@ -371,7 +357,7 @@ class LearningService:
         for attempt in self.attempts(scope, child_id)["items"]:
             history.setdefault((attempt.get("concept"), attempt["kind"]), attempt)
         selected = {}
-        for pack in self.store.packs(scope.family_id, child_id, published_only=True):
+        for pack in self.store.packs(scope.family_id, child_id, published_only=True, courses_only=True):
             if not start <= pack["school_date"] <= day:
                 continue
             try:
@@ -391,10 +377,82 @@ class LearningService:
         ordered = sorted(selected.values(), key=lambda value: value[0])[:8 if period == "week" else 12]
         return {"window_start": start, "window_end": day, "items": [item for _, item in ordered]}
 
-    def sync(self, scope):
-        for child in scope.children:
-            self.store.set_cursor("school-sync-request:" + digest([scope.family_id, child["id"]]), time.time())
-        return {"queued": True}
+    # Parent-uploaded courses. Each upload is one lesson; nothing is picked from photos.
+    def create_course(self, scope, child_id, day, title, kind, language, files):
+        scope.require_review()
+        child = scope.require_child(child_id)
+        valid_day(day)
+        if kind not in COURSE_KINDS or language not in {"en-US", "zh-CN"}:
+            raise ValueError("课程类型无效")
+        if not 1 <= len(files) <= 8:
+            raise ValueError("每节课请上传1到8个文件")
+        if not any(mime.startswith(("video/", "audio/")) for _, _, mime in files):
+            raise ValueError("每节课至少需要一段带老师声音的视频或音频")
+        if any(mime not in UPLOAD_MIMES for _, _, mime in files):
+            raise ValueError("不支持的文件格式")
+        course = self.store.create_course(scope.family_id, child, day, title, kind, language, scope.user_id)
+        try:
+            for index, (name, path, mime) in enumerate(files):
+                self.store.add_source(scope.family_id, child, day, "course:%s:%d" % (course["id"], index), name, Path(path),
+                                      mime, kind=kind, language=language, course_id=course["id"],
+                                      media_ref={"origin": "parent_upload", "uploaded_by": scope.user_id})
+        except Exception:
+            self.store.remove_course(scope.family_id, course["id"])
+            raise
+        return self.course(scope, course["id"])
+
+    def _course(self, scope, cid):
+        course = self.store.course(scope.family_id, cid)
+        scope.require_child(course["child_id"])
+        return course
+
+    def _course_public(self, scope, course, *, detail=False):
+        sources = self.store.sources(scope.family_id, course["child_id"], course["school_date"], course_id=course["id"])
+        public_sources = [self._public_source(source) for source in sources]
+        packs = [p for p in self.store.packs(scope.family_id, course["child_id"], course["school_date"], course_id=course["id"])
+                 if p["status"] in CURRENT_PACKS]
+        pack = None
+        for candidate in packs:
+            try:
+                checked = self._pack(scope, candidate["id"])
+            except (Missing, Conflict):
+                continue
+            pack = checked
+            break
+        states = {source["state"] for source in public_sources}
+        if states & {"failed", "unavailable"}:
+            state = "failed"
+        elif states - {"ready"} or not public_sources:
+            state = "processing"
+        elif pack is None:
+            state = "processing" if scope.can_review else "waiting"
+        else:
+            state = pack["status"]
+        if not scope.can_review and state != "published":
+            state, pack = "waiting", None
+        result = {key: course[key] for key in ("id", "child_id", "school_date", "title", "kind", "language")}
+        result.update(created_at=_iso(course["created_at"]), state=state, source_count=len(sources),
+                      activity_count=len(pack["payload"].get("activities", [])) if pack else 0,
+                      pack=self._public_pack(pack) if pack and detail else ({"id": pack["id"], "status": pack["status"]} if pack else None))
+        if detail:
+            result["sources"] = public_sources if scope.can_review else []
+        return result
+
+    def courses(self, scope, child_id, start, end):
+        child = scope.require_child(child_id)
+        valid_day(start); valid_day(end)
+        if not 0 <= (Date.fromisoformat(end) - Date.fromisoformat(start)).days <= 400:
+            raise ValueError("日期范围无效")
+        return {"items": [self._course_public(scope, course) for course in self.store.courses(scope.family_id, child, start, end)]}
+
+    def course(self, scope, cid):
+        return self._course_public(scope, self._course(scope, cid), detail=True)
+
+    def delete_course(self, scope, cid):
+        scope.require_review()
+        self._course(scope, cid)
+        self.store.remove_course(scope.family_id, cid)
+        return {"deleted": True}
 
     def _media_fact(self, scope, mid):
         if not isinstance(mid, str) or not mid.isalnum() or len(mid) > 128:

@@ -8,7 +8,11 @@ import threading
 import time
 from typing import Callable, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+import mimetypes
+import shutil
+import tempfile
+
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -18,6 +22,9 @@ from .models import Segment
 from .store import Conflict, Missing
 
 MAX_JSON_BYTES = 256 * 1024
+COURSE_UPLOAD_PATH = '/learning/api/courses'
+MAX_COURSE_FILE_BYTES = 256 * 1024 * 1024
+MAX_COURSE_UPLOAD_BYTES = 8 * MAX_COURSE_FILE_BYTES
 WEB_ROOT = Path(__file__).with_name('web')
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
        "img-src 'self'; media-src 'self'; connect-src 'self'; font-src 'self'; "
@@ -117,6 +124,18 @@ def _call(service_factory, method: str, *args):
         raise HTTPException(422, '请求内容无效，请检查后重试。') from None
 
 
+def _timeline(service_factory, method: str, scope, *args):
+    timeline = getattr(service_factory(), 'online_timeline', None)
+    if timeline is None:
+        raise HTTPException(503, '布布专属素材库尚未启用。')
+    try:
+        return getattr(timeline, method)(scope, *args)
+    except Missing:
+        raise HTTPException(404, '素材已不在布布专属库中。') from None
+    except ValueError:
+        raise HTTPException(422, '筛选条件无效，请检查后重试。') from None
+
+
 def _file(result) -> FileResponse:
     path, mime = result
     path = Path(path)
@@ -136,7 +155,8 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         if request.url.path != '/learning' and not request.url.path.startswith('/learning/'):
             return await call_next(request)
         length = request.headers.get('content-length')
-        if length and (not length.isdecimal() or int(length) > MAX_JSON_BYTES):
+        limit = MAX_COURSE_UPLOAD_BYTES if (request.method == 'POST' and request.url.path == COURSE_UPLOAD_PATH) else MAX_JSON_BYTES
+        if length and (not length.isdecimal() or int(length) > limit):
             response = JSONResponse({'detail': '请求内容过大，请缩小后重试。'}, status_code=413)
         else:
             response = await call_next(request)
@@ -272,9 +292,33 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
                         scope: FamilyScope = Depends(_scope)):
         return _call(service_factory, 'timeline_search', scope, query, kind, start, end, order, limit)
 
-    @router.post('/sync')
-    def sync(scope: FamilyScope = Depends(_scope)):
-        return _call(service_factory, 'sync', scope)
+    @router.get('/online-timeline')
+    def online_timeline(query: str = Query('', max_length=500), kind: Literal['all', 'photo', 'video'] = 'all',
+                        start: str | None = Query(None, max_length=10), end: str | None = Query(None, max_length=10),
+                        order: Literal['asc', 'desc'] = 'desc', page: int = Query(1, ge=1, le=10000),
+                        limit: int = Query(40, ge=1, le=100), scope: FamilyScope = Depends(_scope)):
+        return _timeline(service_factory, 'feed', scope, query, kind, start, end, order, page, limit)
+
+    @router.get('/online-timeline/{fid}/preview')
+    def online_preview(fid: str, size: Literal['thumb', 'large'] = 'thumb', scope: FamilyScope = Depends(_scope)):
+        return _file(_timeline(service_factory, 'media', scope, fid, size))
+
+    @router.get('/online-timeline/{fid}/original')
+    def online_original(fid: str, scope: FamilyScope = Depends(_scope)):
+        return _file(_timeline(service_factory, 'media', scope, fid, 'original'))
+
+    @router.get('/courses')
+    def courses(child_id: str | None = Query(None, max_length=128), start: str = Query(..., max_length=10),
+                end: str = Query(..., max_length=10), scope: FamilyScope = Depends(_scope)):
+        return _call(service_factory, 'courses', scope, scope.require_child(child_id), start, end)
+
+    @router.get('/courses/{cid}')
+    def course(cid: str, scope: FamilyScope = Depends(_scope)):
+        return _call(service_factory, 'course', scope, cid)
+
+    @router.delete('/courses/{cid}')
+    def delete_course(cid: str, scope: FamilyScope = Depends(_scope)):
+        return _call(service_factory, 'delete_course', scope, cid)
 
     @router.get('/sources/{sid}/file')
     def source_file(sid: str, scope: FamilyScope = Depends(_scope)):
@@ -285,3 +329,34 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         return _file(_call(service_factory, 'resource', scope, pid, name))
 
     app.include_router(router)
+
+    # Multipart uploads stream to disk; they skip the bounded JSON reader above.
+    uploads = APIRouter(prefix='/learning/api')
+
+    @uploads.post('/courses')
+    def create_course(request: Request, child_id: str | None = Form(None, max_length=128),
+                      school_date: str = Form(..., pattern=r'^\d{4}-\d{2}-\d{2}$'),
+                      title: str = Form(..., min_length=1, max_length=60),
+                      kind: Literal['teaching', 'practice', 'song'] = Form(...),
+                      language: Literal['en-US', 'zh-CN'] = Form('en-US'),
+                      files: list[UploadFile] = File(...), scope: FamilyScope = Depends(_scope)):
+        scope.require_review()
+        if not 1 <= len(files) <= 8:
+            raise HTTPException(422, '每节课请上传1到8个文件。')
+        with tempfile.TemporaryDirectory(prefix='bubu-course-upload-') as tmp:
+            saved = []
+            for index, upload in enumerate(files):
+                name = Path((upload.filename or 'file').replace('\\', '/')).name[:180] or 'file'
+                mime = (upload.content_type or '').split(';')[0].strip().lower()
+                if mime in {'', 'application/octet-stream'}:
+                    mime = mimetypes.guess_type(name)[0] or ''
+                target = Path(tmp) / str(index)
+                with target.open('wb') as handle:
+                    shutil.copyfileobj(upload.file, handle, 1024 * 1024)
+                if not 0 < target.stat().st_size <= MAX_COURSE_FILE_BYTES:
+                    raise HTTPException(413, '单个文件不能为空或超过 256 MB。')
+                saved.append((name, target, mime))
+            return _call(service_factory, 'create_course', scope, scope.require_child(child_id), school_date,
+                         title, kind, language, saved)
+
+    app.include_router(uploads)
