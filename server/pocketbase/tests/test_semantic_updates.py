@@ -66,6 +66,30 @@ def update(database, collection, record_id, changes, token=None):
     assert status == 200, result
 
 
+@pytest.mark.parametrize("state", ["queued", "running"])
+def test_semantic_claim_leaves_other_workers_jobs_untouched(semantic_pipeline, state):
+    database, media, worker, index = semantic_pipeline
+    foreign = database.create("automation_jobs", {
+        "jobKey": "learning-job-" + state, "kind": "learning_course_generate",
+        "sourceCollection": "media", "sourceRecordId": media["a"]["id"],
+        "familyId": database.family_a, "state": state,
+        "availableAt": "2020-01-01 00:00:00.000Z",
+        "leaseUntil": "2020-01-01 00:00:00.000Z", "attempts": 0,
+    })
+    # Both ready and expired-lease foreign work must stay available to its own worker.
+    for _ in range(10):
+        if not worker.run_once():
+            break
+    else:
+        pytest.fail("semantic queue did not converge")
+    assert index.count() == 2
+    status, untouched = database.call("GET", "/api/collections/automation_jobs/records/" + foreign["id"],
+                                      token=database.admin)
+    assert status == 200
+    assert untouched["state"] == state
+    assert untouched["attempts"] == 0
+
+
 def test_metadata_corrections_rebuild_without_sync_touch_churn(semantic_pipeline):
     database, media, worker, index = semantic_pipeline
     drain(database, worker)

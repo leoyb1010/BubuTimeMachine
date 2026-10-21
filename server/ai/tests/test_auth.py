@@ -11,6 +11,22 @@ from fastapi import HTTPException  # noqa: E402
 import pytest  # noqa: E402
 
 
+FAMILY_SETTINGS = (
+    "INTAKE_FAMILY_ID", "SEMANTIC_FAMILY_ID", "WEEKLY_REPORT_FAMILY_ID", "SOUND_RING_FAMILY_ID",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_auth_state(monkeypatch):
+    for setting in FAMILY_SETTINGS:
+        monkeypatch.delenv(setting, raising=False)
+    main._pb_auth_cache.clear()
+    main._rate_buckets.clear()
+    yield
+    main._pb_auth_cache.clear()
+    main._rate_buckets.clear()
+
+
 class FakeResponse:
     status_code = 200
 
@@ -68,6 +84,87 @@ def test_missing_allowlist_fails_closed(monkeypatch):
     assert main._pocketbase_principal("Bearer valid-token") is None
 
 
+@pytest.mark.parametrize("setting", FAMILY_SETTINGS)
+@pytest.mark.parametrize("returned_family", ["another-family", ""])
+def test_family_bound_service_rejects_other_or_unassigned_family(monkeypatch, setting, returned_family):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    monkeypatch.setenv(setting, "expected-family")
+    monkeypatch.setattr(FakeResponse, "json", staticmethod(lambda: {
+        "record": {"id": "family-user", "familyId": returned_family},
+    }))
+    assert main._pocketbase_principal("Bearer valid-token") is None
+
+
+def test_family_change_revokes_access_even_with_same_cached_token(monkeypatch):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    monkeypatch.setenv("WEEKLY_REPORT_FAMILY_ID", "expected-family")
+    record = {"id": "family-user", "familyId": "expected-family"}
+    monkeypatch.setattr(FakeResponse, "json", staticmethod(lambda: {"record": record}))
+    assert main._pocketbase_principal("Bearer valid-token") == "pb:family-user"
+    record["familyId"] = "another-family"
+    assert main._pocketbase_principal("Bearer valid-token") is None
+
+
+def test_consistent_family_bindings_accept_member_but_recheck_revoked_token(monkeypatch):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    for setting in FAMILY_SETTINGS:
+        monkeypatch.setenv(setting, "expected-family")
+    monkeypatch.setattr(FakeResponse, "json", staticmethod(lambda: {
+        "record": {"id": "family-user", "familyId": "expected-family"},
+    }))
+    assert main._pocketbase_principal("Bearer valid-token") == "pb:family-user"
+    monkeypatch.setattr(main.httpx, "Client", RejectingClient)
+    assert main._pocketbase_principal("Bearer valid-token") is None
+
+
+def test_generic_ai_without_family_binding_keeps_identity_cache(monkeypatch):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    assert main._pocketbase_principal("Bearer valid-token") == "pb:family-user"
+    monkeypatch.setattr(main.httpx, "Client", lambda **kwargs: pytest.fail("unexpected PB refresh"))
+    assert main._pocketbase_principal("Bearer valid-token") == "pb:family-user"
+
+
+def test_allowlist_removal_revokes_cached_generic_identity(monkeypatch):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    assert main._pocketbase_principal("Bearer valid-token") == "pb:family-user"
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "another-user")
+    assert main._pocketbase_principal("Bearer valid-token") is None
+    assert not main._pb_auth_cache
+
+
+def test_enabling_family_binding_does_not_reuse_generic_identity_cache(monkeypatch):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    assert main._pocketbase_principal("Bearer valid-token") == "pb:family-user"
+    monkeypatch.setenv("SEMANTIC_FAMILY_ID", "expected-family")
+    assert main._pocketbase_principal("Bearer valid-token") is None
+
+
+def test_conflicting_family_configuration_fails_closed(monkeypatch):
+    monkeypatch.setattr(main.httpx, "Client", FakeClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
+    monkeypatch.setenv("INTAKE_FAMILY_ID", "family-a")
+    monkeypatch.setenv("WEEKLY_REPORT_FAMILY_ID", "family-b")
+    with pytest.raises(HTTPException) as caught:
+        main._pocketbase_principal("Bearer valid-token")
+    assert caught.value.status_code == 503
+
+
+@pytest.mark.parametrize("path", ["/weekly-report/latest", "/sound-ring/latest", "/semantic/search", "/intake/candidates"])
+def test_family_routes_require_a_bound_family_after_authentication(monkeypatch, path):
+    from starlette.requests import Request
+    monkeypatch.setattr(main, "_authorized_principal", lambda *args: "pb:family-user")
+    request = Request({"type": "http", "method": "GET", "path": path})
+    with pytest.raises(HTTPException) as caught:
+        main.require_api_key(request, None, "Bearer valid-token")
+    assert caught.value.status_code == 503
+
+
 class RejectingResponse:
     status_code = 401
 
@@ -79,6 +176,7 @@ class RejectingClient(FakeClient):
 
 def test_uncached_invalid_bearers_are_limited_before_pocketbase(monkeypatch):
     monkeypatch.setattr(main.httpx, "Client", RejectingClient)
+    monkeypatch.setenv("AI_ALLOWED_PB_USER_IDS", "family-user")
     monkeypatch.setattr(main, "_PREAUTH_RATE_LIMIT", 1)
     main._pb_auth_cache.clear()
     main._rate_buckets.clear()

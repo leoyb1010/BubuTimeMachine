@@ -61,7 +61,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
-app = FastAPI(title="布布时光机 AI 服务", version="2.22.0")
+app = FastAPI(title="布布时光机 AI 服务", version="2.23.0")
+
+from learning.api import install_learning
+from learning.runtime import get_service as get_learning_service
+install_learning(app, get_learning_service)
 
 llm = LLMClient()
 
@@ -165,6 +169,19 @@ def _check_rate(bucket_key: str, limit: Optional[int] = None) -> None:
         bucket.append(now)
 
 
+def _configured_ai_family_id() -> str:
+    """Existing AI deployment serves one family; contradictory bindings are unsafe."""
+    families = {
+        os.environ.get(name, "").strip()
+        for name in ("INTAKE_FAMILY_ID", "SEMANTIC_FAMILY_ID",
+                     "WEEKLY_REPORT_FAMILY_ID", "SOUND_RING_FAMILY_ID")
+        if os.environ.get(name, "").strip()
+    }
+    if len(families) > 1:
+        raise HTTPException(status_code=503, detail="服务器家庭配置不一致，请联系管理员。")
+    return next(iter(families), "")
+
+
 def _pocketbase_principal(
     authorization: Optional[str], preauth_bucket: str = "preauth:unknown"
 ) -> Optional[str]:
@@ -175,17 +192,28 @@ def _pocketbase_principal(
     token = value[7:].strip()
     if not token:
         return None
+    allowed_users = {
+        item.strip()
+        for item in os.environ.get("AI_ALLOWED_PB_USER_IDS", "").split(",")
+        if item.strip()
+    }
+    family_id = _configured_ai_family_id()
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
     now = time.monotonic()
     with _pb_auth_lock:
         cached = _pb_auth_cache.get(digest)
-        if cached and cached[0] > now:
-            return "pb:" + cached[1]
         if cached:
+            # Config/allowlist revocation applies even to an otherwise live cache.
+            # Family authorization always rereads PB: a moved/deactivated account
+            # must not retain access until this generic-identity cache expires.
+            if not family_id and cached[0] > now and cached[1] in allowed_users:
+                return "pb:" + cached[1]
             _pb_auth_cache.pop(digest, None)
+    if not allowed_users:
+        return None
 
-    # 只有未命中合法 token 缓存、确实要打到 PocketBase 时才计数，避免伪造 Bearer
-    # 把公网一次请求放大成一次本机 auth-refresh；缓存内的家庭正常请求不占该桶。
+    # Bound calls refresh family membership on every request. Limit all PB
+    # refreshes so forged Bearers cannot turn this into unbounded local traffic.
     _check_rate(preauth_bucket, _PREAUTH_RATE_LIMIT)
     base_url = pb_base_url()
     try:
@@ -204,21 +232,21 @@ def _pocketbase_principal(
     try:
         record = response.json().get("record") or {}
         user_id = str(record.get("id") or "")
-    except (TypeError, ValueError):
+        user_family = str(record.get("familyId") or "").strip()
+    except (TypeError, ValueError, AttributeError):
         return None
     if not user_id:
         return None
-    allowed_users = {
-        item.strip()
-        for item in os.environ.get("AI_ALLOWED_PB_USER_IDS", "").split(",")
-        if item.strip()
-    }
     # 单家庭服务必须显式绑定允许用户；缺配置也拒绝，绝不退化为任意 PB 用户可读。
     if not allowed_users or user_id not in allowed_users:
         logger.warning("pocketbase user rejected by AI allowlist")
         return None
-    with _pb_auth_lock:
-        _pb_auth_cache[digest] = (now + _PB_AUTH_CACHE_SECONDS, user_id)
+    if family_id and user_family != family_id:
+        logger.warning("pocketbase user rejected by AI family binding")
+        return None
+    if not family_id:
+        with _pb_auth_lock:
+            _pb_auth_cache[digest] = (now + _PB_AUTH_CACHE_SECONDS, user_id)
     return "pb:" + user_id
 
 
@@ -269,6 +297,9 @@ def require_api_key(
         logger.warning("unauthorized request path=%s ip=%s",
                        routed_path, request.client.host if request.client else "unknown")
         raise HTTPException(status_code=401, detail="鉴权失败：请先登录家庭服务器。")
+    if routed_path.startswith(("/intake/", "/semantic/", "/weekly-report/", "/sound-ring/")):
+        if not _configured_ai_family_id():
+            raise HTTPException(status_code=503, detail="服务器尚未绑定家庭。")
     # 鉴权后按服务主体/用户计数，反代后的共享源 IP 不会让全家互相挤占额度。
     _check_rate(principal)
     return principal

@@ -1,0 +1,194 @@
+"""Offline HTTP/auth contract tests. All PB requests use MockTransport."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import httpx
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from learning.api import install_learning
+from learning.auth import PocketBaseAuthenticator, SESSION_COOKIE
+from learning.store import Missing, Conflict
+
+class FakeService:
+    def __init__(self, tmp): self.tmp=tmp; self.calls=[]
+    def context(self,s): return {'user':{'id':s.user_id,'can_review':s.can_review},'children':s.children,'default_child':s.require_child(None)}
+    def days(self,s,child,start,end): self.calls.append(('days',s.family_id,child));return {'days':[]}
+    def packs(self,s,child,day): return {'items':[]}
+    def pack(self,s,pid):
+        if pid=='missing': raise Missing('private internal path /secrets')
+        if pid=='conflict': raise Conflict('secret version token')
+        if pid=='invalid': raise ValueError('password=do-not-echo')
+        return {'id':pid}
+    def publish(self,s,*args): self.calls.append(('publish',args));return {'status':'published'}
+    def save_attempt(self,s,body): self.calls.append(('attempt',body));return body
+    def source_file(self,s,sid): return self.tmp/'media.wav','audio/wav'
+    def resource(self,s,pid,name): return self.tmp/'media.wav','audio/wav'
+    def sync(self,s):return {'queued':True}
+    def __getattr__(self,name):
+        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search'}: raise AttributeError(name)
+        def forward(scope,*args):
+            self.calls.append((name,args))
+            return {'method':name}
+        return forward
+
+@pytest.fixture
+def setup(tmp_path,monkeypatch):
+    monkeypatch.setenv('AI_ALLOWED_PB_USER_IDS','mom,grandma')
+    monkeypatch.setenv('LEARNING_REVIEWER_USER_IDS','mom')
+    monkeypatch.setenv('INTAKE_FAMILY_ID','family-a')
+    monkeypatch.setenv('AI_API_KEY','maintenance-key')
+    monkeypatch.setenv('SCHOOL_VISION_TOKEN','school-only-key')
+    for key in ('SEMANTIC_FAMILY_ID','WEEKLY_REPORT_FAMILY_ID','SOUND_RING_FAMILY_ID','LEARNING_FAMILY_ID'):monkeypatch.delenv(key,raising=False)
+    state={'user':'mom','family':'family-a','calls':0,'password_ok':True,'child_token':None}
+    def pb(request):
+        state['calls']+=1
+        if request.url.path.endswith('/auth-with-password'):
+            if not state['password_ok']: return httpx.Response(400,json={'message':'password supersecret invalid'})
+            return httpx.Response(200,json={'token':'pb-token','record':{'id':state['user'],'familyId':state['family']}})
+        if request.url.path.endswith('/auth-refresh'):
+            if request.headers.get('Authorization') not in ('Bearer pb-token','Bearer refreshed-token'):return httpx.Response(401,json={})
+            return httpx.Response(200,json={'token':'refreshed-token','record':{'id':state['user'],'familyId':state['family']}})
+        state['child_token']=request.headers.get('Authorization')
+        assert request.url.path.endswith('/childprofile/records')
+        return httpx.Response(200,json={'items':[{'id':'pbchild','localId':'child-local','name':'布布','familyId':'family-a'},{'id':'foreign','localId':'other-child','name':'外家','familyId':'family-b'}],'totalPages':1})
+    app=FastAPI();service=FakeService(tmp_path);(tmp_path/'media.wav').write_bytes(b'0123456789')
+    install_learning(app,lambda:service)
+    app.state.learning_auth=PocketBaseAuthenticator(client_factory=lambda:httpx.Client(transport=httpx.MockTransport(pb),timeout=5,trust_env=False))
+    with TestClient(app,base_url='https://family.test') as client:yield client,state,service
+
+BEARER={'Authorization':'Bearer pb-token'}
+CSRF={'X-Bubu-Learning':'1'}
+
+def test_index_public_and_native_cookie(setup):
+    client,state,_=setup
+    assert client.get('/learning').status_code==200
+    assert client.get('/learning/api/context').status_code==401
+    response=client.get('/learning?child=child-local',headers=BEARER)
+    assert response.status_code==200
+    cookie=response.headers['set-cookie']
+    assert 'HttpOnly' in cookie and 'Secure' in cookie and 'Path=/learning' in cookie and 'SameSite=strict' in cookie
+    context=client.get('/learning/api/context').json()
+    assert context['children']==[{'id':'child-local','name':'布布'}]
+    assert state['child_token']=='Bearer refreshed-token'
+
+def test_revocation_rereads_pb_and_allowlist(setup,monkeypatch):
+    client,state,_=setup
+    assert client.get('/learning/api/context',headers=BEARER).status_code==200
+    before=state['calls'];state['family']='family-b'
+    assert client.get('/learning/api/context').status_code==403
+    assert state['calls']>before
+    state['family']='family-a';monkeypatch.setenv('AI_ALLOWED_PB_USER_IDS','someoneelse')
+    assert client.get('/learning/api/context').status_code==403
+
+def test_maintenance_and_school_keys_never_become_family_session(setup):
+    client,state,_=setup
+    for key in ('maintenance-key','school-only-key'):
+        response=client.get('/learning/api/context',headers={'Authorization':f'Bearer {key}'})
+        assert response.status_code==401
+        assert 'Max-Age=0' in response.headers.get('set-cookie','')
+        assert SESSION_COOKIE not in client.cookies
+    assert state['calls']==0
+
+def test_csrf_and_child_guard(setup):
+    client,_,service=setup
+    client.get('/learning',headers=BEARER)
+    assert client.post('/learning/api/sync',json={}).status_code==403
+    assert client.post('/learning/api/sync',json={},headers=CSRF).status_code==200
+    assert client.get('/learning/api/days?child_id=other-child&start=2026-10-01&end=2026-10-21').status_code==403
+    assert not service.calls
+    assert client.get('/learning/api/days?child_id=child-local&start=2026-10-01&end=2026-10-21').status_code==200
+
+def test_reviewer_enforced_and_native_without_csrf(setup):
+    client,state,_=setup
+    body={'revision':2,'confirmations':[{'activity_id':'a1','digest':'digest','verified':True}],'date_confirmed':True}
+    assert client.post('/learning/api/packs/p1/publish',headers=BEARER,json=body).status_code==200
+    state['user']='grandma'
+    assert client.post('/learning/api/packs/p1/publish',headers=BEARER,json=body).status_code==403
+
+def test_login_logout_and_password_not_echoed(setup):
+    client,state,_=setup
+    assert client.post('/learning/api/session',json={'identity':'mom','password':'secret'}).status_code==403
+    state['password_ok']=False
+    response=client.post('/learning/api/session',headers=CSRF,json={'identity':'mom','password':'secret'})
+    assert response.status_code==401 and 'supersecret' not in response.text
+    state['password_ok']=True
+    assert client.post('/learning/api/session',headers=CSRF,json={'identity':'mom','password':'secret'}).status_code==200
+    assert client.get('/learning/api/context').status_code==200
+    assert client.delete('/learning/api/session',headers=CSRF).status_code==204
+    assert client.get('/learning/api/context').status_code==401
+
+def test_safe_errors_json_limit_and_file_range(setup):
+    client,_,_=setup
+    for identifier,status in [('missing',404),('conflict',409),('invalid',422)]:
+        response=client.get('/learning/api/packs/'+identifier,headers=BEARER)
+        assert response.status_code==status
+        assert not any(x in response.text for x in ('/secrets','secret version','do-not-echo'))
+    response=client.post('/learning/api/attempts',headers={**BEARER,'Content-Type':'application/json'},content='x'*300000)
+    assert response.status_code==413
+    response=client.get('/learning/api/sources/source1/file',headers={**BEARER,'Range':'bytes=2-5'})
+    assert response.status_code==206 and response.content==b'2345'
+    assert response.headers['cache-control']=='no-store'
+    assert "script-src 'self'" in response.headers['content-security-policy']
+
+def test_attempt_requires_family_child(setup):
+    client,_,_=setup
+    body={'id':'attempt1','child_id':'other-child','pack_id':'p1','activity_id':'a1','kind':'speak'}
+    assert client.post('/learning/api/attempts',headers=BEARER,json=body).status_code==403
+    body['child_id']='child-local'
+    assert client.post('/learning/api/attempts',headers=BEARER,json=body).status_code==200
+
+
+def test_chunked_json_limit_and_invalid_json_are_safe(setup):
+    client,_,_=setup
+    headers={**BEARER,'Content-Type':'application/json'}
+    response=client.post('/learning/api/attempts',headers=headers,content=iter([b'x'*150000,b'y'*150000]))
+    assert response.status_code==413
+    for payload in ('{bad', '{"id":NaN}', '[]'):
+        assert client.post('/learning/api/attempts',headers=headers,content=payload).status_code==422
+
+
+def test_missing_reviewer_configuration_fails_closed(setup,monkeypatch):
+    client,_,_=setup
+    monkeypatch.delenv('LEARNING_REVIEWER_USER_IDS',raising=False)
+    monkeypatch.delenv('INTAKE_ALLOWED_PB_USER_IDS',raising=False)
+    assert client.get('/learning/api/context',headers=BEARER).json()['user']['can_review'] is False
+    monkeypatch.setenv('INTAKE_ALLOWED_PB_USER_IDS','mom')
+    assert client.get('/learning/api/context',headers=BEARER).json()['user']['can_review'] is True
+    monkeypatch.setenv('LEARNING_REVIEWER_USER_IDS','')
+    assert client.get('/learning/api/context',headers=BEARER).json()['user']['can_review'] is False
+
+
+def test_all_service_adapters_and_media_paths(setup):
+    client,_,service=setup
+    root='/learning/api/'
+    gets=[
+        ('packs?child_id=child-local&date=2026-10-21',None),
+        ('sources?child_id=child-local&date=2026-10-21','sources'),
+        ('reviews?child_id=child-local&period=month&date=2026-10-21','reviews'),
+        ('attempts?child_id=child-local','attempts'),
+        ('media/media1/analysis','media_analysis'),
+        ('timeline/search?query=玉米&kind=video&start=2026-10-01&end=2026-10-21&order=asc&limit=10','timeline_search')]
+    for path,method in gets:
+        response=client.get(root+path,headers=BEARER)
+        assert response.status_code==200
+        if method: assert response.json()['method']==method
+    assert ('media_analysis',('media1',False)) in service.calls
+    assert ('timeline_search',('玉米','video','2026-10-01','2026-10-21','asc',10)) in service.calls
+    assert client.post(root+'media/media1/analysis/retry',headers=BEARER,json={}).status_code==200
+    assert ('media_analysis',('media1',True)) in service.calls
+    assert client.post(root+'packs/p1/exclude',headers=BEARER,json={'revision':2,'activity_id':'a1'}).status_code==200
+    assert client.post(root+'packs/p1/regenerate',headers=BEARER,json={}).status_code==200
+    body={'revision':2,'segments':[{'id':'s1','start':1,'end':2,'text':'Corn.'}],'school_date':'2026-10-21','date_confirmed':True}
+    assert client.patch(root+'sources/s1/segments',headers=BEARER,json=body).status_code==200
+    response=client.get(root+'packs/p1/resources/clip.wav',headers={**BEARER,'Range':'bytes=0-2'})
+    assert response.status_code==206 and response.content==b'012'
+
+
+def test_csp_no_cors_and_query_validation(setup):
+    client,_,_=setup
+    response=client.get('/learning/web/app.js')
+    assert response.status_code==200 and "connect-src 'self'" in response.headers['content-security-policy']
+    assert 'access-control-allow-origin' not in response.headers
+    response=client.get('/learning/api/timeline/search?limit=999999&kind=bad',headers=BEARER)
+    assert response.status_code==422 and '999999' not in response.text

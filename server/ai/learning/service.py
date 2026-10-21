@@ -1,0 +1,517 @@
+"""Family-scoped application service for lessons and existing timeline evidence.
+
+HTTP requests authorize/read immutable resources or enqueue work. They never
+call a model, identify a child, or download an original from another service.
+"""
+from __future__ import annotations
+
+from datetime import date as Date, datetime, timedelta, timezone
+import math
+from pathlib import Path
+import re
+import time
+from urllib.parse import quote
+import uuid
+from zoneinfo import ZoneInfo
+
+import httpx
+from fastapi import HTTPException
+
+from memory_query import PocketBaseMemoryStore, _pb_quote
+from .models import Draft, Segment, ground_draft, label_colors, normalize
+from .processing import MediaProcessor, ProcessingUnavailable
+from .store import Conflict, Missing, digest, valid_day
+
+
+RESOURCE = re.compile(r"^[a-f0-9]{64}\.(?:jpg|m4a)$")
+HASH = re.compile(r"^[a-f0-9]{64}$")
+CHOICE_KINDS = {"listen_choice", "color_choice", "sort"}
+CURRENT_PACKS = {"draft", "published", "no_lesson"}
+
+
+def _iso(value):
+    if value is None:
+        return None
+    try:
+        stamp = datetime.fromtimestamp(value, timezone.utc) if isinstance(value, (int, float)) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+        return stamp.astimezone(timezone.utc).isoformat()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _analysis_public(payload):
+    segments = []
+    for raw in payload.get("segments", []):
+        try:
+            segments.append(Segment.model_validate({k: raw[k] for k in ("id", "start", "end", "text")}).model_dump())
+        except (ValueError, TypeError, KeyError):
+            continue
+    return {"description": str(payload.get("description") or ""), "ocr": str(payload.get("ocr") or ""),
+            "tags": [t for t in payload.get("tags", []) if isinstance(t, str)], "segments": segments,
+            "warnings": [w for w in payload.get("warnings", []) if isinstance(w, str)]}
+
+
+class LearningService:
+    def __init__(self, store, processor, *, brain_sync=None, pocketbase=None,
+                 school_inbox_display="iPhone 保存到照片后自动同步；收件夹仅作备用入口"):
+        self.store, self.processor = store, processor
+        self.brain_sync, self.pocketbase = brain_sync, pocketbase
+        self.school_inbox_display = school_inbox_display
+
+    def _pb(self):
+        if self.pocketbase is None:
+            self.pocketbase = PocketBaseMemoryStore()
+        return self.pocketbase
+
+    def context(self, scope):
+        statuses = [self.store.get_cursor("school-status:" + digest([scope.family_id, child["id"]]), {}) for child in scope.children]
+        last = sorted(filter(None, (_iso(s.get("last_sync")) for s in statuses)))
+        return {"user": {"id": scope.user_id, "can_review": scope.can_review}, "children": scope.children,
+                "default_child": scope.children[0]["id"] if scope.children else None,
+                "source_status": {"last_sync": last[-1] if last else None,
+                    "imported": sum(max(0, int(s.get("imported") or 0)) for s in statuses),
+                    "pending": sum(max(0, int(s.get("pending") or 0)) for s in statuses),
+                    "error": "部分素材暂未完成，请稍后重试。" if any(s.get("error") for s in statuses) else ""},
+                "school_inbox_display": str(self.school_inbox_display)[:300]}
+
+    def _pack(self, scope, pid, *, published=False):
+        pack = self.store.pack(scope.family_id, pid)
+        scope.require_child(pack["child_id"])
+        if (published or not scope.can_review) and pack["status"] != "published":
+            raise Missing("课程尚未发布")
+        if pack["status"] == "published":
+            pack = self.store.pack(scope.family_id, pid, require_published=True)
+        return pack
+
+    def days(self, scope, child_id, start, end):
+        scope.require_child(child_id)
+        valid_day(start); valid_day(end)
+        if not 0 <= (Date.fromisoformat(end) - Date.fromisoformat(start)).days <= 365:
+            raise ValueError("日期范围无效")
+        result = {}
+        with self.store.db() as db:
+            if scope.can_review:
+                for row in db.execute("SELECT school_date,count(*) n FROM sources WHERE family_id=? AND child_id=? "
+                    "AND deleted=0 AND school_date>=? AND school_date<=? GROUP BY school_date", (scope.family_id, child_id, start, end)):
+                    result[row["school_date"]] = {"date": row["school_date"], "source_count": row["n"], "pack_count": 0, "published_count": 0}
+            pids = [r[0] for r in db.execute("SELECT id FROM packs WHERE family_id=? AND child_id=? AND school_date>=? AND school_date<=? "
+                    "AND status IN ('draft','published','no_lesson')", (scope.family_id, child_id, start, end))]
+        sources_by_day = {}
+        for pid in pids:
+            try:
+                pack = self._pack(scope, pid)
+            except (Missing, Conflict):
+                continue
+            day = pack["school_date"]
+            counts = result.setdefault(day, {"date": day, "source_count": 0, "pack_count": 0, "published_count": 0})
+            counts["pack_count"] += 1
+            counts["published_count"] += int(pack["status"] == "published")
+            sources_by_day.setdefault(day, set()).update(pack["source_ids"])
+        if not scope.can_review:
+            for day, ids in sources_by_day.items():
+                result[day]["source_count"] = len(ids)
+        return {"days": [result[key] for key in sorted(result)]}
+
+    def packs(self, scope, child_id, day):
+        scope.require_child(child_id); valid_day(day)
+        result = []
+        for pack in self.store.packs(scope.family_id, child_id, day, published_only=not scope.can_review):
+            if pack["status"] not in CURRENT_PACKS:
+                continue
+            try:
+                result.append(self._public_pack(self._pack(scope, pack["id"])))
+            except (Missing, Conflict):
+                continue
+        return {"items": result}
+
+    def pack(self, scope, pid):
+        return self._public_pack(self._pack(scope, pid))
+
+    @staticmethod
+    def _resource_url(pid, name):
+        if not isinstance(name, str) or not RESOURCE.fullmatch(name):
+            return None
+        return "/learning/api/packs/" + quote(pid, safe="") + "/resources/" + name
+
+    def _public_clip(self, pid, clip):
+        if not isinstance(clip, dict):
+            return None
+        result = {key: clip[key] for key in ("source_id", "segment_id", "role", "text", "start", "end", "audio_hash") if key in clip}
+        result["audio_url"] = self._resource_url(pid, clip.get("audio_resource"))
+        result["image_url"] = self._resource_url(pid, clip.get("image_resource"))
+        return result
+
+    def _public_activity(self, pid, activity):
+        result = {key: activity.get(key) for key in ("id", "kind", "title", "concept", "instruction", "correct_choice")}
+        result.update(prompt=self._public_clip(pid, activity.get("prompt")), answer=self._public_clip(pid, activity.get("answer")), choices=[])
+        for choice in activity.get("choices", []):
+            row = {key: choice[key] for key in ("id", "label", "color") if key in choice}
+            if activity.get("kind") == "color_choice":
+                row["colors"] = label_colors(str(choice.get("label") or ""))
+            row.update(evidence=self._public_clip(pid, choice.get("evidence")), image_url=self._resource_url(pid, choice.get("image_resource")))
+            result["choices"].append(row)
+        return result
+
+    def _public_pack(self, pack):
+        payload = pack["payload"]
+        return {key: pack[key] for key in ("id", "child_id", "school_date", "revision", "status")} | {
+            "title": payload.get("title", "学习内容"),
+            "payload": {"title": payload.get("title", "学习内容"), "summary": payload.get("summary", ""),
+                        "activities": [self._public_activity(pack["id"], a) for a in payload.get("activities", [])],
+                        "warnings": payload.get("warnings", [])},
+            "confirmations": [{"activity_id": a["id"], "digest": digest(a)} for a in payload.get("activities", [])],
+        }
+
+    def _source(self, scope, sid):
+        source = self.store.source(scope.family_id, sid)
+        scope.require_child(source["child_id"])
+        return source
+
+    def _public_source(self, source):
+        analysis = self.store.analysis(source["family_id"], source["asset_id"])
+        state = analysis["state"] if analysis else "queued"
+        if state != "ready":
+            with self.store.db() as db:
+                job = db.execute("SELECT state FROM jobs WHERE family_id=? AND kind='analyze' AND job_key=?",
+                                 (source["family_id"], source["asset_id"])).fetchone()
+            if job and job[0] == "running":
+                state = "processing"
+        return {"id": source["id"], "name": source["name"], "kind": source["kind"], "mime": source["mime"],
+                "school_date": source["school_date"], "date_confirmed": bool(source.get("date_confirmed")), "state": state,
+                "revision": analysis["revision"] if analysis else 0,
+                "analysis": _analysis_public(analysis["payload"]) if analysis and state == "ready" else _analysis_public({}),
+                "error": "素材解析未完成，请核对原片后重试。" if state in {"failed", "unavailable"} else "",
+                "original_url": "/learning/api/sources/" + quote(source["id"], safe="") + "/file"}
+
+    def sources(self, scope, child_id, day):
+        scope.require_child(child_id); valid_day(day)
+        if not scope.can_review:
+            return {"items": []}
+        result = []
+        for source in self.store.sources(scope.family_id, child_id, day):
+            try:
+                result.append(self._public_source(self._source(scope, source["id"])))
+            except (Missing, Conflict):
+                continue
+        return {"items": result}
+
+    def source_file(self, scope, sid):
+        scope.require_review()
+        source = self._source(scope, sid)
+        try:
+            path = self.store.asset_path(scope.family_id, source["asset_id"])
+            MediaProcessor.verify_file(path, source["hash"])
+        except (OSError, ProcessingUnavailable) as exc:
+            raise Missing("原片不可用") from exc
+        return path, source["mime"]
+
+    @staticmethod
+    def _resources(pack):
+        result = set()
+        for activity in pack["payload"].get("activities", []):
+            for clip in (activity.get("prompt"), activity.get("answer")):
+                if isinstance(clip, dict):
+                    result.update(name for key in ("audio_resource", "image_resource")
+                                  if isinstance(name := clip.get(key), str) and RESOURCE.fullmatch(name))
+            result.update(c["image_resource"] for c in activity.get("choices", [])
+                          if isinstance(c.get("image_resource"), str) and RESOURCE.fullmatch(c["image_resource"]))
+        return result
+
+    def resource(self, scope, pid, name):
+        pack = self._pack(scope, pid)
+        if pack["status"] not in {"draft", "published"} or not RESOURCE.fullmatch(name) or name not in self._resources(pack):
+            raise Missing("资源不属于当前课程")
+        self._check_sources(pack)
+        try:
+            path = self.processor.resource_path(scope.family_id, name)
+        except (OSError, ValueError, ProcessingUnavailable) as exc:
+            raise Missing("课程资源不可用") from exc
+        return path, "audio/mp4" if name.endswith(".m4a") else "image/jpeg"
+
+    def _check_sources(self, pack):
+        result = {}
+        for sid in pack["source_ids"]:
+            source = self.store.source(pack["family_id"], sid)
+            analysis = self.store.analysis(pack["family_id"], source["asset_id"])
+            if (source["child_id"] != pack["child_id"] or source["school_date"] != pack["school_date"]
+                    or not analysis or analysis["state"] != "ready"
+                    or pack.get("analysis_revisions", {}).get(source["asset_id"]) != analysis["revision"]):
+                raise Conflict("课程证据已更新")
+            result[sid] = {**source, "analysis": analysis["payload"]}
+        return result
+
+    def _validate_materials(self, pack):
+        sources = self._check_sources(pack)
+        def reference(value):
+            return {key: value[key] for key in ("source_id", "segment_id", "role")}
+        try:
+            activities = []
+            for raw in pack["payload"].get("activities", []):
+                value = {key: raw.get(key) for key in ("id", "kind", "title", "concept", "instruction", "correct_choice")}
+                value.update(prompt=reference(raw["prompt"]), answer=reference(raw["answer"]) if raw.get("answer") else None,
+                             choices=[{**{key: c[key] for key in ("id", "label", "color") if key in c}, "evidence": reference(c["evidence"])} for c in raw.get("choices", [])])
+                activities.append(value)
+            draft = Draft.model_validate({"title": pack["payload"]["title"], "summary": pack["payload"].get("summary", ""),
+                "material_kind": pack["payload"].get("material_kind", "uncertain"), "activities": activities})
+            grounded = ground_draft(draft, sources)
+            for raw, checked in zip(pack["payload"]["activities"], grounded["activities"]):
+                for field in ("prompt", "answer"):
+                    if checked.get(field) is None:
+                        continue
+                    clip, expected = raw[field], checked[field]
+                    if any(clip.get(key) != expected.get(key) for key in ("source_id", "segment_id", "source_hash", "role", "text", "start", "end")):
+                        raise ValueError()
+                    name = clip.get("audio_resource", "")
+                    if not RESOURCE.fullmatch(name) or not name.endswith(".m4a") or clip.get("audio_hash") != name[:-4]:
+                        raise ValueError()
+                for owner in [raw.get("prompt"), raw.get("answer"), *raw.get("choices", [])]:
+                    image = owner.get("image_resource") if isinstance(owner, dict) else None
+                    if image and (not isinstance(image, str) or not RESOURCE.fullmatch(image) or not image.endswith(".jpg")):
+                        raise ValueError("图片证据引用无效")
+                if raw["kind"] in CHOICE_KINDS:
+                    right = next(c for c in raw["choices"] if c["id"] == raw["correct_choice"])
+                    if raw["prompt"]["role"] == "cue" and normalize(right["label"]) not in normalize(raw["prompt"]["text"]):
+                        raise ValueError("介绍不能替代目标原声")
+                    if raw["prompt"]["role"] == "question" and not raw["prompt"].get("image_resource"):
+                        raise ValueError("提问缺少画面依据")
+            for source in sources.values():
+                MediaProcessor.verify_file(self.store.asset_path(pack["family_id"], source["asset_id"]), source["hash"])
+            for name in self._resources(pack):
+                self.processor.resource_path(pack["family_id"], name)
+        except (ValueError, TypeError, KeyError, StopIteration, OSError, ProcessingUnavailable) as exc:
+            raise Conflict("题目、原声或图片证据尚未核对完整，请重新生成。") from exc
+
+    def publish(self, scope, pid, revision, confirmations, date_confirmed):
+        scope.require_review()
+        pack = self._pack(scope, pid)
+        if pack["revision"] != revision or date_confirmed is not True:
+            raise Conflict("请核对当前版本和授课日期")
+        self._validate_materials(pack)
+        return self._public_pack(self.store.publish(scope.family_id, pid, revision, scope.user_id, confirmations, date_confirmed=True))
+
+    def exclude(self, scope, pid, revision, activity_id):
+        scope.require_review()
+        pack = self._pack(scope, pid)
+        if pack["revision"] != revision or pack["status"] not in {"draft", "published"}:
+            raise Conflict("课程已更新")
+        return self._public_pack(self.store.exclude_activity(scope.family_id, pid, revision, activity_id))
+
+    def regenerate(self, scope, pid):
+        scope.require_review()
+        pack = self._pack(scope, pid)
+        self.store.enqueue(scope.family_id, "compose", pack["child_id"] + ":" + pack["school_date"],
+                           {"child_id": pack["child_id"], "school_date": pack["school_date"], "nonce": uuid.uuid4().hex}, force=True)
+        return {"queued": True}
+
+    def update_segments(self, scope, sid, revision, segments, school_date, date_confirmed):
+        scope.require_review()
+        source = self._source(scope, sid)
+        analysis = self.store.analysis(scope.family_id, source["asset_id"])
+        if not analysis or analysis["revision"] != revision or analysis["state"] != "ready":
+            raise Conflict("素材解析已变化")
+        valid_day(school_date)
+        if date_confirmed is not True or not 1 <= len(segments) <= 500:
+            raise ValueError("请核对转写和授课日期")
+        checked = [Segment.model_validate(s).model_dump() for s in segments]
+        duration = float(analysis["payload"].get("duration") or 0)
+        if (not math.isfinite(duration) or duration <= 0 or any(s["end"] > duration + .15 for s in checked)
+                or len({s["id"] for s in checked}) != len(checked)):
+            raise ValueError("转写缺少有效时间范围")
+        payload = {**analysis["payload"], "segments": checked,
+                   "transcript_review": {"reviewer": scope.user_id, "at": datetime.now(timezone.utc).isoformat()}}
+        source = self.store.update_source_analysis(scope.family_id, sid, revision, payload, school_date, True)
+        return self._public_source(source)
+
+    def _attempt_public(self, scope, row):
+        kind = "unknown"
+        try:
+            pack = self.store.pack(scope.family_id, row["pack_id"])
+            scope.require_child(pack["child_id"])
+            kind = next(a["kind"] for a in pack["payload"].get("activities", []) if a["id"] == row["activity_id"])
+        except (Missing, StopIteration):
+            pass
+        return {k: v for k, v in row.items() if k not in {"request_digest", "kind"}} | {"kind": kind, "event_kind": row["kind"]}
+
+    def save_attempt(self, scope, body):
+        allowed = {"id", "child_id", "pack_id", "activity_id", "kind", "choice", "run_id", "assistance", "note"}
+        if set(body) - allowed:
+            raise ValueError("互动记录格式无效")
+        child = scope.require_child(body["child_id"])
+        pack = self._pack(scope, body["pack_id"], published=True)
+        if pack["child_id"] != child:
+            raise Missing("课程不属于当前孩子")
+        activity = next((a for a in pack["payload"]["activities"] if a["id"] == body["activity_id"]), None)
+        if not activity or activity["kind"] != body["kind"]:
+            raise ValueError("互动类别与当前活动不一致")
+        if activity["kind"] in CHOICE_KINDS:
+            event = "choice"
+            if not body.get("choice"):
+                raise ValueError("请选择本题选项")
+        else:
+            if body.get("choice"):
+                raise ValueError("此活动不接受选择结果")
+            event = "speaking_attempt" if activity["kind"] == "speak" else "participation"
+        request = {k: body[k] for k in ("activity_id", "choice", "run_id", "assistance", "note") if k in body}
+        request["kind"] = event
+        saved = self.store.save_attempt(scope.family_id, child, pack["id"], body["id"], request)
+        return self._attempt_public(scope, {**saved, "id": body["id"], "child_id": child, "pack_id": pack["id"]})
+
+    def attempts(self, scope, child_id):
+        scope.require_child(child_id)
+        return {"items": [self._attempt_public(scope, row) for row in self.store.attempts(scope.family_id, child_id)]}
+
+    def reviews(self, scope, child_id, period, day):
+        scope.require_child(child_id); valid_day(day)
+        if period not in {"week", "month"}:
+            raise ValueError("复习范围无效")
+        start = (Date.fromisoformat(day) - timedelta(days=6 if period == "week" else 29)).isoformat()
+        history = {}
+        for attempt in self.attempts(scope, child_id)["items"]:
+            history.setdefault((attempt.get("concept"), attempt["kind"]), attempt)
+        selected = {}
+        for pack in self.store.packs(scope.family_id, child_id, published_only=True):
+            if not start <= pack["school_date"] <= day:
+                continue
+            try:
+                pack = self._pack(scope, pack["id"], published=True)
+            except (Missing, Conflict):
+                continue
+            for activity in pack["payload"].get("activities", []):
+                key = (activity.get("concept"), activity["kind"])
+                if key in selected:
+                    continue
+                attempt = history.get(key)
+                needs_help = attempt and (attempt.get("correct") is False or attempt.get("assistance") is True)
+                priority = 0 if needs_help else 1 if not attempt else 2
+                reason = "上次需要一点提示，再轻松玩一次。" if needs_help else "这段原声还没一起玩过。" if not attempt else "隔几天，再听一次熟悉的原声。"
+                selected[key] = (priority, {"pack_id": pack["id"], "activity_id": activity["id"], "concept": activity.get("concept", ""),
+                                          "reason": reason, "activity": self._public_activity(pack["id"], activity)})
+        ordered = sorted(selected.values(), key=lambda value: value[0])[:8 if period == "week" else 12]
+        return {"window_start": start, "window_end": day, "items": [item for _, item in ordered]}
+
+    def sync(self, scope):
+        for child in scope.children:
+            self.store.set_cursor("school-sync-request:" + digest([scope.family_id, child["id"]]), time.time())
+        return {"queued": True}
+
+    def _media_fact(self, scope, mid):
+        if not isinstance(mid, str) or not mid.isalnum() or len(mid) > 128:
+            raise Missing("媒体不存在")
+        try:
+            media = self._pb().get_record("media", mid)
+            if media.get("id") != mid or media.get("familyId") != scope.family_id or media.get("isDeleted") or not media.get("file"):
+                raise Missing("媒体不可用")
+            local = media.get("entryLocalId")
+            if not local:
+                raise Missing("媒体尚未关联时光")
+            entry = self._pb().first_record("entries", filter_value="familyId='%s' && localId='%s'" % (_pb_quote(scope.family_id), _pb_quote(local)), sort="id")
+            if not entry or entry.get("familyId") != scope.family_id or entry.get("isDeleted") or entry.get("isArchived"):
+                raise Missing("时光不可用")
+            return media, entry
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise Missing("媒体不存在") from None
+            raise HTTPException(503, "暂时无法核对时光资料。") from None
+        except httpx.HTTPError:
+            raise HTTPException(503, "暂时无法核对时光资料。") from None
+
+    def _registry(self, scope):
+        if self.brain_sync is None:
+            return {}
+        registry = self.brain_sync.registry()
+        if registry.get("family_id") != scope.family_id or registry.get("child_id") not in {c["id"] for c in scope.children}:
+            return {}
+        return registry.get("items", {})
+
+    @staticmethod
+    def _media_dto(mid, sha, state, *, payload=None, revision=0, updated_at=None):
+        return {"media_id": mid, "content_hash": sha, "state": state, "revision": revision,
+                "provider": "second-brain", **_analysis_public(payload or {}), "updated_at": _iso(updated_at)}
+
+    def media_analysis(self, scope, mid, retry=False):
+        media, _ = self._media_fact(scope, mid)
+        sha = media.get("contentHash") or ""
+        if not HASH.fullmatch(sha):
+            return self._media_dto(mid, None, "unavailable", payload={"warnings": ["素材尚无可核对的校验值，请先完成媒体同步。"]})
+        key = "media-analysis:" + digest([scope.family_id, mid])
+        cache = self.store.get_cursor(key, {})
+        if cache.get("family_id") != scope.family_id or cache.get("media_id") != mid or cache.get("content_hash") != sha:
+            cache = {}
+        if not retry:
+            if cache.get("state") in {"queued", "processing", "failed", "unavailable"}:
+                return self._media_dto(mid, sha, cache["state"], updated_at=cache.get("updated_at"))
+            analysis = self.store.analysis(scope.family_id, cache["asset_id"]) if cache.get("asset_id") else None
+            if analysis and analysis["source_hash"] == sha and analysis["state"] == "ready":
+                return self._media_dto(mid, sha, "ready", payload=analysis["payload"], revision=analysis["revision"], updated_at=analysis["updated_at"])
+            for row in self._registry(scope).values():
+                if row.get("media_id") == mid and row.get("status") == "synced" and row.get("provenance") == "manual" and row.get("content_hash") == sha:
+                    return self._media_dto(mid, sha, "ready", payload=row.get("analysis", {}), revision=max(1, int(row.get("attempts") or 1)), updated_at=row.get("updated_at"))
+            with self.store.db() as db:
+                asset = db.execute("SELECT id FROM assets WHERE family_id=? AND hash=?", (scope.family_id, sha)).fetchone()
+            analysis = self.store.analysis(scope.family_id, asset[0]) if asset else None
+            if analysis and analysis["state"] == "ready" and analysis["source_hash"] == sha:
+                return self._media_dto(mid, sha, "ready", payload=analysis["payload"], revision=analysis["revision"], updated_at=analysis["updated_at"])
+        now = datetime.now(timezone.utc).isoformat()
+        request = {"family_id": scope.family_id, "media_id": mid, "content_hash": sha, "state": "queued", "requested_at": now, "force": bool(retry)}
+        self.store.set_cursor("media-analysis-request:" + digest([scope.family_id, mid, sha]), request)
+        self.store.set_cursor(key, {**request, "updated_at": now})
+        return self._media_dto(mid, sha, "queued", updated_at=now)
+
+    def timeline_search(self, scope, query, kind, start, end, order, limit):
+        if kind not in {"all", "photo", "video"} or order not in {"asc", "desc"} or type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("时光筛选条件无效")
+        if start: valid_day(start)
+        if end: valid_day(end)
+        if start and end and start > end:
+            raise ValueError("日期范围无效")
+        tokens = str(query).casefold().split()
+        candidates = {}
+        for row in self._registry(scope).values():
+            if row.get("status") != "synced" or row.get("provenance") != "manual" or not row.get("media_id", "").isalnum():
+                continue
+            analysis = _analysis_public(row.get("analysis", {}))
+            texts = {"描述": analysis["description"], "图片文字": analysis["ocr"], "标签": " ".join(analysis["tags"]),
+                     "转写": " ".join(s["text"] for s in analysis["segments"])}
+            if not all(token in " ".join(texts.values()).casefold() for token in tokens):
+                continue
+            reason = "、".join(name for name, text in texts.items() if any(t in text.casefold() for t in tokens)) if tokens else "拍摄日期"
+            candidates[row["media_id"]] = (row, analysis, reason)
+        media_rows, entries = {}, {}
+        try:
+            ids = list(candidates)
+            for offset in range(0, len(ids), 100):
+                batch = ids[offset:offset + 100]
+                expression = " || ".join("id='%s'" % _pb_quote(mid) for mid in batch)
+                for media in self._pb().list_records("media", filter_value="familyId='%s' && (%s)" % (_pb_quote(scope.family_id), expression), sort="id"):
+                    if media.get("id") in batch and media.get("familyId") == scope.family_id and not media.get("isDeleted") and media.get("file"):
+                        media_rows[media["id"]] = media
+            locals_ = sorted({m.get("entryLocalId") for m in media_rows.values() if m.get("entryLocalId")})
+            for offset in range(0, len(locals_), 100):
+                batch = locals_[offset:offset + 100]
+                expression = " || ".join("localId='%s'" % _pb_quote(local) for local in batch)
+                for entry in self._pb().list_records("entries", filter_value="familyId='%s' && (%s)" % (_pb_quote(scope.family_id), expression), sort="id"):
+                    if entry.get("localId") in batch and entry.get("familyId") == scope.family_id and not entry.get("isDeleted") and not entry.get("isArchived"):
+                        entries[entry["localId"]] = entry
+        except httpx.HTTPError:
+            raise HTTPException(503, "暂时无法核对时光资料。") from None
+        result = []
+        for mid, media in media_rows.items():
+            row, analysis, reason = candidates[mid]
+            entry = entries.get(media.get("entryLocalId"))
+            if (not entry or media.get("contentHash") != row.get("content_hash") or not HASH.fullmatch(media.get("contentHash") or "")
+                    or media.get("mediaType") not in {"photo", "video"} or (kind != "all" and media["mediaType"] != kind)
+                    or (media.get("resourceRole") or "display") != "display"):
+                continue
+            captured = _iso(entry.get("happenedAt"))
+            if not captured:
+                continue
+            local_day = datetime.fromisoformat(captured).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+            if (start and local_day < start) or (end and local_day > end):
+                continue
+            result.append({"entry_local_id": entry["localId"], "media_id": mid, "media_local_id": media.get("localId", ""),
+                           "captured_at": captured, "description": analysis["description"], "tags": analysis["tags"],
+                           "source": "second-brain", "identity_status": "confirmed", "match_reason": reason})
+        result.sort(key=lambda row: (row["captured_at"], row["media_id"]), reverse=order == "desc")
+        return {"items": result[:limit], "total": len(result), "has_more": len(result) > limit}

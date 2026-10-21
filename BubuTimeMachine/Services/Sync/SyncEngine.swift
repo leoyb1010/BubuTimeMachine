@@ -1785,17 +1785,42 @@ final class SyncEngine {
         }
     }
 
+    /// Page through remote-backed rows so a full first page of healthy files cannot hide older missing originals.
+    /// A filename belonging to an unsynced edit is never replaced by a remote copy.
+    static func mediaNeedingDownload(in context: ModelContext, limit: Int,
+                                     fileExists: (String) -> Bool) throws -> [Media] {
+        guard limit > 0 else { return [] }
+        var descriptor = FetchDescriptor<Media>(
+            predicate: #Predicate { $0.remoteURL != nil && ($0.localFileName == nil || $0.syncStateRaw == "synced") },
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
+        descriptor.fetchLimit = downloadCountCap
+        var result: [Media] = []
+        while !Task.isCancelled {
+            let batch = try context.fetch(descriptor)
+            for media in batch where MediaFileAvailability.needsDownload(
+                fileName: media.localFileName, remoteURL: media.remoteURL,
+                isSynced: media.syncState == .synced, exists: fileExists) {
+                result.append(media)
+                if result.count == limit { return result }
+            }
+            if batch.count < downloadCountCap { break }
+            descriptor.fetchOffset = (descriptor.fetchOffset ?? 0) + batch.count
+        }
+        return result
+    }
+
     private func downloadMissingFiles(_ context: ModelContext) async {
         let deadline = Date().addingTimeInterval(Self.downloadBudget)
 
         // 每个阶段重新取待补文件（新的在前）；跨 await 不再复用可能已删除的模型引用。
-        var pendingDescriptor = FetchDescriptor<Media>(
-            predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil },
-            sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
-        pendingDescriptor.fetchLimit = Self.downloadCountCap
-        let pendingMedia = (try? context.fetch(pendingDescriptor)) ?? []
+        let pendingMedia = (try? Self.mediaNeedingDownload(in: context, limit: Self.downloadCountCap,
+            fileExists: mediaStore.fileExists(forMedia:))) ?? []
         let pendingPhotos = pendingMedia.filter { $0.type == .photo }
         let pendingOthers = pendingMedia.filter { $0.type != .photo }
+        let candidateIDs = pendingMedia.map(\.id)
+        let refreshedDescriptor = FetchDescriptor<Media>(
+            predicate: #Predicate { candidateIDs.contains($0.id) },
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
 
         // ===== 阶段 0 · 预览秒出 =====
         // 缺图照片先拉 PocketBase 服务端小图（?thumb=600x0，几十 KB/张）：
@@ -1822,7 +1847,10 @@ final class SyncEngine {
         // ===== 阶段 1 · 照片原图（新的先下，并发 3） =====
         // 预览 await 期间可能发生删除/替换；下一阶段重新取当前模型，不再读旧数组中的引用。
         guard isCurrentRun else { return }
-        let currentPhotos = ((try? context.fetch(pendingDescriptor)) ?? []).filter { $0.type == .photo }
+        let currentPhotos = ((try? context.fetch(refreshedDescriptor)) ?? []).filter {
+            $0.type == .photo && MediaFileAvailability.needsDownload(fileName: $0.localFileName,
+                remoteURL: $0.remoteURL, isSynced: $0.syncState == .synced, exists: mediaStore.fileExists(forMedia:))
+        }
         let photoSpecs: [DownloadSpec] = currentPhotos.compactMap { m in
             guard let url = m.remoteURL else { return nil }
             return DownloadSpec(snapshot: MediaDownloadSnapshot(m), remoteURL: url,
@@ -1835,7 +1863,10 @@ final class SyncEngine {
 
         // ===== 阶段 2 · 视频/其它原文件（并发 2，排最后不堵照片） =====
         guard isCurrentRun else { return }
-        let currentOthers = ((try? context.fetch(pendingDescriptor)) ?? []).filter { $0.type != .photo }
+        let currentOthers = ((try? context.fetch(refreshedDescriptor)) ?? []).filter {
+            $0.type != .photo && MediaFileAvailability.needsDownload(fileName: $0.localFileName,
+                remoteURL: $0.remoteURL, isSynced: $0.syncState == .synced, exists: mediaStore.fileExists(forMedia:))
+        }
         let videoSpecs: [DownloadSpec] = currentOthers.compactMap { m in
             guard let url = m.remoteURL else { return nil }
             return DownloadSpec(snapshot: MediaDownloadSnapshot(m), remoteURL: url,

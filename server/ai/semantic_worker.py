@@ -148,8 +148,9 @@ class PocketBaseWorkerClient:
         with self._claim_lock:
             now = filter_now()
             filter_value = (
+                "(kind='semantic_media_upsert' || kind='semantic_media_delete') && ("
                 "(state='queued' && availableAt<='%s') || "
-                "(state='running' && leaseUntil<'%s')" % (now, now)
+                "(state='running' && leaseUntil<'%s'))" % (now, now)
             )
             response = self._request(
                 "GET",

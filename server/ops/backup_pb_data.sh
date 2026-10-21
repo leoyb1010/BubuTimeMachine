@@ -217,6 +217,14 @@ PY
 rsync -a "$work_dir/backup-manifest.json" "$MIRROR_DIR/.backup-manifest.json.next"
 mv -f "$MIRROR_DIR/.backup-manifest.json.next" "$MIRROR_DIR/backup-manifest.json"
 
+# Learning state joins the same encrypted restic snapshot after its own online
+# SQLite backup; failure prevents the shared successful-backup timestamp.
+if [[ -n "${LEARNING_STATE_DIR:-}" ]]; then
+  learning_module_root="$(cd "$(dirname "$0")/../ai" && pwd -P)"
+  PYTHONPATH="$learning_module_root" python3 -m learning.backup \
+    --source "$LEARNING_STATE_DIR" --destination "$MIRROR_DIR/learning"
+fi
+
 backup_restic_repository() {
   local repository="$1"
   local role="$2"

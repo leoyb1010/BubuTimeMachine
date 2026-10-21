@@ -19,6 +19,7 @@ struct EntryDetailView: View {
     @State private var appendPick: [PhotosPickerItem] = []
     @State private var showCommentSheet = false
     @State private var viewingMediaID: UUID?
+    @State private var initialPlaybackSeconds: Double?
     @State private var showDeleteConfirm = false
     @State private var appendMediaStatus: String?
     /// 追加媒体的进度：总数与已完成数。大视频要几十秒，没有进度用户会以为卡死。
@@ -78,6 +79,12 @@ struct EntryDetailView: View {
                 }
                 if let appendMediaStatus { mediaStatusRow(appendMediaStatus) }
                 mediaSection
+                if !editing {
+                    EntryMediaAnalysisSection(media: sortedMedia) { id, seconds in
+                        initialPlaybackSeconds = seconds
+                        viewingMediaID = id
+                    }
+                }
                 reactionSection
                 appendPhotoButton
                 metaSection
@@ -205,8 +212,10 @@ struct EntryDetailView: View {
             if let id = viewingMediaID {
                 MediaGalleryViewer(mediaItems: sortedMedia,
                                    initialMediaID: id,
-                                   mediaStore: env.mediaStore) {
+                                   mediaStore: env.mediaStore,
+                                   initialPlaybackSeconds: initialPlaybackSeconds) {
                     viewingMediaID = nil
+                    initialPlaybackSeconds = nil
                 }
             }
         }
@@ -244,7 +253,7 @@ struct EntryDetailView: View {
                 ForEach(sortedMedia) { media in
                     ZStack(alignment: .topTrailing) {
                         Button {
-                            if !editing { viewingMediaID = media.id }
+                            if !editing { initialPlaybackSeconds = nil; viewingMediaID = media.id }
                         } label: {
                             MediaThumbnail(media: media, mediaStore: env.mediaStore,
                                            cornerRadius: BubuTheme.Radius.card)
@@ -588,31 +597,19 @@ struct EntryDetailView: View {
             if Task.isCancelled { failedItems.append(item); continue }
             if let movie = try? await item.loadTransferable(type: MovieTransfer.self) {
                 defer { try? FileManager.default.removeItem(at: movie.url) }
-                guard let imported = try? await env.mediaStore.importVideoForSync(from: movie.url) else {
+                guard let prepared = try? await MediaPreparation.video(from: movie.url, store: env.mediaStore) else {
                     failedItems.append(item)
                     continue
                 }
-                let fileName = imported.fileName
-                let media = Media(type: .video, localFileName: fileName)
-                if imported.wasCompressed {
-                    media.aiTags = ["已压缩", "视频"]
-                }
-                media.thumbnailFileName = await env.mediaStore.makeVideoThumbnail(fromVideo: fileName)
-                preparedMedia.append(media)
+                preparedMedia.append(prepared.makeMedia())
                 continue
             }
             if let data = try? await item.loadTransferable(type: Data.self) {
-                // 全尺寸解码 + 缩略图放到后台线程，避免在 MainActor 上同步解码大图冻结界面。
-                let mediaStore = env.mediaStore
-                let prepared = await Task.detached { () -> (fileName: String, thumbnail: String?)? in
-                    guard let image = UIImage(data: data),
-                          let fileName = try? mediaStore.savePhoto(data) else { return nil }
-                    return (fileName, mediaStore.makePhotoThumbnail(fromImage: image))
-                }.value
+                // 与新建记录共用素材准备；追加不改写父记录的日期、地点或家长文字。
+                let prepared = try? await MediaPreparation.photo(data: data, store: env.mediaStore,
+                    analyzer: env.photoAnalyzer, includeLocation: false)
                 if let prepared {
-                    let media = Media(type: .photo, localFileName: prepared.fileName)
-                    media.thumbnailFileName = prepared.thumbnail
-                    preparedMedia.append(media)
+                    preparedMedia.append(prepared.makeMedia())
                 } else {
                     failedItems.append(item)
                 }

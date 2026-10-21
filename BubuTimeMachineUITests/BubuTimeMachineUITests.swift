@@ -3,6 +3,45 @@ import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
     @MainActor
+    func testLearningEntryAndTimelineFiltersRemainUsableOffline() throws {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-school-report"]
+        app.launch()
+        let learning = app.buttons["school.learning-entry"]
+        XCTAssertTrue(learning.waitForExistence(timeout: 12))
+        learning.tap()
+        XCTAssertTrue(app.navigationBars["一起学"].waitForExistence(timeout: 5))
+        attachScreenshot("learning-entry-offline", to: self)
+        if app.frame.width > 700 {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            XCTAssertTrue(app.navigationBars["一起学"].waitForExistence(timeout: 5))
+            attachScreenshot("learning-entry-ipad-landscape", to: self)
+        }
+        app.navigationBars.buttons.firstMatch.tap()
+        rootNavigationButton(named: "时光", in: app).tap()
+        let filters = app.buttons["timeline.filters"]
+        XCTAssertTrue(filters.waitForExistence(timeout: 5))
+        filters.tap()
+        XCTAssertTrue(app.navigationBars["筛选时光"].waitForExistence(timeout: 5))
+        let dateToggle = app.switches["限定拍摄日期"]
+        XCTAssertTrue(dateToggle.exists)
+        let dateControl = dateToggle.switches.firstMatch
+        XCTAssertTrue(dateControl.exists)
+        dateControl.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["timeline.start-date"].firstMatch.waitForExistence(timeout: 5))
+        attachScreenshot("timeline-filter-dates", to: self)
+        app.buttons["应用"].tap()
+        XCTAssertTrue(app.navigationBars["时光轴"].waitForExistence(timeout: 5))
+        filters.tap()
+        app.buttons["清除全部筛选"].tap()
+        app.buttons["应用"].tap()
+        assertRootNavigation(in: app)
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    @MainActor
     func testRootTabsRemainSelectableInsideChildRecognitionSettings() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

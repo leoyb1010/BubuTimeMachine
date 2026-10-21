@@ -421,25 +421,17 @@ final class CaptureModel {
     private func persist(cameraVideo: SelectedCameraVideo) async -> Media? {
         analyzingHint = "正在整理这段录像，太大时会先压缩…"
         defer { analyzingHint = nil }
-        guard let imported = try? await mediaStore.importVideoForSync(from: cameraVideo.url) else { return nil }
-        let fileName = imported.fileName
-        let media = Media(type: .video, localFileName: fileName)
-        if imported.wasCompressed { media.aiTags = ["已压缩", "视频"] }
-        media.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
-        return media
+        guard let prepared = try? await MediaPreparation.video(from: cameraVideo.url, store: mediaStore) else { return nil }
+        return prepared.makeMedia()
     }
 
     private func persist(cameraPhoto: SelectedCameraPhoto, includeLocation: Bool) async -> (Media, PhotoAnalysis?)? {
-        guard let data = cameraPhoto.image.jpegData(compressionQuality: 0.92),
-              let fileName = try? mediaStore.savePhoto(data) else { return nil }
-        let media = Media(type: .photo, localFileName: fileName)
-        media.width = Int(cameraPhoto.image.size.width)
-        media.height = Int(cameraPhoto.image.size.height)
-        media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: cameraPhoto.image)
+        guard let data = cameraPhoto.image.jpegData(compressionQuality: 0.92) else { return nil }
         analyzingHint = "正在看看这张照片里有什么…"
-        let analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
-        analyzingHint = nil
-        return (media, analysis)
+        defer { analyzingHint = nil }
+        guard let prepared = try? await MediaPreparation.photo(data: data, store: mediaStore,
+            analyzer: analyzer, includeLocation: includeLocation) else { return nil }
+        return (prepared.makeMedia(), prepared.analysis)
     }
 
     /// 拍摄时间兜底：PhotosPicker 无相册权限时拿不到 PHAsset，只有在用户已授权
@@ -481,43 +473,29 @@ final class CaptureModel {
             // 必须在删 tmp 前读元数据。
             var captureDate = Self.assetCreationDate(for: item)
             if captureDate == nil { captureDate = await Self.videoCreationDate(url: movie.url) }
-            guard let imported = try? await mediaStore.importVideoForSync(from: movie.url) else {
+            guard let prepared = try? await MediaPreparation.video(from: movie.url, store: mediaStore) else {
                 analyzingHint = nil
                 return nil
             }
             analyzingHint = nil
-            let fileName = imported.fileName
-            let media = Media(type: .video, localFileName: fileName)
-            if imported.wasCompressed {
-                media.aiTags = ["已压缩", "视频"]
-            }
-            media.thumbnailFileName = await mediaStore.makeVideoThumbnail(fromVideo: fileName)
+            let media = prepared.makeMedia()
             // tags 回填 media.aiTags 同值：save() 会用 analysis.tags 覆写 aiTags，别把「已压缩」冲掉。
             let analysis = PhotoAnalysis(captureDate: captureDate, latitude: nil, longitude: nil,
                                          locationName: nil, tags: media.aiTags, faceCount: 0)
             return (media, analysis)
         }
         // 图片
-        if let data = try? await item.loadTransferable(type: Data.self),
-           let image = UIImage(data: data) {
-            guard let fileName = try? mediaStore.savePhoto(data) else { return nil }
-            let media = Media(type: .photo, localFileName: fileName)
-            // 记录内容指纹（V2）：供「今天拍的」收录去重命中；此路径不拦截——
-            // 用户从相册主动再选同一张（配不同文字另开记录）是合法意图。
-            media.contentHash = MediaStore.sha256Hex(data)
-            media.width = Int(image.size.width)
-            media.height = Int(image.size.height)
-            media.thumbnailFileName = mediaStore.makePhotoThumbnail(fromImage: image)
-
+        if let data = try? await item.loadTransferable(type: Data.self) {
             analyzingHint = "正在看看这张照片里有什么…"
-            var analysis = await analyzer.analyze(imageData: data, includeLocation: includeLocation, resolveLocationName: false)
-            analyzingHint = nil
+            defer { analyzingHint = nil }
+            guard var prepared = try? await MediaPreparation.photo(data: data, store: mediaStore,
+                analyzer: analyzer, includeLocation: includeLocation) else { return nil }
             // 截图/被转发剥了 EXIF 的图拿不到拍摄时间：有相册权限时用 PHAsset 兜底，
             // 否则 happenedAt 会落成保存时刻、老照片被排到「今天」。
-            if analysis.captureDate == nil {
-                analysis.captureDate = Self.assetCreationDate(for: item)
+            if prepared.analysis?.captureDate == nil {
+                prepared.analysis?.captureDate = Self.assetCreationDate(for: item)
             }
-            return (media, analysis)
+            return (prepared.makeMedia(), prepared.analysis)
         }
         return nil
     }

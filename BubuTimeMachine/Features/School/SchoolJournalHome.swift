@@ -53,6 +53,19 @@ struct SchoolJournalHome: View {
                         weekStrip.frame(width: 158)
                     }.padding(.bottom, 18)
                 }.frame(height: typeSize.isAccessibilitySize ? 140 : 52)
+                NavigationLink { SchoolLearningView(day: day) } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sparkles").foregroundStyle(env.theme.theme.textAccent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(Calendar.current.isDateInToday(day) ? "今天一起学" : "这一天一起学")
+                                .font(BubuTheme.Font.body.weight(.semibold))
+                            Text("第二大脑整理素材，家人点开一起玩")
+                                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption)
+                    }.padding(.vertical, 14).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityIdentifier("school.learning-entry")
                 SchoolDayEntries(day: day, onCorrectedDate: { value in selectDay(value) })
                 NavigationLink { MemoryJournalView(kind: .saying) } label: {
                     HStack(spacing: 12) {
@@ -63,7 +76,7 @@ struct SchoolJournalHome: View {
                         }
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right").font(.caption)
-                    }.padding(.vertical, 12)
+                    }.padding(.vertical, 12).contentShape(Rectangle())
                 }.buttonStyle(.plain)
             }
             .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 10).bubuContentColumn(760)

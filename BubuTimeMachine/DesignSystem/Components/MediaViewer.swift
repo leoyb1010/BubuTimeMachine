@@ -1,12 +1,14 @@
 import SwiftUI
 import AVKit
 import Photos
+import Combine
 
 // MARK: - 媒体相册查看器
 struct MediaGalleryViewer: View {
     let mediaItems: [Media]
     let initialMediaID: UUID
     let mediaStore: MediaStore
+    let initialPlaybackSeconds: Double?
     var onDismiss: () -> Void
 
     @Environment(AppEnvironment.self) private var env
@@ -27,10 +29,12 @@ struct MediaGalleryViewer: View {
         max(0.35, 1 - Double(abs(dragOffset)) / 420)
     }
 
-    init(mediaItems: [Media], initialMediaID: UUID, mediaStore: MediaStore, onDismiss: @escaping () -> Void) {
+    init(mediaItems: [Media], initialMediaID: UUID, mediaStore: MediaStore,
+         initialPlaybackSeconds: Double? = nil, onDismiss: @escaping () -> Void) {
         self.mediaItems = mediaItems
         self.initialMediaID = initialMediaID
         self.mediaStore = mediaStore
+        self.initialPlaybackSeconds = initialPlaybackSeconds
         self.onDismiss = onDismiss
         _selectedID = State(initialValue: initialMediaID)
     }
@@ -63,8 +67,8 @@ struct MediaGalleryViewer: View {
     }
 
     private var currentFileURL: URL? {
-        guard let media = currentMedia, let name = media.localFileName else { return nil }
-        return mediaStore.mediaURL(for: name)
+        MediaFileAvailability.localURL(fileName: currentMedia?.localFileName,
+            resolve: mediaStore.mediaURL(for:), exists: { FileManager.default.fileExists(atPath: $0.path) })
     }
 
     /// 存回系统相册（照片/视频都支持；只需「添加」权限，不读相册）。
@@ -98,7 +102,8 @@ struct MediaGalleryViewer: View {
                 // 用 UIKit UIPageViewController 翻页（系统相册同款）：翻页对齐由系统保证，
                 // 彻底避免 SwiftUI TabView(.page) 套可缩放 UIScrollView 时「滑一半卡住」的老问题。
                 PhotoPager(mediaItems: mediaItems, mediaStore: mediaStore,
-                           selectedID: $selectedID, env: env)
+                           selectedID: $selectedID, env: env, initialMediaID: initialMediaID,
+                           initialPlaybackSeconds: initialPlaybackSeconds)
                     .ignoresSafeArea()
             }
 
@@ -228,6 +233,8 @@ private struct PhotoPager: UIViewControllerRepresentable {
     let mediaStore: MediaStore
     @Binding var selectedID: UUID
     let env: AppEnvironment
+    let initialMediaID: UUID
+    let initialPlaybackSeconds: Double?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -269,7 +276,8 @@ private struct PhotoPager: UIViewControllerRepresentable {
             let media = parent.mediaItems[index]
             if let cached = cache[media.id] { return cached }
             let root = AnyView(
-                MediaPageView(media: media, mediaStore: parent.mediaStore)
+                MediaPageView(media: media, mediaStore: parent.mediaStore,
+                    initialPlaybackSeconds: media.id == parent.initialMediaID ? parent.initialPlaybackSeconds : nil)
                     .environment(parent.env)
             )
             let controller = MediaHostingController(mediaID: media.id, rootView: root)
@@ -317,6 +325,7 @@ private struct PhotoPager: UIViewControllerRepresentable {
 private struct MediaPageView: View {
     let media: Media
     let mediaStore: MediaStore
+    let initialPlaybackSeconds: Double?
 
     var body: some View {
         switch media.type {
@@ -331,8 +340,8 @@ private struct MediaPageView: View {
 
     @ViewBuilder
     private var photoPage: some View {
-        if let name = media.localFileName {
-            LocalZoomableImage(url: mediaStore.mediaURL(for: name))
+        if let url = localMediaURL {
+            LocalZoomableImage(url: url)
                 .ignoresSafeArea()
         } else if let remote = media.remoteURL {
             RemoteZoomableImage(remoteURL: remote)
@@ -344,21 +353,20 @@ private struct MediaPageView: View {
 
     @ViewBuilder
     private var videoPage: some View {
-        if let url = localVideoURL {
-            StableVideoPlayer(url: url)
+        if let url = localMediaURL {
+            StableVideoPlayer(url: url, initialPlaybackSeconds: initialPlaybackSeconds)
                 .ignoresSafeArea(edges: .bottom)
         } else if media.remoteURL != nil {
-            RemoteVideoPage(remoteURL: media.remoteURL!)
+            RemoteVideoPage(remoteURL: media.remoteURL!, initialPlaybackSeconds: initialPlaybackSeconds)
                 .ignoresSafeArea(edges: .bottom)
         } else {
             missing("本地视频文件找不到了")
         }
     }
 
-    private var localVideoURL: URL? {
-        guard let name = media.localFileName else { return nil }
-        let localURL = mediaStore.mediaURL(for: name)
-        return FileManager.default.fileExists(atPath: localURL.path) ? localURL : nil
+    private var localMediaURL: URL? {
+        MediaFileAvailability.localURL(fileName: media.localFileName,
+            resolve: mediaStore.mediaURL(for:), exists: { FileManager.default.fileExists(atPath: $0.path) })
     }
 
     private var audioPage: some View {
@@ -423,23 +431,68 @@ private struct LocalZoomableImage: View {
 
 private struct StableVideoPlayer: View {
     let url: URL
+    var initialPlaybackSeconds: Double? = nil
+    var onFailure: ((URL) -> Void)? = nil
     @State private var player: AVPlayer?
+    @State private var failed = false
+    @State private var didSeekToSource = false
 
     var body: some View {
         Group {
-            if let player {
+            if failed {
+                VStack(spacing: 12) {
+                    Image(systemName: "video.slash").font(.largeTitle)
+                    Text("这段视频暂时无法播放")
+                    Button("重新播放") { preparePlayer() }
+                }
+                .foregroundStyle(.white)
+            } else if let player, let item = player.currentItem {
                 VideoPlayer(player: player)
+                    .onReceive(item.publisher(for: \.status).receive(on: RunLoop.main)) { status in
+                        if status == .failed { playbackFailed(for: item) }
+                        if status == .readyToPlay { seekToSource(in: item) }
+                    }
+                    .onReceive(item.publisher(for: \.duration).receive(on: RunLoop.main)) { _ in
+                        if item.status == .readyToPlay { seekToSource(in: item) }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(
+                        for: AVPlayerItem.failedToPlayToEndTimeNotification, object: item)
+                        .receive(on: RunLoop.main)) { _ in
+                        playbackFailed(for: item)
+                    }
             } else {
                 ProgressView().tint(.white)
             }
         }
         .task(id: url) {
-            player?.pause()
-            player = AVPlayer(url: url)
+            preparePlayer()
         }
         .onDisappear {
             player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            player = nil
         }
+    }
+
+    private func preparePlayer() {
+        player?.pause()
+        failed = false
+        didSeekToSource = false
+        player = AVPlayer(url: url)
+    }
+
+    private func seekToSource(in item: AVPlayerItem) {
+        guard player?.currentItem === item, !didSeekToSource, let seconds = VideoStartPosition.seconds(
+            requested: initialPlaybackSeconds, duration: CMTimeGetSeconds(item.duration)) else { return }
+        didSeekToSource = true
+        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func playbackFailed(for item: AVPlayerItem) {
+        guard player?.currentItem === item, !failed else { return }
+        player?.pause()
+        failed = true
+        onFailure?(url)
     }
 }
 
@@ -516,23 +569,24 @@ private struct RemoteVideoPage: View {
     @Environment(AppEnvironment.self) private var env
 
     let remoteURL: String
-    @State private var playableURL: URL?
-    @State private var failed = false
+    let initialPlaybackSeconds: Double?
+    @State private var playback = RemoteVideoPlayback()
 
     var body: some View {
         Group {
-            if let playableURL {
-                StableVideoPlayer(url: playableURL)
-            } else if failed {
+            if let playableURL = playback.playableURL {
+                StableVideoPlayer(url: playableURL, initialPlaybackSeconds: initialPlaybackSeconds,
+                                  onFailure: playback.playbackFailed(for:))
+            } else if playback.failed {
                 VStack(spacing: 12) {
                     Image(systemName: "icloud.slash")
                         .font(BubuTheme.Font.scaled(42))
                     Text("视频还没准备好，请稍后重试")
                         .font(BubuTheme.Font.body)
                     Button("重试") {
-                        failed = false
                         Task { await resolve() }
                     }
+                    .disabled(playback.isLoading)
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
@@ -544,14 +598,12 @@ private struct RemoteVideoPage: View {
             }
         }
         .task(id: remoteURL) { await resolve() }
+        .onDisappear { playback.cancel() }
     }
 
     private func resolve() async {
-        guard playableURL == nil else { return }
-        do {
-            playableURL = try await env.apiClient.signedFileURL(for: remoteURL)
-        } catch {
-            failed = true
+        await playback.resolve {
+            try await env.apiClient.signedFileURL(for: remoteURL)
         }
     }
 }

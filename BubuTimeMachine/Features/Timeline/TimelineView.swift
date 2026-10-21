@@ -1,20 +1,6 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - 时光轴排序方式
-/// 拍摄时间 = 事件真实发生的时刻（回顾成长）；记录时间 = 家人存进 App 的时刻（看最新动态）。
-enum TimelineSortMode: String, CaseIterable {
-    case capture   // 按拍摄/发生时间
-    case recorded  // 按记录时间
-
-    var title: String {
-        switch self {
-        case .capture: return "按拍摄时间"
-        case .recorded: return "按记录时间"
-        }
-    }
-}
-
 // MARK: - 时光轴（分页外壳）
 /// 只做一件事：持有「当前取多少条」和排序方式，把它们喂给真正的列表视图。
 ///
@@ -27,26 +13,20 @@ enum TimelineSortMode: String, CaseIterable {
 struct TimelineView: View {
     /// 每页条数。一屏最多显示 3~4 条，200 条足够连翻很久都不触底。
     static let pageStep = 200
-    /// 搜索时的取数上限。搜索是在内存里跨 7 个字段做的，只在「当前这一页」里找
-    /// 会让分页把搜索范围也一起截断——那是功能倒退。搜索期间把窗口整个放开。
-    /// 仍留一个很高的上限，纯粹是防御性的（十万条时至少不会把内存打爆）。
-    static let searchWindow = 20_000
-
     @State private var pageLimit = TimelineView.pageStep
-    /// 搜索词提到外层：它决定要取多大的窗口，而窗口只能在内层的 init 里定。
+    @State private var filters = TimelineFilters()
+    /// 搜索词与筛选一起重建数据库查询，结果仍按页取回。
     @State private var searchText = TimelineList.semanticVisualProbe ? "扶着沙发学走路" : ""
     @AppStorage("bubu.timeline.sortMode") private var sortModeRaw = TimelineSortMode.capture.rawValue
 
-    private var effectiveLimit: Int {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? pageLimit : TimelineView.searchWindow
-    }
-
     var body: some View {
-        TimelineList(pageLimit: effectiveLimit,
+        TimelineList(pageLimit: pageLimit,
                      sortMode: TimelineSortMode(rawValue: sortModeRaw) ?? .capture,
-                     searchText: $searchText,
+                     searchText: $searchText, filters: $filters,
                      onNeedMore: { pageLimit += TimelineView.pageStep })
+            .onChange(of: searchText) { _, _ in pageLimit = Self.pageStep }
+            .onChange(of: filters) { _, _ in pageLimit = Self.pageStep }
+            .onChange(of: sortModeRaw) { _, _ in pageLimit = Self.pageStep }
     }
 }
 
@@ -61,18 +41,14 @@ struct TimelineList: View {
     private let onNeedMore: () -> Void
 
     init(pageLimit: Int, sortMode: TimelineSortMode,
-         searchText: Binding<String>, onNeedMore: @escaping () -> Void) {
+         searchText: Binding<String>, filters: Binding<TimelineFilters> = .constant(.init()),
+         onNeedMore: @escaping () -> Void) {
         self.pageLimit = pageLimit
         self.onNeedMore = onNeedMore
         self._searchText = searchText
-        // 取数排序必须跟随 sortMode：只按 happenedAt 取前 N 条、再在内存里按 createdAt 重排，
-        // 拿到的会是「错的那 N 条」——批量导入的三年前旧照片正好会踩中这个坑。
-        var descriptor = FetchDescriptor<Entry>(
-            predicate: #Predicate { !$0.isArchived },
-            sortBy: sortMode == .capture
-                ? [SortDescriptor(\Entry.happenedAt, order: .reverse)]
-                : [SortDescriptor(\Entry.createdAt, order: .reverse)])
-        descriptor.fetchLimit = pageLimit
+        self._filters = filters
+        let descriptor = TimelineEntryQuery.descriptor(filters: filters.wrappedValue,
+            query: Self.semanticVisualProbe ? "" : searchText.wrappedValue, sort: sortMode, limit: pageLimit)
         _entries = Query(descriptor, animation: .default)
     }
 
@@ -81,12 +57,21 @@ struct TimelineList: View {
     @Query private var entries: [Entry]
     @Query private var profiles: [ChildProfile]
     @State private var showFamilyFeed = false
+    @State private var showFilters = false
     @State private var entryPendingDelete: Entry?
     /// 长按「分享这一刻」选中的记录。
     @State private var entryPendingShare: Entry?
     @State private var sections: [TimelineSection] = []
-    /// 由外层持有：搜索期间外层会把取数窗口整个放开，避免分页截断搜索范围。
+    /// 由外层持有：数据库先匹配搜索词，再取当前页，不展开整库常驻内存。
     @Binding private var searchText: String
+    @Binding private var filters: TimelineFilters
+    @State private var remoteEntries: [Entry] = []
+    @State private var remoteRawHits: [SemanticSearchHit] = []
+    @State private var remoteResultsKey: SemanticSearchTaskKey?
+    @State private var pendingRemoteCount = 0
+    @State private var remoteHasMore = false
+    @State private var remoteFailureMessage: String?
+    @State private var searchRetry = 0
     @State private var semanticMatches: [UUID: SemanticSearchHit] = [:]
     @State private var semanticSearchState: SemanticSearchState = .idle
     /// 排序方式偏好：默认按拍摄时间（成长回顾心智），可切按记录时间（家庭动态心智）。
@@ -108,9 +93,10 @@ struct TimelineList: View {
         #endif
         let semanticTaskKey = SemanticSearchTaskKey(
             query: searchText,
-            enabled: (env.config.semanticSearchEnabled && env.config.isAIConfigured) || Self.semanticVisualProbe,
-            serviceRevision: env.aiServiceRevision,
-            entriesRevision: entriesRevision
+            enabled: env.config.isAIConfigured || Self.semanticVisualProbe,
+            serviceRevision: env.aiServiceRevision, entriesRevision: entriesRevision,
+            filters: filters, sort: sortMode, access: LearningServiceAccess(env),
+            visualEnabled: env.config.semanticSearchEnabled, retry: searchRetry
         )
         #if DEBUG
         let _ = Self.logSlowKey(CFAbsoluteTimeGetCurrent() - bodyT0, entries: entries.count)
@@ -118,10 +104,10 @@ struct TimelineList: View {
         ZStack {
             BubuTheme.Color.background.ignoresSafeArea()
 
-            if entries.isEmpty {
-                emptyState
-            } else if sections.isEmpty {
-                searchEmptyState
+            if sections.isEmpty {
+                if filters.isActive || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    searchEmptyState
+                } else { emptyState }
             } else {
                 timeline
             }
@@ -133,11 +119,11 @@ struct TimelineList: View {
         // 直接压在列表内容上。搜索位置不该随容器漂移，这里固定住。
         .searchable(text: $searchText,
                     placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: env.config.semanticSearchEnabled
-                    ? "找文字或照片里的画面" : "找找\(profiles.first?.name ?? "布布")的记录")
+                    prompt: env.config.isAIConfigured
+                    ? "找文字、画面描述或视频内容" : "找找\(profiles.first?.name ?? "布布")的记录")
         // 本地文字结果立即出现；停顿 300ms 后再请求家中语义索引。请求失败不影响离线结果。
         .task(id: semanticTaskKey) { await updateSearch(semanticTaskKey) }
-        .onAppear { rebuildSectionsIfNeeded(); refreshUnseenBadge() }
+        .onAppear { rebuildSections(); refreshUnseenBadge() }
         .onChange(of: entries) { _, _ in
             entriesRevision += 1
             // 卡片的增删都由 sections 驱动。不裹动画的话，删除是「瞬间蒸发」——
@@ -150,7 +136,18 @@ struct TimelineList: View {
             refreshUnseenBadge()
         }
         .onChange(of: sortModeRaw) { _, _ in rebuildSections() }
+        .onChange(of: filters) { _, _ in rebuildSections() }
+        .onChange(of: searchText) { _, _ in rebuildSections() }
+        .onChange(of: env.syncEngine.isSyncing) { _, running in
+            if !running, pendingRemoteCount > 0 { refreshRemoteMapping(); rebuildSections() }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) { if filters.isActive { filterSummary } }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showFilters = true } label: {
+                    Label("筛选", systemImage: filters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                }.accessibilityIdentifier("timeline.filters")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Picker("排序方式", selection: $sortModeRaw) {
@@ -178,6 +175,9 @@ struct TimelineList: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showFilters) {
+            TimelineFilterSheet(filters: $filters)
         }
         .sheet(isPresented: $showFamilyFeed) {
             NavigationStack { FamilyFeedView() }
@@ -252,13 +252,12 @@ struct TimelineList: View {
                     }
                 }
                 // 触底加载下一页：取满一页说明后面很可能还有，
-                // 这个哨兵出现在视野里就把窗口再放大一页。搜索中不分页（本页内过滤即可）。
-                if entries.count >= pageLimit,
-                   searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // 这个哨兵出现在视野里就把窗口再放大一页，搜索结果同样分页。
+                if entries.count >= pageLimit {
                     HStack {
                         Spacer()
                         ProgressView().tint(BubuTheme.Color.primary)
-                        Text("正在翻出更早的时光…")
+                        Text(sortMode.ascending ? "正在翻出后面的时光…" : "正在翻出更多时光…")
                             .font(BubuTheme.Font.caption)
                             .foregroundStyle(BubuTheme.Color.secondaryText)
                         Spacer()
@@ -273,6 +272,7 @@ struct TimelineList: View {
         .refreshable {
             env.syncEngine.syncNow()
             try? await Task.sleep(for: .milliseconds(650))
+            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { searchRetry += 1 }
         }
         .bubuIOS27SwipeActionsContainer()
         .navigationDestination(for: UUID.self) { entryID in
@@ -369,7 +369,7 @@ struct TimelineList: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.top, 4)
-                    if let hit = semanticMatches[entry.id] {
+                    if let hit = currentSearchHit(for: entry.id) {
                         Label(semanticReason(entry: entry, hit: hit), systemImage: "sparkle.magnifyingglass")
                             .font(BubuTheme.Font.caption.weight(.semibold))
                             .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -433,7 +433,7 @@ struct TimelineList: View {
                     }
                 }
             }
-            if let hit = semanticMatches[entry.id] {
+            if let hit = currentSearchHit(for: entry.id) {
                 Label(semanticReason(entry: entry, hit: hit), systemImage: "sparkle.magnifyingglass")
                     .font(BubuTheme.Font.caption.weight(.semibold))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -461,11 +461,11 @@ struct TimelineList: View {
 
     /// 标题/副文案规则抽在 TimelineCardText（纯函数 + 单测），避免「同一句话上下重复」复发。
     private func cardHeadline(_ entry: Entry) -> String {
-        TimelineCardText.headline(title: entry.title, note: entry.note)
+        TimelineCardText.headline(title: entry.title, note: TimelineFilters.displayNote(entry.note))
     }
 
     private func cardSubtitle(_ entry: Entry) -> String? {
-        TimelineCardText.subtitle(title: entry.title, note: entry.note)
+        TimelineCardText.subtitle(title: entry.title, note: TimelineFilters.displayNote(entry.note))
     }
 
     /// 封面长宽比：取媒体真实比例并夹在可读区间。
@@ -504,41 +504,62 @@ struct TimelineList: View {
         .background(BubuTheme.Color.background.opacity(0.95))
     }
 
+    private var filterSummary: some View {
+        HStack(spacing: 10) {
+            Text(filterDescription).font(BubuTheme.Font.caption).lineLimit(2)
+            Spacer(minLength: 0)
+            Button("清除筛选") { filters = .init() }.font(BubuTheme.Font.caption.weight(.semibold))
+                .frame(minHeight: 44)
+        }
+        .padding(.horizontal, 16).background(BubuTheme.Color.card)
+    }
+
+    private var filterDescription: String {
+        var parts: [String] = []
+        if filters.kind != .all { parts.append(filters.kind.title) }
+        if filters.source != .all { parts.append(filters.source.title) }
+        if let start = filters.start { parts.append("从 " + BubuDateFormat.shortDate(start)) }
+        if let end = filters.end { parts.append("截至 " + BubuDateFormat.shortDate(end)) }
+        return parts.joined(separator: " · ")
+    }
+
     private var emptyState: some View {
         VStack(spacing: 18) {
             BubuEmptyIllustration(assetName: "BubuEmptyTimeline", fallbackExpression: .bye)
-            Text(BubuTheme.Copy.emptyTimeline)
-                .font(BubuTheme.Font.body)
-                .foregroundStyle(BubuTheme.Color.secondaryText)
+            Text("等待第二大脑同步布布的时光")
+                .font(BubuTheme.Font.body.weight(.semibold))
+            Text("已确认属于布布的素材会自动出现在这里，家人留下的记录也会保留。")
+                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 .multilineTextAlignment(.center)
-        }
-        .padding(40)
+            Button("同步家庭记录") { env.syncEngine.syncNow() }.buttonStyle(.bordered)
+        }.padding(32)
     }
 
     private var searchEmptyState: some View {
-        VStack(spacing: 16) {
-            BubuMascotBadge(size: 72, expression: .surprised)
-            if semanticSearchState == .searching {
-                ProgressView("正在理解照片画面…")
-                    .font(BubuTheme.Font.body)
-            } else {
-                Text("没找到「\(searchText)」相关的记录")
-                    .font(BubuTheme.Font.body)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .multilineTextAlignment(.center)
-            }
-            if semanticSearchState == .offlineFallback {
-                Label("语义服务暂时不可用，已完成本地文字搜索", systemImage: "wifi.slash")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-            if semanticSearchState == .active {
-                Text("照片画面和文字都找过了，换个说法再试试")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
+        ScrollView {
+            VStack(spacing: 16) {
+                BubuMascotBadge(size: 72, expression: .surprised)
+                if semanticSearchState == .searching {
+                    ProgressView("正在查找第二大脑的素材解析…")
+                } else if pendingRemoteCount > 0, remoteResultsAreCurrent {
+                    Text("找到相关时光，正在等这台设备同步")
+                        .font(BubuTheme.Font.body.weight(.semibold))
+                } else if semanticSearchState == .offlineFallback {
+                    Text("暂时没能完成解析检索")
+                        .font(BubuTheme.Font.body.weight(.semibold))
+                } else {
+                    Text(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                         ? "这个筛选条件下暂时没有时光" : "本机暂未找到「\(searchText)」的匹配记录")
+                        .font(BubuTheme.Font.body).multilineTextAlignment(.center)
+                }
+                if shouldShowSemanticStatus { semanticStatusBanner }
+                if filters.isActive {
+                    Button("清除筛选，再看看") { filters = .init() }.buttonStyle(.bordered)
+                }
+                if !searchText.isEmpty { Button("清除搜索词") { searchText = "" } }
+                Button("同步家庭记录") { env.syncEngine.syncNow() }
+            }.padding(30)
         }
-        .padding(40)
     }
 
     // MARK: 分段
@@ -553,6 +574,11 @@ struct TimelineList: View {
         let enabled: Bool
         let serviceRevision: Int
         let entriesRevision: Int
+        let filters: TimelineFilters
+        let sort: TimelineSortMode
+        let access: LearningServiceAccess?
+        let visualEnabled: Bool
+        let retry: Int
     }
 
     private enum SemanticSearchState: Equatable {
@@ -565,7 +591,7 @@ struct TimelineList: View {
     private var shouldShowSemanticStatus: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         semanticSearchState != .idle &&
-        ((env.config.semanticSearchEnabled && env.config.isAIConfigured) || Self.semanticVisualProbe)
+        (env.config.isAIConfigured || Self.semanticVisualProbe) && filters.kind != .audio
     }
 
     static var semanticVisualProbe: Bool {
@@ -588,28 +614,37 @@ struct TimelineList: View {
 
     @ViewBuilder
     private var semanticStatusBanner: some View {
-        HStack(spacing: 8) {
-            switch semanticSearchState {
-            case .searching:
-                ProgressView().controlSize(.small)
-                Text("正在理解照片画面…")
-            case .active:
-                Image(systemName: "sparkle.magnifyingglass")
-                Text("已同时搜索照片画面与文字")
-            case .offlineFallback:
-                Image(systemName: "wifi.slash")
-                Text("语义服务暂时不可用，已用本地文字搜索")
-            case .idle:
-                EmptyView()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                switch semanticSearchState {
+                case .searching:
+                    ProgressView().controlSize(.small)
+                    Text("正在查找第二大脑解析…")
+                case .active:
+                    Image(systemName: "sparkle.magnifyingglass")
+                    Text("已查找本机文字与第二大脑解析")
+                case .offlineFallback:
+                    Image(systemName: "wifi.slash")
+                    Text(remoteFailureMessage ?? "解析检索暂不可用，本机结果仍可查看")
+                case .idle: EmptyView()
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            if pendingRemoteCount > 0, remoteResultsAreCurrent {
+                Text("另有 \(pendingRemoteCount) 条匹配时光尚未同步到这台设备。")
+                Button("同步家庭记录") { env.syncEngine.syncNow() }
+            }
+            if remoteHasMore, remoteResultsAreCurrent {
+                Text("解析匹配仅展示前 50 项。可以缩小拍摄日期或搜索词，继续找其他结果。")
+            }
+            if semanticSearchState == .offlineFallback {
+                Button("重试解析检索") { searchRetry += 1 }
+            }
         }
         .font(BubuTheme.Font.caption.weight(.semibold))
         .foregroundStyle(BubuTheme.Color.secondaryText)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(BubuTheme.Color.card.opacity(0.78), in: Capsule())
-        .accessibilityElement(children: .combine)
+        .padding(14)
+        .background(BubuTheme.Color.card.opacity(0.78), in: RoundedRectangle(cornerRadius: 14))
     }
 
     /// 仅首屏 section 的前 6 张做错峰入场动画，其余直接呈现。
@@ -622,65 +657,132 @@ struct TimelineList: View {
         return 6
     }
 
-    private func rebuildSectionsIfNeeded() {
-        if sections.isEmpty { rebuildSections() }
+    private var remoteResultsAreCurrent: Bool {
+        guard let key = remoteResultsKey else { return false }
+        return key.query == searchText && key.filters == filters && key.sort == sortMode
+            && key.serviceRevision == env.aiServiceRevision && key.access == LearningServiceAccess(env)
+            && key.visualEnabled == env.config.semanticSearchEnabled
+    }
+
+    private func currentSearchHit(for id: UUID) -> SemanticSearchHit? {
+        remoteResultsAreCurrent ? semanticMatches[id] : nil
     }
 
     private func updateSearch(_ key: SemanticSearchTaskKey) async {
-        semanticMatches = [:]
+        semanticMatches = [:]; remoteEntries = []; remoteRawHits = []; remoteResultsKey = nil
+        pendingRemoteCount = 0; remoteHasMore = false; remoteFailureMessage = nil
         semanticSearchState = .idle
-        // 本地匹配永远先完成，断网或未开启语义能力时搜索体验不变。
         rebuildSections()
-
         let query = key.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, key.enabled else { return }
+        guard !query.isEmpty, key.enabled, key.filters.kind != .audio else { return }
 #if DEBUG
         if Self.semanticVisualProbe, let entry = entries.first {
-            semanticMatches = [entry.id: SemanticSearchHit(
-                assetId: "visual-probe",
-                entryLocalId: entry.id.uuidString,
-                mediaRecordId: "visual-probe",
-                capturedAt: ISO8601DateFormatter().string(from: entry.happenedAt),
-                score: 0.93,
-                reason: "画面语义接近“扶着沙发学走路”"
-            )]
-            semanticSearchState = .active
-            rebuildSections()
+            remoteRawHits = [SemanticSearchHit(assetId: "visual-probe", entryLocalId: entry.id.uuidString,
+                mediaRecordId: "visual-probe", capturedAt: ISO8601DateFormatter().string(from: entry.happenedAt),
+                score: 0.93, reason: "画面语义接近“扶着沙发学走路”")]
+            remoteResultsKey = key
+            refreshRemoteMapping(); semanticSearchState = .active; rebuildSections()
             return
         }
 #endif
-        do {
-            try await Task.sleep(for: .milliseconds(300))
-        } catch {
-            return
-        }
-        guard !Task.isCancelled else { return }
+        do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+        guard !Task.isCancelled, let access = key.access, LearningServiceAccess(env) == access else { return }
         semanticSearchState = .searching
+        let api = env.apiClient
+        let visualService = env.aiService
+        var hits: [SemanticSearchHit] = []
+        var failure: String?
+        var more = false
         do {
-            let response = try await env.aiService.semanticSearch(query: query, limit: 30)
-            guard !Task.isCancelled, response.query == query else { return }
-            semanticMatches = TimelineSemanticSearchResolver.bestHits(
-                response.hits,
-                availableEntryIDs: Set(entries.map(\.id))
-            )
-            semanticSearchState = .active
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, searchText == key.query,
-                  env.aiServiceRevision == key.serviceRevision else { return }
-            semanticMatches = [:]
-            semanticSearchState = .offlineFallback
+            let token = try await api.authenticate(role: "ai").token
+            guard !Task.isCancelled, LearningServiceAccess(env) == access else { return }
+            let response = try await TimelineAnalysisSearchClient(baseURL: access.baseURL)
+                .search(query: query, filters: key.filters, sort: key.sort, token: token)
+            more = response.hasMore || response.items.count > 50
+            hits = response.confirmedHits.map { hit in
+                SemanticSearchHit(assetId: "analysis:" + hit.mediaID, entryLocalId: hit.entryLocalID,
+                    mediaRecordId: hit.mediaID, capturedAt: hit.capturedAt ?? "", score: 0,
+                    reason: hit.matchReason?.isEmpty == false ? hit.matchReason! : "第二大脑解析：" + String((hit.description ?? "内容匹配").prefix(100)))
+            }
+        } catch is CancellationError { return }
+        catch {
+            guard !Task.isCancelled else { return }
+            failure = (error as? LearningServiceError)?.errorDescription ?? "第二大脑解析检索暂不可用，已保留本机结果"
         }
+        // Preserve the existing, separately opted-in visual search. Both channels only map to local facts.
+        if key.visualEnabled, !Task.isCancelled, LearningServiceAccess(env) == access {
+            do {
+                let response = try await visualService.semanticSearch(query: query, limit: 30)
+                if response.query == query { hits.append(contentsOf: response.hits.prefix(30)) }
+            } catch is CancellationError { return }
+            catch {
+                if failure == nil { failure = "画面检索暂不可用，本机文字与第二大脑解析结果仍可查看" }
+            }
+        }
+        guard !Task.isCancelled, searchText == key.query, filters == key.filters,
+              sortMode == key.sort, LearningServiceAccess(env) == access else { return }
+        remoteRawHits = hits; remoteResultsKey = key; remoteHasMore = more; remoteFailureMessage = failure
+        semanticSearchState = failure == nil ? .active : .offlineFallback
+        refreshRemoteMapping()
         rebuildSections()
     }
 
+    /// Fetch only bounded remote IDs, including those outside the current text-search page.
+    /// Re-run this local mapping when a sync completes; it never polls the network.
+    private func refreshRemoteMapping() {
+        guard remoteResultsAreCurrent else { return }
+        let ids = Array(Set(remoteRawHits.compactMap { UUID(uuidString: $0.entryLocalId) }))
+        guard !ids.isEmpty else { remoteEntries = []; semanticMatches = [:]; pendingRemoteCount = 0; return }
+        do {
+            var existing = FetchDescriptor<Entry>(predicate: #Predicate { ids.contains($0.id) })
+            existing.fetchLimit = 80
+            let known = try context.fetch(existing)
+            let references = remoteRawHits.compactMap { hit -> (entryID: UUID, mediaID: String)? in
+                guard let id = UUID(uuidString: hit.entryLocalId) else { return nil }
+                return (id, hit.mediaRecordId)
+            }
+            pendingRemoteCount = Self.semanticVisualProbe ? 0 : TimelineEntryQuery.pendingRemoteCount(references: references, known: known)
+            remoteEntries = try context.fetch(TimelineEntryQuery.descriptor(filters: filters, query: "",
+                sort: sortMode, limit: 80, entryIDs: ids))
+            if filters.kind != .all {
+                remoteEntries = remoteEntries.filter { entry in
+                    remoteRawHits.contains { hit in
+                        hit.entryLocalId.caseInsensitiveCompare(entry.id.uuidString) == .orderedSame
+                            && entry.sortedMedia.contains { $0.remoteId == hit.mediaRecordId && $0.typeRaw == filters.kind.rawValue }
+                    }
+                }
+            }
+            let available = Set(remoteEntries.map(\.id))
+            var matches = TimelineSemanticSearchResolver.bestHits(
+                remoteRawHits.filter { !$0.assetId.hasPrefix("analysis:") }, availableEntryIDs: available)
+            var explained: Set<UUID> = []
+            // The analysis endpoint has no confidence score; prefer its first explanation explicitly instead of inventing one.
+            for hit in remoteRawHits where hit.assetId.hasPrefix("analysis:") {
+                if let id = UUID(uuidString: hit.entryLocalId), available.contains(id), explained.insert(id).inserted {
+                    matches[id] = hit
+                }
+            }
+            semanticMatches = matches
+        } catch {
+            remoteEntries = []; semanticMatches = [:]
+            remoteFailureMessage = "本机记录暂时未能读取完整，请稍后重试。"
+            semanticSearchState = .offlineFallback
+        }
+    }
+
     private func cardMedia(_ entry: Entry) -> Media? {
-        guard let recordID = semanticMatches[entry.id]?.mediaRecordId else { return entry.coverMedia }
+        guard let recordID = currentSearchHit(for: entry.id)?.mediaRecordId else { return filterCover(entry) }
         // 不在 ?? autoclosure 里捕获 SwiftData 模型；Release whole-module 会按严格并发拒绝。
         let matched = entry.sortedMedia.first(where: { $0.remoteId == recordID })
-        let fallback = entry.coverMedia
+        let fallback = filterCover(entry)
         return matched ?? fallback
+    }
+
+    private func filterCover(_ entry: Entry) -> Media? {
+        if filters.kind == .photo || filters.kind == .video {
+            return entry.sortedMedia.first { $0.typeRaw == filters.kind.rawValue }
+        }
+        return entry.coverMedia
     }
 
     private func semanticReason(entry: Entry, hit: SemanticSearchHit) -> String {
@@ -688,7 +790,7 @@ struct TimelineList: View {
         let clean = hit.reason.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "画面语义接近", with: "画面接近")
         if matchedMedia == nil, entry.coverMedia != nil {
-            return "这条记录中的另一张照片：" + clean
+            return "这条记录中的另一份素材：" + clean
         }
         return clean
     }
@@ -697,11 +799,11 @@ struct TimelineList: View {
 
     /// 当前排序方式下条目的排序/分组键。
     private func sortDate(_ entry: Entry) -> Date {
-        sortMode == .capture ? entry.happenedAt : entry.createdAt
+        sortMode == .recorded ? entry.createdAt : entry.happenedAt
     }
 
     /// 重新分组：仅在 entries / 搜索词 / 排序方式变化时调用，避免每次 body 求值 O(n) 重分组。
-    /// @Query 固定按 happenedAt 倒序取数；按记录时间浏览时在这里内存重排（个人家庭库量级无压力）。
+    /// @Query 已按当前顺序取页；这里把有限的本机页与远端映射结果合并分组。
     #if DEBUG
     /// 性能取证：semanticTaskKey（含全库 revision 遍历）在 body 里的耗时。
     /// `-uitest-perf` 时打印每次；平时只在超 8ms 时告警。
@@ -725,7 +827,7 @@ struct TimelineList: View {
         }
         #endif
         let calendar = Calendar.current
-        let filtered = matchingEntries.sorted { sortDate($0) > sortDate($1) }
+        let filtered = matchingEntries.sorted { sortMode.ascending ? sortDate($0) < sortDate($1) : sortDate($0) > sortDate($1) }
         let groups = Dictionary(grouping: filtered) { entry -> DateComponents in
             calendar.dateComponents([.year, .month], from: sortDate(entry))
         }
@@ -734,22 +836,23 @@ struct TimelineList: View {
                 TimelineSection(key: monthTitle(comps), entries: items)
             }
             .sorted { lhs, rhs in
-                (lhs.entries.first.map(sortDate) ?? .distantPast) >
-                (rhs.entries.first.map(sortDate) ?? .distantPast)
+                let left = lhs.entries.first.map(sortDate) ?? .distantPast
+                let right = rhs.entries.first.map(sortDate) ?? .distantPast
+                return sortMode.ascending ? left < right : left > right
             }
     }
 
     /// 搜索命中范围：正文 / 第一人称 / 标题 / 地点 / 作者 / 心情 / 「第一次」名称。
     private var matchingEntries: [Entry] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return entries }
-        let lower = q.lowercased()
-        return entries.filter { e in
-            func hit(_ s: String?) -> Bool { s?.lowercased().contains(lower) ?? false }
-            return semanticMatches[e.id] != nil || hit(e.note) || hit(e.firstPersonNote) || hit(e.title)
-                || hit(e.locationName) || hit(e.authorRole)
-                || hit(e.mood?.rawValue) || hit(e.firstTime?.what)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let predicate = TimelineEntryQuery.descriptor(filters: filters, query: query, sort: sortMode, limit: pageLimit).predicate
+        var result = entries.filter { entry in (try? predicate?.evaluate(entry)) == true }
+        if remoteResultsAreCurrent {
+            let scope = TimelineEntryQuery.descriptor(filters: filters, query: "", sort: sortMode, limit: 80).predicate
+            let present = Set(result.map(\.id))
+            result += remoteEntries.filter { !present.contains($0.id) && (try? scope?.evaluate($0)) == true }
         }
+        return result
     }
 
     private func monthTitle(_ comps: DateComponents) -> String {
@@ -773,6 +876,7 @@ struct TimelineList: View {
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
         entryPendingDelete = nil
+        rebuildSections()
         let deletedID = entry.id
         undoToast = BubuToastState(message: "已删除这条时光", systemImage: "trash",
                                    actionTitle: "撤销") { restoreEntry(deletedID) }
@@ -793,6 +897,7 @@ struct TimelineList: View {
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()
+        rebuildSections()
     }
 }
 

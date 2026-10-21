@@ -7,6 +7,7 @@ import pytest
 from semantic_index import SemanticIndex
 from semantic_worker import (
     ClaimedJob,
+    PocketBaseWorkerClient,
     SemanticWorker,
     retry_delay_seconds,
     safe_error_summary,
@@ -140,6 +141,23 @@ def test_unknown_job_fails_without_poisoning_worker(tmp_path: Path):
     assert worker.run_once() == 1
     assert client.completed == []
     assert client.failed == [("job-1", "RuntimeError")]
+
+
+def test_claim_filters_both_ready_and_expired_jobs_to_semantic_kinds(monkeypatch):
+    client = PocketBaseWorkerClient()
+    def request(method, path, **kwargs):
+        assert method == "GET"
+        query = kwargs["params"]["filter"]
+        # Contract at the PocketBase boundary; mixed-job behavior is also covered
+        # against a real disposable database in test_semantic_updates.py.
+        assert query.startswith("(kind='semantic_media_upsert' || kind='semantic_media_delete') && (")
+        assert "state='queued'" in query and "state='running'" in query
+        return httpx.Response(200, json={"items": []})
+    monkeypatch.setattr(client, "_request", request)
+    try:
+        assert client.claim() == []
+    finally:
+        client.close()
 
 
 def test_retry_backoff_is_bounded():
