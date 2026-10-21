@@ -114,6 +114,9 @@ class LearningWorker:
                 try:course=self.store.course(family,course_id)
                 except Missing:
                     self.store.finish_job(job,success=True);return True
+                if not self.store.course_sealed(family,course_id):
+                    # The last file's arrival/analysis enqueues composition again.
+                    self.store.finish_job(job,success=True);return True
                 sources=self.store.sources(family,child,day,course_id=course_id)
                 if not sources:
                     self.store.finish_job(job,success=True);return True

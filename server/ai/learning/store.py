@@ -119,6 +119,10 @@ class LearningStore:
             for table in ("sources", "packs"):
                 if "course_id" not in {r["name"] for r in db.execute("PRAGMA table_info(" + table + ")")}:
                     db.execute("ALTER TABLE " + table + " ADD COLUMN course_id TEXT NOT NULL DEFAULT ''")
+            # Large lessons arrive one file per request (proxies cap request size).
+            # A course composes only after every announced file has arrived.
+            if "expected_files" not in {r["name"] for r in db.execute("PRAGMA table_info(courses)")}:
+                db.execute("ALTER TABLE courses ADD COLUMN expected_files INTEGER NOT NULL DEFAULT 0")
             db.execute("INSERT OR IGNORE INTO analysis_history SELECT * FROM analyses")
             db.execute("COMMIT")
 
@@ -398,17 +402,19 @@ class LearningStore:
 
     # Parent-declared lessons. A course groups exactly the files of one upload.
     def create_course(self, family: str, child: str, day: str, title: str, kind: str,
-                      language: str = "en-US", created_by: str = "") -> dict:
+                      language: str = "en-US", created_by: str = "", expected_files: int = 0) -> dict:
         valid_day(day)
         title = " ".join(str(title).split())[:60]
         if not family or not child or not title:
             raise ValueError("课程缺少名称")
         if kind not in COURSE_KINDS or language not in {"en-US", "zh-CN"}:
             raise ValueError("课程类型或语言无效")
+        if type(expected_files) is not int or not 0 <= expected_files <= 8:
+            raise ValueError("课程文件数量无效")
         cid = uuid.uuid4().hex
         with self.db() as db:
-            db.execute("INSERT INTO courses(id,family_id,child_id,school_date,title,kind,language,created_by,created_at) "
-                       "VALUES(?,?,?,?,?,?,?,?,?)", (cid, family, child, day, title, kind, language, created_by[:100], time.time()))
+            db.execute("INSERT INTO courses(id,family_id,child_id,school_date,title,kind,language,created_by,created_at,expected_files) "
+                       "VALUES(?,?,?,?,?,?,?,?,?,?)", (cid, family, child, day, title, kind, language, created_by[:100], time.time(), expected_files))
         return self.course(family, cid)
 
     def course(self, family: str, cid: str) -> dict:
@@ -417,6 +423,13 @@ class LearningStore:
         if not row:
             raise Missing("课程不存在")
         return dict(row)
+
+    def course_file_count(self, family: str, cid: str) -> int:
+        with self.db() as db:
+            return db.execute("SELECT count(*) FROM sources WHERE family_id=? AND course_id=? AND deleted=0", (family, cid)).fetchone()[0]
+
+    def course_sealed(self, family: str, cid: str) -> bool:
+        return self.course_file_count(family, cid) >= self.course(family, cid)["expected_files"]
 
     def courses(self, family: str, child: str, start: str, end: str) -> list[dict]:
         valid_day(start); valid_day(end)

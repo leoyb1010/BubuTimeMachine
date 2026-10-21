@@ -97,7 +97,7 @@ function renderReview(body,data){
   for(const item of items)body.append(el('article',{class:'review-list-item'},el('div',{},el('h3',{},item.activity?.title || item.concept),el('p',{class:'muted'},item.reason || '已开放的学习内容')),button('只玩这个',()=>launch([item],item.activity.title),'secondary')));
 }
 const KIND_LABELS={teaching:'教学',practice:'练习',song:'儿歌'};
-const STATE_LABELS={processing:'解析中',draft:'待家长核对',published:'可以一起学',no_lesson:'没找到原声题',failed:'解析失败',waiting:'准备中'};
+const STATE_LABELS={processing:'解析中',uploading:'上传未完成',draft:'待家长核对',published:'可以一起学',no_lesson:'没找到原声题',failed:'解析失败',waiting:'准备中'};
 function uploadForm(){
   const title=el('input',{name:'title',required:'',maxlength:'60',placeholder:'例如：水果单词'});
   const kind=el('select',{name:'kind'},...Object.entries(KIND_LABELS).map(([value,label])=>el('option',{value},label)));
@@ -105,26 +105,34 @@ function uploadForm(){
   const files=el('input',{type:'file',name:'files',multiple:'',required:'',accept:'video/*,audio/*,image/jpeg,image/png,image/heic'});
   const progress=el('progress',{max:'100',value:'0',hidden:true});
   const submit=el('button',{type:'submit',class:'primary'},'上传并开始解析');
-  const form=el('form',{class:'upload-form',onsubmit:event=>{
+  const form=el('form',{class:'upload-form',onsubmit:async event=>{
     event.preventDefault();
-    const chosen=[...files.files];
+    const chosen=[...files.files].sort((a,b)=>Number(a.type.startsWith('image/'))-Number(b.type.startsWith('image/')));
     if(!title.value.trim()||!chosen.length){notice('请填写课程名称并选择文件。');return;}
     if(chosen.length>8){notice('每节课最多 8 个文件。');return;}
-    if(!chosen.some(f=>/^(video|audio)\//.test(f.type))){notice('至少需要一段有老师声音的视频或录音。');return;}
-    const data=new FormData();
-    data.append('child_id',state.child);data.append('school_date',state.date);data.append('title',title.value.trim());
-    data.append('kind',kind.value);data.append('language',language.value);
-    for(const file of chosen)data.append('files',file,file.name);
-    const request=new XMLHttpRequest();
-    request.open('POST','/learning/api/courses');request.setRequestHeader('X-Bubu-Learning','1');request.withCredentials=true;
-    request.upload.onprogress=e=>{if(e.lengthComputable){progress.hidden=false;progress.value=Math.round(e.loaded/e.total*100);}};
-    request.onload=()=>{submit.disabled=false;progress.hidden=true;
-      if(request.status>=200&&request.status<300){notice('已上传，正在解析老师原声。几分钟后会出现在下面。');loadDay();}
-      else if(request.status===401)fail({status:401,message:'登录已过期，请重新登录。'});
-      else if(request.status===413)notice('文件太大了，单个文件请小于 256 MB。');
-      else notice('上传没有完成，请检查文件格式后重试。');};
-    request.onerror=()=>{submit.disabled=false;progress.hidden=true;notice('上传中断，请检查网络后重试。');};
-    submit.disabled=true;notice('正在上传…');request.send(data);
+    if(!/^(video|audio)\//.test(chosen[0].type)){notice('至少需要一段有老师声音的视频或录音。');return;}
+    // The family service sits behind a proxy that caps each request at about 100 MB.
+    const large=chosen.find(file=>file.size>92*1024*1024);
+    if(large){notice(`「${large.name}」超过 90 MB。请用布布时光机 App 上传（会自动压缩），或先剪成几段。`);return;}
+    const send=(path,fields,file,field)=>new Promise((resolve,reject)=>{
+      const data=new FormData();for(const [key,value] of fields)data.append(key,value);data.append(field,file,file.name);
+      const request=new XMLHttpRequest();
+      request.open('POST',`/learning/api/${path}`);request.setRequestHeader('X-Bubu-Learning','1');request.withCredentials=true;
+      request.upload.onprogress=e=>{if(e.lengthComputable){progress.hidden=false;progress.value=Math.round(e.loaded/e.total*100);}};
+      request.onload=()=>request.status>=200&&request.status<300?resolve(JSON.parse(request.responseText)):reject({status:request.status});
+      request.onerror=()=>reject({status:0});request.send(data);
+    });
+    submit.disabled=true;
+    try{
+      notice(chosen.length>1?`正在上传第 1/${chosen.length} 个文件…`:'正在上传…');
+      const course=await send('courses',[['child_id',state.child],['school_date',state.date],['title',title.value.trim()],['kind',kind.value],['language',language.value],['total_files',String(chosen.length)]],chosen[0],'files');
+      for(let index=1;index<chosen.length;index++){notice(`正在上传第 ${index+1}/${chosen.length} 个文件…`);await send(`courses/${encodeURIComponent(course.id)}/files`,[],chosen[index],'file');}
+      notice('已上传，正在解析老师原声。几分钟后会出现在下面。');loadDay();
+    }catch(error){
+      if(error.status===401)fail({status:401,message:'登录已过期，请重新登录。'});
+      else if(error.status===413)notice('文件太大了，请先剪短后再上传。');
+      else notice('上传没有完成，请检查网络后重试。如果课程显示“上传未完成”，删除后重新上传即可。');
+    }finally{submit.disabled=false;progress.hidden=true;}
   }},el('label',{class:'field'},'课程名称',title),el('div',{class:'field-row'},el('label',{class:'field'},'课程类型',kind),el('label',{class:'field'},'老师讲的语言',language)),el('label',{class:'field'},'课程视频、录音或教具照片（最多 8 个）',files),el('p',{class:'muted'},`上课日期：${state.date}。一次上传就是一节课；素材只用于每日学习，不进入时光。`),progress,submit);
   return el('details',{class:'upload-card'},el('summary',{},'＋ 上传这一天的课程'),form);
 }
@@ -144,6 +152,7 @@ function renderDay(body,courses,days){
     const card=el('article',{class:'pack-card'},el('div',{class:'pack-heading'},el('div',{},el('p',{class:'eyebrow'},`${course.school_date} · ${KIND_LABELS[course.kind]||'课程'} · ${course.source_count} 个文件`),el('h2',{},course.title)),el('span',{class:`pill state-${course.state}`},STATE_LABELS[course.state]||course.state)));
     if(course.state==='processing')card.append(el('p',{class:'muted'},'家里的服务器正在完整听老师原声、看课堂画面。几分钟后自动刷新。'));
     if(course.state==='failed')card.append(el('p',{class:'warning'},'素材没能完整解析，可以删除后重新上传原片。'));
+    if(course.state==='uploading')card.append(el('p',{class:'warning'},`只收到 ${course.source_count}/${course.expected_files} 个文件，上传中途断开了。请删除后重新上传。`));
     if(course.state==='no_lesson')card.append(el('p',{class:'muted'},pack?.payload?.summary || '没有找到可核对的老师原声。'));
     if(course.state==='waiting')card.append(el('p',{class:'muted'},'等家长核对后，这里就可以开始啦。'));
     if(activities.length){

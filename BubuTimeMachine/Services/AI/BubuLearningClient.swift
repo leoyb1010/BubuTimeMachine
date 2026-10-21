@@ -151,6 +151,7 @@ nonisolated struct LearningCourseDTO: Decodable, Sendable, Hashable, Identifiabl
     let createdAt: String?
     let state: String
     let sourceCount: Int
+    let expectedFiles: Int?
     let activityCount: Int
     let pack: LearningPackRefDTO?
 
@@ -166,6 +167,7 @@ nonisolated struct LearningCourseDetailDTO: Decodable, Sendable, Hashable, Ident
     let language: String
     let state: String
     let sourceCount: Int
+    let expectedFiles: Int?
     let activityCount: Int
     let pack: LearningPackDTO?
     let sources: [LearningSourceDTO]
@@ -372,40 +374,49 @@ nonisolated struct BubuLearningClient: Sendable {
 
     // MARK: Course upload
 
+    /// The family service sits behind a proxy that caps each request (~100 MB), so a
+    /// lesson goes up one file per request: the first creates the course and announces
+    /// how many follow; the server composes only after all of them have arrived.
     @concurrent
-    func uploadCourse(childID: String?, schoolDate: String, title: String, kind: LearningCourseKind,
-                      language: String, files: [LearningUploadFile]) async throws -> LearningCourseDetailDTO {
+    func createCourse(childID: String?, schoolDate: String, title: String, kind: LearningCourseKind,
+                      language: String, first: LearningUploadFile, totalFiles: Int) async throws -> LearningCourseDetailDTO {
+        var fields = [("school_date", schoolDate), ("title", title), ("kind", kind.rawValue),
+                      ("language", language), ("total_files", String(totalFiles))]
+        if let childID { fields.insert(("child_id", childID), at: 0) }
+        return try await multipart("api/courses", fields: fields, fileField: "files", file: first)
+    }
+
+    @concurrent
+    func addCourseFile(courseID: String, file: LearningUploadFile) async throws -> LearningCourseDetailDTO {
+        try await multipart("api/courses/\(courseID)/files", fields: [], fileField: "file", file: file)
+    }
+
+    private func multipart(_ path: String, fields: [(String, String)], fileField: String,
+                           file: LearningUploadFile) async throws -> LearningCourseDetailDTO {
         let boundary = "bubu-\(UUID().uuidString)"
         let body = FileManager.default.temporaryDirectory.appendingPathComponent("bubu-course-\(UUID().uuidString).multipart")
         defer { try? FileManager.default.removeItem(at: body) }
         guard FileManager.default.createFile(atPath: body.path, contents: nil) else { throw LearningServiceError.invalidResponse }
         let handle = try FileHandle(forWritingTo: body)
         do {
-            func field(_ name: String, _ value: String) throws {
+            for (name, value) in fields {
                 try handle.write(contentsOf: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
             }
-            if let childID { try field("child_id", childID) }
-            try field("school_date", schoolDate)
-            try field("title", title)
-            try field("kind", kind.rawValue)
-            try field("language", language)
-            for file in files {
-                let safeName = file.fileName.replacingOccurrences(of: "\"", with: "")
-                try handle.write(contentsOf: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"files\"; filename=\"\(safeName)\"\r\nContent-Type: \(file.mimeType)\r\n\r\n".utf8))
-                let input = try FileHandle(forReadingFrom: file.url)
-                defer { try? input.close() }
-                while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
-                    try handle.write(contentsOf: chunk)
-                }
-                try handle.write(contentsOf: Data("\r\n".utf8))
+            let safeName = file.fileName.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\r", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+            try handle.write(contentsOf: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(safeName)\"\r\nContent-Type: \(file.mimeType)\r\n\r\n".utf8))
+            let input = try FileHandle(forReadingFrom: file.url)
+            defer { try? input.close() }
+            while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
+                try handle.write(contentsOf: chunk)
             }
-            try handle.write(contentsOf: Data("--\(boundary)--\r\n".utf8))
+            try handle.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
             try handle.close()
         } catch {
             try? handle.close()
             throw error
         }
-        var request = try await authorized(url("api/courses"), method: "POST", timeout: 600)
+        var request = try await authorized(url(path), method: "POST", timeout: 900)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.upload(for: request, fromFile: body, delegate: LearningRedirectBlocker())

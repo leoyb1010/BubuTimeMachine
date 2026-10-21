@@ -116,7 +116,7 @@ footer { text-align:center; color:var(--muted); font-size:14px; padding:24px }
 .pill { flex:none; border-radius:999px; padding:5px 12px; font-size:14px; font-weight:800; background:var(--soft); color:var(--ink) }
 .pill.state-published { background:var(--pink); color:#fff }
 .pill.state-draft { background:var(--butter) }
-.pill.state-failed { background:#FDE3E1; color:var(--danger) }
+.pill.state-failed,.pill.state-uploading { background:#FDE3E1; color:var(--danger) }
 .activity-chips { display:flex; flex-wrap:wrap; gap:8px }
 .activity-chips span { background:var(--soft); color:var(--rose); padding:4px 12px; border-radius:999px; font-size:14px; font-weight:700 }
 .start-lesson { justify-self:start; font-size:20px; padding:14px 28px }

@@ -147,3 +147,14 @@ def test_explicit_retry_can_refresh_an_already_ready_hash(tmp_path):
     w.process_media_requests()
     assert w.store.get_cursor(cache_key)['state']=='queued'
     assert any(j['state']=='queued' for j in w.store.jobs('f1') if j['kind']=='analyze')
+
+
+def test_course_waits_for_every_announced_file_before_composing(tmp_path):
+    w=worker(tmp_path)
+    course=w.store.create_course('f1','c1','2026-10-21','Big lesson','teaching',expected_files=2)
+    w.store.add_source('f1','c1','2026-10-21','course:%s:0'%course['id'],'a.mp4',b'part one','video/mp4',kind='teaching',course_id=course['id'])
+    drain(w)
+    assert w.processor.compose_calls==[]
+    w.store.add_source('f1','c1','2026-10-21','course:%s:1'%course['id'],'b.mp4',b'part two','video/mp4',kind='teaching',course_id=course['id'])
+    drain(w)
+    assert [len(ids) for ids,_ in w.processor.compose_calls]==[2]

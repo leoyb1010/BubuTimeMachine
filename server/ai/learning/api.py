@@ -155,7 +155,9 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         if request.url.path != '/learning' and not request.url.path.startswith('/learning/'):
             return await call_next(request)
         length = request.headers.get('content-length')
-        limit = MAX_COURSE_UPLOAD_BYTES if (request.method == 'POST' and request.url.path == COURSE_UPLOAD_PATH) else MAX_JSON_BYTES
+        upload = request.method == 'POST' and (request.url.path == COURSE_UPLOAD_PATH or (
+            request.url.path.startswith(COURSE_UPLOAD_PATH + '/') and request.url.path.endswith('/files')))
+        limit = MAX_COURSE_UPLOAD_BYTES if upload else MAX_JSON_BYTES
         if length and (not length.isdecimal() or int(length) > limit):
             response = JSONResponse({'detail': '请求内容过大，请缩小后重试。'}, status_code=413)
         else:
@@ -333,30 +335,38 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
     # Multipart uploads stream to disk; they skip the bounded JSON reader above.
     uploads = APIRouter(prefix='/learning/api')
 
+    def _spool(upload: UploadFile, target: Path):
+        name = Path((upload.filename or 'file').replace('\\', '/')).name[:180] or 'file'
+        mime = (upload.content_type or '').split(';')[0].strip().lower()
+        if mime in {'', 'application/octet-stream'}:
+            mime = mimetypes.guess_type(name)[0] or ''
+        with target.open('wb') as handle:
+            shutil.copyfileobj(upload.file, handle, 1024 * 1024)
+        if not 0 < target.stat().st_size <= MAX_COURSE_FILE_BYTES:
+            raise HTTPException(413, '单个文件不能为空或超过 256 MB。')
+        return name, target, mime
+
     @uploads.post('/courses')
     def create_course(request: Request, child_id: str | None = Form(None, max_length=128),
                       school_date: str = Form(..., pattern=r'^\d{4}-\d{2}-\d{2}$'),
                       title: str = Form(..., min_length=1, max_length=60),
                       kind: Literal['teaching', 'practice', 'song'] = Form(...),
                       language: Literal['en-US', 'zh-CN'] = Form('en-US'),
+                      total_files: int = Form(0, ge=0, le=8),
                       files: list[UploadFile] = File(...), scope: FamilyScope = Depends(_scope)):
         scope.require_review()
         if not 1 <= len(files) <= 8:
             raise HTTPException(422, '每节课请上传1到8个文件。')
         with tempfile.TemporaryDirectory(prefix='bubu-course-upload-') as tmp:
-            saved = []
-            for index, upload in enumerate(files):
-                name = Path((upload.filename or 'file').replace('\\', '/')).name[:180] or 'file'
-                mime = (upload.content_type or '').split(';')[0].strip().lower()
-                if mime in {'', 'application/octet-stream'}:
-                    mime = mimetypes.guess_type(name)[0] or ''
-                target = Path(tmp) / str(index)
-                with target.open('wb') as handle:
-                    shutil.copyfileobj(upload.file, handle, 1024 * 1024)
-                if not 0 < target.stat().st_size <= MAX_COURSE_FILE_BYTES:
-                    raise HTTPException(413, '单个文件不能为空或超过 256 MB。')
-                saved.append((name, target, mime))
+            saved = [_spool(upload, Path(tmp) / str(index)) for index, upload in enumerate(files)]
             return _call(service_factory, 'create_course', scope, scope.require_child(child_id), school_date,
-                         title, kind, language, saved)
+                         title, kind, language, saved, total_files)
+
+    @uploads.post('/courses/{cid}/files')
+    def add_course_file(cid: str, request: Request, file: UploadFile = File(...), scope: FamilyScope = Depends(_scope)):
+        scope.require_review()
+        with tempfile.TemporaryDirectory(prefix='bubu-course-upload-') as tmp:
+            name, path, mime = _spool(file, Path(tmp) / 'file')
+            return _call(service_factory, 'add_course_file', scope, cid, name, path, mime)
 
     app.include_router(uploads)

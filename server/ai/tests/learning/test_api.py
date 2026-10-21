@@ -255,8 +255,8 @@ def test_old_native_query_only_selects_public_shell_not_old_child_resources(setu
 def test_course_upload_is_multipart_reviewer_only_and_not_capped_like_json(setup):
     client,state,service=setup
     received={}
-    def create_course(scope,child,day,title,kind,language,files):
-        received.update(child=child,day=day,title=title,kind=kind,language=language,
+    def create_course(scope,child,day,title,kind,language,files,total_files=0):
+        received.update(total_files=total_files,child=child,day=day,title=title,kind=kind,language=language,
                         files=[(name,mime,Path(path).read_bytes()) for name,path,mime in files])
         return {'id':'course-1'}
     service.create_course=create_course
@@ -268,3 +268,13 @@ def test_course_upload_is_multipart_reviewer_only_and_not_capped_like_json(setup
     assert received['child']=='child-local' and received['files'][0]==('words.mov','video/quicktime',big)
     state['user']='grandma'
     assert client.post('/learning/api/courses',data=form,files=upload,headers={**BEARER,**CSRF}).status_code==403
+
+
+def test_course_files_can_follow_one_per_request(setup):
+    client,state,service=setup
+    added=[]
+    service.add_course_file=lambda scope,cid,name,path,mime:added.append((cid,name,mime,Path(path).read_bytes())) or {'id':cid}
+    response=client.post('/learning/api/courses/course-1/files',files={'file':('card.jpg',b'card','image/jpeg')},headers={**BEARER,**CSRF})
+    assert response.status_code==200 and added==[('course-1','card.jpg','image/jpeg',b'card')]
+    state['user']='grandma'
+    assert client.post('/learning/api/courses/course-1/files',files={'file':('x.jpg',b'x','image/jpeg')},headers={**BEARER,**CSRF}).status_code==403

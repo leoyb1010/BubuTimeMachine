@@ -78,3 +78,19 @@ def test_delete_course_hides_it_and_its_sources(service, tmp_path):
     assert service.store.sources(FAMILY, CHILD) == []
     with pytest.raises(Missing):
         service.course(scope(), course["id"])
+
+
+def test_announced_files_keep_course_uploading_until_all_arrive(service, tmp_path):
+    first = files(tmp_path, ("words.mp4", "video/mp4", b"video"))
+    course = service.create_course(scope(), CHILD, "2026-10-21", "Fruit", "teaching", "en-US", first, 3)
+    assert course["state"] == "uploading" and course["expected_files"] == 3
+    assert not service.store.course_sealed(FAMILY, course["id"])
+    service.add_course_file(scope(), course["id"], *files(tmp_path, ("song.m4a", "audio/mp4", b"song"))[0])
+    detail = service.add_course_file(scope(), course["id"], *files(tmp_path, ("card.jpg", "image/jpeg", b"card"))[0])
+    assert detail["state"] == "processing" and detail["source_count"] == 3
+    assert service.store.course_sealed(FAMILY, course["id"])
+    from learning.store import Conflict
+    with pytest.raises(Conflict):
+        service.add_course_file(scope(), course["id"], *files(tmp_path, ("extra.jpg", "image/jpeg", b"extra"))[0])
+    with pytest.raises(Exception):
+        service.add_course_file(scope(review=False), course["id"], *files(tmp_path, ("x.jpg", "image/jpeg", b"x"))[0])

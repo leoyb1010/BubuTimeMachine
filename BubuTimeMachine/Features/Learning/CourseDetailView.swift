@@ -101,6 +101,11 @@ struct CourseDetailView: View {
                     .font(BubuTheme.Font.body)
                 ProgressView().frame(maxWidth: .infinity)
             }
+        case "uploading":
+            SchoolPanel(title: "上传没有完成", symbol: "icloud.slash", accent: BubuTheme.Color.danger) {
+                Text("已收到 \(course.sourceCount)/\(course.expectedFiles ?? course.sourceCount) 个文件，上传中途断开了。请删除这节课后重新上传。")
+                    .font(BubuTheme.Font.body)
+            }
         case "failed":
             SchoolPanel(title: "解析没有完成", symbol: "exclamationmark.triangle.fill", accent: BubuTheme.Color.danger) {
                 Text("素材没能完整解析（例如视频损坏或声音轨道不完整）。可以删除这节课后重新上传原片。")

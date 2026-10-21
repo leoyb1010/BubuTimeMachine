@@ -378,19 +378,21 @@ class LearningService:
         return {"window_start": start, "window_end": day, "items": [item for _, item in ordered]}
 
     # Parent-uploaded courses. Each upload is one lesson; nothing is picked from photos.
-    def create_course(self, scope, child_id, day, title, kind, language, files):
+    def create_course(self, scope, child_id, day, title, kind, language, files, total_files=0):
+        """total_files > len(files) announces more files that follow via add_course_file."""
         scope.require_review()
         child = scope.require_child(child_id)
         valid_day(day)
+        total = total_files or len(files)
         if kind not in COURSE_KINDS or language not in {"en-US", "zh-CN"}:
             raise ValueError("课程类型无效")
-        if not 1 <= len(files) <= 8:
+        if not 1 <= len(files) <= total <= 8:
             raise ValueError("每节课请上传1到8个文件")
         if not any(mime.startswith(("video/", "audio/")) for _, _, mime in files):
             raise ValueError("每节课至少需要一段带老师声音的视频或音频")
         if any(mime not in UPLOAD_MIMES for _, _, mime in files):
             raise ValueError("不支持的文件格式")
-        course = self.store.create_course(scope.family_id, child, day, title, kind, language, scope.user_id)
+        course = self.store.create_course(scope.family_id, child, day, title, kind, language, scope.user_id, total)
         try:
             for index, (name, path, mime) in enumerate(files):
                 self.store.add_source(scope.family_id, child, day, "course:%s:%d" % (course["id"], index), name, Path(path),
@@ -400,6 +402,19 @@ class LearningService:
             self.store.remove_course(scope.family_id, course["id"])
             raise
         return self.course(scope, course["id"])
+
+    def add_course_file(self, scope, cid, name, path, mime):
+        scope.require_review()
+        course = self._course(scope, cid)
+        index = self.store.course_file_count(scope.family_id, cid)
+        if index >= course["expected_files"]:
+            raise Conflict("这节课的文件已经上传完整")
+        if mime not in UPLOAD_MIMES:
+            raise ValueError("不支持的文件格式")
+        self.store.add_source(scope.family_id, course["child_id"], course["school_date"], "course:%s:%d" % (cid, index), name,
+                              Path(path), mime, kind=course["kind"], language=course["language"], course_id=cid,
+                              media_ref={"origin": "parent_upload", "uploaded_by": scope.user_id})
+        return self.course(scope, cid)
 
     def _course(self, scope, cid):
         course = self.store.course(scope.family_id, cid)
@@ -420,7 +435,9 @@ class LearningService:
             pack = checked
             break
         states = {source["state"] for source in public_sources}
-        if states & {"failed", "unavailable"}:
+        if len(sources) < course["expected_files"]:
+            state = "uploading"
+        elif states & {"failed", "unavailable"}:
             state = "failed"
         elif states - {"ready"} or not public_sources:
             state = "processing"
@@ -432,6 +449,7 @@ class LearningService:
             state, pack = "waiting", None
         result = {key: course[key] for key in ("id", "child_id", "school_date", "title", "kind", "language")}
         result.update(created_at=_iso(course["created_at"]), state=state, source_count=len(sources),
+                      expected_files=max(course["expected_files"], len(sources)),
                       activity_count=len(pack["payload"].get("activities", [])) if pack else 0,
                       pack=self._public_pack(pack) if pack and detail else ({"id": pack["id"], "status": pack["status"]} if pack else None))
         if detail:

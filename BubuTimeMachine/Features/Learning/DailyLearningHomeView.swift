@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 // MARK: - 每日学习
 /// 独立入口：家长按日期上传幼儿园课程视频，服务端解析出原声互动课，家长核对后开放给布布。
@@ -36,6 +37,7 @@ struct DailyLearningHome: View {
     @State private var context: LearningContextDTO?
     @State private var courses: [LearningCourseDTO] = []
     @State private var weekDays: Set<String> = []
+    @State private var recent: [LearningCourseDTO] = []
     @State private var loading = false
     @State private var errorText: String?
     @State private var uploading = false
@@ -61,6 +63,7 @@ struct DailyLearningHome: View {
                     if canReview { uploadButton }
                     coursesSection
                     reviewSection
+                    if !recentOtherDays.isEmpty { recentSection }
                 }
                 .padding(BubuTheme.Spacing.item)
                 .bubuContentColumn(820)
@@ -197,6 +200,26 @@ struct DailyLearningHome: View {
         }
     }
 
+    private var recentOtherDays: [LearningCourseDTO] { recent.filter { $0.schoolDate != dayString } }
+
+    private var recentSection: some View {
+        SchoolPanel(title: "最近的课", symbol: "clock.arrow.circlepath", subtitle: "近 30 天，按日期积累", accent: SchoolPalette.green) {
+            VStack(spacing: BubuTheme.Spacing.s) {
+                ForEach(recentOtherDays.prefix(12)) { course in
+                    Button { opened = course } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(CourseDetailView.readableDay(course.schoolDate)).font(.caption.weight(.semibold))
+                                .foregroundStyle(BubuTheme.Color.secondaryText)
+                            CourseCard(course: course)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("learning.recent")
+                }
+            }
+        }
+    }
+
     private func reviewButton(_ title: String, detail: String, period: String, tint: Color) -> some View {
         Button { review = period } label: {
             VStack(alignment: .leading, spacing: 4) {
@@ -244,6 +267,11 @@ struct DailyLearningHome: View {
                 let week = try await client.get("api/courses", query: weekQuery, as: LearningCourseList.self)
                 weekDays = Set(week.items.map(\.schoolDate))
             }
+            let today = Date.now
+            let monthAgo = Calendar(identifier: .gregorian).date(byAdding: .day, value: -30, to: today) ?? today
+            let recentQuery = base + [URLQueryItem(name: "start", value: BubuLearningDates.dayString(monthAgo)),
+                                      URLQueryItem(name: "end", value: BubuLearningDates.dayString(today))]
+            recent = try await client.get("api/courses", query: recentQuery, as: LearningCourseList.self).items
             errorText = nil
             await LearningAttemptOutbox.shared.flush(client: client)
         } catch is CancellationError {
@@ -302,6 +330,7 @@ struct CourseStateBadge: View {
     private var label: String {
         switch state {
         case "processing": "解析中"
+        case "uploading": "上传未完成"
         case "draft": "待家长核对"
         case "published": "可以一起学"
         case "no_lesson": "没找到原声题"
@@ -313,7 +342,7 @@ struct CourseStateBadge: View {
     private var foreground: Color {
         switch state {
         case "published": .white
-        case "failed": BubuTheme.Color.danger
+        case "failed", "uploading": BubuTheme.Color.danger
         default: BubuTheme.Color.warmBrown
         }
     }
@@ -321,7 +350,7 @@ struct CourseStateBadge: View {
         switch state {
         case "published": BubuTheme.Color.primary
         case "draft": BubuTheme.Color.butterSurface
-        case "failed": BubuTheme.Color.danger.opacity(0.12)
+        case "failed", "uploading": BubuTheme.Color.danger.opacity(0.12)
         default: BubuTheme.Color.softFill
         }
     }
@@ -342,6 +371,7 @@ struct CourseUploadSheet: View {
     @State private var importing = false
     @State private var preparing = false
     @State private var uploading = false
+    @State private var progressText: String?
     @State private var errorText: String?
     @Environment(\.dismiss) private var dismiss
 
@@ -403,6 +433,10 @@ struct CourseUploadSheet: View {
                     Text("课程素材（最多 8 个）")
                 } footer: {
                     Text("至少需要一段有老师声音的视频或录音；教具照片可帮助出题。素材只用于每日学习，不会进入时光。")
+                }
+                if let progressText {
+                    Section { HStack { ProgressView(); Text(progressText) } }
+                        .accessibilityIdentifier("learning.upload.progress")
                 }
                 if let errorText {
                     Section { Text(errorText).foregroundStyle(BubuTheme.Color.danger) }
@@ -485,19 +519,64 @@ struct CourseUploadSheet: View {
         }
     }
 
+    /// Proxy limit per request is about 100 MB; stay clearly below it.
+    static let maxRequestBytes = 92 * 1_048_576
+    /// Larger phone videos are re-encoded to 720p first. Speech stays intact for transcription.
+    static let compressAboveBytes = 40 * 1_048_576
+
     private func upload() async {
         uploading = true; errorText = nil
-        defer { uploading = false }
+        defer { uploading = false; progressText = nil }
         do {
-            let course = try await client.uploadCourse(childID: childID, schoolDate: BubuLearningDates.dayString(day),
+            var ready: [LearningUploadFile] = []
+            for (index, file) in files.enumerated() {
+                if file.mimeType.hasPrefix("video/"), Self.size(of: file.url) > Self.compressAboveBytes {
+                    progressText = "正在压缩第 \(index + 1) 个视频…"
+                    ready.append(try await Self.compress(file))
+                } else {
+                    ready.append(file)
+                }
+            }
+            if let large = ready.first(where: { Self.size(of: $0.url) > Self.maxRequestBytes }) {
+                errorText = "「\(large.fileName)」压缩后仍超过 90 MB，请在相册里剪成几段（每段几分钟）再上传。"
+                return
+            }
+            // Teacher audio goes first so the course always starts with real speech.
+            ready.sort { !$0.mimeType.hasPrefix("image/") && $1.mimeType.hasPrefix("image/") }
+            progressText = ready.count > 1 ? "正在上传第 1/\(ready.count) 个文件…" : "正在上传…"
+            var course = try await client.createCourse(childID: childID, schoolDate: BubuLearningDates.dayString(day),
                                                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                                       kind: kind, language: language, files: files)
-            for file in files { try? FileManager.default.removeItem(at: file.url) }
+                                                       kind: kind, language: language, first: ready[0], totalFiles: ready.count)
+            for (index, file) in ready.enumerated().dropFirst() {
+                progressText = "正在上传第 \(index + 1)/\(ready.count) 个文件…"
+                course = try await client.addCourseFile(courseID: course.id, file: file)
+            }
+            for file in files + ready { try? FileManager.default.removeItem(at: file.url) }
             onUploaded(course)
             dismiss()
         } catch {
-            errorText = learningErrorText(error, fallback: "上传没有完成，请检查网络后重试。")
+            errorText = learningErrorText(error, fallback: "上传没有完成，请检查网络后重试。如果课程里显示“上传未完成”，可以删除后重新上传。")
         }
+    }
+
+    nonisolated static func size(of url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    }
+
+    @concurrent
+    nonisolated static func compress(_ file: LearningUploadFile) async throws -> LearningUploadFile {
+        let asset = AVURLAsset(url: file.url)
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else {
+            return file
+        }
+        let target = temporary("mp4")
+        try await exporter.export(to: target, as: .mp4)
+        guard size(of: target) > 0, size(of: target) < size(of: file.url) else {
+            try? FileManager.default.removeItem(at: target)
+            return file
+        }
+        let base = (file.fileName as NSString).deletingPathExtension
+        return LearningUploadFile(url: target, fileName: base + ".mp4", mimeType: "video/mp4")
     }
 
     nonisolated static func temporary(_ ext: String) -> URL {
