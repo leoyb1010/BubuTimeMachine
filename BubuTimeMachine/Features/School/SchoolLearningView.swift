@@ -8,17 +8,26 @@ struct LearningServiceAccess: Hashable {
     let account: String
     let revision: Int
 
-    init?(_ env: AppEnvironment) {
-        guard env.config.isAIConfigured, let trustedURL = env.config.aiBaseURL,
+    init?(_ env: AppEnvironment, requiresAIEnabled: Bool = true) {
+        self.init(trustedServiceURL: env.config.aiBaseURL, serverURL: env.config.baseURL,
+                  accountEmail: env.config.accountEmail, revision: env.aiServiceRevision,
+                  serverConfigured: env.config.isConfigured, aiEnabled: env.config.aiEnabled,
+                  requiresAIEnabled: requiresAIEnabled)
+    }
+
+    /// The service URL must already have passed ServerConfig's trusted-host validation.
+    init?(trustedServiceURL: URL?, serverURL: URL?, accountEmail: String, revision: Int,
+          serverConfigured: Bool, aiEnabled: Bool, requiresAIEnabled: Bool = true) {
+        guard serverConfigured, !requiresAIEnabled || aiEnabled, let trustedURL = trustedServiceURL,
               var service = URLComponents(url: trustedURL, resolvingAgainstBaseURL: false),
-              let pbURL = env.config.baseURL,
+              let pbURL = serverURL,
               var server = URLComponents(url: pbURL, resolvingAgainstBaseURL: false) else { return nil }
         service.query = nil; service.fragment = nil
         server.user = nil; server.password = nil; server.query = nil; server.fragment = nil
         guard let base = service.url else { return nil }
         baseURL = base
-        account = (server.url?.absoluteString ?? "") + "\n" + env.config.accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        revision = env.aiServiceRevision
+        account = (server.url?.absoluteString ?? "") + "\n" + accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.revision = revision
     }
 }
 
@@ -30,7 +39,7 @@ struct SchoolLearningView: View {
 
     var body: some View {
         Group {
-            if let access = LearningServiceAccess(env) {
+            if let access = LearningServiceAccess(env, requiresAIEnabled: false) {
                 let selectedChild = childID ?? profiles.first?.id.uuidString
                 SchoolLearningSession(access: access, day: day, childID: selectedChild)
                     .id(PageIdentity(access: access, day: day, childID: selectedChild))
@@ -38,7 +47,7 @@ struct SchoolLearningView: View {
                 ContentUnavailableView {
                     Label("等待第二大脑同步素材", systemImage: "sparkles")
                 } description: {
-                    Text("请先在设置中连接并开启家庭 AI 服务。第二大脑整理出的素材和互动课，会出现在这里。")
+                    Text("请先在设置中连接家庭服务。第二大脑整理出的素材和互动课，会出现在这里。")
                 }
             }
         }
@@ -91,11 +100,11 @@ private struct SchoolLearningSession: View {
         let attempt = UUID()
         authorizationID = attempt
         request = nil; errorText = nil; loading = true
-        guard LearningServiceAccess(env) == access else { loading = false; return }
+        guard LearningServiceAccess(env, requiresAIEnabled: false) == access else { loading = false; return }
         let api = env.apiClient
         do {
             let token = try await api.authenticate(role: "ai").token
-            guard !Task.isCancelled, authorizationID == attempt, LearningServiceAccess(env) == access else { return }
+            guard !Task.isCancelled, authorizationID == attempt, LearningServiceAccess(env, requiresAIEnabled: false) == access else { return }
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.calendar = Calendar(identifier: .gregorian)
