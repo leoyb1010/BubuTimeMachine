@@ -138,14 +138,26 @@ class LearningService:
             result["choices"].append(row)
         return result
 
+    def _readable(self, pack, text):
+        """Model notes may cite internal source IDs; parents see file names instead."""
+        text = str(text)
+        for sid in pack.get("source_ids", []):
+            if sid in text:
+                try:
+                    name = self.store.source(pack["family_id"], sid)["name"]
+                except Missing:
+                    name = "一份素材"
+                text = text.replace(sid, "「" + name + "」")
+        return re.sub(r"\b[a-f0-9]{24,64}\b", "一份素材", text)
+
     def _public_pack(self, pack):
         payload = pack["payload"]
         return {key: pack[key] for key in ("id", "child_id", "school_date", "revision", "status")} | {
             "course_id": pack.get("course_id", ""),
             "title": payload.get("title", "学习内容"),
-            "payload": {"title": payload.get("title", "学习内容"), "summary": payload.get("summary", ""),
+            "payload": {"title": payload.get("title", "学习内容"), "summary": self._readable(pack, payload.get("summary", "")),
                         "activities": [self._public_activity(pack["id"], a) for a in payload.get("activities", [])],
-                        "warnings": payload.get("warnings", [])},
+                        "warnings": [self._readable(pack, w) for w in payload.get("warnings", [])]},
             "confirmations": [{"activity_id": a["id"], "digest": digest(a)} for a in payload.get("activities", [])],
         }
 
@@ -442,7 +454,8 @@ class LearningService:
         elif states - {"ready"} or not public_sources:
             state = "processing"
         elif pack is None:
-            state = "processing" if scope.can_review else "waiting"
+            failed = self.store.compose_job_state(scope.family_id, course["child_id"], course["school_date"], course["id"]) == "failed"
+            state = ("failed" if failed else "processing") if scope.can_review else "waiting"
         else:
             state = pack["status"]
         if not scope.can_review and state != "published":
@@ -465,6 +478,12 @@ class LearningService:
 
     def course(self, scope, cid):
         return self._course_public(scope, self._course(scope, cid), detail=True)
+
+    def retry_course(self, scope, cid):
+        scope.require_review()
+        self._course(scope, cid)
+        self.store.retry_course(scope.family_id, cid, uuid.uuid4().hex)
+        return self.course(scope, cid)
 
     def delete_course(self, scope, cid):
         scope.require_review()

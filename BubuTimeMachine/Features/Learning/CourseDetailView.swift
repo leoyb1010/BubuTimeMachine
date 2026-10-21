@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 
 /// 一节课：解析进度 → 家长逐题核对（老师原声、答案、画面）→ 开放 → 一起学。
 struct CourseDetailView: View {
@@ -15,6 +16,8 @@ struct CourseDetailView: View {
     @State private var working = false
     @State private var playing = false
     @State private var confirmDelete = false
+    @State private var confirmRegenerate = false
+    @State private var awaitingPack: String?
     @State private var player = NativeLearningAudioPlayer()
     @Environment(\.dismiss) private var dismiss
 
@@ -48,20 +51,25 @@ struct CourseDetailView: View {
             if canReview, course != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button("重新生成互动", systemImage: "arrow.clockwise") { Task { await regenerate() } }
-                            .disabled(course?.pack == nil)
+                        Button("重新生成互动", systemImage: "arrow.clockwise") {
+                            if course?.state == "published" { confirmRegenerate = true } else { Task { await regenerate() } }
+                        }
+                        .disabled(course?.state == "processing" || course?.state == "uploading")
                         Button("删除这节课", systemImage: "trash", role: .destructive) { confirmDelete = true }
                     } label: { Image(systemName: "ellipsis.circle") }
                         .accessibilityIdentifier("learning.course.menu")
                 }
             }
         }
+        .confirmationDialog("重新生成这节课？", isPresented: $confirmRegenerate, titleVisibility: .visible) {
+            Button("重新生成") { Task { await regenerate() } }
+        } message: { Text("新的题目需要家长重新核对，核对前布布暂时不能玩这节课。") }
         .confirmationDialog("删除这节课？", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("删除", role: .destructive) { Task { await delete() } }
         } message: { Text("课程素材和互动都会从每日学习中移除，布布的时光不受影响。") }
         .task { await load() }
-        .task(id: course?.state == "processing") {
-            while course?.state == "processing" && !Task.isCancelled {
+        .task(id: course?.state == "processing" || awaitingPack != nil) {
+            while (course?.state == "processing" || awaitingPack != nil) && !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(6))
                 guard !Task.isCancelled else { return }
                 await load()
@@ -108,8 +116,12 @@ struct CourseDetailView: View {
             }
         case "failed":
             SchoolPanel(title: "解析没有完成", symbol: "exclamationmark.triangle.fill", accent: BubuTheme.Color.danger) {
-                Text("素材没能完整解析（例如视频损坏或声音轨道不完整）。可以删除这节课后重新上传原片。")
+                Text("素材解析或出题没有完成（例如网络中断、视频损坏或声音轨道不完整）。可以先再试一次；仍不行就删除后重新上传原片。")
                     .font(BubuTheme.Font.body)
+                if canReview {
+                    Button("再试一次") { Task { await regenerate() } }.buttonStyle(.borderedProminent)
+                        .tint(BubuTheme.Color.primary)
+                }
             }
         case "no_lesson":
             SchoolPanel(title: "没有生成互动题", symbol: "text.badge.xmark") {
@@ -147,6 +159,7 @@ struct CourseDetailView: View {
             }
             ForEach(Array(pack.payload.activities.enumerated()), id: \.element.id) { index, activity in
                 ActivityReviewCard(index: index + 1, activity: activity, client: client, player: player,
+                                   original: course.sources.first { $0.id == activity.prompt?.sourceId && !$0.mime.hasPrefix("image/") }?.originalUrl,
                                    checked: Binding(get: { checked.contains(activity.id) },
                                                     set: { if $0 { checked.insert(activity.id) } else { checked.remove(activity.id) } }),
                                    onRemove: { Task { await exclude(pack, activity) } })
@@ -239,6 +252,7 @@ struct CourseDetailView: View {
         do {
             let value = try await client.get("api/courses/\(courseID)", as: LearningCourseDetailDTO.self)
             if value.pack?.id != course?.pack?.id { checked = []; dateConfirmed = false }
+            if let waiting = awaitingPack, value.pack?.id != waiting || value.state == "failed" { awaitingPack = nil }
             course = value
             errorText = nil
         } catch is CancellationError {
@@ -285,12 +299,14 @@ struct CourseDetailView: View {
     }
 
     private func regenerate() async {
-        guard let pack = course?.pack else { return }
         actionError = nil
         player.stop()
+        let previous = course?.pack?.id ?? ""
         do {
-            _ = try await client.send("POST", "api/packs/\(pack.id)/regenerate", as: Queued.self)
-            actionError = "已经开始重新生成，几分钟后刷新看看。"
+            let value = try await client.send("POST", "api/courses/\(courseID)/retry", as: LearningCourseDetailDTO.self)
+            course = value
+            awaitingPack = previous
+            actionError = "已经开始重新整理，完成后这里会自动更新。"
         } catch { actionError = learningErrorText(error) }
     }
 
@@ -322,8 +338,10 @@ private struct ActivityReviewCard: View {
     let activity: LearningActivityDTO
     let client: BubuLearningClient
     let player: NativeLearningAudioPlayer
+    let original: String?
     @Binding var checked: Bool
     let onRemove: () -> Void
+    @State private var watching = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
@@ -343,6 +361,17 @@ private struct ActivityReviewCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm))
             }
             clipRow(title: "题目原声", clip: activity.prompt, isAnswer: false)
+            if let original, let start = activity.prompt?.start {
+                Button { player.stop(); watching = true } label: {
+                    Label("看这段原片（从提问前 2 秒开始）", systemImage: "film")
+                }
+                .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                .accessibilityIdentifier("learning.review.original")
+                .sheet(isPresented: $watching) {
+                    LearningOriginalClipSheet(client: client, path: original, start: start,
+                                              end: activity.answer?.end ?? activity.prompt?.end ?? start + 8)
+                }
+            }
             if activity.answer != nil { clipRow(title: "答案原声", clip: activity.answer, isAnswer: true) }
             if !activity.choices.isEmpty {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
@@ -382,5 +411,59 @@ private struct ActivityReviewCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(isAnswer ? "learning.review.answer" : "learning.review.prompt")
+    }
+}
+
+/// 家长核对用：播放老师原片中这道题前后的一段，确认问题、指物和答案对得上。
+private struct LearningOriginalClipSheet: View {
+    let client: BubuLearningClient
+    let path: String
+    let start: Double
+    let end: Double
+    @State private var player: AVPlayer?
+    @State private var errorText: String?
+    @State private var boundary: Any?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let player {
+                    VideoPlayer(player: player)
+                } else if let errorText {
+                    Text(errorText).foregroundStyle(.white).padding()
+                } else {
+                    ProgressView("正在打开原片…").tint(.white).foregroundStyle(.white)
+                }
+            }
+            .navigationTitle("原片 \(OnlineTimelineDetailPage.timecode(start))")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+        }
+        .task { await prepare() }
+        .onDisappear {
+            if let boundary { player?.removeTimeObserver(boundary) }
+            player?.pause()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    private func prepare() async {
+        do {
+            let asset = try await client.authorizedAsset(path)
+            guard try await asset.load(.isPlayable) else { throw LearningServiceError.unavailableMedia }
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+            await player.seek(to: CMTime(seconds: max(0, start - 2), preferredTimescale: 600),
+                              toleranceBefore: .zero, toleranceAfter: .zero)
+            // Pause shortly after the teacher's answer; the parent can keep watching with the controls.
+            boundary = player.addBoundaryTimeObserver(forTimes: [NSValue(time: CMTime(seconds: end + 1.5, preferredTimescale: 600))],
+                                                      queue: .main) { [weak player] in player?.pause() }
+            self.player = player
+            player.play()
+        } catch {
+            errorText = learningErrorText(error, fallback: "原片暂时打不开，请检查网络后重试。")
+        }
     }
 }

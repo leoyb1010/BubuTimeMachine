@@ -86,6 +86,7 @@ struct OnlineTimelineBrowser: View {
     @State private var loading = false
     @State private var errorText: String?
     @State private var snapshot = ""
+    @State private var generation = 0
     @State private var selected: OnlineTimelineItem?
     @State private var customRange = false
     @State private var customStart = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
@@ -298,6 +299,7 @@ struct OnlineTimelineBrowser: View {
     }
 
     private func reload() async {
+        generation += 1
         page = 0; hasMore = false; errorText = nil
         await fetch(page: 1, replacing: true)
     }
@@ -309,8 +311,9 @@ struct OnlineTimelineBrowser: View {
 
     private func fetch(page next: Int, replacing: Bool) async {
         let request = query
+        let started = generation
         loading = true
-        defer { if request == query { loading = false } }
+        defer { if request == query && started == generation { loading = false } }
         let (start, end) = request.range.bounds()
         var parameters = [URLQueryItem(name: "kind", value: request.kind.rawValue),
                           URLQueryItem(name: "order", value: request.newestFirst ? "desc" : "asc"),
@@ -321,10 +324,11 @@ struct OnlineTimelineBrowser: View {
         if let end { parameters.append(URLQueryItem(name: "end", value: end)) }
         do {
             let result = try await client.get("api/online-timeline", query: parameters, as: OnlineTimelinePage.self)
-            guard request == query, !Task.isCancelled else { return }
+            // A refresh or new filter started meanwhile: this page belongs to an old list.
+            guard request == query, started == generation, !Task.isCancelled else { return }
             // The library changed between pages: start over rather than mixing two snapshots.
             if !replacing && result.snapshotId != snapshot {
-                await fetch(page: 1, replacing: true)
+                await reload()
                 return
             }
             snapshot = result.snapshotId
@@ -339,7 +343,9 @@ struct OnlineTimelineBrowser: View {
             errorText = nil
         } catch is CancellationError {
         } catch {
-            guard request == query else { return }
+            guard request == query, started == generation else { return }
+            // Never leave the previous filter's results on screen under a new filter.
+            if replacing { items = []; total = 0 }
             errorText = learningErrorText(error, fallback: "暂时读取不到第二大脑的素材，请稍后重试。")
         }
     }

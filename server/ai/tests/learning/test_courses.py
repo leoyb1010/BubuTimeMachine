@@ -94,3 +94,33 @@ def test_announced_files_keep_course_uploading_until_all_arrive(service, tmp_pat
         service.add_course_file(scope(), course["id"], *files(tmp_path, ("extra.jpg", "image/jpeg", b"extra"))[0])
     with pytest.raises(Exception):
         service.add_course_file(scope(review=False), course["id"], *files(tmp_path, ("x.jpg", "image/jpeg", b"x"))[0])
+
+
+def test_reupload_after_failed_parse_retries_and_compose_failure_is_visible(service, tmp_path):
+    store = service.store
+    course = service.create_course(scope(), CHILD, "2026-10-21", "A", "teaching", "en-US", files(tmp_path, ("a.mp4", "video/mp4", b"same")))
+    with store.db() as db:
+        db.execute("UPDATE jobs SET state='failed' WHERE kind='analyze'")
+    aid = store.sources(FAMILY, CHILD)[0]["asset_id"]
+    store.set_analysis(FAMILY, aid, {}, state="failed", error="x")
+    assert service.course(scope(), course["id"])["state"] == "failed"
+    service.delete_course(scope(), course["id"])
+    again = service.create_course(scope(), CHILD, "2026-10-21", "A", "teaching", "en-US", files(tmp_path, ("a.mp4", "video/mp4", b"same")))
+    assert [j["state"] for j in store.jobs(FAMILY) if j["kind"] == "analyze"] == ["queued"]
+    # Analysis ready but the lesson generation failed three times: shown as failed, retry re-queues it.
+    store.set_analysis(FAMILY, aid, {"segments": []})
+    with store.db() as db:
+        db.execute("UPDATE jobs SET state='failed' WHERE kind='compose'")
+    assert service.course(scope(), again["id"])["state"] == "failed"
+    service.retry_course(scope(), again["id"])
+    assert store.compose_job_state(FAMILY, CHILD, "2026-10-21", again["id"]) == "queued"
+    assert service.course(scope(), again["id"])["state"] == "processing"
+
+
+def test_parent_never_sees_internal_source_ids_in_model_notes(service, tmp_path):
+    course = service.create_course(scope(), CHILD, "2026-10-21", "A", "teaching", "en-US",
+                                   files(tmp_path, ("words.mp4", "video/mp4", b"v"), ("card.jpg", "image/jpeg", b"c")))
+    sid = course["sources"][1]["id"]
+    pack = {"id": "p", "family_id": FAMILY, "source_ids": [s["id"] for s in course["sources"]]}
+    text = service._readable(pack, "材料 %s 缺少切片数据；另有 %s" % (sid, "ab" * 16))
+    assert sid not in text and "「card.jpg」" in text and "一份素材" in text

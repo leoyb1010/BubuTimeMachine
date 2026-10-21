@@ -137,6 +137,7 @@ nonisolated struct LearningSourceDTO: Decodable, Sendable, Hashable, Identifiabl
     let revision: Int
     let analysis: Analysis
     let error: String
+    let originalUrl: String?
 }
 
 nonisolated struct LearningPackRefDTO: Decodable, Sendable, Hashable { let id: String; let status: String }
@@ -285,7 +286,11 @@ nonisolated struct BubuLearningClient: Sendable {
         } else {
             components = URLComponents(url: routes.root.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         }
-        if !query.isEmpty { components.queryItems = (components.queryItems ?? []) + query }
+        if !query.isEmpty {
+            components.queryItems = (components.queryItems ?? []) + query
+            // URLComponents leaves "+" as-is and servers read it as a space.
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         guard let url = components.url, routes.allowsNavigation(to: url) else { throw LearningServiceError.invalidAddress }
         return url
     }

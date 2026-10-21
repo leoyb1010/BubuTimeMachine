@@ -207,7 +207,10 @@ class LearningStore:
                 if analyzed and analyzed["state"] == "ready":
                     self._enqueue_compose(db, family, child, day, course_id)
                 else:
-                    self._enqueue(db, family, "analyze", aid, {"asset_id": aid})
+                    # A re-upload after a failed parse must retry; a running/queued job is left alone.
+                    job = db.execute("SELECT state FROM jobs WHERE family_id=? AND kind='analyze' AND job_key=?", (family, aid)).fetchone()
+                    self._enqueue(db, family, "analyze", aid, {"asset_id": aid},
+                                  force=bool(job and job["state"] in {"failed", "done"}))
                 db.execute("COMMIT")
             return self.source(family, sid)
         finally:
@@ -427,6 +430,27 @@ class LearningStore:
     def course_file_count(self, family: str, cid: str) -> int:
         with self.db() as db:
             return db.execute("SELECT count(*) FROM sources WHERE family_id=? AND course_id=? AND deleted=0", (family, cid)).fetchone()[0]
+
+    def compose_job_state(self, family: str, child: str, day: str, cid: str) -> str | None:
+        with self.db() as db:
+            row = db.execute("SELECT state FROM jobs WHERE family_id=? AND kind='compose' AND job_key=?",
+                             (family, compose_key(child, day, cid))).fetchone()
+        return row["state"] if row else None
+
+    def retry_course(self, family: str, cid: str, nonce: str) -> None:
+        """Re-parse failed files, otherwise regenerate the lesson from current analyses."""
+        course = self.course(family, cid)
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            pending = False
+            for source in db.execute("SELECT asset_id FROM sources WHERE family_id=? AND course_id=? AND deleted=0", (family, cid)).fetchall():
+                analysis = db.execute("SELECT state FROM analyses WHERE family_id=? AND asset_id=?", (family, source["asset_id"])).fetchone()
+                if not analysis or analysis["state"] != "ready":
+                    self._enqueue(db, family, "analyze", source["asset_id"], {"asset_id": source["asset_id"]}, force=True)
+                    pending = True
+            if not pending:
+                self._enqueue_compose(db, family, course["child_id"], course["school_date"], cid, nonce)
+            db.execute("COMMIT")
 
     def course_sealed(self, family: str, cid: str) -> bool:
         return self.course_file_count(family, cid) >= self.course(family, cid)["expected_files"]

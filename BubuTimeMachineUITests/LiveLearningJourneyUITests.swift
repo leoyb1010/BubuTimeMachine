@@ -68,7 +68,8 @@ final class LiveLearningJourneyUITests: XCTestCase {
         let title = app.textFields["learning.upload.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         title.tap()
-        title.typeText("水果单词 UI联调")
+        let unique = "水果单词 " + String(Int(Date().timeIntervalSince1970) % 100_000)
+        title.typeText(unique)
         let submit = app.buttons["learning.upload.submit"]
         let enabled = NSPredicate(format: "isEnabled == true")
         expectation(for: enabled, evaluatedWith: submit)
@@ -76,12 +77,17 @@ final class LiveLearningJourneyUITests: XCTestCase {
         shot("11-upload-form", app)
         submit.tap()
 
-        let course = app.buttons["learning.course"].firstMatch
-        XCTAssertTrue(course.waitForExistence(timeout: 300), "上传后应出现这节课")
-        // iPad shows the upload form as a sheet; tap only once it has fully gone away.
-        let gone = NSPredicate(format: "exists == false")
-        expectation(for: gone, evaluatedWith: submit)
-        waitForExpectations(timeout: 30)
+        // Upload (compression + one request per file) finishes when the sheet closes.
+        let closed = NSPredicate(format: "exists == false")
+        let waiter = XCTNSPredicateExpectation(predicate: closed, object: submit)
+        if XCTWaiter().wait(for: [waiter], timeout: 300) != .completed {
+            shot("11b-upload-stuck", app)
+            XCTFail("上传表单没有关闭")
+            return
+        }
+        let course = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@",
+                                                      "learning.course", unique)).firstMatch
+        XCTAssertTrue(course.waitForExistence(timeout: 30), "上传后应出现这节课")
         shot("12-course-listed", app)
         let detail = app.descendants(matching: .any)["learning.course.detail"]
         for _ in 0..<3 where !detail.exists {
@@ -97,6 +103,15 @@ final class LiveLearningJourneyUITests: XCTestCase {
         shot("13-parent-review", app)
         let prompt = app.buttons["learning.review.prompt"].firstMatch
         if prompt.exists { prompt.tap(); sleep(3) }
+        let original = app.buttons["learning.review.original"].firstMatch
+        scrollUntilHittable(original, in: app)
+        XCTAssertTrue(original.exists, "核对时应能看提问前后的原片片段")
+        original.tap()
+        XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 20))
+        sleep(6)
+        shot("13b-original-clip", app)
+        app.buttons["完成"].tap()
+        sleep(1)
 
         var guardCount = 0
         while guardCount < 12 {
@@ -152,8 +167,8 @@ final class LiveLearningJourneyUITests: XCTestCase {
     @MainActor
     private func scrollUntilHittable(_ element: XCUIElement, in app: XCUIApplication) {
         var tries = 0
-        while (!element.exists || !element.isHittable) && tries < 12 {
-            app.swipeUp(velocity: .slow)
+        while (!element.exists || !element.isHittable) && tries < 40 {
+            app.swipeUp()
             tries += 1
         }
     }

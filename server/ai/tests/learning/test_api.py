@@ -25,7 +25,7 @@ class FakeService:
     def source_file(self,s,sid): return self.tmp/'media.wav','audio/wav'
     def resource(self,s,pid,name): return self.tmp/'media.wav','audio/wav'
     def __getattr__(self,name):
-        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search','courses','course','delete_course','create_course'}: raise AttributeError(name)
+        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search','courses','course','delete_course','create_course','retry_course'}: raise AttributeError(name)
         def forward(scope,*args):
             self.calls.append((name,args))
             return {'method':name}

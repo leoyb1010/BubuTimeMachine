@@ -163,7 +163,12 @@ function renderDay(body,courses,days){
     if(canReview){
       if(course.state==='draft'&&activities.length)card.append(reviewPanel(pack,{player,sources:course.sources||[],reload:loadDay,fail,notice}));
       const actions=el('div',{class:'page-actions'});
-      if(pack){const regenerate=button('重新生成互动',async()=>{regenerate.disabled=true;try{await api(`packs/${encodeURIComponent(pack.id)}/regenerate`,{method:'POST',body:{}});notice('已开始重新生成，稍后刷新查看。');}catch(error){fail(error);}finally{regenerate.disabled=false;}},'quiet');actions.append(regenerate);}
+      if(!['processing','uploading'].includes(course.state)){
+        const regenerate=button(course.state==='failed'?'再试一次':'重新生成互动',async()=>{
+          if(course.state==='published'&&!confirm('新的题目需要家长重新核对，核对前孩子暂时不能玩这节课。确定重新生成吗？'))return;
+          regenerate.disabled=true;try{await api(`courses/${encodeURIComponent(course.id)}/retry`,{method:'POST',body:{}});notice('已经开始重新整理，完成后会自动刷新。');loadDay();}catch(error){fail(error);}finally{regenerate.disabled=false;}
+        },course.state==='failed'?'secondary':'quiet');actions.append(regenerate);
+      }
       const remove=button('删除这节课',async()=>{if(!confirm('删除这节课？素材和互动会从每日学习中移除。'))return;try{await api(`courses/${encodeURIComponent(course.id)}`,{method:'DELETE'});notice('已删除。');loadDay();}catch(error){fail(error);}},'danger-text');actions.append(remove);
       const sources=el('details',{class:'sources'},el('summary',{},`课程素材与转写 · ${(course.sources||[]).length} 份`));
       for(const source of course.sources||[])sources.append(sourcePanel(source,{canReview,reload:loadDay,fail,notice}));

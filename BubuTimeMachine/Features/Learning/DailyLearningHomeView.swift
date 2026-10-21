@@ -249,6 +249,7 @@ struct DailyLearningHome: View {
     }
 
     private func load(quiet: Bool = false) async {
+        let requestedDay = dayString
         if !quiet { loading = true }
         defer { loading = false }
         do {
@@ -260,6 +261,8 @@ struct DailyLearningHome: View {
             if let child { base.append(URLQueryItem(name: "child_id", value: child)) }
             let dayQuery = base + [URLQueryItem(name: "start", value: dayString), URLQueryItem(name: "end", value: dayString)]
             let list = try await client.get("api/courses", query: dayQuery, as: LearningCourseList.self)
+            // A slow poll for the previous day must not overwrite the newly chosen day.
+            guard requestedDay == dayString else { return }
             courses = list.items
             if let first = weekDates.first, let last = weekDates.last {
                 let weekQuery = base + [URLQueryItem(name: "start", value: BubuLearningDates.dayString(first)),
@@ -520,15 +523,20 @@ struct CourseUploadSheet: View {
     }
 
     /// Proxy limit per request is about 100 MB; stay clearly below it.
-    static let maxRequestBytes = 92 * 1_048_576
+    nonisolated static let maxRequestBytes = 92 * 1_048_576
     /// Larger phone videos are re-encoded to 720p first. Speech stays intact for transcription.
-    static let compressAboveBytes = 40 * 1_048_576
+    nonisolated static let compressAboveBytes = 40 * 1_048_576
 
     private func upload() async {
         uploading = true; errorText = nil
-        defer { uploading = false; progressText = nil }
+        var ready: [LearningUploadFile] = []
+        var created: String?
+        defer {
+            uploading = false; progressText = nil
+            // Compressed copies are ours; the picked originals stay for a retry.
+            for file in ready where !files.contains(file) { try? FileManager.default.removeItem(at: file.url) }
+        }
         do {
-            var ready: [LearningUploadFile] = []
             for (index, file) in files.enumerated() {
                 if file.mimeType.hasPrefix("video/"), Self.size(of: file.url) > Self.compressAboveBytes {
                     progressText = "正在压缩第 \(index + 1) 个视频…"
@@ -547,28 +555,48 @@ struct CourseUploadSheet: View {
             var course = try await client.createCourse(childID: childID, schoolDate: BubuLearningDates.dayString(day),
                                                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                                                        kind: kind, language: language, first: ready[0], totalFiles: ready.count)
+            created = course.id
             for (index, file) in ready.enumerated().dropFirst() {
                 progressText = "正在上传第 \(index + 1)/\(ready.count) 个文件…"
                 course = try await client.addCourseFile(courseID: course.id, file: file)
             }
-            for file in files + ready { try? FileManager.default.removeItem(at: file.url) }
+            for file in files { try? FileManager.default.removeItem(at: file.url) }
             onUploaded(course)
             dismiss()
         } catch {
+            // Don't leave a half-uploaded lesson behind; retrying creates a clean one.
+            if let created {
+                _ = try? await client.send("DELETE", "api/courses/\(created)", as: CourseDeleted.self)
+            }
             errorText = learningErrorText(error, fallback: "上传没有完成，请检查网络后重试。如果课程里显示“上传未完成”，可以删除后重新上传。")
         }
     }
+
+    private nonisolated struct CourseDeleted: Decodable, Sendable { let deleted: Bool }
 
     nonisolated static func size(of url: URL) -> Int {
         (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
 
+    /// Sharpest first: cards and teacher gestures stay readable while long lessons still fit.
+    nonisolated static let presets = [AVAssetExportPreset1280x720, AVAssetExportPreset960x540,
+                                      AVAssetExportPreset640x480, AVAssetExportPresetMediumQuality]
+
     @concurrent
     nonisolated static func compress(_ file: LearningUploadFile) async throws -> LearningUploadFile {
         let asset = AVURLAsset(url: file.url)
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1280x720) else {
-            return file
+        // Never use fileLengthLimit: it would silently cut the end of the lesson.
+        var chosen: AVAssetExportSession?
+        for preset in presets {
+            guard let exporter = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            exporter.outputFileType = .mp4
+            let estimate: Int64 = await withCheckedContinuation { continuation in
+                exporter.estimateOutputFileLength { length, _ in continuation.resume(returning: length) }
+            }
+            chosen = exporter
+            if estimate > 0 && estimate < Int64(maxRequestBytes) * 9 / 10 { break }
         }
+        guard let exporter = chosen else { return file }
         let target = temporary("mp4")
         try await exporter.export(to: target, as: .mp4)
         guard size(of: target) > 0, size(of: target) < size(of: file.url) else {

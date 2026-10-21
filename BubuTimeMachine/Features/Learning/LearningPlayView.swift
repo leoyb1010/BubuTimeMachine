@@ -383,20 +383,30 @@ actor LearningAttemptOutbox {
         await flush(client: client)
     }
 
+    private var flushing = false
+
     func flush(client: BubuLearningClient) async {
-        var remaining = read()
-        for item in remaining where item.scope == client.scope {
+        guard !flushing else { return }
+        flushing = true
+        defer { flushing = false }
+        for item in read() where item.scope == client.scope {
             do {
                 _ = try await client.send("POST", "api/attempts", body: item.body, as: Saved.self)
-                remaining.removeAll { $0.body.id == item.body.id }
+                remove(item.body.id)
             } catch LearningServiceError.unavailableMedia {
-                remaining.removeAll { $0.body.id == item.body.id }  // course was withdrawn
+                remove(item.body.id)  // the course was withdrawn
             } catch BubuLearningClientError.conflict {
-                remaining.removeAll { $0.body.id == item.body.id }
+                remove(item.body.id)
+            } catch BubuLearningClientError.message {
+                remove(item.body.id)  // rejected as invalid; retrying can never succeed
             } catch {
-                break
+                return  // offline or signed out: keep everything for the next try
             }
         }
-        write(remaining)
+    }
+
+    /// Re-read after each send so attempts queued meanwhile are never overwritten.
+    private func remove(_ id: String) {
+        write(read().filter { $0.body.id != id })
     }
 }

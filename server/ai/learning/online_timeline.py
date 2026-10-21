@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 
 from .brain_bridge import BrainUnavailable
-from .store import Missing, valid_day
+from .store import Missing, digest, valid_day
 
 LOCAL = ZoneInfo('Asia/Shanghai')
 PREVIEW_SIZES = {'thumb': 480, 'large': 1600}
@@ -64,7 +64,10 @@ class OnlineTimeline:
                                  ' '.join(str(s.get('text') or '') for s in analysis.get('segments') or [])]).casefold()
                 items.append({'item': item, 'stamp': stamp, 'day': day, 'text': text})
             items.sort(key=lambda row: (row['stamp'] or '', row['item']['file_id']), reverse=True)
-            self.cached = {'snapshot_id': value['snapshot_id'], 'rows': items,
+            # Only what the feed shows defines a page snapshot; still-unparsed
+            # library files must not reset a parent's scroll position.
+            snapshot_id = digest([(row['item']['file_id'], row['item'].get('source_revision', '')) for row in items])
+            self.cached = {'snapshot_id': snapshot_id, 'rows': items,
                            'by_id': {row['item']['file_id']: row['item'] for row in items}}
             self.cached_at = time.monotonic()
             return self.cached

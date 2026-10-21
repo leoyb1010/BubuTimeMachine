@@ -59,7 +59,12 @@ struct OnlineTimelineDetailPage: View {
             .bubuContentColumn(900)
         }
         .onChange(of: isCurrent) { _, active in if !active { player?.pause() } }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            guard let player else { return }
+            player.pause()
+            // Let music or podcasts in other apps resume after a video.
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     @ViewBuilder

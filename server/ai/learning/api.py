@@ -318,6 +318,10 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
     def course(cid: str, scope: FamilyScope = Depends(_scope)):
         return _call(service_factory, 'course', scope, cid)
 
+    @router.post('/courses/{cid}/retry')
+    def retry_course(cid: str, scope: FamilyScope = Depends(_scope)):
+        return _call(service_factory, 'retry_course', scope, cid)
+
     @router.delete('/courses/{cid}')
     def delete_course(cid: str, scope: FamilyScope = Depends(_scope)):
         return _call(service_factory, 'delete_course', scope, cid)
