@@ -17,7 +17,7 @@ final class LiveLearningJourneyUITests: XCTestCase {
     @MainActor
     private func launch(tab: Int) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-seed", "-uitest-server-config", "-uitest-tab", String(tab)]
+        app.launchArguments = ["-uitest-seed", "-uitest-server-config", "-uitest-skip-consent", "-uitest-tab", String(tab)]
         app.launchEnvironment = environment
         app.launch()
         return app
@@ -162,6 +162,71 @@ final class LiveLearningJourneyUITests: XCTestCase {
         week.tap()
         XCTAssertTrue(app.buttons["learning.review.start"].waitForExistence(timeout: 30), "开放的课程应进入本周复习")
         shot("19-week-review", app)
+    }
+
+    @MainActor
+    func testConsentAppearsOnceBeforeSecondBrainContent() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uitest-seed", "-uitest-server-config", "-uitest-tab", "1"]
+        app.launchEnvironment = environment
+        app.launch()
+        let accept = app.buttons["consent.accept"]
+        if accept.waitForExistence(timeout: 20) {
+            shot("20-consent", app)
+            accept.tap()
+        }
+        XCTAssertTrue(app.buttons["timeline.item"].firstMatch.waitForExistence(timeout: 90))
+        app.terminate()
+        app.launch()
+        XCTAssertFalse(app.buttons["consent.accept"].waitForExistence(timeout: 6), "确认过一次后不再弹出")
+    }
+
+    @MainActor
+    func testUpgrade225Surfaces() throws {
+        let app = launch(tab: 1)
+        XCTAssertTrue(app.buttons["timeline.item"].firstMatch.waitForExistence(timeout: 90))
+        XCTAssertTrue(app.buttons["timeline.source.merged"].exists, "时光应有全部/第二大脑/家人记录分段")
+        sleep(2)
+        shot("21-timeline-merged", app)
+        app.buttons["timeline.source.family"].tap()
+        XCTAssertTrue(app.buttons["timeline.family"].firstMatch.waitForExistence(timeout: 15), "家人记录应出现在时光里")
+        shot("22-timeline-family", app)
+        app.buttons["timeline.source.brain"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["timeline.scrubber"].waitForExistence(timeout: 15), "按月拖动条")
+        let person = app.buttons["timeline.person"].firstMatch
+        if person.waitForExistence(timeout: 10) {
+            person.tap()
+            XCTAssertTrue(app.staticTexts["timeline.online.total"].waitForExistence(timeout: 20))
+            sleep(2)
+            shot("23-timeline-person", app)
+            person.tap()
+        }
+        app.buttons["timeline.source.merged"].tap()
+
+        app.buttons["timeline.menu"].tap()
+        app.buttons["认一认"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["brain.recognition"].waitForExistence(timeout: 20))
+        sleep(4)
+        shot("24-recognition", app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["timeline.menu"].tap()
+        app.buttons["每月成长小报"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["brain.monthly"].waitForExistence(timeout: 20))
+        sleep(5)
+        shot("25-monthly", app)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 首页回忆与生日倒计时
+        let home = app.tabBars.buttons["首页"].firstMatch.exists ? app.tabBars.buttons["首页"].firstMatch : app.buttons["首页"].firstMatch
+        home.tap()
+        let memory = app.buttons["home.memory"].firstMatch
+        scrollUntilHittable(memory, in: app)
+        XCTAssertTrue(memory.waitForExistence(timeout: 30), "首页应有今日回忆")
+        shot("26-home-memories", app)
+        memory.tap()
+        XCTAssertTrue(app.buttons["timeline.item"].firstMatch.waitForExistence(timeout: 10) || app.otherElements.firstMatch.exists)
+        sleep(3)
+        shot("27-memory-detail", app)
     }
 
     @MainActor

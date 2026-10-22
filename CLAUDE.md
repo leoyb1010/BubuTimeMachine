@@ -41,9 +41,12 @@ sleep 4 && xcrun simctl io "iPhone 17 Pro" screenshot /tmp/shot.png
 GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMachineApp.swift` 与 `RootTabView.swift`，仅 DEBUG 生效）：
 - `-uitest-seed`：注入布布档案 + 成员 + 记录 + 里程碑 + 胶囊，跳过引导
   （档案里带 5 天后开学的入园日期与过敏信息，用于验证幼儿园相关界面）
-- `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 2 成长 / 3 魔法屋**。
-  时间胶囊已并入魔法屋；iPhone 是原生 4 Tab +「记录此刻」底部附件，iPad 由
-  `sidebarAdaptable` 自动切换顶部/侧栏，Mac Catalyst 额外保留 tag 4「档案馆」
+- `-uitest-tab N`：直达第 N 个 tab —— **0 首页 / 1 时光 / 5 学习 / 2 成长 / 3 幼儿园**（视觉顺序如此）。
+  魔法屋在 成长 → AIStudio；iPhone 是原生 5 Tab +「记录此刻」底部附件，iPad 由
+  `sidebarAdaptable` 自动切换顶部/侧栏，Mac Catalyst 额外保留 tag 4「档案馆」。
+  时光是合成流：第二大脑在线素材 + 本机家人记录（`OnlineTimelineView`），未连接服务时只显示家人记录。
+- 联调参数：`-uitest-server-config`（读 BUBU_UITEST_* 环境变量指向本机回环测试服务）、`-uitest-skip-consent`；
+  真实旅程测试在 `BubuTimeMachineUITests/LiveLearningJourneyUITests.swift`（无环境变量时自动跳过）。
 - 直达页面：`-uitest-milestones` / `-uitest-story` / `-uitest-capsule` / `-uitest-growth` / `-uitest-growth-curve` / `-uitest-diary` / `-uitest-settings` / `-uitest-advanced-settings` / `-uitest-voice` / `-uitest-export` / `-uitest-timeline` / `-uitest-ai` / `-uitest-movie` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-sound-ring` / `-uitest-capture` / `-uitest-simple`
 - 手表端：bundle id `com.bubu.timemachine.watchkitapp`，App Group `group.com.bubu.timemachine.watch`；可用 `xcrun simctl` 往手表模拟器 App Group 容器注入 plist 快照数据后截图验证（本地有专用模拟器 `BubuWatchSim`）
 
@@ -64,7 +67,9 @@ GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMa
 ## 注意事项
 - 截图含真实 PII（布布真名、生日、照片），**对外分享前必须高斯模糊脱敏**。
   注：ChildProfile **没有身份证字段**，身份卡上的 `No.BUBU…` 是装饰性假号（2026-09-04 审计更正）
-- 数据外发（同步/AI）必须用户显式开启，默认全离线；人脸/图片分析一律端侧
+- 数据外发（同步/AI）必须用户显式开启，默认全离线；App 内的人脸/图片分析一律端侧（如成长脸延时）。
+  例外且已如实告知：时光/学习读取家里第二大脑的内容，第二大脑用云端 Gemini 做画面描述、人物归类和课程解析；
+  首次使用时由 `secondBrainConsent` 说明，改动这部分行为必须同步更新那段说明文案
 - **改任何 @Model 之前先跑 `BubuTimeMachineTests/StoreMigrationTests.swift`**：
   并同时运行 `HistoricalSchemaBridgeTests`、`StoreUpgradeBackupTests`、`SyncCheckpointTests`。
   V1 已冻结在 `BubuSchemaV1Snapshot.swift`，不得原地修改；V2 使用活动模型和独立同步进度。
