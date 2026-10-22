@@ -11,6 +11,7 @@ from datetime import date as Date, datetime, timezone
 import json
 import logging
 
+from .brain_bridge import BrainUnavailable
 from .online_timeline import LOCAL, short_place
 
 log = logging.getLogger("bubu.learning.monthly")
@@ -120,8 +121,13 @@ class Monthly:
             sum(r["item"]["media_type"] == "video" for r in rows), "\n".join(facts))
         title = summary = ""
         for attempt in range(2):
-            reply = self.bridge.complete_json(SYSTEM, user if not attempt else user + "\n\n上一次超出字数，请严格控制：标题≤20字，小结≤160字。",
-                                              SCHEMA, effort="medium")
+            prompt = user if not attempt else user + "\n\n上一次超出字数，请严格控制：标题≤20字，小结≤160字。"
+            try:
+                reply = self.bridge.complete_json(SYSTEM, prompt, SCHEMA, effort="medium")
+            except BrainUnavailable:
+                # Medium reasoning on a busy month can exceed the brain gate's 180 s; low still
+                # writes from the same facts.
+                reply = self.bridge.complete_json(SYSTEM, prompt, SCHEMA, effort="low")
             title = " ".join(str(reply.get("title") or "").split()).strip("「」《》\"'")
             summary = " ".join(str(reply.get("summary") or "").split())
             if title and summary and len(title) <= MAX_TITLE and len(summary) <= MAX_SUMMARY:

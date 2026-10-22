@@ -68,10 +68,10 @@ struct Growth2_25Tests {
         let now = Date.now
         let pastEnd = now.addingTimeInterval(-40 * 86_400)
         #expect(FaceTimelapseCache.needsCheck(nil, monthEnd: pastEnd, now: now))
-        #expect(!FaceTimelapseCache.needsCheck(.init(itemId: "a", checkedAt: now.addingTimeInterval(-90 * 86_400)), monthEnd: pastEnd, now: now))
-        #expect(!FaceTimelapseCache.needsCheck(.init(itemId: nil, checkedAt: now.addingTimeInterval(-86_400)), monthEnd: pastEnd, now: now))
-        #expect(FaceTimelapseCache.needsCheck(.init(itemId: nil, checkedAt: now.addingTimeInterval(-8 * 86_400)), monthEnd: pastEnd, now: now))
-        #expect(FaceTimelapseCache.needsCheck(.init(itemId: "a", checkedAt: now.addingTimeInterval(-13 * 3600)), monthEnd: now.addingTimeInterval(86_400), now: now))
+        #expect(!FaceTimelapseCache.needsCheck(FaceTimelapseCache.Entry(itemId: "a", checkedAt: now.addingTimeInterval(-90 * 86_400)), monthEnd: pastEnd, now: now))
+        #expect(!FaceTimelapseCache.needsCheck(FaceTimelapseCache.Entry(itemId: nil, checkedAt: now.addingTimeInterval(-86_400)), monthEnd: pastEnd, now: now))
+        #expect(FaceTimelapseCache.needsCheck(FaceTimelapseCache.Entry(itemId: nil, checkedAt: now.addingTimeInterval(-8 * 86_400)), monthEnd: pastEnd, now: now))
+        #expect(FaceTimelapseCache.needsCheck(FaceTimelapseCache.Entry(itemId: "a", checkedAt: now.addingTimeInterval(-13 * 3600)), monthEnd: now.addingTimeInterval(86_400), now: now))
     }
 
     @Test func firstDTODecodesContractShape() throws {
