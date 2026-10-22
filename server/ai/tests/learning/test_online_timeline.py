@@ -130,3 +130,15 @@ def test_family_wording_replaces_description_but_search_keeps_both(timeline):
     assert row["description"] == "布布（袁晨希）在画画" and row["description_adjusted"] is True
     assert [i["id"] for i in service.feed(scope(), query="袁晨希")["items"]] == [fid]
     assert fid in [i["id"] for i in service.feed(scope(), query="画画")["items"]]
+
+
+def test_nothing_before_birth_is_shown(tmp_path):
+    items = [row(tmp_path, 1, day="2024-05-21T23:00:00+08:00", description="一二布布动画"),
+             row(tmp_path, 2, day="2024-05-22T08:00:00+08:00", description="布布出生第一天"),
+             row(tmp_path, 3, day="2023-12-01T10:00:00+08:00", description="别的孩子")]
+    service = OnlineTimeline(Bridge(items), Processor(), LearningStore(tmp_path / "state"), FAMILY, CHILD, "s", born="2024-05-22")
+    feed = service.feed(scope())
+    assert [i["id"][-1] for i in feed["items"]] == ["2"] and feed["total"] == 1
+    import pytest as _pytest
+    with _pytest.raises(Missing):
+        service.media(scope(), "%024x" % 1)

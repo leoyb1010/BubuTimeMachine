@@ -28,9 +28,12 @@ PROVENANCE = {'manual': '家人标注', 'gemini_two_pass': '第二大脑人物�
 
 
 class OnlineTimeline:
-    def __init__(self, bridge, processor, store, family, child, subject, *, ttl=30):
+    def __init__(self, bridge, processor, store, family, child, subject, *, ttl=30, born=None):
         self.bridge, self.processor, self.store = bridge, processor, store
         self.family, self.child, self.subject, self.ttl = family, child, subject, ttl
+        # Library labels can be wrong (other children, a cartoon called 布布); nothing
+        # captured before she was born belongs in her timeline.
+        self.born = valid_day(born) if born else None
         self.captions = TimelineCaptions(store)
         self.lock = threading.RLock()
         self.cached = None
@@ -62,6 +65,8 @@ class OnlineTimeline:
                     continue
                 stamp = self.stamp(item.get('captured_at'))
                 day = datetime.fromisoformat(stamp).astimezone(LOCAL).date().isoformat() if stamp else None
+                if self.born and (not day or day < self.born):
+                    continue
                 original = str(analysis.get('description') or '')
                 description = family_words.get(item['file_id'], original)
                 text = ' '.join([original, description, str(analysis.get('ocr') or ''),

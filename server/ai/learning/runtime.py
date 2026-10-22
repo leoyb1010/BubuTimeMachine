@@ -47,7 +47,8 @@ def get_service():
     service=LearningService(store,processor,brain_sync=timeline,pocketbase=pocketbase)
     subject=os.environ.get("LEARNING_SUBJECT_ID","").strip()
     # Without a configured person the timeline routes answer 503; courses keep working.
-    service.online_timeline=OnlineTimeline(bridge,processor,store,family,child,subject) if subject else None
+    born=os.environ.get("LEARNING_SUBJECT_BIRTH_DATE","").strip() or None
+    service.online_timeline=OnlineTimeline(bridge,processor,store,family,child,subject,born=born) if subject else None
     return service
 
 
