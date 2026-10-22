@@ -110,7 +110,7 @@ def test_jpeg_header_gives_aspect_and_feed_reports_extended_fields(tmp_path):
     feed = timeline.feed(scope())
     first, second = feed["items"]
     assert first["aspect"] == 1.5 and second["aspect"] == 1.0
-    assert first["people"] == ["郑德兰"] and first["place"] == "深圳市 · 尚云花园"
+    assert first["people"] == ["姥姥"] and first["place"] == "深圳市 · 尚云花园"
     assert [s["text"] for s in first["segments"]] == ["妈妈抱"] and first["transcript_hidden"] == 1
     assert first["confirmed_by_family"] is False
     assert feed["months"] == [{"month": "2026-10", "count": 1}, {"month": "2026-09", "count": 1}]

@@ -267,7 +267,10 @@ class OnlineTimeline:
                 'segments': row.get('segments', []), 'transcript_hidden': row.get('hidden', 0),
                 'label_provenance': provenance,
                 'label_provenance_text': PROVENANCE.get(provenance, '第二大脑'),
-                'aspect': self.aspect(sha), 'people': row.get('people', []), 'place': short_place(row.get('place')),
+                # Family roles (爸爸/妈妈…) read better than names; filtering accepts either.
+                'aspect': self.aspect(sha),
+                'people': [(self.cached or {}).get('labels', {}).get(name) or name for name in row.get('people', [])],
+                'place': short_place(row.get('place')),
                 'confirmed_by_family': bool(row.get('confirmed')),
                 'source': 'second-brain', 'preview_url': base + '/preview?size=thumb&revision=' + sha,
                 'large_url': base + '/preview?size=large&revision=' + sha,

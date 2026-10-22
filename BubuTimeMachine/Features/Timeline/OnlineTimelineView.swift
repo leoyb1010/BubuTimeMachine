@@ -305,7 +305,7 @@ struct OnlineTimelineBrowser: View {
                 if !people.isEmpty {
                     Divider().frame(height: 22)
                     ForEach(people.prefix(6), id: \.name) { person in
-                        chip("和\(person.name)", symbol: "person.2.fill", active: query.person == person.name) {
+                        chip("和\(person.display)", symbol: "person.2.fill", active: query.person == person.name) {
                             query.person = query.person == person.name ? nil : person.name
                         }
                         .accessibilityIdentifier("timeline.person")

@@ -43,7 +43,12 @@ nonisolated struct OnlineTimelineItem: Codable, Sendable, Hashable, Identifiable
 }
 
 nonisolated struct OnlineTimelineMonthCount: Codable, Sendable, Hashable { let month: String; let count: Int }
-nonisolated struct OnlineTimelinePerson: Decodable, Sendable, Hashable { let name: String; let count: Int }
+nonisolated struct OnlineTimelinePerson: Decodable, Sendable, Hashable {
+    let name: String
+    let label: String?
+    let count: Int
+    var display: String { label?.isEmpty == false ? label! : name }
+}
 nonisolated struct OnlineTimelinePeople: Decodable, Sendable { let items: [OnlineTimelinePerson] }
 nonisolated struct OnlineTimelineItems: Decodable, Sendable { let items: [OnlineTimelineItem] }
 
