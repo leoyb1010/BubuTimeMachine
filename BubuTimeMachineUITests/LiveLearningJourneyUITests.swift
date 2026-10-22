@@ -192,7 +192,12 @@ final class LiveLearningJourneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["timeline.family"].firstMatch.waitForExistence(timeout: 15), "家人记录应出现在时光里")
         shot("22-timeline-family", app)
         app.buttons["timeline.source.brain"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["timeline.scrubber"].waitForExistence(timeout: 15), "按月拖动条")
+        let scrubber = app.descendants(matching: .any)["timeline.scrubber"]
+        if !scrubber.waitForExistence(timeout: 15), let folder = ProcessInfo.processInfo.environment["BUBU_UITEST_SHOTS"] {
+            try? app.debugDescription.write(toFile: folder + "/scrubber-tree.txt", atomically: true, encoding: .utf8)
+            shot("22b-brain-no-scrubber", app)
+        }
+        XCTAssertTrue(scrubber.exists, "按月拖动条")
         let person = app.buttons["timeline.person"].firstMatch
         if person.waitForExistence(timeout: 10) {
             person.tap()

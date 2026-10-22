@@ -18,7 +18,6 @@ struct OnlineTimelineView: View {
         }
         .navigationTitle("时光")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("timeline.online")
     }
 }
 

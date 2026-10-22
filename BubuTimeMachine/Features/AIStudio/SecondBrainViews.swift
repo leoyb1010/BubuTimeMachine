@@ -103,6 +103,17 @@ private struct MonthlyReportCard: View {
     @State private var items: [OnlineTimelineItem] = []
     @State private var selected: OnlineTimelineItem?
 
+    /// "深圳市 · 尚云花园" → "尚云花园"; at most three, no repeats.
+    private var shortPlaces: [String] {
+        var result: [String] = []
+        for place in report.places {
+            let short = place.components(separatedBy: " · ").last?.trimmingCharacters(in: .whitespaces) ?? place
+            if !short.isEmpty, !result.contains(short) { result.append(short) }
+            if result.count == 3 { break }
+        }
+        return result
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
             HStack(alignment: .firstTextBaseline) {
@@ -131,8 +142,8 @@ private struct MonthlyReportCard: View {
                 Label("这个月的第一次：" + report.firsts.joined(separator: "、"), systemImage: "star.fill")
                     .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.deepRose)
             }
-            if !report.places.isEmpty {
-                Label("去过：" + report.places.joined(separator: "、"), systemImage: "mappin.and.ellipse")
+            if !shortPlaces.isEmpty {
+                Label("去过：" + shortPlaces.joined(separator: "、"), systemImage: "mappin.and.ellipse")
                     .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }
         }
