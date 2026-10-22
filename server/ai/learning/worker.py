@@ -23,6 +23,7 @@ log = logging.getLogger('bubu.learning.worker')
 HEARTBEAT = 'worker-heartbeat'
 BACKUP = 'learning-backup'
 BACKUP_KEEP = 7
+VOICE_EVERY, VOICE_BATCH = 120, 20  # was 4 clips per 20 min: a 500-clip backlog took days
 
 class LearningWorker:
     def __init__(self, store, bridge, processor, *, family, child, pocketbase=None, subject=None, features=None):
@@ -220,12 +221,13 @@ class LearningWorker:
             try:
                 self.backup(backup_root,today);done['backup']=today;self.store.set_cursor(cursor,done)
             except Exception as exc:log.warning('learning backup failed error=%s',type(exc).__name__)
-        if 'voices' in features and self._due('voices',1200,now):
+        if 'voices' in features and self._due('voices',VOICE_EVERY,now):
             try:
                 if done.get('voices')!=today:
                     features['voices'].sync_candidates();done['voices']=today;self.store.set_cursor(cursor,done)
-                # The queue is empty here: work through the backlog a few clips at a time.
-                features['voices'].process(4)
+                # The queue is empty here: work through the backlog, bounded by the clip's own time budget
+                # (~150 s) so a new lesson waits at most one batch.
+                features['voices'].process(VOICE_BATCH)
             except Exception as exc:log.warning('voice archive step failed error=%s',type(exc).__name__)
 
     def run(self,once=False):

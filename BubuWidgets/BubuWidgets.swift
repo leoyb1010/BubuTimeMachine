@@ -26,6 +26,36 @@ struct BubuEntry: TimelineEntry {
     var pickURL: URL? = nil
     var pickReason: String? = nil
     var pickDateText: String? = nil
+    /// 照片墙右上角轮换点的实际页数（≤1 时不画点）。
+    var pageCount = 0
+}
+
+/// 轮播时间线的统一收尾：条目截到 `cutoff`（零点），零点后 2 分钟重建——
+/// 精选跨零点要改标「昨日精选」或回落本机照片，「那年今日」徽章也只属于当天。
+private func cappedTimeline(_ entries: [BubuEntry], cutoff: Date) -> Timeline<BubuEntry> {
+    let kept = entries.filter { $0.date < cutoff }
+    guard !kept.isEmpty, kept.count < entries.count else { return Timeline(entries: entries, policy: .atEnd) }
+    return Timeline(entries: kept, policy: .after(cutoff.addingTimeInterval(120)))
+}
+
+/// 本机照片的零点（与「那年今日」同一本机日历）。
+private func nextLocalMidnight(after date: Date = .now) -> Date {
+    Calendar.current.nextDate(after: date, matching: DateComponents(hour: 0, minute: 0, second: 0),
+                              matchingPolicy: .nextTime) ?? date.addingTimeInterval(3600)
+}
+
+/// 确定性洗牌（同一 seed 结果恒定）：同一天内稳定、跨天自然翻新。
+private func dailyShuffled<T>(_ items: [T], seed: Int) -> [T] {
+    var result = items
+    var state = UInt64(truncatingIfNeeded: seed) &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+    var i = result.count - 1
+    while i > 0 {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        let j = Int(state >> 33) % (i + 1)
+        result.swapAt(i, j)
+        i -= 1
+    }
+    return result
 }
 
 struct BubuProvider: TimelineProvider {
@@ -96,7 +126,7 @@ struct BubuMomentProvider: TimelineProvider {
                 Self.pickEntry(picks, snapshot: snapshot,
                                date: Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60), slot: slot)
             }
-            completion(Timeline(entries: entries, policy: .atEnd))
+            completion(cappedTimeline(entries, cutoff: DailyPicksReader.nextMidnight()))
             return
         }
 
@@ -110,23 +140,27 @@ struct BubuMomentProvider: TimelineProvider {
         // 每天换一种顺序：用「今天是第几天」当种子，同一天内稳定、跨天自然翻新。
         // 不能用 random——每次重建时间线顺序都变的话，画面会毫无规律地跳。
         let daySeed = Int(Date.now.timeIntervalSince1970 / 86_400)
-        let ordered = Self.shuffled(moments, seed: daySeed)
+        let ordered = dailyShuffled(moments, seed: daySeed)
+        // 同一屏绝不重复同一张：池子够一屏时每屏取连续的 wallSize 张（循环取用）；
+        // 不够一屏时这一屏就只铺池里这几张，版式按实际张数排（见 BubuMomentWallView）。
+        let perWall = min(Self.wallSize, ordered.count)
+        let pages = ordered.count > Self.wallSize
+            ? min(Self.slots, (ordered.count + Self.wallSize - 1) / Self.wallSize)
+            : min(Self.slots, ordered.count)
 
         var entries: [BubuEntry] = []
         for slot in 0..<Self.slots {
             let date = Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60)
-            // 每屏从池子里往后取 wallSize 张，循环取用；池子小于一屏时自然重复但顺序仍在转
-            var wall: [SharedMoment] = []
-            for i in 0..<Self.wallSize {
-                wall.append(ordered[(slot * Self.wallSize + i) % ordered.count])
-            }
+            let start = ordered.count > Self.wallSize ? (slot % pages) * Self.wallSize : slot % pages
+            let wall = (0..<perWall).map { ordered[(start + $0) % ordered.count] }
             entries.append(BubuEntry(date: date, snapshot: snapshot,
                                      photoIndex: slot,
                                      moment: wall.first,
                                      wallMoments: wall,
-                                     wallPhotos: wall.compactMap { BubuWidgetData.momentImageData(fileName: $0.photoFileName) }))
+                                     wallPhotos: wall.compactMap { BubuWidgetData.momentImageData(fileName: $0.photoFileName) },
+                                     pageCount: pages))
         }
-        completion(Timeline(entries: entries, policy: .atEnd))
+        completion(cappedTimeline(entries, cutoff: nextLocalMidnight()))
     }
 
     private static func pickEntry(_ picks: [(pick: WidgetDailyPick, data: Data)], snapshot: BubuSnapshot,
@@ -135,27 +169,14 @@ struct BubuMomentProvider: TimelineProvider {
         let moments = rotated.map { item in
             SharedMoment(photoFileName: item.pick.file, title: item.pick.caption, note: nil,
                          date: item.pick.capturedDate ?? date, moodEmoji: nil,
-                         isOnThisDay: item.pick.reason == "那年今天")
+                         isOnThisDay: item.pick.isOnThisDay)
         }
         var links: [String: URL] = [:]
         for item in picks { links[item.pick.file] = item.pick.url }
         return BubuEntry(date: date, snapshot: snapshot, photoIndex: slot, moment: moments.first,
                          wallMoments: moments, wallPhotos: rotated.map(\.data),
-                         isDailyPicks: true, wallLinks: links, pickURL: rotated.first?.pick.url)
-    }
-
-    /// 确定性洗牌（同一 seed 结果恒定）。
-    private static func shuffled(_ items: [SharedMoment], seed: Int) -> [SharedMoment] {
-        var result = items
-        var state = UInt64(truncatingIfNeeded: seed) &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-        var i = result.count - 1
-        while i > 0 {
-            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-            let j = Int(state >> 33) % (i + 1)
-            result.swapAt(i, j)
-            i -= 1
-        }
-        return result
+                         isDailyPicks: true, wallLinks: links, pickURL: rotated.first?.pick.url,
+                         pageCount: min(picks.count, Self.slots))
     }
 }
 
@@ -169,11 +190,51 @@ private enum WidgetPalette {
     static let lav = Color(red: 0.863, green: 0.788, blue: 1.000)      // #DCC9FF
     static let honey = Color(red: 1.000, green: 0.886, blue: 0.627)    // butter
     static let mint = Color(red: 0.749, green: 0.922, blue: 0.827)
-    static let warmBrown = Color(red: 0.353, green: 0.239, blue: 0.204) // ink #5A3D34
     static let cream = Color(red: 1.000, green: 0.969, blue: 0.945)    // #FFF7F1
-    /// 次级文字。比 App 内的 ink2 深一档：卡片底改成透明后，
-    /// 小字下面不再有奶油实底兜着，原来的 #A98D82 压在壁纸上会发飘。
-    static let secondary = Color(red: 0.580, green: 0.470, blue: 0.420) // #947869
+    /// 主文字：浅色下深棕 ink #5A3D34；深色（深色模式或深色导入壁纸）下奶油 #FFF7F1。
+    /// 深色壁纸上固定深棕对比度只有约 1.5:1，几乎读不出来。
+    static let warmBrown = dynamic(light: (0.353, 0.239, 0.204), dark: (1.000, 0.969, 0.945))
+    /// 次级文字。浅色比 App 内的 ink2 深一档（#947869，透明底上不发飘）；深色用浅粉 #F2D6CB。
+    static let secondary = dynamic(light: (0.580, 0.470, 0.420), dark: (0.949, 0.839, 0.796))
+    /// 小卡片/胶囊底：浅色是白，深色是黑（再由调用方压不透明度）。
+    static let chip = dynamic(light: (1, 1, 1), dark: (0, 0, 0))
+    /// 实底纸色：浅色奶油，深色暖炭 #2A211F。
+    static let paper = dynamic(light: (1.000, 0.969, 0.945), dark: (0.165, 0.129, 0.122))
+
+    private static func dynamic(light: (CGFloat, CGFloat, CGFloat), dark: (CGFloat, CGFloat, CGFloat)) -> Color {
+        Color(uiColor: UIColor { traits in
+            let c = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+    }
+}
+
+/// 导入壁纸的平均亮度（0…1）。读不到时为 nil。小组件按它选字色，而不是按系统深浅色。
+private func wallpaperLuminance(for family: WidgetFamily) -> Double? {
+    let slot: WidgetWallpaper.Slot
+    switch family {
+    case .systemSmall: slot = .small
+    case .systemMedium: slot = .medium
+    case .systemLarge: slot = .large
+    default: return nil
+    }
+    guard let data = WidgetWallpaper.backgroundData(for: slot),
+          let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+              kCGImageSourceCreateThumbnailFromImageAlways: true,
+              kCGImageSourceThumbnailMaxPixelSize: 16,
+          ] as CFDictionary) else { return nil }
+    var pixel = [UInt8](repeating: 0, count: 4)
+    let drawn: Bool = pixel.withUnsafeMutableBytes { buffer in
+        guard let context = CGContext(data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                      bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.interpolationQuality = .medium
+        context.draw(thumb, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return true
+    }
+    guard drawn else { return nil }
+    return (0.2126 * Double(pixel[0]) + 0.7152 * Double(pixel[1]) + 0.0722 * Double(pixel[2])) / 255
 }
 
 // MARK: - 布布圆形头像（无头像时回退到吉祥物表情）
@@ -259,6 +320,7 @@ struct BubuAvatar: View {
 private struct BubuGlassContainer: View {
     var tintStrength: Double = 1.0
     @Environment(\.widgetFamily) private var family
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         // 用户导入过桌面壁纸：直接把它身后那块壁纸铺成底，桌面上小组件就"消失"了。
@@ -290,7 +352,8 @@ private struct BubuGlassContainer: View {
             // 底下没有花纹可透——底色留到 27% 时，视觉上和一张不透明的浅粉卡几乎没区别
             // （2026-07-29 真机反馈）。透明度只有压到 10% 以下，卡片才真的"退到壁纸里"，
             // 剩下头像、数字块、照片浮在上面。
-            Color.white.opacity(0.06)
+            // 深色模式：约 20% 黑压住深色壁纸，奶油字才立得住。
+            colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.06)
             LinearGradient(
                 colors: [WidgetPalette.peach.opacity(0.06 * tintStrength),
                          WidgetPalette.pink.opacity(0.05 * tintStrength),
@@ -303,7 +366,7 @@ private struct BubuGlassContainer: View {
             // 用 ContainerRelativeShape 而不是写死圆角：它自动跟随系统给这个尺寸的小组件圆角，
             // 手写半径在不同机型/不同 family 上必然对不齐。
             ContainerRelativeShape()
-                .strokeBorder(Color.white.opacity(0.55), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.25 : 0.55), lineWidth: 1)
         }
     }
 }
@@ -314,10 +377,23 @@ private extension View {
     @ViewBuilder
     func bubuGlassBackground(_ mode: WidgetRenderingMode, tintStrength: Double = 1.0) -> some View {
         if mode == .fullColor {
-            containerBackground(for: .widget) { BubuGlassContainer(tintStrength: tintStrength) }
+            modifier(WallpaperAwareScheme())
+                .containerBackground(for: .widget) { BubuGlassContainer(tintStrength: tintStrength) }
         } else {
             containerBackground(for: .widget) { Color.white.opacity(0.06) }
         }
+    }
+}
+
+/// 铺了导入壁纸时，字色跟着壁纸本身的亮度走（深壁纸用奶油字，浅壁纸用深棕字），
+/// 不跟系统深浅色——壁纸就是小组件的底。
+private struct WallpaperAwareScheme: ViewModifier {
+    @Environment(\.widgetFamily) private var family
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let scheme = wallpaperLuminance(for: family).map { $0 < 0.55 ? ColorScheme.dark : .light } ?? colorScheme
+        content.environment(\.colorScheme, scheme)
     }
 }
 
@@ -390,7 +466,7 @@ private struct BubuInfoChip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.white.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(WidgetPalette.chip.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -423,7 +499,7 @@ private struct BubuMetricPill: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 36)
-        .background(.white.opacity(0.42), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(WidgetPalette.chip.opacity(0.42), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -510,7 +586,7 @@ private struct BubuProgressStars: View {
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.48))
+                    Capsule().fill(WidgetPalette.chip.opacity(0.48))
                     Capsule()
                         .fill(LinearGradient(colors: [WidgetPalette.honey, WidgetPalette.primary],
                                              startPoint: .leading, endPoint: .trailing))
@@ -542,7 +618,7 @@ private struct BubuMotifRow: View {
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(tint)
             .frame(width: 22, height: 22)
-            .background(.white.opacity(0.42), in: Circle())
+            .background(WidgetPalette.chip.opacity(0.42), in: Circle())
     }
 }
 
@@ -913,7 +989,7 @@ private struct BubuMomentLargeView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(WidgetPalette.chip.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             BubuMomentStatsRow(snapshot: snapshot)
             Spacer(minLength: 0)
@@ -953,7 +1029,7 @@ private struct BubuMomentHeader: View {
             .lineLimit(1)
             .padding(.horizontal, compact ? 7 : 9)
             .padding(.vertical, compact ? 4 : 5)
-            .background(.white.opacity(0.58), in: Capsule())
+            .background(WidgetPalette.chip.opacity(0.58), in: Capsule())
         }
     }
 }
@@ -1043,7 +1119,7 @@ private struct BubuGrowthLargeView: View {
                 BubuMotifRow()
             }
             .padding(11)
-            .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(WidgetPalette.chip.opacity(0.4), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             HStack(spacing: 8) {
                 BubuMetricPill(title: "身高", value: snapshot.latestHeightText, icon: "ruler.fill", tint: WidgetPalette.mint)
@@ -1182,6 +1258,7 @@ private extension View {
 private struct SoftPhotoBackground: ViewModifier {
     let imageData: Data?
     @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         content.containerBackground(for: .widget) {
@@ -1194,10 +1271,18 @@ private struct SoftPhotoBackground: ViewModifier {
                         .blur(radius: 28)
                         .opacity(0.55)
                     // 暖色蒙版：压住模糊照片，保证上层白卡片信息对比度。
-                    LinearGradient(
-                        colors: [WidgetPalette.cream.opacity(0.82), WidgetPalette.peach.opacity(0.7), WidgetPalette.pink.opacity(0.6)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
+                    if colorScheme == .dark {
+                        LinearGradient(colors: [WidgetPalette.paper.opacity(0.86), WidgetPalette.roseDeep.opacity(0.35)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    } else {
+                        LinearGradient(
+                            colors: [WidgetPalette.cream.opacity(0.82), WidgetPalette.peach.opacity(0.7), WidgetPalette.pink.opacity(0.6)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    }
+                } else if colorScheme == .dark {
+                    LinearGradient(colors: [WidgetPalette.paper, WidgetPalette.roseDeep.opacity(0.4)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
                 } else {
                     LinearGradient(
                         colors: [WidgetPalette.peach.opacity(0.55), WidgetPalette.pink.opacity(0.45), WidgetPalette.lav.opacity(0.45), WidgetPalette.cream],
@@ -1220,26 +1305,19 @@ struct BubuMomentWallView: View {
     @Environment(\.widgetFamily) private var family
     @Environment(\.widgetRenderingMode) private var renderingMode
 
-    /// 本屏张数：大卡 9（3×3）、中卡 4（4×1 横排）、小卡 4（2×2）。
+    /// 本屏最多张数：大卡 9、中卡 4、小卡 4。少于上限时按实际张数换版式，同一屏不重复、不缺块。
     private var tileCount: Int {
         switch family {
         case .systemLarge: return 9
-        case .systemMedium: return 4
         default: return 4
-        }
-    }
-
-    private var columns: Int {
-        switch family {
-        case .systemLarge: return 3
-        case .systemMedium: return 4
-        default: return 2
         }
     }
 
     private var tiles: [(moment: SharedMoment, image: UIImage)] {
         let maxPixel: CGFloat = family == .systemLarge ? 420 : 320
+        var seen = Set<String>()
         return zip(entry.wallMoments, entry.wallPhotos)
+            .filter { seen.insert($0.0.photoFileName).inserted }
             .prefix(tileCount)
             .compactMap { pair in
                 guard let img = BubuAvatar.downsampledImage(from: pair.1, maxPixel: maxPixel) else { return nil }
@@ -1261,50 +1339,89 @@ struct BubuMomentWallView: View {
             }
         }
         .widgetURL(entry.pickURL ?? URL(string: "bubu://moment"))
+        .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
     }
 
-    // MARK: 大卡：标题行 + 3×3 图墙 + 底部一句话
+    private typealias Item = (moment: SharedMoment, image: UIImage)
 
-    private func largeWall(_ items: [(moment: SharedMoment, image: UIImage)]) -> some View {
+    // MARK: 大卡：标题行 + 图墙（按张数排版）+ 底部一句话
+
+    private func largeWall(_ items: [Item]) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             header
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
-                ForEach(Array(items.prefix(9).enumerated()), id: \.offset) { _, item in
-                    linked(item) { tile(item, corner: 12, showBadge: true) }
+            Group {
+                switch items.count {
+                case 9...: grid(Array(items.prefix(9)), columns: 3, corner: 12, badge: true)
+                case 6...8: grid(Array(items.prefix(6)), columns: 3, corner: 12, badge: true)
+                case 4...5: grid(Array(items.prefix(4)), columns: 2, corner: 14, badge: true)
+                case 2...3: leadAndRow(items, corner: 14, vertical: true)
+                default: linked(items[0]) { tile(items[0], corner: 16, showBadge: true) }
                 }
             }
+            .frame(maxHeight: .infinity)
             if let lead = items.first?.moment {
                 caption(lead)
             }
-            Spacer(minLength: 0)
         }
     }
 
-    // MARK: 中卡：左侧文字 + 右侧 4 张横排
+    // MARK: 中卡：标题行 + 1–4 张横排
 
-    private func mediumWall(_ items: [(moment: SharedMoment, image: UIImage)]) -> some View {
+    private func mediumWall(_ items: [Item]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            HStack(spacing: 5) {
-                ForEach(Array(items.prefix(4).enumerated()), id: \.offset) { _, item in
-                    linked(item) { tile(item, corner: 10, showBadge: true) }
+            grid(Array(items.prefix(4)), columns: min(4, items.count), corner: 10, badge: true)
+        }
+    }
+
+    // MARK: 小卡：2×2 / 一大两小 / 两张并排 / 满幅
+
+    private func smallWall(_ items: [Item]) -> some View {
+        Group {
+            switch items.count {
+            case 4...: grid(Array(items.prefix(4)), columns: 2, corner: 9, badge: false, spacing: 4)
+            case 3: leadAndRow(items, corner: 9, vertical: false, spacing: 4)
+            case 2: grid(items, columns: 2, corner: 9, badge: false, spacing: 4)
+            default: tile(items[0], corner: 12, showBadge: false)
+            }
+        }
+    }
+
+    /// 等分网格：张数正好铺满 rows × columns，瓦片随可用空间伸缩（不留空行）。
+    private func grid(_ items: [Item], columns: Int, corner: CGFloat, badge: Bool,
+                      spacing: CGFloat = 5) -> some View {
+        let rows = stride(from: 0, to: items.count, by: max(1, columns)).map {
+            Array(items[$0..<min($0 + columns, items.count)])
+        }
+        return VStack(spacing: spacing) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: spacing) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, item in
+                        linked(item) { tile(item, corner: corner, showBadge: badge) }
+                    }
                 }
             }
         }
     }
 
-    // MARK: 小卡：纯 2×2 图墙
-
-    private func smallWall(_ items: [(moment: SharedMoment, image: UIImage)]) -> some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                ForEach(Array(items.prefix(2).enumerated()), id: \.offset) { _, item in
-                    tile(item, corner: 9, showBadge: false)
-                }
+    /// 一大配一两小：大卡上大下小，小卡左大右小。
+    @ViewBuilder
+    private func leadAndRow(_ items: [Item], corner: CGFloat, vertical: Bool, spacing: CGFloat = 5) -> some View {
+        let rest = Array(items.dropFirst().prefix(2))
+        if vertical {
+            VStack(spacing: spacing) {
+                linked(items[0]) { tile(items[0], corner: corner, showBadge: true) }
+                    .frame(maxHeight: .infinity).layoutPriority(1)
+                grid(rest, columns: rest.count, corner: corner, badge: true, spacing: spacing)
+                    .frame(maxHeight: .infinity)
             }
-            HStack(spacing: 4) {
-                ForEach(Array(items.dropFirst(2).prefix(2).enumerated()), id: \.offset) { _, item in
-                    tile(item, corner: 9, showBadge: false)
+        } else {
+            HStack(spacing: spacing) {
+                tile(items[0], corner: corner, showBadge: false)
+                VStack(spacing: spacing) {
+                    ForEach(Array(rest.enumerated()), id: \.offset) { _, item in
+                        tile(item, corner: corner, showBadge: false)
+                    }
                 }
             }
         }
@@ -1321,12 +1438,15 @@ struct BubuMomentWallView: View {
                 .font(.system(size: 12, weight: .black, design: .rounded))
                 .foregroundColor(WidgetPalette.warmBrown)
             Spacer(minLength: 0)
-            // 轮换位置点：让人知道这面墙会一直翻，不是坏了
-            HStack(spacing: 3) {
-                ForEach(0..<4, id: \.self) { i in
-                    Circle()
-                        .fill(i == entry.photoIndex % 4 ? WidgetPalette.primary : WidgetPalette.primary.opacity(0.25))
-                        .frame(width: 4.5, height: 4.5)
+            // 轮换位置点：点数 = 实际页数，让人知道这面墙会一直翻，不是坏了。
+            if entry.pageCount > 1 {
+                HStack(spacing: 3) {
+                    ForEach(0..<min(entry.pageCount, 8), id: \.self) { i in
+                        Circle()
+                            .fill(i == entry.photoIndex % entry.pageCount
+                                  ? WidgetPalette.primary : WidgetPalette.primary.opacity(0.25))
+                            .frame(width: 4.5, height: 4.5)
+                    }
                 }
             }
             BubuPlusLink(size: 22)
@@ -1335,7 +1455,7 @@ struct BubuMomentWallView: View {
 
     /// 精选瓦片各自深链到在线时光详情（中/大尺寸才支持 Link；小卡走 widgetURL）。
     @ViewBuilder
-    private func linked<Content: View>(_ item: (moment: SharedMoment, image: UIImage),
+    private func linked<Content: View>(_ item: Item,
                                        @ViewBuilder content: () -> Content) -> some View {
         if let url = entry.wallLinks[item.moment.photoFileName] {
             Link(destination: url) { content() }
@@ -1345,10 +1465,9 @@ struct BubuMomentWallView: View {
     }
 
     /// 一块照片瓦片：正方形填充裁切；「那年今日」左上角打徽章。
-    private func tile(_ item: (moment: SharedMoment, image: UIImage),
-                     corner: CGFloat, showBadge: Bool) -> some View {
+    private func tile(_ item: Item, corner: CGFloat, showBadge: Bool) -> some View {
         Color.clear
-            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
                 Image(uiImage: item.image)
                     .resizable()
@@ -1387,7 +1506,7 @@ struct BubuMomentWallView: View {
                 .foregroundColor(WidgetPalette.primary)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(WidgetPalette.chip.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func ageAt(_ date: Date) -> String? {
@@ -1527,7 +1646,7 @@ struct BubuPanoramaView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(WidgetPalette.chip.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: 里程碑进度条
@@ -1548,7 +1667,7 @@ struct BubuPanoramaView: View {
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.48))
+                    Capsule().fill(WidgetPalette.chip.opacity(0.48))
                     Capsule()
                         .fill(LinearGradient(colors: [WidgetPalette.honey, WidgetPalette.primary],
                                              startPoint: .leading, endPoint: .trailing))
@@ -1564,7 +1683,7 @@ struct BubuPanoramaView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(WidgetPalette.chip.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: 最近一条
@@ -1596,7 +1715,7 @@ struct BubuPanoramaView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.white.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(WidgetPalette.chip.opacity(0.4), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -1606,6 +1725,7 @@ struct BubuWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
             BubuWidgetEntryView(entry: entry, style: .identity)
+                .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
         }
         .configurationDisplayName("布布身份卡")
         .description("头像、年龄、陪伴天数和生日倒计时。")
@@ -1634,6 +1754,7 @@ struct BubuPanoramaWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
             BubuPanoramaView(entry: entry)
+                .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
         }
         .configurationDisplayName("布布全景卡")
         .description("一屏看全：身份、年龄、身高体重、里程碑进度、本月照片和最近记录。")
@@ -1647,6 +1768,7 @@ struct BubuGrowthWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
             BubuWidgetEntryView(entry: entry, style: .growth)
+                .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
         }
         .configurationDisplayName("布布成长一览")
         .description("身高体重、里程碑和下一个成长目标。")
@@ -1729,6 +1851,7 @@ struct BubuAccessoryWidget: Widget {
         StaticConfiguration(kind: kind, provider: BubuProvider()) { entry in
             BubuAccessoryView(snapshot: entry.snapshot)
                 .containerBackground(for: .widget) { Color.clear }
+                .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
         }
         .configurationDisplayName("布布锁屏")
         .description("锁屏上的年龄、陪伴天数和生日倒计时。")
@@ -1741,6 +1864,9 @@ struct BubuAccessoryWidget: Widget {
 /// 多 entry 时间线：未来 6 小时每 30 分钟一个 entry 轮换一张照片。
 /// 翻页由时间线驱动，不消耗 WidgetKit 刷新预算（一次生成、系统按时切换）。
 struct BubuMemoryProvider: TimelineProvider {
+    /// 6 小时 × 每 30 分钟。
+    private static let slots = 12
+
     func placeholder(in context: Context) -> BubuEntry {
         BubuEntry(date: .now, snapshot: .sample)
     }
@@ -1752,29 +1878,49 @@ struct BubuMemoryProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<BubuEntry>) -> Void) {
         var snapshot = BubuWidgetData.loadSnapshot()
         // 关键：把图片数组从 snapshot 里剥掉，避免 12 个 entry 各自完整拷贝 3 张图 → 撞 WidgetKit 内存红线。
-        // 每个 entry 只在 carouselPhoto 里带「本槽位那一张」；同一张图在多个槽位间靠 Data 的写时复制共享底层缓冲。
-        let photos = snapshot.photoImageData
+        // 每个 entry 只在 carouselPhoto 里带「本槽位那一张」。
+        let fallbackPhotos = snapshot.photoImageData
         snapshot.photoImageData = []
         var entries: [BubuEntry] = []
+        let now = Date.now
         // 今日精选优先：每 30 分钟换一张精选，点开就是那一张的在线详情。
         let picks = DailyPicksReader.load()
         if !picks.isEmpty {
-            for slot in 0..<12 {
+            for slot in 0..<Self.slots {
                 let item = picks[slot % picks.count]
-                entries.append(BubuEntry(date: Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60),
+                entries.append(BubuEntry(date: now.addingTimeInterval(TimeInterval(slot) * 30 * 60),
                                          snapshot: snapshot, carouselPhoto: item.data, isDailyPicks: true,
                                          pickURL: item.pick.url, pickReason: item.pick.reason,
                                          pickDateText: item.pick.dateText))
             }
-            completion(Timeline(entries: entries, policy: .atEnd))
+            completion(cappedTimeline(entries, cutoff: DailyPicksReader.nextMidnight()))
             return
         }
-        for slot in 0..<12 {   // 6 小时 × 每 30 分钟
-            let date = Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60)
-            let photo = photos.isEmpty ? nil : photos[slot % photos.count]
-            entries.append(BubuEntry(date: date, snapshot: snapshot, photoIndex: 0, carouselPhoto: photo))
+        // 本机照片：按时光墙同一个池子（snapshot.moments）逐槽读图，6 小时内尽量不重复；
+        // 点开跳到这张照片那一天的时光。池子为空的老快照才回落到最近 3 张。
+        let ordered = dailyShuffled(snapshot.moments, seed: Int(now.timeIntervalSince1970 / 86_400))
+        if !ordered.isEmpty {
+            for slot in 0..<Self.slots {
+                let moment = ordered[slot % ordered.count]
+                guard let photo = BubuWidgetData.momentImageData(fileName: moment.photoFileName) else { continue }
+                entries.append(BubuEntry(date: now.addingTimeInterval(TimeInterval(slot) * 30 * 60),
+                                         snapshot: snapshot, moment: moment, carouselPhoto: photo,
+                                         pickURL: BubuIntentLinks.timeline(on: moment.date)))
+            }
         }
-        completion(Timeline(entries: entries, policy: .atEnd))
+        if entries.isEmpty {
+            for slot in 0..<Self.slots {
+                let photo = fallbackPhotos.isEmpty ? nil : fallbackPhotos[slot % fallbackPhotos.count]
+                entries.append(BubuEntry(date: now.addingTimeInterval(TimeInterval(slot) * 30 * 60),
+                                         snapshot: snapshot, carouselPhoto: photo))
+            }
+        }
+        // 槽位按「第几个」排时间：读图失败跳过的槽位不留空档。
+        entries = entries.enumerated().map { index, entry in
+            BubuEntry(date: now.addingTimeInterval(TimeInterval(index) * 30 * 60), snapshot: entry.snapshot,
+                      moment: entry.moment, carouselPhoto: entry.carouselPhoto, pickURL: entry.pickURL)
+        }
+        completion(cappedTimeline(entries, cutoff: nextLocalMidnight()))
     }
 }
 
@@ -1841,7 +1987,7 @@ struct BubuMemoryWidgetView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .containerBackground(for: .widget) {
                     // 染色/vibrant 模式下奶油实底会糊成一坨，与其它卡一致降级成中性淡底。
-                    if renderingMode == .fullColor { WidgetPalette.cream } else { Color.white.opacity(0.06) }
+                    if renderingMode == .fullColor { WidgetPalette.paper } else { Color.white.opacity(0.06) }
                 }
             }
         }
@@ -1852,10 +1998,11 @@ struct BubuMemoryWidget: Widget {
     let kind = "BubuMemoryWidget"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: BubuMemoryProvider()) { entry in
-            BubuMemoryWidgetView(entry: entry).widgetURL(entry.pickURL)
+            BubuMemoryWidgetView(entry: entry).widgetURL(entry.pickURL ?? URL(string: "bubu://moment"))
+                .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
         }
         .configurationDisplayName("成长相框")
-        .description("最近的照片每半小时自动换一张，桌面就是布布的相框。")
+        .description("时光里的照片每半小时自动换一张，点一下回到那一天。")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
         // 照片就是背景：StandBy/锁屏等场景系统若移除容器背景，只剩白字不可读。

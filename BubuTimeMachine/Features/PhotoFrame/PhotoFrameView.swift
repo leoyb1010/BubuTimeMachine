@@ -38,7 +38,7 @@ struct PhotoFrameView: View {
     private var usesBrain: Bool { sourceRaw == FrameSource.brain.rawValue && client != nil }
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    private var childName: String { profiles.first?.name ?? env.config.childName }
+    private var childName: String { ChildProfile.canonical(from: profiles)?.name ?? env.config.childName }
     private var current: FrameSlide? { slides.indices.contains(index) ? slides[index] : nil }
 
     var body: some View {
@@ -253,7 +253,7 @@ struct PhotoFrameView: View {
         guard let client else { brainSlides = nil; return }
         do {
             let list = try await client.get("api/online-timeline/highlights", as: FrameHighlightList.self)
-            let birthday = profiles.first?.birthday
+            let birthday = ChildProfile.canonical(from: profiles)?.birthday
             brainSlides = list.items.compactMap { item in
                 let path = item.largeUrl ?? item.previewUrl
                 guard let path, !path.isEmpty else { return nil }
@@ -287,7 +287,7 @@ struct PhotoFrameView: View {
         }
         let cal = Calendar.current
         let today = cal.dateComponents([.month, .day], from: .now)
-        let birthday = profiles.first?.birthday
+        let birthday = ChildProfile.canonical(from: profiles)?.birthday
 
         var onThisDay: [FrameSlide] = []
         var rest: [FrameSlide] = []

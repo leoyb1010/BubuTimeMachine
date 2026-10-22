@@ -32,13 +32,25 @@ struct WatchPhotoView: View {
         typeSize
         #endif
     }
+    /// 翻页动画：轻弹簧；减弱动态效果时只做淡入淡出。
+    private var pageAnimation: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.15)
+    }
+    private var pageTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98))
+    }
 
     var body: some View {
         let displayed = photos
         let memories = displayed.map(\.memory)
         let index = selection.index(in: memories)
         Group {
-            if displayed.isEmpty {
+            if displayed.isEmpty && loadedSession == -1 {
+                // 冷启动：缓存里的照片还在异步解码，先给一块安静的占位，不闪引导文案。
+                ProgressView().tint(.pink)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityLabel("正在打开照片")
+            } else if displayed.isEmpty {
                 ScrollView {
                     VStack(spacing: 12) {
                         Image(systemName: "photo").font(.title2).foregroundStyle(.pink)
@@ -51,36 +63,23 @@ struct WatchPhotoView: View {
             } else {
                 GeometryReader { geometry in
                     let current = displayed[index]
-                    VStack(spacing: 0) {
+                    // 图片始终占满整屏，说明浮在底部渐变层上：翻页时照片高度不随说明行数跳动。
+                    ZStack {
                         Image(uiImage: current.image).resizable().scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(.horizontal, showsCaption ? 0 : 6)
-                            .padding(.bottom, showsCaption ? 0 : 20)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped().accessibilityHidden(true)
-                        if showsCaption {
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 5) {
-                                    if let reason = current.memory.reason, !reason.isEmpty {
-                                        Text(reason).font(.caption2.weight(.bold))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 6).padding(.vertical, 1.5)
-                                            .background(Color(red: 0.882, green: 0.361, blue: 0.525), in: Capsule())
-                                    }
-                                    Text(current.memory.dateText).font(.caption2)
-                                        .foregroundStyle(Color(red: 0.88, green: 0.65, blue: 0.72))
-                                }
-                                if !current.memory.note.isEmpty {
-                                    Text(current.memory.note).font(.footnote).lineLimit(2)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 16).padding(.top, 5).padding(.bottom, 24)
-                        }
+                            .id(current.memory.id)
+                            .transition(pageTransition)
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
+                    .overlay(alignment: .bottom) {
+                        if showsCaption { caption(current.memory).transition(.opacity) }
+                    }
+                    .overlay(alignment: .trailing) {
+                        if displayed.count > 1 { pageDots(count: displayed.count, current: index) }
+                    }
                     .contentShape(Rectangle())
-                    .onTapGesture { showsCaption.toggle() }
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { showsCaption.toggle() } }
                     .gesture(DragGesture(minimumDistance: 25).onEnded { value in
                         guard abs(value.translation.width) > abs(value.translation.height) else { return }
                         step(value.translation.width < 0 ? 1 : -1)
@@ -108,7 +107,9 @@ struct WatchPhotoView: View {
         .ignoresSafeArea(.container, edges: .bottom)
         .dynamicTypeSize(previewType)
         .onOpenURL { _ in } // All former widget links open this same screen.
-        .onChange(of: crown) { _, value in selection.select(crownValue: value, in: cards) }
+        .onChange(of: crown) { _, value in
+            withAnimation(pageAnimation) { selection.select(crownValue: value, in: cards) }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { session += 1; focused = photos.count > 1 }
         }
@@ -116,21 +117,24 @@ struct WatchPhotoView: View {
                           photoVersion: connector.photoVersion, active: scenePhase == .active)) {
             guard scenePhase == .active, loadedSession != session || photos.isEmpty else { return }
             let snapshot = connector.snapshot
-            // 今日精选优先；精选的图还没到（或没有精选）时回落到本机照片。
-            var ready = await Self.load(WatchReadModel.dailyPicks(from: snapshot))
-            let showsPicks = !ready.isEmpty
-            if !showsPicks { ready = await Self.load(WatchReadModel.memories(from: snapshot)) }
+            let now = Date.now
+            // 家人近期照片与精选合并成一组（WatchReadModel.deck），图还没到的先跳过。
+            let ready = await Self.load(WatchReadModel.deck(from: snapshot, now: now))
             guard !Task.isCancelled else { return }
             // Keep the previous cached batch while its replacement is in flight.
             // An explicit empty list, however, must withdraw now-ineligible items.
-            if !ready.isEmpty || snapshot?.photoCards?.isEmpty == true {
+            let explicitlyEmpty = snapshot?.photoCards?.isEmpty == true
+                && WatchReadModel.dailyPicks(from: snapshot, now: now).isEmpty
+            if !ready.isEmpty || explicitlyEmpty {
                 photos = ready
                 selection.reconcile(with: ready.map(\.memory))
                 crown = Double(selection.index(in: ready.map(\.memory)))
             }
             loadedSession = session
             focused = photos.count > 1
-            if showsPicks, let day = snapshot?.dailyPicksDay, day != celebratedPicksDay {
+            let freshPicks = DailyPicksDay.freshness(of: snapshot?.dailyPicksDay, now: now) == .today
+            let showsPicks = ready.contains { $0.memory.id.hasPrefix("pick-") }
+            if freshPicks, showsPicks, let day = snapshot?.dailyPicksDay, day != celebratedPicksDay {
                 celebratedPicksDay = day
                 if !reduceMotion {
                     celebrating = true
@@ -139,6 +143,46 @@ struct WatchPhotoView: View {
                 }
             }
         }
+    }
+
+    private func caption(_ memory: WatchMemory) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                if let reason = memory.reason, !reason.isEmpty {
+                    Text(reason).font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 1.5)
+                        .background(Color(red: 0.882, green: 0.361, blue: 0.525), in: Capsule())
+                }
+                Text(memory.dateText).font(.caption2)
+                    .foregroundStyle(Color(red: 0.88, green: 0.65, blue: 0.72))
+            }
+            if !memory.note.isEmpty {
+                Text(memory.note).font(.footnote).lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 24)
+        .background {
+            LinearGradient(colors: [.clear, .black.opacity(0.55), .black.opacity(0.8)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// 表冠一侧的位置小圆点：当前那张拉长成胶囊。
+    private func pageDots(count: Int, current: Int) -> some View {
+        VStack(spacing: 3) {
+            ForEach(0..<count, id: \.self) { i in
+                Capsule()
+                    .fill(i == current ? Color.pink : Color.white.opacity(0.4))
+                    .frame(width: 4, height: i == current ? 10 : 4)
+            }
+        }
+        .padding(.trailing, 3)
+        .animation(pageAnimation, value: current)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private static func load(_ candidates: [WatchMemory]) async -> [Photo] {
@@ -155,7 +199,7 @@ struct WatchPhotoView: View {
     }
 
     private func step(_ delta: Int) {
-        selection.step(delta, in: cards)
+        withAnimation(pageAnimation) { selection.step(delta, in: cards) }
         crown = Double(selection.index(in: cards))
     }
 }

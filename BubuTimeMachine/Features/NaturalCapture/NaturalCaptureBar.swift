@@ -18,7 +18,7 @@ struct NaturalCaptureBar: View {
     @State private var isTranscribing = false
     @State private var pendingAudioURL: URL?
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
     private var isRecording: Bool { recorder.state == .recording }
     private var isBusy: Bool { isParsing || isTranscribing }

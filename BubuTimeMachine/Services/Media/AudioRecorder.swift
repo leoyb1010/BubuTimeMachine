@@ -20,6 +20,7 @@ final class AudioRecorder: NSObject {
     private var currentURL: URL?
     private var interruptionObserver: NSObjectProtocol?
     private var backgroundObserver: NSObjectProtocol?
+    private var stopIntentObserver: NSObjectProtocol?
 
     /// 来电/闹钟等中断时自动收尾保留的录音（UI 观察到后当作正常 stop 结果处理，已录的不丢）。
     private(set) var interruptedResult: (url: URL, duration: TimeInterval, waveform: [Float])?
@@ -67,6 +68,7 @@ final class AudioRecorder: NSObject {
             startTimer()
             observeInterruptions()
             observeBackgrounding()
+            observeStopIntent()
             // 录音中 Live Activity（灵动岛/锁屏可见时长）；未授权时安静 no-op。
             BubuActivityController.startVoiceRecording(childName: SharedDefaults.childName)
             return true
@@ -123,6 +125,26 @@ final class AudioRecorder: NSObject {
         backgroundObserver = nil
     }
 
+    /// 灵动岛/锁屏的「停止」按钮（`StopRecordingActivityIntent`）：与打断收尾同一路径，已录的照常导入。
+    private func observeStopIntent() {
+        removeStopIntentObserver()
+        stopIntentObserver = NotificationCenter.default.addObserver(
+            forName: StopRecordingActivityIntent.notification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state == .recording else { return }
+                self.interruptedResult = self.stop()
+            }
+        }
+    }
+
+    private func removeStopIntentObserver() {
+        if let stopIntentObserver {
+            NotificationCenter.default.removeObserver(stopIntentObserver)
+        }
+        stopIntentObserver = nil
+    }
+
     /// 停止录音，返回（临时文件 URL、时长、波形采样）。
     @discardableResult
     func stop() -> (url: URL, duration: TimeInterval, waveform: [Float])? {
@@ -136,6 +158,7 @@ final class AudioRecorder: NSObject {
         self.recorder = nil
         removeInterruptionObserver()
         removeBackgroundObserver()
+        removeStopIntentObserver()
         try? AVAudioSession.sharedInstance().setActive(false)
         BubuActivityController.endVoiceRecording(elapsedText: Self.timeText(duration))
         return (url, duration, waveform)
@@ -148,6 +171,7 @@ final class AudioRecorder: NSObject {
         recorder = nil; currentURL = nil
         removeInterruptionObserver()
         removeBackgroundObserver()
+        removeStopIntentObserver()
         state = .idle
         elapsed = 0
         levels = []

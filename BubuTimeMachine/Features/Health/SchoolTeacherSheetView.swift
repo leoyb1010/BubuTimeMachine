@@ -22,7 +22,7 @@ struct SchoolTeacherSheetView: View {
     /// 出图时是否连出生年月一起印。默认开——园方通常需要核对年龄；不想给就关掉。
     @State private var includeBirthday = true
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
     private var pickupMembers: [FamilyMember] { members.filter(\.canPickUpFromSchool) }
 

@@ -15,7 +15,7 @@ struct ChildIdentitySettingsView: View {
     @State private var showClearConfirmation = false
 
     private let recognizer = ChildIdentityRecognizer()
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
 
     var body: some View {
         Form {

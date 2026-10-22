@@ -61,11 +61,19 @@ enum BackgroundRefresher {
         // （切勿留空 expirationHandler / 直接 success，否则会被系统记为超时失败并降配额）。
         let runner = syncRunner ?? makeColdStartRunner()
         guard let runner else {
+            // 没有同步可跑，也顺手把今日精选换新（未同意说明/未配置服务时它自己什么都不做）。
+            await DailyPicksStore.shared.refreshInBackground()
             task.setTaskCompleted(success: false)
             return
         }
         // 用可取消 Task 包住真实同步；到期回调取消它，再按是否被取消如实上报结果。
-        let work = Task { @MainActor in await runner() }
+        // 今日精选与同步并行：精选只有几张小图，不该排在可能很长的媒体下载后面被系统打断——
+        // 不开 App 的日子，零点后桌面和手表也能换上当天的精选（新精选到达前昨天的会标「昨日精选」）。
+        let work = Task { @MainActor in
+            async let picks: Void = DailyPicksStore.shared.refreshInBackground()
+            await runner()
+            await picks
+        }
         task.expirationHandler = { work.cancel() }
         await work.value
         task.setTaskCompleted(success: !work.isCancelled)
@@ -108,7 +116,7 @@ enum BackupReminder {
         comps.day = 1; comps.hour = 10; comps.minute = 3
         let content = UNMutableNotificationContent()
         content.title = "给布布的时光做个备份 📦"
-        content.body = "每月一次：到 设置 → 导出，把全部记录导出存到电脑或硬盘。自托管的最后一道保险。"
+        content.body = "每月一次：到 设置 → 数据与备份 →「导出开放阅读档案」，把全部记录导出存到电脑或硬盘。自托管的最后一道保险。"
         content.sound = .default
         try? await center.add(UNNotificationRequest(
             identifier: id, content: content,

@@ -610,15 +610,24 @@ private struct RemoteVideoPage: View {
 
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
+    /// Single tap (waits for the double-tap to fail), e.g. to show or hide the surrounding chrome.
+    var onSingleTap: (() -> Void)? = nil
+    /// Crossfade when a sharper copy of the same picture replaces a placeholder (off under Reduce Motion).
+    var crossfade = false
+    /// When false (the page scrolled away) any zoom is reset, like the system Photos app.
+    var isActive = true
 
     func makeUIView(context: Context) -> ZoomingImageScrollView {
         let view = ZoomingImageScrollView()
+        view.onSingleTap = onSingleTap
         view.setImage(image)
         return view
     }
 
     func updateUIView(_ uiView: ZoomingImageScrollView, context: Context) {
-        uiView.setImage(image)
+        uiView.onSingleTap = onSingleTap
+        uiView.setImage(image, crossfade: crossfade)
+        if !isActive { uiView.resetZoom() }
     }
 }
 
@@ -626,6 +635,7 @@ struct ZoomableImageView: UIViewRepresentable {
 final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
     private let imageView = UIImageView()
     private var lastImage: UIImage?
+    var onSingleTap: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -650,6 +660,17 @@ final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         addGestureRecognizer(doubleTap)
+
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
+        singleTap.require(toFail: doubleTap)
+        addGestureRecognizer(singleTap)
+    }
+
+    @objc private func handleSingleTap() { onSingleTap?() }
+
+    func resetZoom() {
+        guard zoomScale > minimumZoomScale + 0.001 else { return }
+        setZoomScale(minimumZoomScale, animated: false)
     }
 
     /// 只有放大后才允许内层滚动（平移），原始大小时交给 TabView 翻页。
@@ -661,16 +682,34 @@ final class ZoomingImageScrollView: UIScrollView, UIScrollViewDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func setImage(_ image: UIImage) {
+    func setImage(_ image: UIImage, crossfade: Bool = false) {
         guard lastImage !== image else {
             setNeedsLayout()
             return
         }
+        let previous = lastImage
         lastImage = image
+        // A sharper copy of the same picture (thumbnail → large): keep the zoom and pan the user is in.
+        if let previous, Self.sameAspect(previous.size, image.size) {
+            if crossfade {
+                UIView.transition(with: imageView, duration: 0.18, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                    self.imageView.image = image
+                }
+            } else {
+                imageView.image = image
+            }
+            setNeedsLayout()
+            return
+        }
         imageView.image = image
         zoomScale = 1
         updateScrollEnabled()
         setNeedsLayout()
+    }
+
+    nonisolated static func sameAspect(_ a: CGSize, _ b: CGSize) -> Bool {
+        guard a.width > 0, a.height > 0, b.width > 0, b.height > 0 else { return false }
+        return abs(a.width / a.height - b.width / b.height) < 0.02 * max(a.width / a.height, 1)
     }
 
     override func layoutSubviews() {

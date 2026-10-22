@@ -306,7 +306,7 @@ def test_family_feature_routes_scope_reviewer_and_errors(setup):
         response=client.get(root+path,headers=BEARER)
         assert response.status_code==200,path
         assert service.calls[-1][:2]==expected
-    assert service.calls[0][2][-1]=='姥姥' and service.calls[0][2][0]=='海边'
+    assert service.calls[0][2][-2]=='姥姥' and service.calls[0][2][-1] is False and service.calls[0][2][0]=='海边'
     assert client.get(root+'memories',headers=BEARER).status_code==200 and len(service.calls[-1][2][0])==10
     assert client.get(root+'voices/v1/audio',headers=BEARER).headers['content-type']=='audio/mp4'
     assert client.get(root+'recognition/f1/preview',headers=BEARER).status_code==200

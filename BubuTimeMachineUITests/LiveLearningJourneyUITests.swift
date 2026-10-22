@@ -23,18 +23,30 @@ final class LiveLearningJourneyUITests: XCTestCase {
         return app
     }
 
+    /// 来源与类型都收在「筛选」菜单里：先展开菜单，再点选项（标识符取不到时按文字找）。
+    @MainActor
+    private func pickFilter(_ identifier: String, label: String, in app: XCUIApplication) {
+        let menu = app.buttons["timeline.filter"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), "缺少筛选菜单")
+        menu.tap()
+        let byID = app.buttons[identifier].firstMatch
+        let option = byID.waitForExistence(timeout: 3) ? byID : app.buttons[label].firstMatch
+        XCTAssertTrue(option.waitForExistence(timeout: 5), "筛选菜单里缺少「\(label)」")
+        option.tap()
+    }
+
     @MainActor
     func testOnlineTimelineShowsSecondBrainPhotosAndVideos() throws {
         let app = launch(tab: 1)
         let first = app.buttons["timeline.item"].firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 90), "时光必须直接显示第二大脑的布布素材")
-        let counts = app.staticTexts["timeline.online.counts"]
-        XCTAssertTrue(counts.waitForExistence(timeout: 10))
-        XCTAssertTrue(counts.label.contains("视频"), counts.label)
+        // 数量在导航副标题里（照片 N · 视频 N）。
+        let counts = app.navigationBars.staticTexts.containing(NSPredicate(format: "label CONTAINS '视频'")).firstMatch
+        XCTAssertTrue(counts.waitForExistence(timeout: 10), "导航副标题应显示照片/视频数量")
         sleep(3)
         shot("01-timeline-list", app)
 
-        app.buttons["timeline.kind.video"].tap()
+        pickFilter("timeline.kind.video", label: "只看视频", in: app)
         XCTAssertTrue(app.staticTexts["timeline.online.total"].waitForExistence(timeout: 30))
         sleep(3)
         shot("02-timeline-videos", app)
@@ -46,7 +58,7 @@ final class LiveLearningJourneyUITests: XCTestCase {
         shot("03-timeline-video-detail", app)
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
-        app.buttons["timeline.kind.all"].tap()
+        pickFilter("timeline.kind.all", label: "不限类型", in: app)
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()
@@ -185,13 +197,13 @@ final class LiveLearningJourneyUITests: XCTestCase {
     func testUpgrade225Surfaces() throws {
         let app = launch(tab: 1)
         XCTAssertTrue(app.buttons["timeline.item"].firstMatch.waitForExistence(timeout: 90))
-        XCTAssertTrue(app.buttons["timeline.source.merged"].exists, "时光应有全部/第二大脑/家人记录分段")
+        XCTAssertTrue(app.buttons["timeline.filter"].exists, "时光应有筛选菜单（全部/照片视频/家人写的）")
         sleep(2)
         shot("21-timeline-merged", app)
-        app.buttons["timeline.source.family"].tap()
+        pickFilter("timeline.source.family", label: "家人写的", in: app)
         XCTAssertTrue(app.buttons["timeline.family"].firstMatch.waitForExistence(timeout: 15), "家人记录应出现在时光里")
         shot("22-timeline-family", app)
-        app.buttons["timeline.source.brain"].tap()
+        pickFilter("timeline.source.brain", label: "照片视频", in: app)
         let scrubber = app.descendants(matching: .any)["timeline.scrubber"]
         if !scrubber.waitForExistence(timeout: 15), let folder = ProcessInfo.processInfo.environment["BUBU_UITEST_SHOTS"] {
             try? app.debugDescription.write(toFile: folder + "/scrubber-tree.txt", atomically: true, encoding: .utf8)
@@ -201,12 +213,16 @@ final class LiveLearningJourneyUITests: XCTestCase {
         let person = app.buttons["timeline.person"].firstMatch
         if person.waitForExistence(timeout: 10) {
             person.tap()
+            let someone = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '和'")).firstMatch
+            XCTAssertTrue(someone.waitForExistence(timeout: 5), "人物菜单应列出家人")
+            someone.tap()
             XCTAssertTrue(app.staticTexts["timeline.online.total"].waitForExistence(timeout: 20))
             sleep(2)
             shot("23-timeline-person", app)
             person.tap()
+            app.buttons["不限"].firstMatch.tap()
         }
-        app.buttons["timeline.source.merged"].tap()
+        pickFilter("timeline.source.merged", label: "全部", in: app)
 
         app.buttons["timeline.menu"].tap()
         app.buttons["认一认"].tap()

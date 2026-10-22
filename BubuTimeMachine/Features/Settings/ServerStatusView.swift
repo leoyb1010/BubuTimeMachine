@@ -53,19 +53,25 @@ struct ServerStatusView: View {
     }
 
     private func summary(_ status: LearningServerStatusDTO) -> some View {
-        let healthy = status.ok == true
+        // The header is derived from the same rules as the rows below, so it can't say "一切正常" over a yellow chip.
+        let headline = Self.headline(status)
+        let healthy = headline.level != .warn
         return HStack(spacing: BubuTheme.Spacing.m) {
             ZStack {
                 Circle().fill(healthy ? BubuTheme.Color.mintSurface : BubuTheme.Color.butterSurface)
-                Image(systemName: healthy ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                Image(systemName: healthy ? (headline.level == .progress ? "arrow.triangle.2.circlepath" : "checkmark.seal.fill")
+                                          : "exclamationmark.triangle.fill")
                     .font(BubuTheme.Font.headline)
                     .foregroundStyle(healthy ? BubuTheme.Color.success : BubuTheme.Color.warning)
             }
             .frame(width: 46, height: 46)
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(healthy ? "一切正常" : "有地方需要看一下")
+                Text(headline.title)
                     .font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                if let detail = headline.detail {
+                    Text(detail).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.warmBrown)
+                }
                 Text(subtitle(status)).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }
             Spacer(minLength: 0)
@@ -92,7 +98,7 @@ struct ServerStatusView: View {
             row("后台在运行", symbol: "gearshape.2", detail: Self.relative(status.workerHeartbeatAt).map { "上次心跳 \($0)" },
                 state: Self.flag(status.workerAlive, ok: "在运行", warn: "停了"))
             Divider().padding(.leading, 44)
-            row("待补称呼", symbol: "person.text.rectangle", state: Self.pending(status.captionsPending, unit: "条"))
+            row("照片说明待补", symbol: "person.text.rectangle", state: Self.pending(status.captionsPending, unit: "条"))
             Divider().padding(.leading, 44)
             row("声音待整理", symbol: "waveform", state: Self.pending(status.voicesPending, unit: "段"))
             Divider().padding(.leading, 44)
@@ -148,16 +154,42 @@ struct ServerStatusView: View {
         }
     }
 
+    /// A backlog is work in progress, not a fault: neutral grey, never yellow.
     static func pending(_ count: Int?, unit: String) -> ServerStatusChip {
         guard let count else { return ServerStatusChip(text: "取不到", level: .unknown) }
-        return count == 0 ? ServerStatusChip(text: "都处理好了", level: .ok) : ServerStatusChip(text: "\(count) \(unit)", level: .warn)
+        return count == 0 ? ServerStatusChip(text: "都处理好了", level: .ok) : ServerStatusChip(text: "整理中 \(count) \(unit)", level: .progress)
     }
 
     /// A backup older than two days is worth a look.
     static func backup(_ value: String?, now: Date = .now) -> ServerStatusChip {
-        guard let date = value.flatMap(BubuLearningDates.parseISO) else { return ServerStatusChip(text: "没有记录", level: .warn) }
+        guard let date = value.flatMap(BubuLearningDates.parseISO) else { return ServerStatusChip(text: "还没开始", level: .warn) }
         let text = relativeText(date, now: now)
         return ServerStatusChip(text: text, level: now.timeIntervalSince(date) > 2 * 86_400 ? .warn : .ok)
+    }
+
+    struct Headline: Equatable {
+        let level: ServerStatusChip.Level
+        let title: String
+        let detail: String?
+    }
+
+    /// Summarises the rows: any warning wins (named when there is one), then work in progress, then all clear.
+    static func headline(_ status: LearningServerStatusDTO, now: Date = .now) -> Headline {
+        var problems: [String] = []
+        if status.brainLibrary == false { problems.append("素材库读不到") }
+        if status.learningStore == false { problems.append("学习数据读不到") }
+        if status.workerAlive == false { problems.append("后台停了") }
+        if backup(status.backupAt, now: now).level == .warn {
+            problems.append(status.backupAt.flatMap(BubuLearningDates.parseISO) == nil ? "备份还没开始" : "备份有一阵没更新了")
+        }
+        if problems.isEmpty, status.ok == false { problems.append("服务器报告了问题") }
+        if problems.count == 1 { return Headline(level: .warn, title: problems[0], detail: nil) }
+        if problems.count > 1 {
+            return Headline(level: .warn, title: "有 \(problems.count) 处需要看一下", detail: problems.joined(separator: "、"))
+        }
+        let backlog = (status.captionsPending ?? 0) + (status.voicesPending ?? 0)
+        if backlog > 0 { return Headline(level: .progress, title: "运行正常，还在慢慢整理", detail: nil) }
+        return Headline(level: .ok, title: "一切正常", detail: nil)
     }
 
     static func relative(_ value: String?, now: Date = .now) -> String? {
@@ -172,7 +204,7 @@ struct ServerStatusView: View {
 }
 
 struct ServerStatusChip: View {
-    enum Level { case ok, warn, unknown }
+    enum Level: Equatable { case ok, warn, progress, unknown }
     let text: String
     let level: Level
 
@@ -188,6 +220,7 @@ struct ServerStatusChip: View {
         switch level {
         case .ok: "checkmark.circle.fill"
         case .warn: "exclamationmark.circle.fill"
+        case .progress: "hourglass"
         case .unknown: "questionmark.circle"
         }
     }
@@ -195,14 +228,14 @@ struct ServerStatusChip: View {
         switch level {
         case .ok: BubuTheme.Color.success
         case .warn: BubuTheme.Color.warning
-        case .unknown: BubuTheme.Color.secondaryText
+        case .progress, .unknown: BubuTheme.Color.secondaryText
         }
     }
     private var background: Color {
         switch level {
         case .ok: BubuTheme.Color.mintSurface
         case .warn: BubuTheme.Color.butterSurface
-        case .unknown: BubuTheme.Color.softFill
+        case .progress, .unknown: BubuTheme.Color.softFill
         }
     }
 }

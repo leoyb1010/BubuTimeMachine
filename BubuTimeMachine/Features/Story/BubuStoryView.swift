@@ -12,7 +12,7 @@ struct BubuStoryView: View {
     @Query private var profiles: [ChildProfile]
     @Environment(AppEnvironment.self) private var env
 
-    private var birthday: Date? { profiles.first?.birthday }
+    private var birthday: Date? { ChildProfile.canonical(from: profiles)?.birthday }
     private var chapters: [StoryChapter] { StoryChapterBuilder.chapters(from: pickedEntries, birthday: birthday) }
 
     var body: some View {

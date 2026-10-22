@@ -26,7 +26,12 @@ struct SyncCenterView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: BubuTheme.Spacing.section) {
+                if let reauth = env.config.reauthenticationMessage {
+                    noticeLine(reauth, tint: BubuTheme.Color.danger, icon: "person.crop.circle.badge.exclamationmark")
+                        .accessibilityIdentifier("sync.reauth")
+                }
                 statusCard
+                if !engine.attentionItems.isEmpty { attentionCard }
                 detailCard
                 if !engine.collectionProgress.isEmpty { collectionDetails }
                 actionCard
@@ -53,7 +58,7 @@ struct SyncCenterView: View {
             Button("开始重传", role: .destructive) { Task { await performFullPush() } }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("适用于「本机有、服务器没有」的情况。已经在服务器上的内容会被跳过，不会产生重复。大库可能要跑一阵子。")
+            Text("适用于「本机有、服务器没有」的情况：只补传服务器缺的内容。服务器上已有的以服务器为准——家人改过的版本不会被本机旧副本覆盖，本机会更新成服务器上的样子。不会产生重复，大库可能要跑一阵子。")
         }
         .alert("同步", isPresented: Binding(
             get: { actionNotice != nil }, set: { if !$0 { actionNotice = nil } })) {
@@ -180,6 +185,61 @@ struct SyncCenterView: View {
             }
             return "还有 \(engine.pendingCount) 项在排队，可以放着不管，它会自己传完。"
         }
+    }
+
+    // MARK: 需要处理的条目（D9-03）
+
+    private var attentionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.bubble.fill")
+                    .foregroundStyle(BubuTheme.Color.warning)
+                Text("有 \(engine.attentionItems.count) 项传不上去，需要你看一下")
+                    .font(BubuTheme.Font.body.weight(.medium))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+            }
+            Text("它们先留在这台设备上，其余内容照常同步。文件找回来后点「重试」；确定不要了点「放弃上传」，内容仍保留在本机。")
+                .font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+            ForEach(engine.attentionItems) { item in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(item.label)
+                            .font(BubuTheme.Font.caption.weight(.semibold))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Spacer()
+                        Text(BubuDateFormat.shortDateTime(item.since))
+                            .font(BubuTheme.Font.scaled(11))
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    Text(item.reason)
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                    HStack(spacing: 16) {
+                        Button("重试") {
+                            BubuHaptics.tapLight()
+                            engine.retryAttention(item)
+                        }
+                        .foregroundStyle(theme)
+                        Button("放弃上传") {
+                            BubuHaptics.tapLight()
+                            engine.skipAttention(item)
+                        }
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                    }
+                    .font(BubuTheme.Font.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                }
+                .padding(12)
+                .background(BubuTheme.Color.warning.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .bubuCardShadow()
+        .accessibilityIdentifier("sync.attention")
     }
 
     // MARK: 明细
@@ -333,7 +393,7 @@ struct SyncCenterView: View {
         BubuHaptics.success()
         actionNotice = summary.contains("FAILED")
             ? "重传没能开始，稍后再试。"
-            : "本机内容已全部重新排队上传，剩下的它会自己传完。"
+            : "已开始核对：服务器缺的会补传，服务器已有的保持服务器版本。剩下的它会自己传完。"
     }
 
     // MARK: 备份

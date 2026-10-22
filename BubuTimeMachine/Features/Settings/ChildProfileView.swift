@@ -15,7 +15,7 @@ struct ChildProfileView: View {
     /// 头像降采样失败时的提示。宁可不换头像，也不落一张会让桌面小组件空白的原图。
     @State private var avatarLoadFailed = false
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: BubuThemeDefinition { env.theme.theme }
 
     var body: some View {
@@ -37,7 +37,7 @@ struct ChildProfileView: View {
         .safeAreaInset(edge: .bottom) {
             if profiles.count > 1 {
                 // 历史上出现过「同一家庭两份档案」，此时编辑的是最早那份，另一份会造成年龄/身份卡不一致。
-                Label("检测到 \(profiles.count) 份布布档案，当前编辑的是最早创建的那份。多余的档案可以联系管理员在服务器上清理。",
+                Label("检测到 \(profiles.count) 份布布档案，当前编辑的这份会作为布布的正式档案，全 App 统一使用。多余的档案可以联系管理员在服务器上清理。",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.warning)
@@ -180,6 +180,7 @@ struct ChildProfileView: View {
     /// 输入类字段已在 BubuBufferedField 内缓冲，到这里必定是「用户完成了一次编辑」，
     /// 因此可以直接同步保存，不需要旧的 700ms 去抖（去抖窗口内被杀还会丢改动）。
     private func commitProfile() {
+        if let profile { ChildProfile.pinAsCanonical(profile) }
         try? context.save()
         env.refreshWidgetSnapshot(context: context)
         env.syncEngine.syncNow()

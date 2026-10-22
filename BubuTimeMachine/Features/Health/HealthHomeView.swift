@@ -6,6 +6,7 @@ struct HealthHomeView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \HealthRecord.recordedAt, order: .reverse) private var records: [HealthRecord]
     @State private var composingKind: HealthRecordKind?
     /// 进行中的哄睡开始时刻（App Group 持久化：杀掉重开也能收尾）
@@ -39,6 +40,10 @@ struct HealthHomeView: View {
         .animation(BubuMotion.gentle, value: sleepStartedAt)
         // 手表可能已替这场哄睡收了尾：回到这页时重读共享状态，别让 @State 停在旧值。
         .onAppear { sleepStartedAt = SharedDefaults.sleepStartedAt }
+        // 锁屏「醒啦」在 App 进程外收尾：回前台也重读，否则页内按钮还在，再点就落第二条睡眠记录。
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { sleepStartedAt = SharedDefaults.sleepStartedAt }
+        }
         .navigationTitle("布布健康")
         .sheet(item: $composingKind) { kind in
             HealthRecordSheet(kind: kind)
@@ -129,12 +134,15 @@ struct HealthHomeView: View {
     /// 哄睡状态变了立刻推手表：不推的话手表快照里的 sleepingSince 还是旧的，
     /// 手机点了「醒啦」手表仍显示呼吸态，用户再点一下就落出第二条睡眠卡。
     private func pushSleepStateToWatch() {
-        if let snap = WatchSnapshotBuilder.make(context: context, role: env.config.currentRole) {
-            WatchConnectivityManager.shared.push(snap)
-        }
+        WatchConnectivityManager.shared.pushSnapshot(context: context, role: env.config.currentRole)
     }
 
     private func endSleep(startedAt: Date) {
+        // 锁屏或手表已经收过尾：只同步界面，不重复落记录。
+        guard SharedDefaults.sleepStartedAt != nil else {
+            sleepStartedAt = nil
+            return
+        }
         let end = Date.now
         sleepStartedAt = nil
         SharedDefaults.sleepStartedAt = nil

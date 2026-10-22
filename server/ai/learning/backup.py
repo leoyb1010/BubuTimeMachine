@@ -1,4 +1,5 @@
 """Export a consistent learning snapshot with originals and derived evidence."""
+from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
 import json
@@ -106,7 +107,9 @@ def backup(source: Path, destination: Path):
         # Commit the database only after every file it references is present.
         _copy_verified(snapshot,destination/'learning.sqlite',_sha256(snapshot))
         manifest=Path(tmp)/'manifest.json'
-        manifest.write_text(json.dumps({'schema':1,'assets':len(assets),'sqlite_integrity':'ok'}))
+        # completed_at makes every successful run visible (status reads this file's mtime as backup_at).
+        manifest.write_text(json.dumps({'schema':1,'assets':len(assets),'sqlite_integrity':'ok',
+                                        'completed_at':datetime.now(timezone.utc).isoformat(timespec='seconds')}))
         _copy_verified(manifest,destination/'manifest.json',_sha256(manifest))
     return {'assets':len(assets)}
 

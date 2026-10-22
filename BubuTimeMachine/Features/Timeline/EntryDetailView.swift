@@ -34,7 +34,7 @@ struct EntryDetailView: View {
     @State private var didInjectEditFailure = false
     #endif
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var schoolReport: SchoolDailyReport? { SchoolDailyReport.from(note: entry.note) }
     private var sortedMedia: [Media] { entry.sortedMedia }
     private var theme: Color { env.theme.theme.primary }

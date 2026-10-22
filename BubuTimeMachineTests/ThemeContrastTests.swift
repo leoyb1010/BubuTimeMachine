@@ -23,4 +23,22 @@ struct ThemeContrastTests {
             }
         }
     }
+
+    @Test("白字压主色的填充（主题 actionFill、深玫瑰、主按钮渐变两端）白字 ≥4.5:1")
+    func filledActionsKeepWhiteTextReadable() {
+        for theme in BubuThemeDefinition.all {
+            let fill = BubuThemeDefinition.readableFill(hex: theme.primaryHex)
+            #expect(BubuThemeDefinition.contrast(fill, .white) >= 4.5, "主题 \(theme.name)")
+        }
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        for token in [BubuTheme.Color.actionFill, BubuTheme.Color.actionFillDeep] {
+            for traits in [light, dark] {
+                let resolved = UIColor(token).resolvedColor(with: traits)
+                #expect(BubuThemeDefinition.contrast(resolved, .white) >= 4.5)
+            }
+        }
+        let deepRoseLight = UIColor(BubuTheme.Color.deepRose).resolvedColor(with: light)
+        #expect(BubuThemeDefinition.contrast(deepRoseLight, .white) >= 4.5)
+    }
 }

@@ -3,6 +3,7 @@ import AVFoundation
 import CryptoKit
 import ImageIO
 import UIKit
+import Synchronization
 
 // MARK: - DTOs
 // Server JSON is snake_case; the decoder converts keys. Every URL the server
@@ -362,20 +363,34 @@ nonisolated struct BubuLearningClient: Sendable {
               routes.allowsNavigation(to: responseURL) else { throw LearningServiceError.invalidResponse }
         switch http.statusCode {
         case 200..<300: return
-        case 401, 403: throw LearningServiceError.unauthorized
+        case 401: throw LearningServiceError.unauthorized
+        // 403 is "signed in, but this account may not do that" (e.g. a non-parent reviewing). Reconnecting won't help.
+        case 403: throw BubuLearningClientError.message(Self.detail(data) ?? LearningErrorKind.forbiddenText)
         case 404: throw LearningServiceError.unavailableMedia
         case 409: throw BubuLearningClientError.conflict
         case 413: throw BubuLearningClientError.message("文件太大了，单个文件请小于 256 MB。")
         case 422: throw BubuLearningClientError.message(Self.detail(data) ?? "内容没有通过检查，请核对后重试。")
+        case 429: throw BubuLearningClientError.message(Self.detail(data) ?? LearningErrorKind.tooFrequentText)
         case 503: throw BubuLearningClientError.unavailable(Self.detail(data))
         default: throw LearningServiceError.server(http.statusCode)
         }
     }
 
-    private static func detail(_ data: Data?) -> String? {
+    /// The server's own Chinese explanation. Framework defaults ("Not authenticated", "Forbidden") are English
+    /// and mean nothing to a parent, so only text containing Chinese is passed through.
+    static func detail(_ data: Data?) -> String? {
         guard let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let text = object["detail"] as? String, !text.isEmpty else { return nil }
+              let text = object["detail"] as? String, containsChinese(text) else { return nil }
         return text
+    }
+
+    static func containsChinese(_ text: String) -> Bool {
+        text.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) }
+    }
+
+    /// Ask waits for the model (server TIMEOUT=60), so it gets a little longer than the rest.
+    static func requestTimeout(for path: String) -> TimeInterval {
+        path == "api/ask" ? 65 : 30
     }
 
     private static var decoder: JSONDecoder {
@@ -396,7 +411,7 @@ nonisolated struct BubuLearningClient: Sendable {
     @concurrent
     func send<T: Decodable & Sendable>(_ method: String, _ path: String, body: (any Encodable & Sendable)? = nil,
                                        as type: T.Type = T.self) async throws -> T {
-        var request = try await authorized(url(path), method: method)
+        var request = try await authorized(url(path), method: method, timeout: Self.requestTimeout(for: path))
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
             let encoder = JSONEncoder()
@@ -411,11 +426,14 @@ nonisolated struct BubuLearningClient: Sendable {
         do { return try Self.decoder.decode(T.self, from: data) } catch { throw LearningServiceError.invalidResponse }
     }
 
-    /// Protected bytes (images, short clips). Thumbnails also land in a per-account disk cache.
+    /// Protected bytes (images, short clips). Thumbnails and detail images also land in a per-account disk cache.
     @concurrent
     func mediaData(_ path: String, cache: Bool = false) async throws -> Data {
         let file = cache ? LearningMediaCache.file(scope: scope, path: path) : nil
-        if let file, let data = try? Data(contentsOf: file) { return data }
+        if let file, let data = try? Data(contentsOf: file) {
+            LearningMediaCache.touch(file)
+            return data
+        }
         try await LearningMediaGate.shared.acquire()
         defer { Task { await LearningMediaGate.shared.release() } }
         let request = try await authorized(url(path), timeout: 60)
@@ -530,16 +548,19 @@ nonisolated enum LearningErrorKind: Equatable, Sendable {
 
     static let offlineText = "手机现在没有网络，连上网络后再试。"
     static let serverUnreachableText = "家里的服务器没有回应，可能需要在 Mac mini 上处理一下，请稍后重试。"
-    static let unauthorizedText = "家里服务器的登录过期了，请到 设置 → 家庭服务 重新连接。"
+    static let unauthorizedText = "家里服务器的登录过期了，请到 设置 → 高级 → 服务器与 AI 配置 重新连接。"
     static let serviceUnavailableText = "家里的服务器暂时读不到素材库，请稍后重试。"
+    static let forbiddenText = "这个账号没有这项权限（需要家长账号）。"
+    static let tooFrequentText = "操作有点太频繁了，稍等一会儿再试。"
 
     init(_ error: Error) {
         if isCancellation(error) { self = .cancelled; return }
         if let error = error as? URLError {
             switch error.code {
-            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+            case .notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff:
                 self = .offline
-            case .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+            // -1005 is almost always the tunnel or the server dropping the connection, not the phone's network.
+            case .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .networkConnectionLost:
                 self = .serverUnreachable
             default:
                 self = .other
@@ -578,6 +599,30 @@ nonisolated func learningErrorText(_ error: Error, fallback: String = "暂时连
     if let error = error as? BubuLearningClientError { return error.errorDescription ?? fallback }
     if let error = error as? LearningServiceError { return error.errorDescription ?? fallback }
     if error is APIError { return LearningErrorKind.unauthorizedText }
+    return fallback
+}
+
+/// Any error, in a sentence a parent can read. System errors come back in English or as codes
+/// ("NSCocoaErrorDomain error 640"), so they are mapped or replaced by `fallback`; the raw error goes to the log only.
+nonisolated func bubuErrorText(_ error: Error, fallback: String) -> String {
+    #if DEBUG
+    print("[bubuErrorText]", error)
+    #endif
+    if let error = error as? CocoaError {
+        switch error.code {
+        case .fileWriteOutOfSpace: return "手机存储空间不够了，清理一些空间后再试。"
+        case .fileNoSuchFile, .fileReadNoSuchFile: return "文件找不到了，可能已经被移走或删除。"
+        case .fileWriteNoPermission, .fileReadNoPermission: return "没有权限读写这个文件，请重新选择后再试。"
+        case .fileWriteVolumeReadOnly: return "这个位置只能读不能写，请换个位置保存。"
+        case .fileReadCorruptFile: return "文件好像损坏了，打不开。"
+        default: return fallback
+        }
+    }
+    if error is URLError || error is LearningServiceError || error is BubuLearningClientError || error is APIError {
+        return learningErrorText(error, fallback: fallback)
+    }
+    // Our own errors are already written in Chinese; anything else is the system talking.
+    if let text = (error as? LocalizedError)?.errorDescription, BubuLearningClient.containsChinese(text) { return text }
     return fallback
 }
 
@@ -627,14 +672,53 @@ private nonisolated final class LearningRedirectBlocker: NSObject, URLSessionTas
                     completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
-/// Per-account thumbnail cache in Caches. Keys include the content revision in the path.
+/// Per-account image cache in Caches. Keys include the content revision in the path, so edits leave
+/// orphans behind; the whole folder is trimmed least-recently-used to `limitBytes` once per launch.
 nonisolated enum LearningMediaCache {
+    static let limitBytes = 200 * 1_048_576
+    private static let state = Mutex<(folders: Set<String>, pruned: Bool)>(([], false))
+
+    static var root: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("BubuLearningMedia", isDirectory: true)
+    }
+
     static func file(scope: String, path: String) -> URL? {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
-        let folder = caches.appendingPathComponent("BubuLearningMedia", isDirectory: true)
-            .appendingPathComponent(hash(scope).prefix(16).description, isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard let root else { return nil }
+        let folder = root.appendingPathComponent(hash(scope).prefix(16).description, isDirectory: true)
+        // One mkdir per folder per launch instead of one per cell.
+        let (create, prune) = state.withLock { state -> (Bool, Bool) in
+            let create = state.folders.insert(folder.path).inserted
+            let prune = !state.pruned
+            state.pruned = true
+            return (create, prune)
+        }
+        if create { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        if prune { Task.detached(priority: .background) { Self.prune(root, limit: limitBytes) } }
         return folder.appendingPathComponent(hash(path) + ".bin")
+    }
+
+    /// Marks a hit as recently used (the modification date is the LRU clock).
+    static func touch(_ file: URL) {
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+    }
+
+    /// Deletes the least recently used files until the folder fits in `limit` bytes. Returns the bytes kept.
+    @discardableResult
+    static func prune(_ folder: URL, limit: Int) -> Int {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey, .totalFileAllocatedSizeKey, .fileSizeKey]
+        guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys) else { return 0 }
+        var files: [(url: URL, date: Date, size: Int)] = []
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { continue }
+            files.append((url, values.contentModificationDate ?? .distantPast,
+                          values.totalFileAllocatedSize ?? values.fileSize ?? 0))
+        }
+        var total = files.reduce(0) { $0 + $1.size }
+        for file in files.sorted(by: { $0.date < $1.date }) where total > limit {
+            if (try? FileManager.default.removeItem(at: file.url)) != nil { total -= file.size }
+        }
+        return total
     }
 
     private static func hash(_ value: String) -> String {
@@ -666,8 +750,12 @@ nonisolated enum LearningImageDecoder {
     /// Pixel buckets keep the cache small and let one decode serve similar-sized cells.
     static let buckets: [Int] = [256, 512, 1024, 2048]
 
+    /// Nearest bucket, leaning small: up to 1.3× over a bucket still uses it (a 370pt card at 3× is 1110px
+    /// and decodes at 1024 — about 3 MB — instead of jumping to 2048 and decoding the whole 1600px source).
     static func bucket(forPixels pixels: CGFloat) -> Int {
-        buckets.first { CGFloat($0) >= pixels } ?? buckets[buckets.count - 1]
+        guard let index = buckets.firstIndex(where: { CGFloat($0) >= pixels }) else { return buckets[buckets.count - 1] }
+        if index > 0, pixels <= CGFloat(buckets[index - 1]) * 1.3 { return buckets[index - 1] }
+        return buckets[index]
     }
 
     static func downsample(_ data: Data, maxPixel: Int) -> UIImage? {

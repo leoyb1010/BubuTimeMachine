@@ -24,11 +24,25 @@ nonisolated enum BubuTheme {
             light: UIColor(red: 0.58, green: 0.14, blue: 0.30, alpha: 1),
             dark: UIColor(red: 1.0, green: 0.63, blue: 0.75, alpha: 1)
         )
-        /// 强调深色端 deeprose（#E15C86）：主按钮渐变尾色 / 凸起记录键。
+        /// 强调深色端 deep rose（#C73E6F）：浅色下既能当强调字（奶油底 4.56:1），
+        /// 也能直接压白字（4.83:1）。深色模式保留亮玫瑰，给深底上的强调字/图标用。
+        /// 注意：深色值不能压白字——白字填充一律用 `actionFill`。
         static let deepRose = dynamic(
-            light: UIColor(red: 0.882, green: 0.361, blue: 0.525, alpha: 1),   // #E15C86
+            light: UIColor(red: 0.780, green: 0.243, blue: 0.435, alpha: 1),   // #C73E6F
             dark: UIColor(red: 0.95, green: 0.42, blue: 0.58, alpha: 1)
         )
+        /// 「白字压主色」的唯一填充色：深玫瑰 #C73E6F，白字 4.83:1（WCAG AA 正文）。
+        /// 明暗模式同值——填充块本身就是深色，深底上依然醒目，白字依然清楚。
+        /// 粉色 `primary`（#F2789F，白字仅 2.64:1）只做装饰、描边、浅底 tint。
+        static let actionFill = SwiftUI.Color(red: 0.780, green: 0.243, blue: 0.435)          // #C73E6F
+        /// 主按钮渐变尾色：更深一档的玫瑰 #B8325F（白字 5.74:1）。
+        static let actionFillDeep = SwiftUI.Color(red: 0.722, green: 0.196, blue: 0.373)      // #B8325F
+        /// 导航标题等 UIKit 外观需要的 UIColor 版暖棕（与 `warmBrown` 同值）。
+        static let warmBrownUIColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
+                : UIColor(red: 0.353, green: 0.239, blue: 0.204, alpha: 1)
+        }
         /// 辅助：奶油底 cream（#FFF7F1）/ 深色柔棕底。
         static let cream = dynamic(
             light: UIColor(red: 1.000, green: 0.969, blue: 0.945, alpha: 1),   // #FFF7F1
@@ -40,10 +54,7 @@ nonisolated enum BubuTheme {
             dark: UIColor(red: 0.24, green: 0.20, blue: 0.18, alpha: 1)
         )
         /// 暖棕（文字/标题）ink（#5A3D34）。深色用暖米白。
-        static let warmBrown = dynamic(
-            light: UIColor(red: 0.353, green: 0.239, blue: 0.204, alpha: 1),   // #5A3D34
-            dark: UIColor(red: 0.94, green: 0.86, blue: 0.78, alpha: 1)
-        )
+        static let warmBrown = SwiftUI.Color(warmBrownUIColor)                    // #5A3D34 / 暖米白
         /// 固定墨色：给「固定浅色纸面」（信纸/恢复码卡 #FFFDF8 底）配的不随深色翻转的深棕。
         /// 固定底必须配固定字——否则深色下 warmBrown 变米白，白纸白字不可读。
         static let paperInk = SwiftUI.Color(red: 0.353, green: 0.239, blue: 0.204)          // #5A3D34
@@ -270,9 +281,10 @@ nonisolated enum BubuTheme {
 
     // MARK: 马卡龙渐变（主按钮 / Hero / 凸起键）
     enum Gradient {
-        /// 主按钮：rose → deeprose。
+        /// 主按钮：deep rose → 更深玫瑰。两端都让白字 ≥4.5:1；
+        /// 以前从浅粉 primary 起渐变，按钮左上半边的白字只有 2.6:1。
         static var primaryButton: LinearGradient {
-            LinearGradient(colors: [Color.primary, Color.deepRose],
+            LinearGradient(colors: [Color.actionFill, Color.actionFillDeep],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
         }
         /// Hero 卡：peach → pink → lav。

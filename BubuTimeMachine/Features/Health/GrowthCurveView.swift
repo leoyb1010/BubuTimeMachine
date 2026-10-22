@@ -37,7 +37,7 @@ struct GrowthCurveView: View {
 
     private static let daysPerMonth = 30.4375
     private var axis: AxisMode { AxisMode(rawValue: axisRaw) ?? .age }
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
 
     var body: some View {
@@ -189,6 +189,8 @@ struct GrowthCurveView: View {
         let upper = upperMonth(pts)
         let allBands = WHOGrowthStandard.bands(metric: metric, gender: profile?.gender)
         let shownBands = allBands.filter { $0.month <= upper }
+        let step = upper > 36 ? 12 : 6
+        let ticks = Array(stride(from: 0, through: upper, by: step))
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("\(metric.title)（\(metric.unit)）")
@@ -206,9 +208,11 @@ struct GrowthCurveView: View {
                     curveChart(bands: shownBands, points: pts, xBand: { Double($0) }, xPoint: { $0.ageMonths },
                                domain: 0...Double(upper), xLabel: "月龄")
                         .chartXAxis {
-                            AxisMarks(values: .stride(by: upper > 36 ? 12 : 6)) { value in
+                            // 显式给出刻度（含末端的 24/36…月），stride 会把落在边缘的最后一个刻度丢掉。
+                            AxisMarks(values: ticks.map(Double.init)) { value in
                                 AxisGridLine().foregroundStyle(BubuTheme.Color.hairline)
-                                AxisValueLabel {
+                                AxisTick().foregroundStyle(BubuTheme.Color.hairline)
+                                AxisValueLabel(anchor: value.index == ticks.count - 1 ? .topTrailing : .top) {
                                     if let m = value.as(Double.self) { Text("\(Int(m))月") }
                                 }
                             }
@@ -220,8 +224,9 @@ struct GrowthCurveView: View {
                                    domain: date(atAge: 0, birthday: birthday)...date(atAge: Double(upper), birthday: birthday),
                                    xLabel: "日期")
                             .chartXAxis {
-                                AxisMarks(values: .stride(by: .month, count: upper > 36 ? 12 : 6)) { _ in
+                                AxisMarks(values: ticks.map { date(atAge: Double($0), birthday: birthday) }) { _ in
                                     AxisGridLine().foregroundStyle(BubuTheme.Color.hairline)
+                                    AxisTick().foregroundStyle(BubuTheme.Color.hairline)
                                     AxisValueLabel(format: .dateTime.year(.twoDigits).month(.defaultDigits))
                                 }
                             }
@@ -241,22 +246,29 @@ struct GrowthCurveView: View {
         bands: [WHOGrowthStandard.Band], points: [CurvePoint],
         xBand: @escaping (Int) -> X, xPoint: @escaping (CurvePoint) -> X, domain: ClosedRange<X>, xLabel: String
     ) -> some View {
-        Chart {
-            ForEach(bands, id: \.month) { b in
-                AreaMark(x: .value(xLabel, xBand(b.month)), yStart: .value("P3", b.p3), yEnd: .value("P97", b.p97),
-                         series: .value("带", "P3–P97"))
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(BubuTheme.Color.pinkSurface.opacity(0.75))
-                AreaMark(x: .value(xLabel, xBand(b.month)), yStart: .value("P15", b.p15), yEnd: .value("P85", b.p85),
-                         series: .value("带", "P15–P85"))
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(theme.opacity(0.16))
+        // 身高在 24 月从卧位身长换成立位身高（WHO 官方约 0.7cm 台阶）：两段分开画，
+        // 台阶显示成干净的断口，而不是把末端拉出一个往下拐的钩。只有一个点的段不画。
+        let segments = Self.bandSegments(bands, splitAtTwoYears: metric == .height)
+        return Chart {
+            ForEach(segments, id: \.name) { segment in
+                ForEach(segment.bands, id: \.month) { b in
+                    AreaMark(x: .value(xLabel, xBand(b.month)), yStart: .value("P3", b.p3), yEnd: .value("P97", b.p97),
+                             series: .value("带", "P3–P97" + segment.name))
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(Self.outerBand)
+                    AreaMark(x: .value(xLabel, xBand(b.month)), yStart: .value("P15", b.p15), yEnd: .value("P85", b.p85),
+                             series: .value("带", "P15–P85" + segment.name))
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(innerBand)
+                }
             }
-            ForEach(bands, id: \.month) { b in
-                LineMark(x: .value(xLabel, xBand(b.month)), y: .value("P50", b.p50), series: .value("线", "P50"))
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(theme.opacity(0.55))
-                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+            ForEach(segments, id: \.name) { segment in
+                ForEach(segment.bands, id: \.month) { b in
+                    LineMark(x: .value(xLabel, xBand(b.month)), y: .value("P50", b.p50), series: .value("线", "P50" + segment.name))
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(medianLine)
+                        .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [4, 3]))
+                }
             }
             ForEach(points) { p in
                 LineMark(x: .value(xLabel, xPoint(p)), y: .value(metric.title, p.value), series: .value("线", "布布"))
@@ -277,6 +289,13 @@ struct GrowthCurveView: View {
         }
         .chartXScale(domain: domain)
         .chartYScale(domain: .automatic(includesZero: false))
+        .chartYAxis {
+            AxisMarks(position: .leading) { _ in
+                AxisGridLine().foregroundStyle(BubuTheme.Color.hairline)
+                AxisTick().foregroundStyle(BubuTheme.Color.hairline)
+                AxisValueLabel()
+            }
+        }
         .chartLegend(.hidden)
         .chartPlotStyle { plot in
             plot.mask(alignment: .leading) {
@@ -287,21 +306,66 @@ struct GrowthCurveView: View {
         }
     }
 
+    // 图例色块与图中叠出来的颜色一致：P15–P85 画在 P3–P97 上面，所以色块也按同样顺序叠。
+    static let outerBand = BubuTheme.Color.pinkSurface.opacity(0.75)
+    private var innerBand: Color { theme.opacity(0.16) }
+    private var medianLine: Color { theme.opacity(0.55) }
+
+    struct BandSegment { let name: String; let bands: [WHOGrowthStandard.Band] }
+
+    static func bandSegments(_ bands: [WHOGrowthStandard.Band], splitAtTwoYears: Bool) -> [BandSegment] {
+        guard splitAtTwoYears else { return [BandSegment(name: "", bands: bands)] }
+        let lying = bands.filter { $0.month < 24 }, standing = bands.filter { $0.month >= 24 }
+        return [BandSegment(name: "-卧位", bands: lying), BandSegment(name: "-立位", bands: standing)]
+            .filter { $0.bands.count > 1 }
+    }
+
     private var legend: some View {
-        HStack(spacing: 12) {
-            legendItem(color: BubuTheme.Color.pinkSurface, label: "P3–P97")
-            legendItem(color: theme.opacity(0.22), label: "P15–P85")
-            legendItem(color: BubuTheme.Color.deepRose, label: "布布")
-            Spacer(minLength: 0)
+        // 大字号下一行放不下时自动折成两行。
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { legendItems; Spacer(minLength: 0) }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) { bandSwatch(inner: false, label: "P3–P97"); bandSwatch(inner: true, label: "P15–P85") }
+                HStack(spacing: 12) { medianSwatch; childSwatch }
+            }
         }
         .font(BubuTheme.Font.caption)
         .foregroundStyle(BubuTheme.Color.secondaryText)
     }
 
-    private func legendItem(color: Color, label: String) -> some View {
+    @ViewBuilder
+    private var legendItems: some View {
+        bandSwatch(inner: false, label: "P3–P97")
+        bandSwatch(inner: true, label: "P15–P85")
+        medianSwatch
+        childSwatch
+    }
+
+    private func bandSwatch(inner: Bool, label: String) -> some View {
         HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 3).fill(color).frame(width: 16, height: 10)
+            ZStack {
+                RoundedRectangle(cornerRadius: 3).fill(BubuTheme.Color.card)
+                RoundedRectangle(cornerRadius: 3).fill(Self.outerBand)
+                if inner { RoundedRectangle(cornerRadius: 3).fill(innerBand) }
+            }
+            .frame(width: 16, height: 10)
             Text(label)
+        }
+    }
+
+    private var medianSwatch: some View {
+        HStack(spacing: 5) {
+            Path { p in p.move(to: CGPoint(x: 0, y: 5)); p.addLine(to: CGPoint(x: 16, y: 5)) }
+                .stroke(medianLine, style: StrokeStyle(lineWidth: 1.6, dash: [4, 3]))
+                .frame(width: 16, height: 10)
+            Text("P50 中位数")
+        }
+    }
+
+    private var childSwatch: some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 3).fill(BubuTheme.Color.deepRose).frame(width: 16, height: 10)
+            Text("布布")
         }
     }
 

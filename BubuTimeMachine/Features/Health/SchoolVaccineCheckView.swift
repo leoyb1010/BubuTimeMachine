@@ -19,7 +19,7 @@ struct SchoolVaccineCheckView: View {
     @State private var shareURL: URL?
     @State private var rendering = false
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
 
     var body: some View {

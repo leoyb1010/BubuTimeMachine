@@ -51,13 +51,65 @@ final class WatchConnectivityManager: NSObject {
         session.activate()
     }
 
-    /// 把概览快照推给手表（合并最新态，省电）。未激活时缓存，激活后补发。
+    /// 有没有一块能收快照的手表：已配对且装了手表 App。会话还没激活时（isPaired 尚不可信）按「可能有」处理，
+    /// 由激活回调再补推。没有手表的家庭因此不再每次回前台都读库、解码照片。
+    var canReachWatch: Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return true }
+        return session.isPaired && session.isWatchAppInstalled
+    }
+
+    /// 首选入口：主线程只把模型抄成值，照片试解码 / 头像降采样在后台执行器完成后再推。
+    /// 连续调用会合并：进行中的那一轮结束后最多再补一轮。
+    func pushSnapshot(context: ModelContext, role: FamilyRole) {
+        guard !BubuStoreHealth.loadFailed, canReachWatch else { return }
+        lastRole = role
+        guard WCSession.default.activationState == .activated else { pendingBuild = true; return }
+        guard !building else { rebuildQueued = true; return }
+        guard let inputs = WatchSnapshotBuilder.inputs(context: context, role: role) else { return }
+        building = true
+        rebuildContext = context
+        Task { [weak self] in
+            let snapshot = await WatchSnapshotBuilder.buildOffMain(inputs)
+            guard let self else { return }
+            self.building = false
+            self.push(snapshot)
+            let context = self.rebuildContext
+            self.rebuildContext = nil
+            if self.rebuildQueued, let context {
+                self.rebuildQueued = false
+                self.pushSnapshot(context: context, role: self.lastRole ?? role)
+            }
+        }
+    }
+
+    /// 合并期间暂存的 context（Task 闭包不直接捕获非 Sendable 的 ModelContext）。
+    private var rebuildContext: ModelContext?
+    private var building = false
+    private var rebuildQueued = false
+    /// 会话未激活时请求过快照：激活且确认有手表后用 appContext 补一轮。
+    private var pendingBuild = false
+    private var lastRole: FamilyRole?
+
+    /// 激活完成 / 手表配对或安装状态变化后，补推一轮（没有手表就什么都不做）。
+    private func flushPendingBuild(watchChanged: Bool = false) {
+        if let pending = pendingSnapshot { pendingSnapshot = nil; push(pending) }
+        guard canReachWatch else { pendingBuild = false; return }
+        guard pendingBuild || watchChanged,
+              let context = appContext ?? SharedModelContainer.sharedIfAvailable?.mainContext else { return }
+        pendingBuild = false
+        pushSnapshot(context: context, role: lastRole ?? SharedDefaults.currentRole)
+    }
+
+    /// 把概览快照推给手表（合并最新态，省电）。未激活时缓存，激活后补发；没有手表时不推。
     func push(_ snapshot: WatchSnapshot) {
-        guard WCSession.isSupported() else { return }
+        guard canReachWatch else { return }
         // 今日精选每次都从 App Group 现读合并：本机快照与服务端精选各自刷新，谁后推都不覆盖对方。
         var snapshot = snapshot
-        snapshot.dailyPicks = DailyPicksStore.watchCards()
-        snapshot.dailyPicksDay = DailyPicksStore.currentDay
+        let picks = DailyPicksStore.watchCards()
+        snapshot.dailyPicks = picks.cards
+        snapshot.dailyPicksDay = picks.day
         lastSnapshot = snapshot
         let session = WCSession.default
         guard session.activationState == .activated else { pendingSnapshot = snapshot; return }
@@ -67,17 +119,20 @@ final class WatchConnectivityManager: NSObject {
         } catch {
             log.error("push snapshot failed: \(error.localizedDescription)")
         }
-        pushPhotoBundle(names: photoNames(photoCards: (snapshot.dailyPicks ?? []) + (snapshot.photoCards ?? []),
-                                         memories: snapshot.memories, recent: snapshot.recent),
-                        session: session)
+        // 照片包只装手表实际会显示的两类：今日精选 + 家人生活照。
+        pushPhotoBundle(names: photoNames(snapshot.dailyPicks, snapshot.photoCards), session: session)
     }
 
     /// 最近一次推送的快照，精选刷新后据此重推（不必重读库）。
     private var lastSnapshot: WatchSnapshot?
 
-    /// DailyPicksStore 写完新精选后调用。还没推过快照时不做事——下次前台推快照自然带上精选。
+    /// DailyPicksStore 写完新精选后调用。还没推过快照（如后台刷新冷启动）时现读库组装一份。
     func pushDailyPicks() {
-        guard var snapshot = lastSnapshot ?? pendingSnapshot else { return }
+        guard var snapshot = lastSnapshot ?? pendingSnapshot else {
+            guard let context = appContext ?? SharedModelContainer.sharedIfAvailable?.mainContext else { return }
+            pushSnapshot(context: context, role: lastRole ?? SharedDefaults.currentRole)
+            return
+        }
         snapshot.updatedAt = .now
         push(snapshot)
     }
@@ -91,20 +146,10 @@ final class WatchConnectivityManager: NSObject {
     /// 最近一次组包用的照片名清单，手表请求补发时直接按它重组，不用重读库。
     private var lastPhotoNames: [String]?
 
-    /// 新版五张生活照 + 旧版回忆/最近引用的照片名并集（去重保序）。
-    private func photoNames(photoCards: [WatchMemory]?, memories: [WatchMemory]?, recent: [WatchRecent]?) -> [String] {
+    /// 精选 + 生活照引用的照片名（去重保序）。
+    private func photoNames(_ groups: [WatchMemory]?...) -> [String] {
         var seen = Set<String>()
-        var names: [String] = []
-        for name in (photoCards ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
-            names.append(name)
-        }
-        for name in (memories ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
-            names.append(name)
-        }
-        for name in (recent ?? []).compactMap(\.photoFileName) where seen.insert(name).inserted {
-            names.append(name)
-        }
-        return names
+        return groups.flatMap { $0 ?? [] }.compactMap(\.photoFileName).filter { seen.insert($0).inserted }
     }
 
     /// 正在后台编码照片包。冷启动/回前台会连着推好几次快照，
@@ -207,7 +252,7 @@ final class WatchConnectivityManager: NSObject {
                     break
                 }
                 SharedDefaults.sleepStartedAt = request.happenedAt
-                let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
+                let profile = ChildProfile.canonical(in: context)
                 BubuActivityController.startSleepTimer(childName: profile?.name ?? "布布",
                                                        startedAt: request.happenedAt)
             case .sleepEnd:
@@ -315,49 +360,76 @@ final class WatchConnectivityManager: NSObject {
 }
 
 // MARK: - 概览快照构建（iPhone 侧读库 → 手表展示）
+/// 手表只读 photoCards / dailyPicks / 名字 / 生日 / 头像（WatchShared `WatchReadModel`），
+/// 快照也只装这些：旧版的回忆序列、最近动态、今日打卡计数手表早已不显示，再算就是白耗主线程，
+/// 还会让照片包指纹随每条新记录变动、整包重传。
+///
+/// 分两段：主线程只把 SwiftData 模型抄成值（模型是 MainActor 隔离的，离不开主线程），
+/// 试解码候选照片、读头像这些文件活交给 `build` 在后台执行器上做。
 enum WatchSnapshotBuilder {
-    @MainActor
-    static func make(context: ModelContext, role: FamilyRole) -> WatchSnapshot? {
-        guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return nil }
-        // 「最近」用 FeedEvent（统一涵盖记录/健康打卡/语音等），这样手表打卡后也能立刻在「最近」看到。
-        // 按 createdAt（动作时刻）排：导入旧照片的动态也能进「最近」，不被事件真实时间埋掉。
-        var feedDescriptor = FetchDescriptor<FeedEvent>(
-            sortBy: [SortDescriptor(\.createdAt, order: .reverse)])
-        feedDescriptor.fetchLimit = 6
-        let events = (try? context.fetch(feedDescriptor)) ?? []
-        let recent = events
-            .filter { $0.kind != .entryArchived }
-            .prefix(4)
-            .map { e in
-                WatchRecent(id: e.id.uuidString,
-                            dateText: BubuDateFormat.monthDay(e.createdAt),
-                            note: e.summary,
-                            moodEmoji: e.kind.emoji,
-                            photoFileName: recentPhotoName(targetLocalId: e.targetLocalId, context: context))
-            }
-        let milestones = (try? context.fetch(FetchDescriptor<Milestone>())) ?? []
-        let achieved = milestones.filter { $0.isAchieved }.count
-        return WatchSnapshot(childName: profile.name, birthday: profile.birthday,
-                             roleRaw: role.rawValue,
-                             achievedMilestones: achieved, totalMilestones: milestones.count,
-                             recent: Array(recent), avatarData: avatarThumbData(profile.avatarMediaFileName),
-                             updatedAt: .now,
-                             memories: memories(context: context, birthday: profile.birthday),
-                             todayStats: todayStats(context: context),
-                             sleepingSince: SharedDefaults.sleepStartedAt,
-                             photoCards: photoCards(context: context, birthday: profile.birthday))
+    /// 一条带照片的记录（已抄成值，可跨线程）。
+    nonisolated struct PhotoCandidate: Sendable {
+        nonisolated struct Photo: Sendable {
+            let id: UUID
+            let contentHash: String?
+            let fileNames: [String]
+        }
+        let entryID: UUID
+        let happenedAt: Date
+        let caption: String
+        let ageText: String
+        let moodEmoji: String?
+        let photos: [Photo]
     }
 
-    // MARK: 五张生活照（新版单屏）
+    /// 生成快照所需的全部输入（值类型）。
+    nonisolated struct Inputs: Sendable {
+        let childName: String
+        let birthday: Date?
+        let roleRaw: String
+        let avatarFileName: String?
+        let sleepingSince: Date?
+        let candidates: [PhotoCandidate]
+    }
+
+    /// 同步版：抄值 + 组装都在调用方线程。新代码请用 `WatchConnectivityManager.pushSnapshot(context:role:)`，
+    /// 它把组装放到后台。没有配对手表（或手表没装 App）时直接返回 nil，不读库。
+    @MainActor
+    static func make(context: ModelContext, role: FamilyRole) -> WatchSnapshot? {
+        guard WatchConnectivityManager.shared.canReachWatch, let inputs = inputs(context: context, role: role) else {
+            return nil
+        }
+        return build(inputs, now: .now)
+    }
 
     @MainActor
-    private static func photoCards(context: ModelContext, birthday: Date?) -> [WatchMemory] {
+    static func inputs(context: ModelContext, role: FamilyRole) -> Inputs? {
+        guard let profile = ChildProfile.canonical(in: context) else { return nil }
         var descriptor = FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived },
                                                 sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
         descriptor.fetchLimit = 300
+        descriptor.relationshipKeyPathsForPrefetching = [\.media]
         let entries = (try? context.fetch(descriptor)) ?? []
-        return photoCards(entries: entries, birthday: birthday)
+        return Inputs(childName: profile.name, birthday: profile.birthday, roleRaw: role.rawValue,
+                      avatarFileName: profile.avatarMediaFileName, sleepingSince: SharedDefaults.sleepStartedAt,
+                      candidates: candidates(entries: entries, birthday: profile.birthday))
     }
+
+    /// 组装快照（文件探测、照片试解码、头像降采样）。可在任意线程调用。
+    nonisolated static func build(_ inputs: Inputs, now: Date) -> WatchSnapshot {
+        WatchSnapshot(childName: inputs.childName, birthday: inputs.birthday, roleRaw: inputs.roleRaw,
+                      achievedMilestones: 0, totalMilestones: 0, recent: [],
+                      avatarData: avatarThumbData(inputs.avatarFileName), updatedAt: now,
+                      sleepingSince: inputs.sleepingSince,
+                      photoCards: curate(inputs.candidates, now: now, calendar: .current, photoURL: localPhotoURL))
+    }
+
+    @concurrent
+    nonisolated static func buildOffMain(_ inputs: Inputs) async -> WatchSnapshot {
+        build(inputs, now: .now)
+    }
+
+    // MARK: 五张生活照（新版单屏）
 
     /// 只读筛选；文件解析可注入临时目录，测试不接触家庭真实照片。
     /// 只排除已有明确标签的截图/文档，不声称能识别所有聊天截图。
@@ -365,6 +437,41 @@ enum WatchSnapshotBuilder {
     static func photoCards(entries: [Entry], birthday: Date?, now: Date = .now,
                            calendar: Calendar = .current,
                            photoURL: (String) -> URL? = localPhotoURL) -> [WatchMemory] {
+        curate(candidates(entries: entries, birthday: birthday), now: now, calendar: calendar, photoURL: photoURL)
+    }
+
+    /// 把记录抄成候选值：只看未归档、非幼儿园日报、带可用照片（排除截图/文档标签）的记录。不碰文件。
+    @MainActor
+    static func candidates(entries: [Entry], birthday: Date?) -> [PhotoCandidate] {
+        let sorted = entries.filter { !$0.isArchived }.sorted {
+            if $0.happenedAt == $1.happenedAt { return $0.id.uuidString < $1.id.uuidString }
+            return $0.happenedAt > $1.happenedAt
+        }.prefix(300)
+        return sorted.compactMap { entry -> PhotoCandidate? in
+            let photos = entry.sortedMedia.compactMap { media -> PhotoCandidate.Photo? in
+                guard media.typeRaw == MediaType.photo.rawValue,
+                      !media.aiTags.contains(where: isExcludedPhotoTag) else { return nil }
+                // 取局部值，避免 Release 下 ?? autoclosure 捕获 SwiftData 模型。
+                let thumb = media.thumbnailFileName
+                let original = media.localFileName
+                let names = [thumb, original].compactMap { $0 }.filter {
+                    !$0.isEmpty && $0 != "." && $0 != ".." && ($0 as NSString).lastPathComponent == $0
+                }
+                guard !names.isEmpty else { return nil }
+                return PhotoCandidate.Photo(id: media.id, contentHash: media.contentHash, fileNames: names)
+            }
+            guard !photos.isEmpty, SchoolDailyReport.from(note: entry.note) == nil else { return nil }
+            let date = entry.happenedAt
+            return PhotoCandidate(entryID: entry.id, happenedAt: date,
+                                  caption: photoCaption(note: entry.note, title: entry.title),
+                                  ageText: birthday.map { AgeCalculator.compactAge(birthday: $0, at: date) } ?? "",
+                                  moodEmoji: entry.mood?.emoji, photos: photos)
+        }
+    }
+
+    /// 最新三张 + 那年今日/不同旧日期补到五张。只有实际试选时才读文件、解码。
+    nonisolated static func curate(_ entries: [PhotoCandidate], now: Date, calendar: Calendar,
+                                   photoURL: (String) -> URL?) -> [WatchMemory] {
         var seenIDs = Set<UUID>()
         var seenHashes = Set<String>()
         var seenNames = Set<String>()
@@ -375,10 +482,6 @@ enum WatchSnapshotBuilder {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "yyyy年M月d日"
         let today = calendar.startOfDay(for: now)
-        let entries = entries.filter { !$0.isArchived }.sorted {
-            if $0.happenedAt == $1.happenedAt { return $0.id.uuidString < $1.id.uuidString }
-            return $0.happenedAt > $1.happenedAt
-        }.prefix(300)
 
         func isOnThisDay(_ date: Date) -> Bool {
             calendar.startOfDay(for: date) < today
@@ -386,36 +489,24 @@ enum WatchSnapshotBuilder {
                 && calendar.component(.day, from: date) == calendar.component(.day, from: now)
         }
 
-        // 只有实际试选时才读文件、解码；不预先检查全部 300 条的照片。
-        @MainActor
-        func take(_ entry: Entry) -> Bool {
-            guard SchoolDailyReport.from(note: entry.note) == nil else { return false }
-            for media in entry.sortedMedia where media.typeRaw == MediaType.photo.rawValue {
-                guard !media.aiTags.contains(where: isExcludedPhotoTag) else { continue }
-                let id = media.id
+        func take(_ entry: PhotoCandidate) -> Bool {
+            for media in entry.photos {
                 let hash = media.contentHash?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                guard !seenIDs.contains(id),
+                guard !seenIDs.contains(media.id),
                       hash.map({ $0.isEmpty || !seenHashes.contains($0) }) != false else { continue }
-                // 取局部值，避免 Release 下 ?? autoclosure 捕获 SwiftData 模型。
-                let thumb = media.thumbnailFileName
-                let original = media.localFileName
-                let fileNames = [thumb, original].compactMap { $0 }.filter {
-                    !$0.isEmpty && $0 != "." && $0 != ".." && ($0 as NSString).lastPathComponent == $0
-                }
-                guard let name = fileNames.first(where: { name in
+                guard let name = media.fileNames.first(where: { name in
                     guard let url = photoURL(name) else { return false }
                     return ThumbnailProvider.downsample(url: url, maxPixel: 1) != nil
                 }), !seenNames.contains(name) else { continue }
 
-                seenIDs.insert(id)
+                seenIDs.insert(media.id)
                 if let hash, !hash.isEmpty { seenHashes.insert(hash) }
                 seenNames.insert(name)
                 let date = entry.happenedAt
                 picked.append((date, WatchMemory(
-                    id: id.uuidString, dateText: formatter.string(from: date),
-                    note: photoCaption(note: entry.note, title: entry.title),
-                    ageText: birthday.map { AgeCalculator.compactAge(birthday: $0, at: date) } ?? "",
-                    isOnThisDay: isOnThisDay(date), moodEmoji: entry.mood?.emoji, photoFileName: name)))
+                    id: media.id.uuidString, dateText: formatter.string(from: date),
+                    note: entry.caption, ageText: entry.ageText,
+                    isOnThisDay: isOnThisDay(date), moodEmoji: entry.moodEmoji, photoFileName: name)))
                 return true // 每条记录最多一张生活照。
             }
             return false
@@ -475,122 +566,11 @@ enum WatchSnapshotBuilder {
         return FileManager.default.fileExists(atPath: thumb.path) ? thumb : store.mediaURL(for: name)
     }
 
-    // MARK: 回忆序列（表冠时光机）
-
-    /// 一次下发多少段。手表侧一屏一段，20 段大约是拧 3 圈表冠——够远，又不至于让照片包过大。
-    private static let memoryCount = 20
-
-    /// 组装回忆序列：近期 + 那年今日 + 更早的抽样，去重后**按时间倒序**。
-    ///
-    /// 为什么必须单调有序：手表侧拧表冠是「越拧越远」的时间旅行，顶部还有一条年代刻度尺。
-    /// 池子里混序的话，刻度尺会来回跳，那个「往回走」的体感就没了。
-    /// 「那年今日」不单独排在一起，而是就地打标记——它本来就属于它那个年份。
-    @MainActor
-    private static func memories(context: ModelContext, birthday: Date?) -> [WatchMemory]? {
-        let store = MediaStore()
-        var descriptor = FetchDescriptor<Entry>(sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
-        descriptor.fetchLimit = 300
-        guard let entries = try? context.fetch(descriptor), !entries.isEmpty else { return nil }
-
-        let cal = Calendar.current
-        let todayMonth = cal.component(.month, from: .now)
-        let todayDay = cal.component(.day, from: .now)
-
-        var picked: [Entry] = []
-        var seen = Set<UUID>()
-        func take(_ entry: Entry) {
-            guard !seen.contains(entry.id) else { return }
-            seen.insert(entry.id)
-            picked.append(entry)
-        }
-
-        // ① 近期 8 条：时光机的起点得是「刚发生的事」，不然一拧就跳到三年前很突兀。
-        for entry in entries.prefix(8) { take(entry) }
-        // ② 那年今日：同月同日的旧记录，是这个功能最有价值的部分。
-        for entry in entries where picked.count < 14 {
-            guard cal.component(.month, from: entry.happenedAt) == todayMonth,
-                  cal.component(.day, from: entry.happenedAt) == todayDay,
-                  !cal.isDateInToday(entry.happenedAt) else { continue }
-            take(entry)
-        }
-        // ③ 更早的等距抽样：让剩下的格子铺满整个时间跨度，而不是全挤在最近一个月。
-        let remaining = entries.filter { !seen.contains($0.id) }
-        if !remaining.isEmpty, picked.count < memoryCount {
-            let need = memoryCount - picked.count
-            let stride = max(1, remaining.count / need)
-            for i in Swift.stride(from: 0, to: remaining.count, by: stride) where picked.count < memoryCount {
-                take(remaining[i])
-            }
-        }
-
-        let onThisDay = Set(picked.filter {
-            cal.component(.month, from: $0.happenedAt) == todayMonth
-                && cal.component(.day, from: $0.happenedAt) == todayDay
-                && !cal.isDateInToday($0.happenedAt)
-        }.map(\.id))
-
-        return picked
-            .sorted { $0.happenedAt > $1.happenedAt }
-            .map { entry in
-                // 【别改回 `a ?? b` 的写法】`??` 右侧是 autoclosure，会捕获 SwiftData 模型对象，
-                // Release（whole-module）下被判成「main actor 闭包捕获 task-isolated 值」而编译失败。
-                // 先取成局部量再拼装。
-                let firstPerson = clip(entry.firstPersonNote, 46)
-                let plain = clip(entry.note, 46)
-                let title = clip(entry.title, 46)
-                let text = firstPerson ?? plain ?? title ?? "这一天"
-                return WatchMemory(
-                    id: entry.id.uuidString,
-                    dateText: BubuDateFormat.monthDay(entry.happenedAt),
-                    note: text,
-                    ageText: birthday.map { AgeCalculator.compactAge(birthday: $0, at: entry.happenedAt) } ?? "",
-                    isOnThisDay: onThisDay.contains(entry.id),
-                    moodEmoji: entry.mood?.emoji,
-                    photoFileName: photoName(for: entry, store: store))
-            }
-    }
-
-    /// 这条记录代表哪一张照片。返回的名字同时是手表缓存里的 key，所以必须稳定
-    /// （同一条记录每次都算出同一个名字，手表才不会重复下载同一张图）。
-    ///
-    /// 【必须校验文件真的在本地】家人发来的照片，缩略图可能还没下载完。
-    /// 若在这里返回一个手机自己都没有的文件名，就会形成死循环：
-    /// 组包时这张被跳过 → 手表数出「快照引用了 N 张、缓存只有 N-1 张」→ 请求补发 →
-    /// 手机作废指纹重传约 600KB → 下一轮再缺 → 无限。所以缺文件的直接跳到下一张。
-    @MainActor
-    private static func photoName(for entry: Entry, store: MediaStore) -> String? {
-        for media in entry.sortedMedia where media.type == .photo {
-            let thumb = media.thumbnailFileName
-            let original = media.localFileName
-            guard let name = thumb ?? original, !name.isEmpty else { continue }
-            let short = (name as NSString).lastPathComponent
-            guard hasLocalFile(short, store: store) else { continue }
-            return short
-        }
-        return nil
-    }
-
     /// 缩略图目录或原图目录任一存在即可（组包侧的取图顺序与此一致）。
     nonisolated static func hasLocalFile(_ name: String, store: MediaStore) -> Bool {
         let fm = FileManager.default
         return fm.fileExists(atPath: store.thumbnailURL(for: name).path)
             || fm.fileExists(atPath: store.mediaURL(for: name).path)
-    }
-
-    /// 「最近」一条动态对应的照片：FeedEvent 只带 targetLocalId，回查 Entry 取首图。
-    @MainActor
-    private static func recentPhotoName(targetLocalId: String?, context: ModelContext) -> String? {
-        guard let targetLocalId, let id = UUID(uuidString: targetLocalId) else { return nil }
-        let d = FetchDescriptor<Entry>(predicate: #Predicate { $0.id == id })
-        guard let entry = try? context.fetch(d).first else { return nil }
-        return photoName(for: entry, store: MediaStore())
-    }
-
-    private static func clip(_ value: String?, _ maxLength: Int) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return trimmed.count <= maxLength ? trimmed : String(trimmed.prefix(maxLength)) + "…"
     }
 
     /// 把一批照片按名字裁成手表尺寸。
@@ -617,25 +597,8 @@ enum WatchSnapshotBuilder {
         return out
     }
 
-    // MARK: 今日打卡计数
-
-    /// 今天各类打卡了几次。手表打卡按钮的角标（🍼 ×4）用它——
-    /// 「今天第几次」是喂养场景最常被问的一句，却是原来手表上唯一看不到的信息。
-    @MainActor
-    private static func todayStats(context: ModelContext) -> [String: Int]? {
-        let start = Calendar.current.startOfDay(for: .now)
-        let descriptor = FetchDescriptor<HealthRecord>(
-            predicate: #Predicate { $0.recordedAt >= start })
-        guard let records = try? context.fetch(descriptor), !records.isEmpty else { return [:] }
-        var stats: [String: Int] = [:]
-        for record in records {
-            stats[record.kindRaw, default: 0] += 1
-        }
-        return stats
-    }
-
     /// 布布头像小缩略图（120px，jpeg 0.7，<30KB），供手表概览显示。
-    private static func avatarThumbData(_ fileName: String?) -> Data? {
+    nonisolated private static func avatarThumbData(_ fileName: String?) -> Data? {
         guard let fileName, !fileName.isEmpty else { return nil }
         // 经 MediaStore 读回退解析：媒体后台迁移窗口内头像可能只在旧沙盒目录，
         // 直接拼 App Group 路径会漏读、手表概览丢头像。thumbnailURL/mediaURL 自动回退旧目录。
@@ -650,9 +613,11 @@ enum WatchSnapshotBuilder {
 // MARK: - WCSessionDelegate（回调在 WC 队列，写库统一切回 MainActor）
 extension WatchConnectivityManager: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
-        Task { @MainActor in
-            if let pending = self.pendingSnapshot { self.pendingSnapshot = nil; self.push(pending) }
-        }
+        Task { @MainActor in self.flushPendingBuild() }
+    }
+    /// 配对 / 安装手表 App 之后补推一轮快照。
+    nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+        Task { @MainActor in self.flushPendingBuild(watchChanged: true) }
     }
     nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
     nonisolated func sessionDidDeactivate(_ session: WCSession) {

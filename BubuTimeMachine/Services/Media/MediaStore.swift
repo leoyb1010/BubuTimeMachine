@@ -255,8 +255,13 @@ nonisolated struct MediaStore: Sendable {
         return mediaURL(for: fileName)
     }
 
+    /// 最多两次 stat（新目录命中即返回）。以前经 mediaURL 解析后再 stat 一次，
+    /// 已存在的文件每次要 2 次 stat，同步扫 2000+ 媒体就是 4000+ 次（D4-04）。
     func fileExists(forMedia fileName: String) -> Bool {
-        FileManager.default.fileExists(atPath: mediaURL(for: fileName).path)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: mediaDir.appendingPathComponent(fileName).path) { return true }
+        let legacy = BubuStorage.legacyMediaDirectory.appendingPathComponent(fileName)
+        return legacy.path != mediaDir.appendingPathComponent(fileName).path && fm.fileExists(atPath: legacy.path)
     }
 
     func fileSize(forMedia fileName: String) -> Int64? {

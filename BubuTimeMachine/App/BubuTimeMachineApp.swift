@@ -71,6 +71,22 @@ struct BubuTimeMachineApp: App {
         // 让 App Intents / 通知回复 / 手表写入都经它拿到同一个容器——写入能刷新主 UI、
         // 快照读到最新数据。注入时机足够早（App.init），且 extension 是独立进程、天然拿不到它。
         SharedModelContainer.injected = modelContainer
+        Self.applyNavigationTitleAppearance()
+    }
+
+    /// 全局导航标题：暖棕 + 圆体（D2-08）。系统默认纯黑标题压在暖棕/粉色设计上显得没做完。
+    /// 只改标题文字属性，不替换导航栏背景（保留系统材质与 Liquid Glass 外观）。
+    /// warmBrownUIColor 是动态色：星夜深色主题下自动翻成暖米白。
+    private static func applyNavigationTitleAppearance() {
+        func rounded(_ style: UIFont.TextStyle, size: CGFloat, weight: UIFont.Weight) -> UIFont {
+            let base = UIFont.systemFont(ofSize: size, weight: weight)
+            let font = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
+            return UIFontMetrics(forTextStyle: style).scaledFont(for: font)
+        }
+        let color = BubuTheme.Color.warmBrownUIColor
+        let bar = UINavigationBar.appearance()
+        bar.titleTextAttributes = [.foregroundColor: color, .font: rounded(.headline, size: 17, weight: .bold)]
+        bar.largeTitleTextAttributes = [.foregroundColor: color, .font: rounded(.largeTitle, size: 34, weight: .heavy)]
     }
 
     var body: some Scene {
@@ -124,8 +140,12 @@ struct BubuTimeMachineApp: App {
                         // syncOnce() 会 await 到一轮同步真正跑完，BGTask 才能如实 setTaskCompleted。
                         BackgroundRefresher.setRunner { await env.syncEngine.syncOnce() }
                         Task { await BackupReminder.scheduleIfAuthorized() }   // 备份提醒（G-6）
-                        // 语音自动转写补写（端侧优先，尽力而为）：三年语音逐步变成可搜索文字
-                        Task {
+                        // 语音自动转写补写（端侧优先，尽力而为）+ 记录此刻的孤儿录音清理：
+                        // 首屏之后 10 秒、低优先级再做，不和冷启动首帧抢 CPU（D4-06）。
+                        Task(priority: .utility) { @MainActor in
+                            try? await Task.sleep(for: .seconds(10))
+                            CaptureDraftStore.standard.cleanupOrphanAudio(
+                                context: modelContainer.mainContext, mediaStore: env.mediaStore)
                             await VoiceTranscriber.backfill(
                                 context: modelContainer.mainContext, mediaStore: env.mediaStore,
                                 aiService: env.aiService, aiConfigured: env.config.isAIConfigured)
@@ -143,11 +163,7 @@ struct BubuTimeMachineApp: App {
                     }
                     // 每次场景出现都要做的：手表上下文注入 + 小组件快照 + 消费待办 + 推手表快照。
                     WatchConnectivityManager.shared.appContext = modelContainer.mainContext
-                    NotificationReplyHandler.shared.retryPendingReplies()
-                    WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
-                    env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                    pushWatchSnapshot()
-                    DailyPicksStore.shared.refreshIfNeeded(env: env)   // 手表/小组件的每日精选（需已同意第二大脑说明，每天成功刷新一次）
+                    runActivationWork()
                 }
         }
         .modelContainer(modelContainer)
@@ -156,12 +172,12 @@ struct BubuTimeMachineApp: App {
             switch phase {
             case .active:
                 guard !BubuStoreHealth.loadFailed else { return }
+                // start() 自带 5 秒去重：冷启动 bootstrap 刚排过一轮时不会再连跑第二轮。
                 env.syncEngine.start()
-                NotificationReplyHandler.shared.retryPendingReplies()
-                WatchConnectivityManager.shared.retryPendingVoiceImports()   // 进前台重试手表语音应急导入（W-P1-3）
-                env.refreshWidgetSnapshot(context: modelContainer.mainContext)
-                pushWatchSnapshot()
-                DailyPicksStore.shared.refreshIfNeeded(env: env)
+                runActivationWork()
+                if let client = BubuLearningClient(env: env) {
+                    Task { await BubuActivityController.reconcileCourseUploads(client: client) }
+                }
                 case .background:
                 env.syncEngine.stopPolling()
                 BackgroundRefresher.scheduleNext()   // 系统择机唤醒补一轮同步
@@ -173,13 +189,26 @@ struct BubuTimeMachineApp: App {
     /// 控制中心/Action Button 的记录标志由各 scene 的 SceneRoot 自行消费
     /// （router 已改为 per-scene，App 结构体这里不再持有）。
 
+    /// 场景出现 / 回到前台要做的一组事。冷启动时 scene `.task` 和 `.active` 会在同一刻各触发一次，
+    /// 以前小组件快照、手表快照、重试队列都跑两遍（D4-06）；2 秒内只执行一次。
+    @MainActor
+    private func runActivationWork() {
+        guard !BubuStoreHealth.loadFailed else { return }
+        guard Date.now.timeIntervalSince(AppActivationGate.lastRun) > 2 else { return }
+        AppActivationGate.lastRun = .now
+        NotificationReplyHandler.shared.retryPendingReplies()
+        WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
+        env.refreshWidgetSnapshot(context: modelContainer.mainContext)
+        pushWatchSnapshot()
+        DailyPicksStore.shared.refreshIfNeeded(env: env)   // 手表/小组件的每日精选（需已同意第二大脑说明，每天成功刷新一次）
+    }
+
     /// 读库生成概览快照并推给手表。
     @MainActor
     private func pushWatchSnapshot() {
         guard !BubuStoreHealth.loadFailed else { return }
-        guard let snapshot = WatchSnapshotBuilder.make(context: modelContainer.mainContext,
-                                                       role: env.config.currentRole) else { return }
-        WatchConnectivityManager.shared.push(snapshot)
+        // 主线程只取输入，快照组装与照片编码在后台完成。
+        WatchConnectivityManager.shared.pushSnapshot(context: modelContainer.mainContext, role: env.config.currentRole)
     }
 
     #if DEBUG
@@ -259,7 +288,7 @@ struct BubuTimeMachineApp: App {
     private func dumpShareCardsIfNeeded() {
         guard ProcessInfo.processInfo.arguments.contains("-uitest-sharecard") else { return }
         let context = modelContainer.mainContext
-        let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
+        let profile = ChildProfile.canonical(in: context)
         var descriptor = FetchDescriptor<Entry>(sortBy: [SortDescriptor(\.happenedAt, order: .reverse)])
         descriptor.fetchLimit = 10
         let entries = (try? context.fetch(descriptor)) ?? []
@@ -669,4 +698,10 @@ private struct SceneRoot: View {
         SharedDefaults.pendingRecord = false
         router.pendingQuickCapture = true
     }
+}
+
+/// 场景激活去重（跨 scene 共享：iPad 多窗口同时出现也只跑一遍）。
+@MainActor
+private enum AppActivationGate {
+    static var lastRun = Date.distantPast
 }

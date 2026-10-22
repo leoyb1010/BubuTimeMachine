@@ -357,9 +357,23 @@ class LearningService:
         saved = self.store.save_attempt(scope.family_id, child, pack["id"], body["id"], request)
         return self._attempt_public(scope, {**saved, "id": body["id"], "child_id": child, "pack_id": pack["id"]})
 
-    def attempts(self, scope, child_id):
+    def attempts(self, scope, child_id, start=None, end=None):
         scope.require_child(child_id)
-        return {"items": [self._attempt_public(scope, row) for row in self.store.attempts(scope.family_id, child_id)]}
+        if start:
+            valid_day(start)
+        if end:
+            valid_day(end)
+        if start and end and start > end:
+            raise ValueError("日期范围无效")
+        rows = self.store.attempts(scope.family_id, child_id, limit=5000 if start or end else 1000)
+        if start or end:
+            def day(row):
+                try:
+                    return datetime.fromtimestamp(float(row["created_at"]), ZoneInfo("Asia/Shanghai")).date().isoformat()
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    return None
+            rows = [r for r in rows if day(r) and (not start or day(r) >= start) and (not end or day(r) <= end)]
+        return {"items": [self._attempt_public(scope, row) for row in rows]}
 
     def reviews(self, scope, child_id, period, day):
         """FSRS-4.5 picks what is due (Good = answered alone, Again = wrong or helped); ≤5 per session."""

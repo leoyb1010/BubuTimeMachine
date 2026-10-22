@@ -125,7 +125,7 @@ struct JournalEntries: View {
                                     .font(BubuTheme.Font.caption.weight(.semibold))
                                     .foregroundStyle(env.theme.theme.textAccent)
                                 Spacer()
-                                if let birthday = profiles.first?.birthday {
+                                if let birthday = ChildProfile.canonical(from: profiles)?.birthday {
                                     Text(AgeCalculator.compactAge(birthday: birthday, at: entry.happenedAt))
                                         .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                                 }

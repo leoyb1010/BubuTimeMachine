@@ -19,7 +19,7 @@ struct Core2_26Tests {
 
     @Test func noNetworkIsOffline() {
         #expect(LearningErrorKind(URLError(.notConnectedToInternet)) == .offline)
-        #expect(LearningErrorKind(URLError(.networkConnectionLost)) == .offline)
+        #expect(LearningErrorKind(URLError(.networkConnectionLost)) == .serverUnreachable)
         #expect(learningErrorText(URLError(.notConnectedToInternet)) == LearningErrorKind.offlineText)
         #expect(BubuStateKind(LearningErrorKind(URLError(.notConnectedToInternet))) == .offline)
     }

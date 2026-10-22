@@ -110,7 +110,8 @@ struct AskBubuView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: BubuTheme.Spacing.s) {
                     ForEach(Self.examples, id: \.self) { example in
-                        Button { Task { await ask(example, client: client) } } label: {
+                        // Asking an example leaves whatever the parent was typing untouched.
+                        Button { Task { await ask(example, client: client, clearsDraft: false) } } label: {
                             Text(example).font(BubuTheme.Font.caption)
                                 .foregroundStyle(BubuTheme.Color.deepRose)
                                 .padding(.horizontal, 12).padding(.vertical, 7)
@@ -121,11 +122,11 @@ struct AskBubuView: View {
                         .accessibilityHint("用这个例子提问")
                     }
                 }
-                .padding(.horizontal, BubuTheme.Spacing.item)
             }
+            .contentMargins(.horizontal, BubuTheme.Spacing.item, for: .scrollContent)
             HStack(spacing: BubuTheme.Spacing.s) {
-                TextField("问一个关于布布的问题…", text: $draft, axis: .vertical)
-                    .lineLimit(1...3)
+                // Single-line so Return sends (a vertical-axis field turns Return into a newline).
+                TextField("问一个关于布布的问题…", text: $draft)
                     .font(BubuTheme.Font.body)
                     .focused($focused)
                     .submitLabel(.send)
@@ -137,7 +138,7 @@ struct AskBubuView: View {
                 Button { Task { await ask(draft, client: client) } } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 36, design: .rounded))
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, canSend ? BubuTheme.Color.primary : BubuTheme.Color.softFill)
+                        .foregroundStyle(.white, canSend ? BubuTheme.Color.actionFill : BubuTheme.Color.softFill)
                 }
                 .buttonStyle(BubuPressableStyle(scale: 0.9))
                 .disabled(!canSend)
@@ -218,7 +219,7 @@ struct AskBubuView: View {
                                 .overlay(alignment: .topLeading) {
                                     if let number = citationNumber(item.id, response) {
                                         Text("\(number)").font(BubuTheme.Font.caption.weight(.heavy)).foregroundStyle(.white)
-                                            .frame(width: 22, height: 22).background(BubuTheme.Color.deepRose, in: Circle())
+                                            .frame(width: 22, height: 22).background(BubuTheme.Color.actionFill, in: Circle())
                                             .padding(5).accessibilityHidden(true)
                                     }
                                 }
@@ -229,6 +230,8 @@ struct AskBubuView: View {
                 }
             }
             .frame(height: 120)
+            // Bleed to the bubble's edge so the next photo peeks in with its rounded corners intact.
+            .secondBrainCarouselBleed(BubuTheme.Spacing.m)
         }
     }
 
@@ -274,13 +277,13 @@ struct AskBubuView: View {
 
     // MARK: Asking
 
-    private func ask(_ raw: String, client: BubuLearningClient, replacing: UUID? = nil) async {
+    private func ask(_ raw: String, client: BubuLearningClient, replacing: UUID? = nil, clearsDraft: Bool = true) async {
         let question = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
         guard !question.isEmpty, !asking else { return }
         asking = true
         defer { asking = false }
         focused = false
-        if replacing == nil { draft = "" }
+        if replacing == nil, clearsDraft { draft = "" }
         let id: UUID
         if let replacing {
             id = replacing

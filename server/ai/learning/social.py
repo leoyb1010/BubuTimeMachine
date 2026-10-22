@@ -50,7 +50,7 @@ def notify(name):
             headers["Authorization"] = "Bearer " + token
         try:
             with httpx.Client(timeout=5, trust_env=False) as client:
-                client.post(url, content=("%s评论了布布的一条时光" % name).encode(), headers=headers)
+                client.post(url, content=("%s给布布的一条时光留言了" % name).encode(), headers=headers)
         except Exception as exc:
             log.warning("social push failed error=%s", type(exc).__name__)
 
@@ -98,7 +98,7 @@ class Social:
         fid = self._item(scope, fid)
         text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", str(text or "")).strip()
         if not 1 <= len(text) <= 300:
-            raise ValueError("评论长度无效")
+            raise ValueError("留言要在 1–300 字之间")
         row = {"id": uuid.uuid4().hex, "family_id": self.family, "item_id": fid, "user_id": scope.user_id,
                "author": author(scope), "text": text, "created_at": time.time()}
         with self.store.db() as db:

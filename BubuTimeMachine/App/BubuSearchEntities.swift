@@ -105,6 +105,7 @@ enum BubuMomentSpotlightIndexer {
     static let enabledKey = "bubu.spotlight.enabled"
     private static let indexedIDsKey = "bubu.spotlight.indexedIDs"
     private static let clearedKey = "bubu.spotlight.cleared"
+    private static let fingerprintKey = "bubu.spotlight.fingerprint"
     private static let log = Logger(subsystem: "com.bubu.timemachine", category: "Spotlight")
     private static var pendingTask: Task<Void, Never>?
 
@@ -128,6 +129,13 @@ enum BubuMomentSpotlightIndexer {
                     log.error("清除 Spotlight 时光索引失败，将在下次刷新重试")
                 }
             }
+            return
+        }
+        // 记录没变就不重建：同步每轮、回前台都会调到这里，以前每次都在主线程取 2000 条、
+        // 全量 indexAppEntities 再把 2000 个 UUID 写回 defaults（D4-05）。指纹只用 3 次 SQL 聚合。
+        let fingerprint = Self.fingerprint(context: context)
+        if fingerprint == UserDefaults.standard.string(forKey: fingerprintKey) {
+            pendingTask = previousTask
             return
         }
         // 一旦准备写入，就不能继续沿用上次“已清空”的状态。
@@ -162,6 +170,7 @@ enum BubuMomentSpotlightIndexer {
                 UserDefaults.standard.set(
                     currentIDs.map(\.uuidString).sorted(), forKey: indexedIDsKey)
                 UserDefaults.standard.set(false, forKey: clearedKey)
+                UserDefaults.standard.set(fingerprint, forKey: fingerprintKey)
             } catch {
                 log.error("更新 Spotlight 时光索引失败，将在下次刷新重试")
             }
@@ -170,8 +179,23 @@ enum BubuMomentSpotlightIndexer {
 
     static func setEnabled(_ enabled: Bool, context: ModelContext) {
         UserDefaults.standard.set(enabled, forKey: enabledKey)
+        UserDefaults.standard.removeObject(forKey: fingerprintKey)
         if !enabled { UserDefaults.standard.set(false, forKey: clearedKey) }
         schedule(context: context)
+    }
+
+    /// 未归档记录的「数量 + 最新创建 + 最新编辑」：新增、归档、编辑任一发生都会变。
+    static func fingerprint(context: ModelContext) -> String {
+        let count = (try? context.fetchCount(FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived }))) ?? -1
+        var newest = FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived },
+                                            sortBy: [SortDescriptor(\Entry.createdAt, order: .reverse)])
+        newest.fetchLimit = 1
+        var edited = FetchDescriptor<Entry>(predicate: #Predicate { !$0.isArchived && $0.editedAt != nil },
+                                            sortBy: [SortDescriptor(\Entry.editedAt, order: .reverse)])
+        edited.fetchLimit = 1
+        let created = (try? context.fetch(newest).first?.createdAt.timeIntervalSince1970) ?? 0
+        let lastEdit = (try? context.fetch(edited).first?.editedAt?.timeIntervalSince1970) ?? 0
+        return "\(count)|\(created)|\(lastEdit)"
     }
 
     nonisolated static func staleIdentifiers(previous: Set<UUID>, current: Set<UUID>) -> [UUID] {

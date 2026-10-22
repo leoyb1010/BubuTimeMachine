@@ -11,7 +11,7 @@ struct ThemeSettingsView: View {
 
     /// 生日月（与身份卡徽章同一条规则）：优先生日彩带图标。
     private var isBirthdayMonth: Bool {
-        guard let birthday = profiles.first?.birthday else { return false }
+        guard let birthday = ChildProfile.canonical(from: profiles)?.birthday else { return false }
         return Calendar.current.component(.month, from: .now)
             == Calendar.current.component(.month, from: birthday)
     }

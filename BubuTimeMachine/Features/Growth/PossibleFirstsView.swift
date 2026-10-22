@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Observation
+import UIKit
 
 // MARK: - 第二大脑「可能的第一次」（契约 §3）
 // 第二大脑只读；确认/忽略存在服务端学习库。确认后由 App 在本机点亮一个 Milestone。
@@ -93,14 +94,16 @@ final class PossibleFirstsModel {
         guard !busyIDs.contains(item.id), let index = candidates.firstIndex(of: item) else { return }
         busyIDs.insert(item.id)
         defer { busyIDs.remove(item.id) }
-        _ = withAnimation(BubuMotion.gentle) { candidates.remove(at: index) }
+        _ = withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: Self.reduceMotion)) { candidates.remove(at: index) }
         do {
             _ = try await client.send("POST", "api/firsts/\(item.id)/dismiss", as: GrowthFirstDTO.self)
         } catch {
-            withAnimation(BubuMotion.gentle) { candidates.insert(item, at: min(index, candidates.count)) }
+            withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: Self.reduceMotion)) { candidates.insert(item, at: min(index, candidates.count)) }
             actionError = confirmErrorText(error)
         }
     }
+
+    private static var reduceMotion: Bool { UIAccessibility.isReduceMotionEnabled }
 
     private func confirmErrorText(_ error: Error) -> String {
         if (error as? LearningServiceError) == .unauthorized { return "只有审核家长可以确认或忽略「第一次」。" }
@@ -135,7 +138,7 @@ enum BrainFirstMilestoneWriter {
         if milestone.detail?.isEmpty ?? true { milestone.detail = note }
         if !milestone.isAchieved {
             milestone.happenedAt = date
-            if let profile = try context.fetch(FetchDescriptor<ChildProfile>()).first {
+            if let profile = ChildProfile.canonical(in: context) {
                 milestone.ageDescription = AgeCalculator.ageDescription(birthday: profile.birthday, at: date)
             }
             context.insert(FeedEvent(kind: .milestoneLit, actorRole: env.config.currentRole.rawValue,
@@ -149,70 +152,6 @@ enum BrainFirstMilestoneWriter {
     }
 }
 
-// MARK: - 成长页卡片
-
-/// 成长首页的入口卡片：服务不可用时整块不出现。
-struct PossibleFirstsCard: View {
-    @Environment(AppEnvironment.self) private var env
-    @State private var model = PossibleFirstsModel()
-
-    var body: some View {
-        let client = BubuLearningClient(env: env)
-        Group {
-            if let client, model.phase == .ready, !(model.candidates.isEmpty && model.confirmed.isEmpty) {
-                NavigationLink { PossibleFirstsView(model: model, client: client) } label: { content }
-                    .buttonStyle(BubuPressableStyle())
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-        .animation(BubuMotion.gentle, value: model.phase)
-        .task(id: client?.scope) { await model.load(client: client) }
-    }
-
-    private var content: some View {
-        HStack(spacing: 14) {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "sparkle.magnifyingglass")
-                    .font(BubuTheme.Font.scaled(24, weight: .semibold))
-                    .foregroundStyle(BubuTheme.Color.deepRose)
-                    .frame(width: 52, height: 52)
-                    .background(BubuTheme.Color.butterSurface, in: Circle())
-                    .symbolEffect(.bounce, value: model.candidates.count)
-                if !model.candidates.isEmpty {
-                    Text("\(model.candidates.count)")
-                        .font(BubuTheme.Font.caption.weight(.heavy))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(BubuTheme.Color.primary, in: Capsule())
-                        .offset(x: 6, y: -4)
-                }
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("可能的第一次")
-                    .font(BubuTheme.Font.headline)
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text(model.candidates.isEmpty
-                     ? "已确认 \(model.confirmed.count) 个，第二大脑还在留意新的"
-                     : "第二大脑在照片里发现了 \(model.candidates.count) 个，等你来认一认")
-                    .font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .lineLimit(2)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(BubuTheme.Font.caption.weight(.bold))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-        }
-        .padding(16)
-        .background(
-            LinearGradient(colors: [BubuTheme.Color.butterSurface, BubuTheme.Color.pinkSurface],
-                           startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
-        )
-        .bubuCardShadow()
-    }
-}
-
 // MARK: - 列表页
 
 struct PossibleFirstsView: View {
@@ -223,6 +162,7 @@ struct PossibleFirstsView: View {
     @Query private var profiles: [ChildProfile]
     @State private var ceremony: CeremonyItem?
     @State private var lightTick = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     struct CeremonyItem: Identifiable { let id: String; let title: String; let subtitle: String? }
 
@@ -262,7 +202,7 @@ struct PossibleFirstsView: View {
     private var intro: some View {
         HStack(alignment: .top, spacing: 12) {
             BubuMascotBadge(size: 48, expression: .surprised)
-            Text("第二大脑在布布的照片和视频里，找到了一些可能是“第一次”的瞬间。是的话点「确认」，会在里程碑里点亮；不是就「忽略」。")
+            Text("第二大脑在布布的照片和视频里，找到了一些可能是“第一次”的瞬间。是的话点「确认」，会收进成长页的「第一次」，也会在里程碑里点亮；不是就「忽略」。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -291,7 +231,7 @@ struct PossibleFirstsView: View {
             } else {
                 ForEach(model.candidates) { item in
                     candidateCard(item)
-                        .transition(.asymmetric(
+                        .transition(reduceMotion ? .opacity : .asymmetric(
                             insertion: .opacity,
                             removal: .scale(scale: 0.86).combined(with: .opacity).combined(with: .offset(x: -40))
                         ))
@@ -349,7 +289,7 @@ struct PossibleFirstsView: View {
                         .font(BubuTheme.Font.body.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(BubuTheme.Color.primary, in: Capsule())
+                        .background(BubuTheme.Color.actionFill, in: Capsule())
                     }
                 }
                 .buttonStyle(BubuPressableStyle())
@@ -401,7 +341,7 @@ struct PossibleFirstsView: View {
     }
 
     private func dateText(_ day: Date) -> String {
-        guard let birthday = profiles.first?.birthday else { return BubuDateFormat.shortDate(day) }
+        guard let birthday = ChildProfile.canonical(from: profiles)?.birthday else { return BubuDateFormat.shortDate(day) }
         return "\(BubuDateFormat.shortDate(day)) · \(AgeCalculator.ageDescription(birthday: birthday, at: day))"
     }
 
@@ -412,8 +352,8 @@ struct PossibleFirstsView: View {
             BubuSound.play(.milestone)
             lightTick += 1
             let subtitle = updated.day.flatMap { day in
-                profiles.first.map { "布布 \(AgeCalculator.ageDescription(birthday: $0.birthday, at: day)) 的第一次，已经点亮在里程碑里。" }
-            } ?? "已经点亮在里程碑里。"
+                ChildProfile.canonical(from: profiles).map { "布布 \(AgeCalculator.ageDescription(birthday: $0.birthday, at: day)) 的第一次，已经收进「第一次」。" }
+            } ?? "已经收进「第一次」。"
             ceremony = CeremonyItem(id: updated.id, title: updated.displayTitle, subtitle: subtitle)
         } catch {
             model.actionError = "服务端已经确认，但本机里程碑没存进去。可以到里程碑页手动点亮「\(updated.displayTitle)」。"

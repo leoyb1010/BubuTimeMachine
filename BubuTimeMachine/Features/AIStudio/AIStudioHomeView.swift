@@ -1,334 +1,220 @@
 import SwiftUI
 
-// MARK: - 布布的魔法屋
-/// 自托管 AI 的创作中心。当前为完整可玩的 Mock 工作流；
-/// 正式部署接入真实 LLM 后，UI 与交互不变。
+// MARK: - 回忆与作品
+/// 按家长的心智分组：先「问」，再看最新的几样，其后是 回顾、写给布布、声音。
+/// - 第一屏：一个「布布问答」主卡 + 新鲜出炉（生日影片 / 成长小报 / 语言成长线 / 去过的地方 / 认一认）。
+/// - 同名功能合并：问答只剩一个「布布问答」（连上家里服务时问全家相册，否则问本机记录）；
+///   两支影片、三种报告各自写清楚是什么，不再让人猜。
+/// - 每个分区按行铺满：iPhone 两列、iPad 三到四列，末行自动拉宽，不留空格子。
 struct AIStudioHomeView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(AppEnvironment.self) private var env
-    private var theme: Color { env.theme.theme.primary }
 
     var body: some View {
         ScrollView {
-            // 9 个能力平铺在一张网格里时，新用户不知道该先点哪个。
-            // 改成「一个主位 + 三个分区」：先给最像入口的「问问布布」一个大卡，
-            // 其余按用途分成 回顾 / 创作 / 声音，各自 2-3 个，一眼能选。
-            VStack(alignment: .leading, spacing: 18) {
-                banner
+            VStack(alignment: .leading, spacing: 22) {
+                askHeroCard
 
-                storybookCard      // 成长绘本（把里程碑编织成翻页故事）
-                capsuleCard        // 时间胶囊收入魔法屋，底栏不再单独占位
+                section("新鲜出炉", subtitle: "最近加的几样，点开就能看", isNew: true, tiles: [
+                    StudioTile(icon: "birthday.cake.fill", title: "生日影片",
+                               subtitle: "上个生日到今天，一键成片", tint: BubuTheme.Color.butter) { AnyView(BirthdayFilmView()) },
+                    StudioTile(icon: "newspaper.fill", title: "成长小报",
+                               subtitle: "每月 1 号出一期", tint: BubuTheme.Color.mint) { AnyView(MonthlyReportView()) },
+                    StudioTile(icon: "character.bubble.fill", title: "语言成长线",
+                               subtitle: "会说的词一月月变多", tint: BubuTheme.Color.peach) { AnyView(WordsGrowthView()) },
+                    StudioTile(icon: "map.fill", title: "去过的地方",
+                               subtitle: "照片里的小地图", tint: BubuTheme.Color.sky) { AnyView(PlacesMapView()) },
+                    StudioTile(icon: "person.crop.square.badge.camera", title: "认一认",
+                               subtitle: "左滑右滑，帮相册把布布认得更准", tint: BubuTheme.Color.lav) { AnyView(RecognitionView()) }
+                ])
 
-                DisclosureGroup("用 AI 整理回忆") {
-                    askBubuCard
-                    NavigationLink("第一人称日记") { FirstPersonDiaryView() }
-                    NavigationLink("家人合奏") { FamilyEnsembleView() }
-                    if !env.config.isAIConfigured {
-                        Text("需要在设置里启用家庭 AI 服务。原始记录始终保留。")
-                            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                    }
-                }.tint(env.theme.theme.textAccent)
+                section("回顾与报告", subtitle: "把已经发生的整理给你看", tiles: [
+                    StudioTile(icon: "text.book.closed.fill", title: "布布周报",
+                               subtitle: "这一周的小故事", tint: BubuTheme.Color.peach) { AnyView(WeeklyReportView()) },
+                    StudioTile(icon: "chart.line.uptrend.xyaxis", title: "成长报告",
+                               subtitle: "档案记了什么、还缺什么", tint: BubuTheme.Color.butter) { AnyView(GrowthReportView()) },
+                    StudioTile(icon: "film.stack.fill", title: "年度成长电影",
+                               subtitle: "挑一年的照片配乐成片", tint: BubuTheme.Color.sky) { AnyView(GrowthMovieView()) },
+                    StudioTile(icon: "book.pages.fill", title: "成长绘本",
+                               subtitle: "点滴编成可翻页的故事", tint: BubuTheme.Color.pink) { AnyView(BubuStoryView()) }
+                ])
 
-                section("回顾", subtitle: "把已经发生的整理给你看") {
-                    capabilityTile(icon: "newspaper.fill", title: "布布周报",
-                                   subtitle: "这一周的小故事", tint: BubuTheme.Color.peach) {
-                        WeeklyReportView()
-                    }
-                    capabilityTile(icon: "chart.line.uptrend.xyaxis", title: "成长报告",
-                                   subtitle: "整理成长变化", tint: BubuTheme.Color.butter) {
-                        GrowthReportView()
-                    }
-                    capabilityTile(icon: "film.stack.fill", title: "成长电影",
-                                   subtitle: "精选照片成短片", tint: BubuTheme.Color.sky) {
-                        GrowthMovieView()
-                    }
-                    capabilityTile(icon: "calendar.badge.plus", title: "成长小报",
-                                   subtitle: "每月 1 号自动出刊", tint: BubuTheme.Color.mint) {
-                        MonthlyReportView()
-                    }
-                    capabilityTile(icon: "text.bubble.fill", title: "布布问答",
-                                   subtitle: "问问家里的相册", tint: BubuTheme.Color.pink) {
-                        AskBubuView()
-                    }
-                    capabilityTile(icon: "birthday.cake.fill", title: "生日影片",
-                                   subtitle: "一年的瞬间拼成短片", tint: BubuTheme.Color.butter) {
-                        BirthdayFilmView()
-                    }
-                    capabilityTile(icon: "map.fill", title: "去过的地方",
-                                   subtitle: "照片里的小地图", tint: BubuTheme.Color.sky) {
-                        PlacesMapView()
-                    }
+                section("写给布布", subtitle: "留给长大后的她", tiles: [
+                    StudioTile(icon: "envelope.fill", title: "时间胶囊",
+                               subtitle: "把今天的话寄给未来", tint: BubuTheme.Color.lav) { AnyView(CapsuleHomeView()) },
+                    StudioTile(icon: "pencil.and.scribble", title: "第一人称日记",
+                               subtitle: "用她的口吻写一天", tint: BubuTheme.Color.mint) { AnyView(FirstPersonDiaryView()) },
+                    StudioTile(icon: "person.3.fill", title: "家人合奏",
+                               subtitle: "全家写的同一天", tint: BubuTheme.Color.pink) { AnyView(FamilyEnsembleView()) }
+                ])
+                if !env.config.isAIConfigured {
+                    Text("日记与合奏需要在设置里启用家庭 AI 服务，原始记录始终保留。")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .padding(.horizontal, 6)
+                        .padding(.top, -12)
                 }
 
-                section("声音", subtitle: "听见布布慢慢长大") {
-                    capabilityTile(icon: "waveform.path", title: "声音年轮",
-                                   subtitle: "一圈是一岁", tint: BubuTheme.Color.lav) {
-                        SoundRingView()
-                    }
+                section("布布的声音", subtitle: "听见她慢慢长大", tiles: [
+                    StudioTile(icon: "waveform.path", title: "声音年轮",
+                               subtitle: "一圈是一岁", tint: BubuTheme.Color.lav) { AnyView(SoundRingView()) },
                     // 从「设置」搬过来：按岁归档的语音本来就是创作素材，不是配置项。
-                    capabilityTile(icon: "waveform.badge.mic", title: "成长之声",
-                                   subtitle: "按岁归档的语音", tint: BubuTheme.Color.info) {
-                        VoiceArchiveView()
-                    }
-                    capabilityTile(icon: "quote.bubble.fill", title: "布布的声音",
-                                   subtitle: "视频里她自己说的话", tint: BubuTheme.Color.pink) {
-                        BubuVoicesView()
-                    }
-                    capabilityTile(icon: "character.bubble.fill", title: "语言成长线",
-                                   subtitle: "会说的词一月月变多", tint: BubuTheme.Color.peach) {
-                        WordsGrowthView()
-                    }
-                }
-
-                section("第二大脑", subtitle: "帮第二大脑把布布认得更准") {
-                    capabilityTile(icon: "person.crop.square.badge.camera", title: "认一认",
-                                   subtitle: "左滑右滑确认照片", tint: BubuTheme.Color.peach) {
-                        RecognitionView()
-                    }
-                }
+                    StudioTile(icon: "waveform.badge.mic", title: "成长之声",
+                               subtitle: "家人录下的语音，按岁归档", tint: BubuTheme.Color.sky) { AnyView(VoiceArchiveView()) },
+                    StudioTile(icon: "quote.bubble.fill", title: "布布的声音",
+                               subtitle: "视频里她亲口说的话", tint: BubuTheme.Color.pink) { AnyView(BubuVoicesView()) }
+                ])
 
                 Spacer(minLength: 30)
             }
             .padding()
             .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
-        .background(background.ignoresSafeArea())
+        .background(BubuThemedBackground().ignoresSafeArea())
         .navigationTitle("回忆与作品")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    @ViewBuilder
-    private var background: some View {
-        BubuThemedBackground()
-    }
-
-    private var banner: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                BubuMascotBadge(size: 58, expression: .drawing)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("回忆与作品").font(BubuTheme.Font.title)
-                    Text("故事、电影、报告和未来胶囊")
-                        .font(BubuTheme.Font.caption.weight(.semibold))
+    // MARK: 布布问答主卡
+    /// 唯一的问答入口。连上家里服务时问全家相册（AskBubuView），离线时问本机记录（BubuQAView），
+    /// 名字都叫「布布问答」，家长不必分辨两个几乎同名的框。
+    private var askHeroCard: some View {
+        NavigationLink {
+            if BubuLearningClient(env: env) != nil {
+                AskBubuView()
+            } else {
+                BubuQAView()
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                        .font(BubuTheme.Font.scaled(22, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(BubuTheme.Gradient.primaryButton,
+                                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("布布问答")
+                            .font(BubuTheme.Font.scaled(19, weight: .heavy))
+                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                        Text("她这几年的记录，都可以直接问")
+                            .font(BubuTheme.Font.caption)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(BubuTheme.Font.scaled(13, weight: .black))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                // 像一个搜索框：告诉家长「可以这样问」。
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text("她第一次去海边是什么时候？")
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
+                    Spacer(minLength: 0)
                 }
+                .font(BubuTheme.Font.caption)
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(BubuTheme.Color.softFill, in: Capsule())
             }
-            .foregroundStyle(.white)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(
-            LinearGradient(colors: [theme, theme.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .bubuCardShadow()
-    }
-
-    // 成长绘本主卡（butter→peach→pink，对照设计稿；点进翻页绘本）
-    private var storybookCard: some View {
-        NavigationLink {
-            BubuStoryView()
-        } label: {
-            HStack(spacing: 14) {
-                // 原来用 BubuDreamPhoto（照片占位渐变 + 巨大的 ✦ 字符）当图标：
-                // 缩到 60pt 后 motif 字号 32pt、白色 0.6 透明压在浅粉彩上，糊成一块黄绿色斑，
-                // 和旁边一排清晰的 SF Symbol 完全不是一个语言。改成同语言的图标底。
-                ZStack {
-                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
-                        .fill(LinearGradient(colors: [BubuTheme.Color.butter, BubuTheme.Color.peach],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: "book.pages.fill")
-                        .font(BubuTheme.Font.scaled(26, weight: .bold))
-                        .foregroundStyle(BubuTheme.Color.paperInk)
-                }
-                .frame(width: 60, height: 60)
-                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
-                    .stroke(.white.opacity(0.85), lineWidth: 3))
-                .rotationEffect(.degrees(-4))
-                .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
-                VStack(alignment: .leading, spacing: 4) {
-                    // 白字压在 butter/peach 这种高明度底上，浅色模式本来就勉强；
-                    // 改成动态 warmBrown：浅色是深棕（对比度足），深色随底一起翻。
-                    Text("成长绘本")
-                        .font(BubuTheme.Font.scaled(19, weight: .heavy))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("由你记录的点滴，自动编织成可翻页的故事")
-                        .font(BubuTheme.Font.scaled(12.5, weight: .semibold))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(BubuTheme.Font.scaled(14, weight: .bold))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                // 大面积暖彩卡走 warmSurface（深色下压暗）。原来直接用静态 butter/peach/pink，
-                // 深色模式下整张卡是一块发亮的粉黄，从页面上「飘」出来。
-                LinearGradient(colors: [BubuTheme.Color.warmSurfaceTop,
-                                        BubuTheme.Color.warmSurfaceMid,
-                                        BubuTheme.Color.warmSurfaceEnd],
+                LinearGradient(colors: [BubuTheme.Color.card, BubuTheme.Color.pinkSurface.opacity(0.6)],
                                startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
-            )
-            .overlay(alignment: .topTrailing) {
-                BubuSparkle(size: 13, color: BubuTheme.Color.warmBrown.opacity(0.55)).padding(14)
-            }
+                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .bubuCardShadow()
+            .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("studio.ask")
     }
 
-    private var capsuleCard: some View {
-        NavigationLink {
-            CapsuleHomeView()
-        } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
-                        .fill(LinearGradient(colors: [BubuTheme.Color.lav, BubuTheme.Color.sky],
-                                             startPoint: .topLeading,
-                                             endPoint: .bottomTrailing))
-                    Image(systemName: "envelope.fill")
-                        .font(BubuTheme.Font.scaled(26, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 60, height: 60)
-                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous).stroke(.white.opacity(0.7), lineWidth: 2))
-                .shadow(color: BubuTheme.Color.lav.opacity(0.35), radius: 10, y: 5)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("未来胶囊")
-                        .font(BubuTheme.Font.scaled(17, weight: .heavy))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("把今天的话，寄给未来的布布")
-                        .font(BubuTheme.Font.scaled(12.5, weight: .semibold))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(BubuTheme.Font.scaled(13, weight: .black))
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                    .stroke(.white.opacity(0.60), lineWidth: 1)
-            }
-            .shadow(color: BubuTheme.Color.lav.opacity(0.22), radius: 12, y: 6)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 主位大卡：魔法屋里最像「入口」的能力，不该和另外 8 个挤在同一张网格里。
-    private var askBubuCard: some View {
-        NavigationLink { BubuQAView() } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
-                        .fill(LinearGradient(colors: [BubuTheme.Color.primary, BubuTheme.Color.deepRose],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: "bubble.left.and.text.bubble.right.fill")
-                        .font(BubuTheme.Font.scaled(24, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 60, height: 60)
-                .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous)
-                    .stroke(.white.opacity(0.7), lineWidth: 2))
-                .shadow(color: BubuTheme.Color.deepRose.opacity(0.30), radius: 10, y: 5)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("问问布布")
-                        .font(BubuTheme.Font.scaled(18, weight: .heavy))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Text("她这几年的记录，都可以直接问")
-                        .font(BubuTheme.Font.scaled(12.5, weight: .semibold))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(BubuTheme.Font.scaled(13, weight: .black))
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                    .stroke(.white.opacity(0.60), lineWidth: 1)
-            }
-            .shadow(color: BubuTheme.Color.primary.opacity(0.20), radius: 12, y: 6)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 分区：小标题 + 一句话说明 + 一张网格。
-    @ViewBuilder
-    private func section<Content: View>(_ title: String, subtitle: String,
-                                        @ViewBuilder content: () -> Content) -> some View {
+    // MARK: 分区
+    private func section(_ title: String, subtitle: String, isNew: Bool = false,
+                         tiles: [StudioTile]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(BubuTheme.Font.scaled(15, weight: .heavy, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(BubuTheme.Font.scaled(16, weight: .heavy))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    if isNew {
+                        Text("新")
+                            .font(BubuTheme.Font.scaled(11, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(BubuTheme.Color.actionFill, in: Capsule())
+                    }
+                }
                 Text(subtitle)
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
             }
             .padding(.leading, 6)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145, maximum: 220), spacing: 10)],
-                      spacing: 10) {
-                content()
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            tileRows(tiles)
+        }
+    }
+
+    /// 按行铺满：iPhone 两列；iPad 4 的倍数或不多于 4 个时一行 4 个，否则一行 3 个。
+    /// 末行不足时每格拉宽，所以永远没有孤零零的空格子。
+    private func tileRows(_ tiles: [StudioTile]) -> some View {
+        let perRow: Int = {
+            guard sizeClass == .regular else { return 2 }
+            return (tiles.count <= 4 || tiles.count % 4 == 0) ? min(4, tiles.count) : 3
+        }()
+        let rows = stride(from: 0, to: tiles.count, by: perRow).map {
+            Array(tiles[$0..<min($0 + perRow, tiles.count)])
+        }
+        return VStack(spacing: 10) {
+            ForEach(rows.indices, id: \.self) { index in
+                HStack(spacing: 10) {
+                    ForEach(rows[index]) { tile in tileView(tile) }
+                }
             }
         }
     }
 
-    private func capabilityTile<Destination: View>(
-        icon: String,
-        title: String,
-        subtitle: String,
-        tint: Color,
-        @ViewBuilder destination: @escaping () -> Destination
-    ) -> some View {
+    private func tileView(_ tile: StudioTile) -> some View {
         NavigationLink {
-            destination()
+            tile.destination()
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Image(systemName: icon)
+                    Image(systemName: tile.icon)
                         .font(BubuTheme.Font.scaled(17, weight: .bold))
                         .foregroundStyle(BubuTheme.Color.deepRose)
                         .frame(width: 36, height: 36)
-                        .background(tint.opacity(0.72), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+                        .background(tile.tint.opacity(0.72), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(BubuTheme.Font.scaled(11, weight: .black))
                         .foregroundStyle(BubuTheme.Color.secondaryText.opacity(0.72))
                 }
                 Spacer(minLength: 0)
-                Text(title)
+                Text(tile.title)
                     .font(BubuTheme.Font.scaled(15, weight: .heavy))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
-                Text(subtitle)
+                Text(tile.subtitle)
                     .font(BubuTheme.Font.scaled(11.5, weight: .medium))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.86)
             }
             .padding(13)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: BubuAdaptive.value(sizeClass, compact: 112, regular: 140))
+            .frame(height: BubuAdaptive.value(sizeClass, compact: 118, regular: 140))
             .background(
-                LinearGradient(colors: [BubuTheme.Color.card.opacity(0.98), tint.opacity(0.22)],
+                LinearGradient(colors: [BubuTheme.Color.card.opacity(0.98), tile.tint.opacity(0.22)],
                                startPoint: .topLeading,
                                endPoint: .bottomTrailing),
                 in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
@@ -337,9 +223,29 @@ struct AIStudioHomeView: View {
                 RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
                     .stroke(.white.opacity(0.62), lineWidth: 1)
             }
-            .shadow(color: tint.opacity(0.22), radius: 12, y: 7)
+            .shadow(color: tile.tint.opacity(0.22), radius: 12, y: 7)
+            .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(tile.title)，\(tile.subtitle)")
     }
+}
 
+private struct StudioTile: Identifiable {
+    let icon: String
+    let title: String
+    let subtitle: String
+    let tint: Color
+    let destination: () -> AnyView
+    var id: String { title }
+
+    init(icon: String, title: String, subtitle: String, tint: Color,
+         destination: @escaping () -> AnyView) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.tint = tint
+        self.destination = destination
+    }
 }

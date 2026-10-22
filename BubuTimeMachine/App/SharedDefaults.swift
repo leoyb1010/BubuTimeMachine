@@ -15,7 +15,7 @@ nonisolated struct SharedMoment: Codable, Sendable, Hashable {
     var isOnThisDay: Bool = false
 }
 
-nonisolated struct SharedWidgetSnapshot: Codable, Sendable {
+nonisolated struct SharedWidgetSnapshot: Codable, Sendable, Equatable {
     var name: String
     var birthday: Date?
     var recentPhotoFileName: String?
@@ -42,6 +42,13 @@ nonisolated struct SharedWidgetSnapshot: Codable, Sendable {
     var moments: [SharedMoment]?
     var updatedAt: Date
 
+    /// 除生成时间外内容完全一致：同步每轮都会重算快照，内容没变就不写盘、不唤起小组件进程（D4-05）。
+    func hasSameContent(as other: SharedWidgetSnapshot) -> Bool {
+        var lhs = self
+        lhs.updatedAt = other.updatedAt
+        return lhs == other
+    }
+
     var hasRenderableContent: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         || birthday != nil
@@ -55,7 +62,7 @@ extension SharedWidgetSnapshot {
 
     @MainActor
     static func make(context: ModelContext) -> SharedWidgetSnapshot? {
-        guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else {
+        guard let profile = ChildProfile.canonical(in: context) else {
             return nil
         }
 
@@ -337,6 +344,28 @@ nonisolated enum SharedDefaults {
         return try? JSONDecoder().decode(SharedWidgetSnapshot.self, from: data)
     }
 
+    /// 内容有变化才写入；返回 true 表示写了（调用方据此决定要不要 reload 小组件时间线）。
+    @discardableResult
+    static func saveWidgetSnapshotIfChanged(_ snapshot: SharedWidgetSnapshot) -> Bool {
+        if let current = widgetSnapshot, current.hasSameContent(as: snapshot) { return false }
+        saveWidgetSnapshot(snapshot)
+        return true
+    }
+
+    // MARK: 当前使用的布布档案（多份档案时固定选一份）
+
+    private static let canonicalProfileKey = "bubu.shared.canonicalChildProfileId"
+
+    /// 家长在「布布的档案」里编辑过的那一份，之后所有页面、小组件、手表都固定用它。
+    /// 存 App Group：小组件进程也按同一份算年龄。
+    static var canonicalChildProfileID: UUID? {
+        get { suite?.string(forKey: canonicalProfileKey).flatMap(UUID.init(uuidString:)) }
+        set {
+            if let newValue { suite?.set(newValue.uuidString, forKey: canonicalProfileKey) }
+            else { suite?.removeObject(forKey: canonicalProfileKey) }
+        }
+    }
+
     static func saveWidgetSnapshot(_ snapshot: SharedWidgetSnapshot) {
         guard let suite else {
             log.error("App Group UserDefaults 不可用，widget 快照未写入")
@@ -362,5 +391,48 @@ nonisolated enum SharedDefaults {
             saveWidgetSnapshot(snapshot)
         }
         WidgetCenter.shared.reloadAllTimelines()
+    }
+}
+
+// MARK: - 布布档案的唯一选择器（D9-01）
+/// 服务器上可能有多份 childprofile（历史上每次在空设备上走引导都会新建一份，生产库里有 7 份、
+/// 5 个不同生日）。以前各页面各自 `fetch().first`——SwiftData 不保证顺序，等于随机取一份，
+/// 于是生长百分位、疫苗计划、小组件年龄可能按错的生日算。
+///
+/// 规则（确定性、全家设备一致，绝不随机）：
+/// 1. 家长在「布布的档案」里编辑/确认过的那份（`SharedDefaults.canonicalChildProfileID`）；
+/// 2. 否则取**最早创建**的一份（同时间按 id 字符串排序）；选中的若已在服务器上就自动固定，不再漂移。
+///
+/// 所有计算年龄/百分位/疫苗的地方都应走这里（`@Query` 结果用 `canonical(from:)`）。
+extension ChildProfile {
+    @MainActor
+    static func canonical(from profiles: [ChildProfile],
+                          preferredID: UUID? = SharedDefaults.canonicalChildProfileID) -> ChildProfile? {
+        if let preferredID, let pinned = profiles.first(where: { $0.id == preferredID }) { return pinned }
+        return profiles.min { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    @MainActor
+    static func canonical(in context: ModelContext) -> ChildProfile? {
+        if let preferredID = SharedDefaults.canonicalChildProfileID {
+            var pinned = FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == preferredID })
+            pinned.fetchLimit = 1
+            if let profile = try? context.fetch(pinned).first { return profile }
+        }
+        var oldest = FetchDescriptor<ChildProfile>(sortBy: [SortDescriptor(\.createdAt), SortDescriptor(\.name)])
+        oldest.fetchLimit = 8
+        let chosen = canonical(from: (try? context.fetch(oldest)) ?? [], preferredID: nil)
+        // 已经在服务器上的那份一旦被选中就固定下来：之后全量重拉改写 createdAt 也不会让页面悄悄换成
+        // 另一份生日。只在本机、还没上过服务器的档案（新设备引导时临时建的）不固定，免得盖过家里那份。
+        if let chosen, chosen.remoteId != nil { SharedDefaults.canonicalChildProfileID = chosen.id }
+        return chosen
+    }
+
+    /// 家长在档案页保存时调用：之后全家这台设备的所有页面都固定显示这一份。
+    static func pinAsCanonical(_ profile: ChildProfile) {
+        SharedDefaults.canonicalChildProfileID = profile.id
     }
 }

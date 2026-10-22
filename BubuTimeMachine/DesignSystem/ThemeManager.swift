@@ -47,7 +47,27 @@ struct BubuThemeDefinition: Identifiable, Hashable, Sendable {
     nonisolated static func dynamicAccent(light: UIColor, dark: UIColor) -> UIColor {
         UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light }
     }
-    var actionFill: Color { Color(Self.readableAccent(hex: primaryHex, against: .white, lighten: false)) }
+    /// 「白字压主色」的填充：同色相加深、加饱和，直到白字 ≥4.5:1。
+    /// 以前直接往黑色混，珊瑚粉会变成灰褐；现在往同色相的深玫瑰走，仍是一眼认得的粉调。
+    var actionFill: Color { Color(Self.readableFill(hex: primaryHex)) }
+
+    static func readableFill(hex: String) -> UIColor {
+        let base = UIColor(Color(hex: hex))
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        base.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        let deep = UIColor(hue: hue, saturation: max(saturation, 0.85), brightness: 0.5, alpha: 1)
+        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0
+        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0
+        base.getRed(&r1, green: &g1, blue: &b1, alpha: &alpha)
+        deep.getRed(&r2, green: &g2, blue: &b2, alpha: &alpha)
+        for step in 0...40 {
+            let t = CGFloat(step) / 40
+            let candidate = UIColor(red: r1 + (r2 - r1) * t, green: g1 + (g2 - g1) * t,
+                                    blue: b1 + (b2 - b1) * t, alpha: 1)
+            if contrast(candidate, .white) >= 4.5 { return candidate }
+        }
+        return readableAccent(hex: hex, against: .white, lighten: false)
+    }
 
     static func readableAccent(hex: String, against background: UIColor, lighten: Bool) -> UIColor {
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0

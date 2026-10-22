@@ -30,7 +30,7 @@ struct GrowthMovieView: View {
     @State private var renderTask: Task<Void, Never>?
 
     private var theme: Color { env.theme.theme.primary }
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private let stages = ["筛选照片素材…", "整理时间和地点…", "套用电影模板…", "生成片头和字幕…"]
 
     var body: some View {

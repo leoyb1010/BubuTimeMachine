@@ -15,6 +15,7 @@ import re
 import tempfile
 import time
 
+from .brain_bridge import BrainBlocked, BrainUnavailable
 from .online_timeline import CJK
 from .store import Missing, digest
 
@@ -85,14 +86,20 @@ class Voices:
                                  "-movflags", "+faststart", "-y", str(model)], 120)
         return audio, model
 
-    def process(self, limit=3) -> dict:
+    def process(self, limit=3, budget=150.0) -> dict:
+        """Oldest clips first (her first words matter most), until `limit` clips or `budget` seconds;
+        an unreachable model ends the batch instead of burning every clip's attempts."""
         report = {"ready": 0, "rejected": 0, "failed": 0}
         with self.store.db() as db:
             pending = [dict(r) for r in db.execute(
-                "SELECT * FROM voices WHERE family_id=? AND state='pending' ORDER BY captured_at DESC,start LIMIT ?",
+                "SELECT * FROM voices WHERE family_id=? AND state='pending' ORDER BY captured_at,start LIMIT ?",
                 (self.family, max(1, int(limit))))]
         by_id = self.timeline.snapshot()["by_id"]
-        for row in pending:
+        deadline = time.monotonic() + budget
+        for index, row in enumerate(pending):
+            if index and time.monotonic() > deadline:
+                break  # at least one clip per pass
+            outage = False
             item = by_id.get(row["item_id"])
             state, heard = "failed", ""
             try:
@@ -111,12 +118,15 @@ class Voices:
             except Exception as exc:
                 log.warning("voice clip failed error=%s", type(exc).__name__)
                 state = "pending" if row["attempts"] + 1 < 3 else "failed"
+                outage = isinstance(exc, BrainUnavailable) and not isinstance(exc, BrainBlocked)
             if state != "ready":
                 (self.directory / (row["id"] + ".m4a")).unlink(missing_ok=True)
             report["ready" if state == "ready" else "rejected" if state == "rejected" else "failed"] += 1
             with self.store.db() as db:
                 db.execute("UPDATE voices SET state=?,heard=?,attempts=attempts+1,updated_at=? WHERE id=?",
                            (state, heard, time.time(), row["id"]))
+            if outage:
+                break
         return report
 
     def list(self, scope):

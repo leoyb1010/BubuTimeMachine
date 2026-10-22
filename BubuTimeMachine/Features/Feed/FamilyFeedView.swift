@@ -11,6 +11,8 @@ struct FamilyFeedView: View {
     @Query(sort: \Comment.createdAt, order: .reverse) private var comments: [Comment]
     @Query private var milestones: [Milestone]
     @State private var selectedKind: FeedEventKind?
+    /// Photo opened from 「照片下的悄悄话」（GET social/recent）.
+    @State private var socialRoute: TimelinePagerRoute?
 
     // 动态行缓存：从多张表现场派生，但只在数据指纹变化时重算一次。
     // 关键修复：原先 derivedEvents 每次 body 都 new 一批 id=UUID() 的 @Model，
@@ -87,6 +89,7 @@ struct FamilyFeedView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 header
+                FamilySocialRecentSection(route: $socialRoute)
                 filters
                 ForEach(filteredRows) { row in
                     eventRow(row)
@@ -102,6 +105,11 @@ struct FamilyFeedView: View {
         .navigationTitle("家庭动态")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Entry.self) { EntryDetailView(entry: $0) }
+        .navigationDestination(item: $socialRoute) { route in
+            if let client = BubuLearningClient(env: env) {
+                OnlineTimelineDetailPager(client: client, items: route.items, initial: route.initial, loadMore: {}, hasMore: false)
+            }
+        }
         .animation(BubuMotion.gentle, value: selectedKind)
         .animation(BubuMotion.gentle, value: rows.count)
         .onChange(of: fingerprint, initial: true) { _, _ in rebuildRows() }
@@ -112,7 +120,7 @@ struct FamilyFeedView: View {
             Text("布布的家庭动态墙")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
-            Text("谁记录了新瞬间、谁补充了评论、谁点亮了里程碑，都会汇到这里。")
+            Text("谁记录了新瞬间、谁补充了评论、谁给照片点了心，都会汇到这里。")
                 .font(BubuTheme.Font.caption)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
@@ -131,6 +139,7 @@ struct FamilyFeedView: View {
                 }
             }
         }
+        .secondBrainCarouselBleed(16, clips: false)
     }
 
     private func filterChip(_ text: String, selected: Bool, action: @escaping () -> Void) -> some View {

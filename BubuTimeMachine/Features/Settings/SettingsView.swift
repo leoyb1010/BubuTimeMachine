@@ -36,11 +36,11 @@ struct SettingsView: View {
                 identityCard
                 // 「功能搬家」提示卡已移除：那是 2.11.0 的信息架构调整，早已不是新消息。
                 // 设置只放「配置」，不放业务。
-                // 「健康」是天天用的记录能力，归首页与成长 Tab；「成长之声」是创作能力，归魔法屋。
+                // 「健康」是天天用的记录能力，归首页与成长 Tab；「成长之声」是创作能力，归「回忆与作品」。
                 // 它们过去挂在这里，等于把高频操作藏进「设置」心智里。
                 group("布布", footer: "档案里的名字和生日会驱动全 App 的年龄、生日提醒和身份卡。") {
                     row("布布的档案", icon: "figure.child", tint: env.theme.theme.primary) { ChildProfileView() }
-                    row("认布布与精选", icon: "person.crop.rectangle.stack.fill",
+                    row("本机认脸（照片收件箱）", icon: "person.crop.rectangle.stack.fill",
                         tint: BubuTheme.Color.pink) { ChildIdentitySettingsView() }
                 }
                 // 入园相关的两件事都要拿出去给别人看，所以单独成组，
@@ -249,7 +249,7 @@ struct SettingsView: View {
                     }
                 }
             })) {
-                settingRowLabel("那年今日 · 每日回忆", icon: "bell.badge.fill",
+                settingRowLabel("那年今天 · 每日回忆", icon: "bell.badge.fill",
                                 tint: BubuTheme.Color.warning,
                                 subtitle: permission.isUpdating ? "正在确认通知权限…" : "每天提醒：往年的今天",
                                 showsChevron: false)

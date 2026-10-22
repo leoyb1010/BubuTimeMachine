@@ -1,7 +1,8 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - 问问布布（RAG 问答）
+// MARK: - 布布问答（本机记录版）
+/// 和 AskBubuView 共用「布布问答」这一个名字：没连家里服务时，回忆与作品里的问答入口落到这里。
 /// 三年记录变成能对话的记忆。检索在 App 端做（离线优先），把相关记录发给自托管 AI 组织答案带出处。
 /// 「布布第一次叫妈妈是什么时候？」「她 6 个月多重？」「去年今天在干嘛？」
 struct BubuQAView: View {
@@ -17,7 +18,7 @@ struct BubuQAView: View {
     @State private var thinking = false
     @State private var jumpEntry: Entry?
 
-    private var childName: String { profiles.first?.name ?? env.config.childName }
+    private var childName: String { ChildProfile.canonical(from: profiles)?.name ?? env.config.childName }
     private let samples = ["第一次叫妈妈是什么时候？", "最近有什么新变化？", "去年今天在干嘛？", "最开心的一天是哪天？"]
 
     var body: some View {
@@ -38,7 +39,7 @@ struct BubuQAView: View {
             inputBar
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
-        .navigationTitle("问问\(childName)")
+        .navigationTitle("布布问答")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }
     }
@@ -94,7 +95,7 @@ struct BubuQAView: View {
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(msg.isUser ? BubuTheme.Color.primary : BubuTheme.Color.card,
+            .background(msg.isUser ? BubuTheme.Color.actionFill : BubuTheme.Color.card,
                         in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
             if !msg.isUser { Spacer(minLength: 40) }
         }
@@ -127,7 +128,7 @@ struct BubuQAView: View {
                 ask(input)
             } label: {
                 Image(systemName: "arrow.up.circle.fill").font(BubuTheme.Font.scaled(30))
-                    .foregroundStyle(canSend ? BubuTheme.Color.primary : BubuTheme.Color.secondaryText.opacity(0.5))
+                    .foregroundStyle(canSend ? BubuTheme.Color.actionFill : BubuTheme.Color.secondaryText.opacity(0.5))
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
@@ -179,7 +180,7 @@ struct BubuQAView: View {
     /// ② 关键词（含 2-gram，过滤疑问停用词）命中时光、里程碑、成长测量；
     /// ③ 命中不足补最近时光。最多 12 条给 AI。
     private func retrieve(for question: String) -> [(context: QAContextRecord, snippet: String)] {
-        let birthday = profiles.first?.birthday
+        let birthday = ChildProfile.canonical(from: profiles)?.birthday
         func dateText(_ d: Date) -> String { BubuDateFormat.yearMonthDay(d) }
         func ageText(_ d: Date) -> String {
             birthday.map { AgeCalculator.ageDescription(birthday: $0, at: d) } ?? ""

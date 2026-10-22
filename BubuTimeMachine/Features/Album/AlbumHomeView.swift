@@ -22,7 +22,7 @@ struct AlbumHomeView: View {
     private var fingerprint: String {
         var mediaCount = 0
         for entry in entries { mediaCount += entry.sortedMedia.count }
-        let birthday = profiles.first?.birthday.timeIntervalSince1970 ?? 0
+        let birthday = ChildProfile.canonical(from: profiles)?.birthday.timeIntervalSince1970 ?? 0
         return "\(entries.count)-\(mediaCount)-\(Int(birthday))"
     }
 
@@ -66,7 +66,7 @@ struct AlbumHomeView: View {
         totalCount = items.count
         featured = SystemAlbumFactory.featured(from: items)
         monthly = SystemAlbumFactory.monthly(from: items)
-        byAge = SystemAlbumFactory.byAgeMonth(from: items, birthday: profiles.first?.birthday)
+        byAge = SystemAlbumFactory.byAgeMonth(from: items, birthday: ChildProfile.canonical(from: profiles)?.birthday)
         built = true
     }
 

@@ -15,7 +15,7 @@ struct VaccineView: View {
     /// 待确认删除的接种记录。删掉之后入园查验那张单子会立刻少一剂，值得问一句。
     @State private var pendingDelete: VaccineRecord?
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
 
     /// 已完成的排期剂次（doseId → 记录），自由疫苗记录不参与排期打卡。

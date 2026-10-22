@@ -49,6 +49,7 @@ struct TimelineSocialSection: View {
             Button("删除", role: .destructive) {
                 if let comment = pendingDelete { Task { await delete(comment) } }
             }
+            Button("取消", role: .cancel) { pendingDelete = nil }
         }
     }
 
@@ -81,7 +82,7 @@ struct TimelineSocialSection: View {
     private func commentRow(_ comment: TimelineCommentDTO) -> some View {
         HStack(alignment: .top, spacing: BubuTheme.Spacing.s) {
             Text(String(comment.author.prefix(1))).font(BubuTheme.Font.caption.weight(.heavy)).foregroundStyle(.white)
-                .frame(width: 30, height: 30).background(BubuTheme.Color.primary, in: Circle())
+                .frame(width: 30, height: 30).background(BubuTheme.Color.actionFill, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -129,7 +130,7 @@ struct TimelineSocialSection: View {
                 } else {
                     Image(systemName: "paperplane.circle.fill").font(.system(size: 34, design: .rounded))
                         .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, trimmed.isEmpty ? BubuTheme.Color.softFill : BubuTheme.Color.primary)
+                        .foregroundStyle(.white, trimmed.isEmpty ? BubuTheme.Color.softFill : BubuTheme.Color.actionFill)
                 }
             }
             .buttonStyle(BubuPressableStyle(scale: 0.9))

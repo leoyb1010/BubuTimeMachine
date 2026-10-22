@@ -13,7 +13,14 @@ struct OnlineItemsGridView<Header: View>: View {
     @State private var failureText = ""
     @State private var loaded = false
     @State private var attempt = 0
+    /// Attempt already loaded: coming back from a photo doesn't fetch the whole group again.
+    @State private var loadedAttempt: Int?
+    /// Marked "not Bubu" here; kept out even if the server still serves a stale copy.
+    @State private var removed: Set<String> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var zoom
+    /// Opened item id → id of the photo now in front, so going back zooms into that photo.
+    @State private var zoomFollow: [String: String] = [:]
 
     init(client: BubuLearningClient, ids: [String], title: String, @ViewBuilder header: () -> Header) {
         self.client = client
@@ -60,22 +67,29 @@ struct OnlineItemsGridView<Header: View>: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selected) { item in
             OnlineTimelineDetailPager(client: client, items: items, initial: item, loadMore: {}, hasMore: false,
-                                      onNotBubu: { id in remove(id) })
-                .navigationTransition(.zoom(sourceID: item.id, in: zoom))
+                                      onNotBubu: { id in remove(id) },
+                                      onCurrentChange: { id in zoomFollow = [item.id: id] })
+                .navigationTransition(.zoom(sourceID: zoomFollow[item.id] ?? item.id, in: zoom))
         }
-        .task(id: attempt) { await load() }
+        .task(id: attempt) {
+            guard loadedAttempt != attempt else { return }
+            await load()
+        }
     }
 
     private func remove(_ id: String) {
-        withAnimation(BubuMotion.gentle) { items.removeAll { $0.id == id } }
+        removed.insert(id)
+        withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { items.removeAll { $0.id == id } }
         selected = nil
     }
 
     private func load() async {
         failure = nil
         do {
-            items = try await client.items(ids: ids)
+            let fetched = try await client.items(ids: ids)
+            items = fetched.filter { !removed.contains($0.id) }
             loaded = true
+            loadedAttempt = attempt
         } catch where isCancellation(error) {
         } catch {
             failure = LearningErrorKind(error)
@@ -111,15 +125,51 @@ nonisolated struct OnlineTimelineEvent: Decodable, Sendable, Hashable, Identifia
 
 nonisolated struct OnlineTimelineEvents: Decodable, Sendable { let items: [OnlineTimelineEvent] }
 
-/// Big card in the timeline stream: cover, title, two lines of story, place and count.
+/// Compact story card in the timeline stream: date and place, title, one line of story and a strip of
+/// up to four of its photos. Those photos are left out of the grid around it, so nothing shows twice.
 struct OnlineTimelineEventCard: View {
     let event: OnlineTimelineEvent
+    /// The event's photos already loaded; empty falls back to the server's cover.
+    var thumbs: [OnlineTimelineItem] = []
     let client: BubuLearningClient
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear
-                .frame(height: 190)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Label(OnlineTimelineEventCard.when(event), systemImage: "book.pages.fill")
+                    .font(BubuTheme.Font.caption.weight(.bold)).foregroundStyle(BubuTheme.Color.deepRose)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                HStack(spacing: 2) {
+                    Text("看全部 \(event.count) 张")
+                    Image(systemName: "chevron.right").imageScale(.small)
+                }
+                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                .fixedSize()
+            }
+            Text(event.title).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown).lineLimit(1)
+            if let story = event.story, !story.isEmpty {
+                Text(story).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).lineLimit(1)
+            }
+            strip.padding(.top, 2)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BubuTheme.Color.card.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("小故事，\(event.title)，\(OnlineTimelineEventCard.meta(event))")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var stripHeight: CGFloat { BubuAdaptive.value(sizeClass, compact: 84, regular: 128) }
+
+    @ViewBuilder
+    private var strip: some View {
+        if thumbs.isEmpty {
+            Color.clear.frame(height: stripHeight).frame(maxWidth: .infinity)
                 .overlay {
                     if let cover = event.coverUrl {
                         LearningRemoteImage(path: cover, client: client, label: event.title, contentMode: .fill, diskCache: true)
@@ -127,32 +177,31 @@ struct OnlineTimelineEventCard: View {
                         BubuTheme.Color.peachSurface
                     }
                 }
-                .clipped()
-                .overlay(alignment: .topLeading) {
-                    Label("一段小故事", systemImage: "book.pages.fill")
-                        .font(BubuTheme.Font.caption.weight(.bold))
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.white.opacity(0.88), in: Capsule())
-                        .foregroundStyle(BubuTheme.Color.paperInk)
-                        .padding(BubuTheme.Spacing.m)
+                .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+        } else {
+            HStack(spacing: OnlineTimelineLayoutBuilder.spacing) {
+                ForEach(0..<4, id: \.self) { index in
+                    Color.clear.frame(height: stripHeight).frame(maxWidth: .infinity)
+                        .overlay {
+                            if index < thumbs.count {
+                                LearningRemoteImage(path: thumbs[index].previewUrl, client: client, label: thumbs[index].description,
+                                                    contentMode: .fill, diskCache: true)
+                            }
+                        }
+                        .background(index < thumbs.count ? BubuTheme.Color.softFill : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+                        .overlay(alignment: .bottomLeading) { if index < thumbs.count, thumbs[index].isVideo { OnlineVideoBadge() } }
                 }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(event.title).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown).lineLimit(2)
-                if let story = event.story, !story.isEmpty {
-                    Text(story).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText).lineLimit(2)
-                }
-                Text(OnlineTimelineEventCard.meta(event))
-                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.deepRose).lineLimit(1)
             }
-            .padding(BubuTheme.Spacing.item)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(BubuTheme.Color.card.opacity(0.95))
-        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .shadow(color: BubuTheme.Color.deepRose.opacity(0.12), radius: 10, y: 5)
-        .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+    }
+
+    /// "10月14日 · 曼海宁"
+    static func when(_ event: OnlineTimelineEvent) -> String {
+        var parts: [String] = []
+        if let date = BubuLearningDates.day(event.day) { parts.append(BubuDateFormat.monthDay(date)) }
+        if let place = event.place, !place.isEmpty { parts.append(place) }
+        return parts.isEmpty ? "一段小故事" : parts.joined(separator: " · ")
     }
 
     static func meta(_ event: OnlineTimelineEvent) -> String {

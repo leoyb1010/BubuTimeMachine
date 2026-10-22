@@ -24,3 +24,10 @@ struct TodayPhotosTip: Tip {
     var message: Text? { Text("拍完照打开 App，这里会主动帮你把今天的照片收进时光轴。") }
     var image: Image? { Image(systemName: "photo.badge.plus.fill") }
 }
+
+/// 成长页「回忆与作品」入口：2.26 起问答、生日影片、语言成长线、去过的地方都在里面。
+struct MemoriesHubTip: Tip {
+    var title: Text { Text("新功能在这里") }
+    var message: Text? { Text("布布问答、生日影片、语言成长线、去过的地方和认一认，都在「回忆与作品」里。") }
+    var image: Image? { Image(systemName: "sparkles") }
+}

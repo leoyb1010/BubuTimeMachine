@@ -77,6 +77,7 @@ class BrainBridge:
                 or any(not isinstance(token, str) or not 2 <= len(token.strip()) <= 80 for token in tokens)):
             raise ValueError("教学候选关键词须为1–32个明确词语")
         self.school_tokens = tuple(dict.fromkeys(token.strip().casefold() for token in tokens))
+        self._sizes: dict[tuple[str, str], dict] = {}
 
     @contextmanager
     def _database(self):
@@ -506,11 +507,28 @@ class BrainBridge:
             # Display-only facts below stay out of source_revision (timeline sync keys on it).
             item.update(place=str(asset["place"] or "") if "place" in columns else "",
                         category=str(asset["category"] or "") if "category" in columns else "",
-                        event=extra.get("event", ""))
+                        event=extra.get("event", ""),
+                        **self._display_size(fid, location["sha256"], asset))
             return item
         if unavailable_root:
             raise BrainUnavailable("第二大脑原片存储尚未连接。")
         return None
+
+    def _display_size(self, fid: str, sha: str, asset) -> dict:
+        """Display-oriented pixel size for layout before Bubu renders its own preview.
+
+        The library's own 480px grid thumbnail (data/media/thumbs) applies EXIF/video
+        rotation; media_assets.width/height are raw sensor sizes (portrait videos come
+        back landscape), so they are only the fallback. Read once per file version.
+        """
+        key = (fid, sha)
+        cache = self._sizes
+        if key not in cache:
+            size = _jpeg_header_size(self.root / "data/media/thumbs" / (fid + ".jpg"))
+            if size is None:
+                size = (_dimension(asset, "width"), _dimension(asset, "height"))
+            cache[key] = {"width": size[0], "height": size[1]}
+        return cache[key]
 
     @staticmethod
     def _verified_path(location) -> Path | None:
@@ -619,6 +637,45 @@ class BrainBridge:
                 if album is not None and isinstance(row["file_id"], str):
                     album["file_ids"].append(row["file_id"])
             return list(albums.values())
+
+
+def _jpeg_header_size(path: Path) -> tuple[int, int] | None:
+    """(width, height) from a JPEG's SOF marker, reading at most 64 KiB; None when absent or unreadable."""
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read(65536)
+    except OSError:
+        return None
+    if data[:2] != b"\xff\xd8":
+        return None
+    index = 2
+    while index + 9 < len(data):
+        if data[index] != 0xFF:
+            return None
+        marker = data[index + 1]
+        if marker == 0xFF:
+            index += 1
+            continue
+        if marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:
+            index += 2
+            continue
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height = int.from_bytes(data[index + 5:index + 7], "big")
+            width = int.from_bytes(data[index + 7:index + 9], "big")
+            return (width, height) if width and height else None
+        length = int.from_bytes(data[index + 2:index + 4], "big")
+        if length < 2:
+            return None
+        index += 2 + length
+    return None
+
+
+def _dimension(asset, column: str) -> int:
+    try:
+        value = int(asset[column] or 0) if column in asset.keys() else 0
+    except (TypeError, ValueError):
+        return 0
+    return value if 0 < value < 100000 else 0
 
 
 def _received_iso(value) -> str | None:

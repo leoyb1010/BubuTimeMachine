@@ -18,7 +18,7 @@ struct MilestonesHomeView: View {
     @State private var isConstellation = true   // 展示方式：星盘视图 / 奖章墙
 
     private var theme: Color { env.theme.theme.primary }
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
 
     private var achieved: [Milestone] { filteredMilestones.filter(\.isAchieved) }
     /// 待播仪式：全量里程碑里已达成且仪式未播的第一个（不受搜索/分类过滤影响，P2a）。

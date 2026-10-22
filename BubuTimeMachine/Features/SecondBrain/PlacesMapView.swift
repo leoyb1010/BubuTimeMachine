@@ -83,7 +83,7 @@ struct PlacesMapView: View {
                                 Label("正在把地点放到地图上…", systemImage: "map")
                                     .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                             }
-                            Text("去过 \(places.count) 个地方").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                            Text("照片里认出 \(places.count) 个地方").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
                             ForEach(Array(places.enumerated()), id: \.element.id) { index, place in
                                 row(place, client: client).entranceEffect(index: index)
                             }
@@ -101,7 +101,8 @@ struct PlacesMapView: View {
         .task(id: client?.scope) {
             guard let client else { loading = false; return }
             do {
-                places = try await client.get("api/places", as: PlaceListDTO.self).items.sorted { $0.count > $1.count }
+                // Folds "X" / "城市·X" duplicates and hides city-only or coordinate rows.
+                places = SecondBrainHygiene.mergedPlaces(try await client.get("api/places", as: PlaceListDTO.self).items)
                 errorText = nil
             } catch is CancellationError {
             } catch {
@@ -157,7 +158,7 @@ struct PlacesMapView: View {
                 .accessibilityLabel("打开\(place.displayName)的 \(place.count) 张照片")
             }
             ZStack {
-                Circle().fill(BubuTheme.Color.primary)
+                Circle().fill(BubuTheme.Color.actionFill)
                 Circle().stroke(.white, lineWidth: 3)
                 Image(systemName: "heart.fill").font(.system(size: size * 0.42, weight: .bold, design: .rounded)).foregroundStyle(.white)
             }

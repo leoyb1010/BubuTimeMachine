@@ -4,9 +4,9 @@ import PhotosUI
 import Photos
 import UIKit
 
-// MARK: - 首页 · 成长仪表盘
-/// 专属布布的主屏：年龄实时计数 + 那年今日 + 统计 + 精选 + 大记录按钮。
-/// 背景可用主题渐变或布布的照片。
+// MARK: - 首页 · 今天
+/// 首屏回答「布布今天什么样」：今日精选大图 + 一句话记录 + 今天的回忆；
+/// 身份卡收成一行，其余入口往下放。背景可用主题渐变或布布的照片。
 struct CaptureHomeView: View {
     /// 刚刚确认的「人生第一次」，非空时播一次仪式动画。
     @State private var ceremonyTitle: String?
@@ -36,6 +36,9 @@ struct CaptureHomeView: View {
     @State private var showPendingRecallDialog = false
     @State private var identityCardFlipped = false
     @State private var heroBackgroundImage: UIImage?
+    /// 「今天」的第二大脑内容（今日精选 + 回忆），同一天只取一次。
+    @State private var today = HomeTodayModel()
+    @AppStorage(SecondBrainConsentModifier.storageKey) private var secondBrainConsented = false
 
     // 首页统计缓存：全表派生值只在数据指纹变化时重算一次，
     // 避免拖动 AI 球/同步进度等高频 body 重绘里 O(n·m) 全表 faulting（U-P1-5）。
@@ -58,7 +61,7 @@ struct CaptureHomeView: View {
         _entries = Query(descriptor, animation: .default)
     }
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: BubuThemeDefinition { env.theme.theme }
     private var homeSurface: Color {
         env.themedCard.opacity(colorScheme == .dark || env.isDarkTheme ? 0.92 : 0.94)
@@ -72,42 +75,51 @@ struct CaptureHomeView: View {
             heroBackground.ignoresSafeArea()
 
             ScrollView {
-                // 布局原则：首页只回答「布布现在怎么样 / 我现在要记一笔 / 最近发生了什么」。
-                // 里程碑与成长曲线归「成长」Tab、绘本归「魔法屋」——它们曾在首页四宫格里
-                // 再铺一遍，等于把两个 Tab 的存在感稀释掉，也让首页无限变长。
-                // 顺序：问候 → 身份卡 → 待办卡片 → 主操作 → 今日一问 → 最近时光 → 那年今日。
+                // 布局原则：首屏只回答「布布今天怎么样 / 我现在要记一句 / 今天有什么回忆」。
+                // 身份卡是不会变的信息，收成一行；里程碑与成长曲线归「成长」Tab。
+                // 顺序：问候 → 横幅 → 身份条 → 今天（大图 + 一句话）→ 待办卡片 → 今天的回忆 → 入口 → 今日一问 → 最近时光。
+                let client = learningClient
                 VStack(spacing: 12) {
                     greetingRow
                     if isBirthdayToday { birthdayBanner }   // 🎂 生日当天全 App 仪式（R4 C4）
                     schoolBanner               // 🎒 入园倒计时 / 上学头一个月（过后自动安静）
-                    identityCardTop            // ① 布布身份卡（可翻面看性别/血型/出生地）
+                    if isWide {
+                        // iPad：左边今天的大图，右边身份条 + 入口 + 今日一问，横向把宽度用起来。
+                        HStack(alignment: .top, spacing: 16) {
+                            todayCard(client: client, photoHeight: 320)
+                                .frame(maxWidth: .infinity)
+                            VStack(spacing: 12) {
+                                identityCardTop
+                                VStack(spacing: 8) { shortcutTiles(horizontal: true) }
+                                if !entries.isEmpty { dailyQuestionStrip }
+                            }
+                            .frame(width: 340)
+                        }
+                    } else {
+                        identityCardTop        // ① 身份条（可翻面看性别/血型/出生地）
+                        todayCard(client: client, photoHeight: 260)   // ② 今天：精选大图 + 一句话记录
+                    }
                     ssdCandidateCard           // 移动硬盘只生成候选，必须回手机确认
                     uploadQueueCard            // 后台原片必须可见、可重试，不能假装已经收好
                     todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
-                    primaryActionDock          // ② 记录/相册/健康：首屏主动作更明确
-                    NavigationLink { MemoryJournalView(kind: .saying) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "quote.bubble.fill")
-                            Text("布布说").font(BubuTheme.Font.headline)
-                            Text("留住她刚说的那句话").font(BubuTheme.Font.caption)
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").font(.caption)
-                        }
-                        .foregroundStyle(theme.textAccent)
-                        .padding(14)
-                        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md))
-                    }.buttonStyle(.plain).accessibilityIdentifier("home.sayings")
-                    // 「功能搬家」提示卡已移除：那次信息架构调整是 2.11.0 的事，
-                    // 早就不是新消息了，却还常驻在首屏最值钱的位置上。
-                    // 项目已经接了 TipKit，真要做渐进引导用它，不用再自养一套常驻横幅。
-                    // ③ 生日倒计时 + 第二大脑回忆轮播（未连接服务时只有倒计时）
-                    HomeMemoriesSection(birthday: profile?.birthday, childName: profile?.name ?? "布布")
+                    // ③ 生日倒计时 + 今天的回忆（第二大脑 + 本机那年今天）；没内容时不占位
+                    if HomeMemoriesSection.hasContent(model: today, client: client,
+                                                      birthday: profile?.birthday,
+                                                      localOnThisDay: onThisDayEntries) {
+                        HomeMemoriesSection(model: today, client: client,
+                                            birthday: profile?.birthday,
+                                            childName: profile?.name ?? "布布",
+                                            localOnThisDay: onThisDayEntries,
+                                            zoomNS: zoomNS)
+                    }
+                    if !isWide {
+                        HStack(spacing: 10) { shortcutTiles(horizontal: false) }   // 布布说 / 相册 / 健康，三列等宽
+                    }
                     if entries.isEmpty {
-                        firstRecordEmptyState  // ③a 空库：单焦点，只说「记第一笔」
+                        firstRecordEmptyState  // 空库：单焦点，只说「记第一笔」
                     } else {
-                        dailyQuestionStrip     // ③b 今日一问（轻条，不再占四宫格一格）
+                        if !isWide { dailyQuestionStrip }   // 今日一问（轻条）
                         recentMomentsSection   // ④ 最近时光（行卡）
-                        onThisDaySection
                     }
                     SaveHealthStrip()
                     // 给底部悬浮玻璃 Tab 栏留出空间
@@ -116,7 +128,7 @@ struct CaptureHomeView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .bubuContentColumn(920)
+                .bubuContentColumn(1080)
             }
             // 下拉刷新此前全仓 0 处。首页只在出现和回到前台时刷新，同步状态还藏在页面最底部，
             // 而下拉是「我要最新的」最强的本能——之前它纹丝不动。
@@ -177,6 +189,9 @@ struct CaptureHomeView: View {
         .onChange(of: env.syncEngine.lastSyncedAt) { _, _ in rebuildStats() }
         .task(id: heroBackgroundKey) {
             await refreshHeroBackgroundImage()
+        }
+        .task(id: todayTaskKey) {
+            await today.load(client: learningClient, consented: secondBrainConsented)
         }
         .alert("这是布布的第一次吗？", isPresented: Binding(
             get: { firstTimeSuggestion != nil },
@@ -312,7 +327,29 @@ struct CaptureHomeView: View {
     private func pullToRefresh() async {
         kickOffHomeRefresh()
         env.syncEngine.syncNow()
-        try? await Task.sleep(for: .milliseconds(650))
+        async let pause: Void? = try? Task.sleep(for: .milliseconds(650))
+        await today.load(client: learningClient, consented: secondBrainConsented, force: true)
+        _ = await pause
+    }
+
+    private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
+
+    /// 家庭服务（第二大脑）客户端；未配置时为 nil，首页只显示本机内容。
+    private var learningClient: BubuLearningClient? { BubuLearningClient(env: env) }
+
+    /// 换账号、同意说明或跨天时重新取「今天」。
+    private var todayTaskKey: String {
+        "\(learningClient?.scope ?? "-")|\(secondBrainConsented)|\(BubuLearningDates.dayString(.now))"
+    }
+
+    private func todayCard(client: BubuLearningClient?, photoHeight: CGFloat) -> some View {
+        HomeTodayCard(
+            picks: today.picks,
+            client: client,
+            fallbackEntry: entries.first { $0.coverMedia != nil },
+            isLoading: today.isLoading,
+            photoHeight: photoHeight,
+            onRecord: { startQuickCapture() })
     }
 
     private func kickOffHomeRefresh() {
@@ -420,7 +457,8 @@ struct CaptureHomeView: View {
         await cleanupOrphanPlaceholders()
         refreshUploadQueueSummary()
         photoScanner.refreshAuthorizationState()
-        if photoScanner.authorized { _ = await photoScanner.scan() }
+        // 照片收件箱默认关闭：关着时不在每次回到前台都枚举相册。
+        if photoInboxEnabled, photoScanner.authorized { _ = await photoScanner.scan() }
     }
 
     // MARK: 今天拍的照片卡（零操作记录）
@@ -523,7 +561,7 @@ struct CaptureHomeView: View {
             Button(actionTitle, action: action)
                 .font(BubuTheme.Font.scaled(13, weight: .bold))
                 .buttonStyle(.borderedProminent)
-                .tint(BubuTheme.Color.primary)
+                .tint(BubuTheme.Color.actionFill)
         }
         .padding(14)
         .frame(maxWidth: .infinity)
@@ -748,16 +786,11 @@ struct CaptureHomeView: View {
                 Text("\(greetingText) 呀")
                     .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
-                if let profile {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(profile.name)
-                            .font(BubuTheme.Font.scaled(28, weight: .heavy, design: .rounded, cap: .extraExtraExtraLarge))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text(AgeCalculator.ageDescription(birthday: profile.birthday, at: .now))
-                            .font(BubuTheme.Font.scaled(14, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
-                            .foregroundStyle(theme.textAccent)
-                    }
-                }
+                // 名字和年龄在下面的身份条里，这里不再重复一遍。
+                Text("今天")
+                    .font(BubuTheme.Font.scaled(28, weight: .heavy, design: .rounded, cap: .extraExtraExtraLarge))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .accessibilityAddTraits(.isHeader)
             }
             Spacer()
             todayStatusPill
@@ -783,15 +816,15 @@ struct CaptureHomeView: View {
         VStack(alignment: .trailing, spacing: 3) {
             HStack(spacing: 5) {
                 Image(systemName: "calendar")
-                    .font(BubuTheme.Font.scaled(10, weight: .bold, cap: .extraExtraExtraLarge))
+                    .font(BubuTheme.Font.scaled(11, weight: .bold, cap: .extraExtraExtraLarge))
                 Text(todayText)
-                    .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded, cap: .extraExtraExtraLarge))
+                    .font(BubuTheme.Font.scaled(12, weight: .bold, design: .rounded, cap: .extraExtraExtraLarge))
             }
             HStack(spacing: 5) {
                 Image(systemName: weatherSymbol)
                     .font(BubuTheme.Font.scaled(11, weight: .bold, cap: .extraExtraExtraLarge))
                 Text(weatherMoodText)
-                    .font(BubuTheme.Font.scaled(11, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
+                    .font(BubuTheme.Font.scaled(12, weight: .semibold, design: .rounded, cap: .extraExtraExtraLarge))
             }
         }
         .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -843,11 +876,11 @@ struct CaptureHomeView: View {
         }
     }
 
-    // MARK: 布布身份卡（顶部主卡，可翻面看性别/血型/出生地——用户指定保留）
+    // MARK: 布布身份条（紧凑一行，可翻面看性别/血型/出生地——用户指定保留翻面）
 
     @ViewBuilder
     private var identityCardTop: some View {
-        if let profile {
+        if let profile = ChildProfile.canonical(from: profiles) {
             BubuIdentityCard(
                 profile: profile,
                 theme: theme,
@@ -879,89 +912,83 @@ struct CaptureHomeView: View {
         }
     }
 
-    // MARK: 首屏主操作 — 记录 / 相册 / 健康
+    // MARK: 入口 — 布布说 / 相册 / 健康
 
-    private var primaryActionDock: some View {
-        HStack(spacing: 10) {
-            // 「记录此刻」在窄屏是重复的：系统底部附件（RootTabView 的 root.record）
-            // 已经常驻在屏幕底部，两处同名同功能、副标题还不一样，读起来像 bug。
-            // 宽屏没有底部附件（tabViewBottomAccessory(isEnabled: !isWide)），
-            // 所以 iPad / Mac 侧栏形态下这里仍是唯一入口，必须保留。
-            if BubuAdaptive.isWide(sizeClass) {
-                Button { startQuickCapture() } label: { recordButtonLabel }
-                    .buttonStyle(BubuPressableStyle())
-                    .layoutPriority(1)
-                    .accessibilityIdentifier("home.record")
-            }
-
-            NavigationLink { AlbumHomeView() } label: {
-                quickDockButton(icon: "photo.on.rectangle.angled.fill", title: "相册",
-                                subtitle: "\(totalPhotos) 张", tint: BubuTheme.Color.mint)
-                    // 照片数会随收图变化，硬切换数字看起来像重绘了一次；滚动一下就有了「又多了一张」的感觉。
-                    .contentTransition(.numericText(value: Double(totalPhotos)))
-                    .animation(reduceMotion ? nil : BubuMotion.gentle, value: totalPhotos)
-            }
-            .buttonStyle(BubuPressableStyle())
-
-            NavigationLink { HealthHomeView() } label: {
-                quickDockButton(icon: "cross.case.fill", title: "健康",
-                                subtitle: "餐睡", tint: BubuTheme.Color.sky)
-            }
-            .buttonStyle(BubuPressableStyle())
+    /// 三个等宽入口。窄屏横排三列（不会再缩成居中的两个小方块）；宽屏在右栏竖排成行卡。
+    /// 「记录此刻」在今天卡底部的一句话入口里（宽屏没有底部附件，那里就是唯一入口）。
+    @ViewBuilder
+    private func shortcutTiles(horizontal: Bool) -> some View {
+        NavigationLink { MemoryJournalView(kind: .saying) } label: {
+            shortcutTile(icon: "quote.bubble.fill", title: "布布说", subtitle: "她说的话",
+                         tint: BubuTheme.Color.pink, horizontal: horizontal)
         }
+        .buttonStyle(BubuPressableStyle())
+        .accessibilityIdentifier("home.sayings")
+
+        NavigationLink { AlbumHomeView() } label: {
+            shortcutTile(icon: "photo.on.rectangle.angled.fill", title: "相册",
+                         subtitle: albumSubtitle, tint: BubuTheme.Color.mint, horizontal: horizontal)
+                // 照片数会随收图变化，硬切换数字看起来像重绘了一次；滚动一下就有了「又多了一张」的感觉。
+                .contentTransition(.numericText(value: Double(totalPhotos)))
+                .animation(reduceMotion ? nil : BubuMotion.gentle, value: totalPhotos)
+        }
+        .buttonStyle(BubuPressableStyle())
+
+        NavigationLink { HealthHomeView() } label: {
+            shortcutTile(icon: "cross.case.fill", title: "健康",
+                         subtitle: "吃饭睡觉", tint: BubuTheme.Color.sky, horizontal: horizontal)
+        }
+        .buttonStyle(BubuPressableStyle())
     }
 
-    private var recordButtonLabel: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "plus")
-                .font(BubuTheme.Font.scaled(20, weight: .black))
-                .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
-                .background(BubuTheme.Gradient.primaryButton, in: Circle())
-                .shadow(color: BubuTheme.Color.deepRose.opacity(0.35), radius: 8, y: 3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("记录此刻")
-                    .font(BubuTheme.Font.scaled(16, weight: .heavy, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                Text("照片、声音和一句话一起收好")
-                    .font(BubuTheme.Font.scaled(11.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.leading, 12)
-        .padding(.trailing, 10)
-        .frame(height: 64)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                .stroke(.white.opacity(0.58), lineWidth: 1)
-        }
+    /// 连着家里的服务时，本机张数只是一小部分，写数字反而误导。
+    private var albumSubtitle: String {
+        learningClient == nil ? "\(totalPhotos) 张" : "全家照片"
     }
 
-    /// 首屏三个主动作的小方块。图标 + 标题 + 副标三段分别朗读会很啰嗦，合成一句。
-    private func quickDockButton(icon: String, title: String, subtitle: String, tint: Color) -> some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(BubuTheme.Font.scaled(16, weight: .bold))
-                .foregroundStyle(BubuTheme.Color.deepRose)
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.72), in: Circle())
-            Text(title)
-                .font(BubuTheme.Font.scaled(11.5, weight: .bold, design: .rounded))
-                .foregroundStyle(BubuTheme.Color.warmBrown)
-            Text(subtitle)
-                .font(BubuTheme.Font.scaled(9.5, weight: .medium, design: .rounded))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-                .lineLimit(1)
+    private func shortcutTile(icon: String, title: String, subtitle: String, tint: Color, horizontal: Bool) -> some View {
+        let iconView = Image(systemName: icon)
+            .font(BubuTheme.Font.scaled(16, weight: .bold))
+            .foregroundStyle(BubuTheme.Color.primaryInk)
+            .frame(width: 34, height: 34)
+            .background(tint.opacity(0.55), in: Circle())
+        let titleText = Text(title)
+            .font(BubuTheme.Font.scaled(15, weight: .bold, design: .rounded))
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+        let subtitleText = Text(subtitle)
+            .font(BubuTheme.Font.scaled(12, weight: .medium, design: .rounded))
+            .foregroundStyle(BubuTheme.Color.secondaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+        return Group {
+            if horizontal {
+                HStack(spacing: 12) {
+                    iconView
+                    VStack(alignment: .leading, spacing: 1) { titleText; subtitleText }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(BubuTheme.Font.scaled(12, weight: .bold))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, minHeight: 60)
+            } else {
+                VStack(spacing: 4) {
+                    iconView
+                    titleText
+                    subtitleText
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 6)
+                .frame(maxWidth: .infinity, minHeight: 96)
+            }
         }
-        .frame(minWidth: 66, minHeight: 64)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                .stroke(.white.opacity(0.54), lineWidth: 1)
+                .stroke(BubuTheme.Color.hairline.opacity(0.35), lineWidth: 0.7)
         }
+        .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title)，\(subtitle)")
     }
@@ -1055,7 +1082,7 @@ struct CaptureHomeView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(BubuTheme.Color.primary, in: Capsule())
+                    .background(BubuTheme.Color.actionFill, in: Capsule())
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -1119,21 +1146,19 @@ struct CaptureHomeView: View {
     private var recentMomentsSection: some View {
         if !entries.isEmpty {
             VStack(spacing: 10) {
-                HStack {
-                    Text("最近时光")
-                        .font(BubuTheme.Font.scaled(17, weight: .heavy, design: .rounded))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                    Spacer()
-                    Button { openTimeline?() } label: {
-                        Text("查看全部 ›")
-                            .font(BubuTheme.Font.scaled(12.5, weight: .semibold, design: .rounded))
-                            .foregroundStyle(BubuTheme.Color.primaryInk)
-                    }
-                }
-                ForEach(entries.prefix(2)) { entry in
-                    NavigationLink(value: entry.id) { momentRow(entry) }
+                HomeSectionHeader(title: "最近时光") {
+                    Button { openTimeline?() } label: { HomeSectionActionLabel() }
                         .buttonStyle(.plain)
-                        .matchedTransitionSource(id: entry.id, in: zoomNS)
+                        .accessibilityLabel("查看全部时光")
+                }
+                // 宽屏两列，窄屏一列。
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: isWide ? 2 : 1),
+                          spacing: 10) {
+                    ForEach(entries.prefix(isWide ? 4 : 2)) { entry in
+                        NavigationLink(value: entry.id) { momentRow(entry) }
+                            .buttonStyle(.plain)
+                            .matchedTransitionSource(id: entry.id, in: zoomNS)
+                    }
                 }
             }
         }
@@ -1154,7 +1179,7 @@ struct CaptureHomeView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(BubuDateFormat.monthDay(entry.happenedAt))
-                    .font(BubuTheme.Font.scaled(11, weight: .bold, design: .rounded))
+                    .font(BubuTheme.Font.scaled(12, weight: .bold, design: .rounded))
                     .foregroundStyle(BubuTheme.Color.primaryInk)
                 Text(entry.note?.isEmpty == false ? entry.note! : "记录此刻")
                     .font(BubuTheme.Font.scaled(14.5, weight: .bold, design: .rounded))
@@ -1174,73 +1199,6 @@ struct CaptureHomeView: View {
         .bubuCardShadow()
     }
 
-
-    // MARK: 那年今日
-
-    @ViewBuilder
-    private var onThisDaySection: some View {
-        let memories = onThisDayEntries
-        if !memories.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                NavigationLink { OnThisDayView() } label: {
-                    HStack(spacing: 6) {
-                        Label("那年今日", systemImage: "calendar.badge.clock")
-                            .font(BubuTheme.Font.headline)
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
-                        Image(systemName: "chevron.right")
-                            .font(BubuTheme.Font.scaled(13, weight: .semibold))
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.plain)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(memories) { entry in
-                            NavigationLink(value: entry.id) {
-                                onThisDayCard(entry)
-                            }
-                            .buttonStyle(.plain)
-                            .matchedTransitionSource(id: entry.id, in: zoomNS)
-                        }
-                    }
-                }
-            }
-            .padding()
-            .background(homeSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        }
-    }
-
-    private func onThisDayCard(_ entry: Entry) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let media = entry.coverMedia {
-                MediaThumbnail(media: media, mediaStore: env.mediaStore)
-                    .frame(width: 130, height: 130)
-            } else {
-                RoundedRectangle(cornerRadius: BubuTheme.Radius.small)
-                    .fill(theme.primary.opacity(0.12))
-                    .frame(width: 130, height: 130)
-                    .overlay { Text(entry.mood?.emoji ?? "📝").font(BubuTheme.Font.scaled(40)) }
-            }
-            if let profile {
-                Text(AgeCalculator.compactAge(birthday: profile.birthday, at: entry.happenedAt))
-                    .font(BubuTheme.Font.scaled(13, weight: .semibold))
-                    .foregroundStyle(theme.textAccent)
-            }
-            Text(yearsAgoText(entry.happenedAt))
-                .font(BubuTheme.Font.scaled(11)).foregroundStyle(BubuTheme.Color.secondaryText)
-        }
-        .frame(width: 130)
-    }
-
-
-    private func yearsAgoText(_ date: Date) -> String {
-        // 筛选已保证同月同日，只取「年」分量之差，避免 dateComponents 含时分导致
-        // 晚间拍的两年前照片上午被算成「1年前」。
-        let cal = Calendar.current
-        let years = cal.component(.year, from: .now) - cal.component(.year, from: date)
-        return years <= 0 ? "今年" : "\(years)年前的今天"
-    }
 
     /// 保存成功：布布「耶」贴纸弹入 + 成功触觉（haptic 在 CaptureModel.flashSaved 触发）。
     private var savedToast: some View {

@@ -1,6 +1,9 @@
 import AppIntents
 import SwiftData
 import Foundation
+#if !targetEnvironment(macCatalyst)
+import ActivityKit
+#endif
 
 // MARK: - App Intents 底座
 /// 把布布的核心动作开放给整个系统：Siri、快捷指令、Spotlight、小组件交互按钮、
@@ -34,7 +37,7 @@ struct RecordMomentIntent: AppIntent {
             try EntryWriter.quickTextEntry(note: note, role: role, in: context)
             // 写后钩子：重建 widget 快照 + 刷新小组件，桌面立刻读到这条新记录。
             SharedDefaults.refreshWidgetsAfterWrite(context: context)
-            return .result(dialog: "已经帮你记下啦 🌟")
+            return .result(dialog: "已经帮你记下啦")
         } catch {
             throw error
         }
@@ -108,7 +111,7 @@ struct HealthCheckInIntent: AppIntent {
         // 重复执行 → 重复打卡。这里对「同类型 + 极短时间窗内」去重（用 Media/Entry 自有字段做 COUNT，
         // 不穿透关系），既挡住系统重复执行，又不误伤真实的连续两次操作（窗口只有几秒）。
         if isRecentDuplicate(context: context) {
-            return .result(dialog: "\(kind.emoji) \(kind.label)已记上")
+            return .result(dialog: "\(kind.label)已记上")
         }
 
         switch kind {
@@ -123,7 +126,7 @@ struct HealthCheckInIntent: AppIntent {
         }
         // 写后钩子：重建 widget 快照 + 刷新小组件，桌面/锁屏立刻反映这次打卡。
         SharedDefaults.refreshWidgetsAfterWrite(context: context)
-        return .result(dialog: "\(kind.emoji) \(kind.label)已记上")
+        return .result(dialog: "\(kind.label)已记上")
     }
 
     /// 极短时间窗内是否已有同类型打卡（挡 WidgetKit 重复执行）。
@@ -168,7 +171,7 @@ struct BubuAgeIntent: AppIntent {
         }
         let age = AgeCalculator.ageDescription(birthday: profile.birthday, at: .now)
         let days = AgeCalculator.daysSinceBirth(birthday: profile.birthday)
-        return .result(dialog: "\(profile.name)现在\(age)啦，已经来到世界第 \(days) 天 💛")
+        return .result(dialog: "\(profile.name)现在\(age)啦，已经来到世界第 \(days) 天")
     }
 }
 
@@ -263,6 +266,74 @@ struct AskBubuTimeIntent: AppIntent {
     }
 }
 
+// MARK: 实时活动上的「停止」按钮（哄睡 / 录音）
+
+/// 锁屏 / 灵动岛哄睡计时上的「醒啦」：记一条带起止时刻的睡眠（与健康页、手表同一语义），
+/// 清掉共享哄睡状态并结束计时活动。LiveActivityIntent 在 App 进程里执行，不用先打开 App。
+struct StopSleepActivityIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "布布醒啦"
+    static let description = IntentDescription("结束哄睡计时，并记下这次睡了多久。")
+    static let isDiscoverable = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let end = Date.now
+        let started = SharedDefaults.sleepStartedAt
+        SharedDefaults.sleepStartedAt = nil
+        var summary = ""
+        // 不到一分钟多半是误触：清状态但不落一条 0 分钟的睡眠卡（与手表一致）。
+        if let started, started < end, end.timeIntervalSince(started) >= 60,
+           let context = SharedModelContainer.sharedIfAvailable?.mainContext {
+            let minutes = Int(end.timeIntervalSince(started) / 60)
+            summary = minutes >= 60
+                ? (minutes % 60 > 0 ? "\(minutes / 60)小时\(minutes % 60)分钟" : "\(minutes / 60)小时")
+                : "\(minutes)分钟"
+            let record = HealthRecord(kind: .sleep, title: "睡觉", recordedAt: end)
+            record.startAt = started
+            record.endAt = end
+            record.amountValue = end.timeIntervalSince(started) / 3600
+            record.amountUnit = "小时"
+            record.amountText = summary
+            context.insert(record)
+            context.insert(FeedEvent(kind: .healthRecorded, actorRole: SharedDefaults.currentRole.rawValue,
+                                     summary: "记录了睡眠：\(summary)", targetLocalId: record.id.uuidString,
+                                     happenedAt: end))
+            try context.save()
+            SharedDefaults.refreshWidgetsAfterWrite(context: context)
+            // 与手表记录同一个广播：App 在跑时立即同步并刷新手表快照。
+            NotificationCenter.default.post(name: Notification.Name("bubu.watch.didRecord"), object: nil)
+        }
+        #if !targetEnvironment(macCatalyst)
+        let final = BubuActivityAttributes.ContentState(startedAt: end, elapsedText: summary)
+        for activity in Activity<BubuActivityAttributes>.activities where activity.attributes.kind == .sleepTimer {
+            await activity.end(.init(state: final, staleDate: nil), dismissalPolicy: .immediate)
+        }
+        #endif
+        return .result()
+    }
+}
+
+/// 锁屏 / 灵动岛录音活动上的「停止」：广播给 App 内的录音器停止并保存（录音器需观察
+/// `StopRecordingActivityIntent.notification`），同时结束录音活动。
+struct StopRecordingActivityIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "停止录音"
+    static let description = IntentDescription("停止正在进行的布布录音。")
+    static let isDiscoverable = false
+    nonisolated static let notification = Notification.Name("bubu.liveActivity.stopRecording")
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        NotificationCenter.default.post(name: Self.notification, object: nil)
+        #if !targetEnvironment(macCatalyst)
+        let final = BubuActivityAttributes.ContentState(startedAt: .now, elapsedText: "")
+        for activity in Activity<BubuActivityAttributes>.activities where activity.attributes.kind == .voiceRecording {
+            await activity.end(.init(state: final, staleDate: nil), dismissalPolicy: .immediate)
+        }
+        #endif
+        return .result()
+    }
+}
+
 // MARK: 预置快捷短语
 
 /// 免用户手动配快捷指令：装上即可在 Siri/快捷指令里用这些短语。
@@ -273,7 +344,7 @@ struct BubuAppShortcuts: AppShortcutsProvider {
             phrases: [
                 "用\(.applicationName)记一笔",
                 "在\(.applicationName)记录此刻",
-                "\(.applicationName)记录布布"
+                "\(.applicationName)口述记一笔"
             ],
             shortTitle: "记录此刻",
             systemImageName: "heart.circle.fill"
@@ -330,7 +401,7 @@ struct BubuAppShortcuts: AppShortcutsProvider {
             intent: OpenRecordIntent(),
             phrases: [
                 "打开\(.applicationName)记录",
-                "\(.applicationName)记录布布此刻"
+                "\(.applicationName)打开记录页"
             ],
             shortTitle: "打开记录",
             systemImageName: "plus.circle.fill"

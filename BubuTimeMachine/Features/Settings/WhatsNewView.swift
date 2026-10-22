@@ -35,12 +35,104 @@ enum WhatsNewGate {
     }
 }
 
+// MARK: 更新要点 → 对应页面
+/// 只写「新增了什么」不够：家长读完关掉弹窗，还是找不到它在哪。
+/// 每条要点里提到的功能都给一个「去看看」，点了直接进那一页。
+enum WhatsNewDestination: String, CaseIterable, Identifiable {
+    case ask = "布布问答"
+    case birthdayFilm = "生日影片"
+    case words = "语言成长线"
+    case places = "去过的地方"
+    case recognition = "认一认"
+    case monthlyReport = "成长小报"
+    case voices = "布布的声音"
+    case soundRing = "声音年轮"
+    case weeklyReport = "布布周报"
+    case movie = "成长电影"
+    case capsule = "时间胶囊"
+    case serverStatus = "家里服务器状态"
+
+    var id: String { rawValue }
+
+    /// 按在文字里出现的先后排列，一条要点可能带两三个入口。
+    static func matches(in text: String) -> [WhatsNewDestination] {
+        allCases
+            .compactMap { destination in text.range(of: destination.rawValue).map { (destination, $0.lowerBound) } }
+            .sorted { $0.1 < $1.1 }
+            .map(\.0)
+    }
+}
+
+private struct WhatsNewDestinationView: View {
+    @Environment(AppEnvironment.self) private var env
+    let destination: WhatsNewDestination
+
+    var body: some View {
+        switch destination {
+        case .ask:
+            if BubuLearningClient(env: env) != nil { AskBubuView() } else { BubuQAView() }
+        case .birthdayFilm: BirthdayFilmView()
+        case .words: WordsGrowthView()
+        case .places: PlacesMapView()
+        case .recognition: RecognitionView()
+        case .monthlyReport: MonthlyReportView()
+        case .voices: BubuVoicesView()
+        case .soundRing: SoundRingView()
+        case .weeklyReport: WeeklyReportView()
+        case .movie: GrowthMovieView()
+        case .capsule: CapsuleHomeView()
+        case .serverStatus: ServerStatusView()
+        }
+    }
+}
+
+/// 要点下方的一排「去看看」小胶囊。
+private struct WhatsNewLinks: View {
+    let text: String
+
+    var body: some View {
+        let destinations = WhatsNewDestination.matches(in: text)
+        if !destinations.isEmpty {
+            FlowLayout(spacing: 8) {
+                ForEach(destinations) { destination in
+                    NavigationLink {
+                        WhatsNewDestinationView(destination: destination)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("去看看 \(destination.rawValue)")
+                            Image(systemName: "chevron.right").font(BubuTheme.Font.scaled(10, weight: .bold))
+                        }
+                        .font(BubuTheme.Font.scaled(13, weight: .semibold))
+                        .foregroundStyle(BubuTheme.Color.primaryInk)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(BubuTheme.Color.pinkSurface.opacity(0.7), in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("去看看\(destination.rawValue)")
+                }
+            }
+        }
+    }
+}
+
 // MARK: 升级弹窗（只展示最新一版）
 struct WhatsNewSheet: View {
     let note: ReleaseNote
     var onClose: () -> Void
 
     var body: some View {
+        NavigationStack {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(false)
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
                 Text("✨").font(BubuTheme.Font.scaled(44))
@@ -62,10 +154,13 @@ struct WhatsNewSheet: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(BubuTheme.Color.primaryInk)
                                 .padding(.top, 2)
-                            Text(item)
-                                .font(BubuTheme.Font.body)
-                                .foregroundStyle(BubuTheme.Color.warmBrown)
-                                .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(item)
+                                    .font(BubuTheme.Font.body)
+                                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                WhatsNewLinks(text: item)
+                            }
                         }
                     }
                 }
@@ -81,15 +176,12 @@ struct WhatsNewSheet: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(BubuTheme.Color.primary, in: Capsule())
+                    .background(BubuTheme.Color.actionFill, in: Capsule())
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
         }
         .background(BubuTheme.Color.cream)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(false)
     }
 }
 
@@ -116,10 +208,16 @@ struct WhatsNewListView: View {
                             ForEach(note.highlights, id: \.self) { item in
                                 HStack(alignment: .top, spacing: 8) {
                                     Text("·").foregroundStyle(BubuTheme.Color.primaryInk)
-                                    Text(item)
-                                        .font(BubuTheme.Font.scaled(14))
-                                        .foregroundStyle(BubuTheme.Color.warmBrown)
-                                        .fixedSize(horizontal: false, vertical: true)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(item)
+                                            .font(BubuTheme.Font.scaled(14))
+                                            .foregroundStyle(BubuTheme.Color.warmBrown)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        // 只给最新一版加入口：旧版本的功能名可能已经改过。
+                                        if note.version == Changelog.latest?.version {
+                                            WhatsNewLinks(text: item)
+                                        }
+                                    }
                                 }
                             }
                         }

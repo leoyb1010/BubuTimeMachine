@@ -33,9 +33,13 @@ struct BubuPhotoWidgetProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<BubuPhotoWidgetEntry>) -> Void) {
         // Receipt of a new photo batch explicitly reloads the timeline; no slideshow.
         // Age is day-granular: refresh shortly after midnight so「2岁5个月」rolls over on time.
-        let midnight = Calendar.current.nextDate(after: .now, matching: DateComponents(hour: 0, minute: 2),
-                                                 matchingPolicy: .nextTime) ?? .now.addingTimeInterval(3600)
-        completion(Timeline(entries: [entry()], policy: .after(min(midnight, .now.addingTimeInterval(3600)))))
+        // 精选按上海日期换标签/过期：上海零点后也要重建一次。
+        let now = Date.now
+        let midnight = Calendar.current.nextDate(after: now, matching: DateComponents(hour: 0, minute: 2),
+                                                 matchingPolicy: .nextTime) ?? now.addingTimeInterval(3600)
+        let picksRollover = DailyPicksDay.nextMidnight(after: now).addingTimeInterval(120)
+        completion(Timeline(entries: [entry()],
+                            policy: .after(min(midnight, picksRollover, now.addingTimeInterval(3600)))))
     }
     private func entry() -> BubuPhotoWidgetEntry {
         let snapshot = WatchSnapshotStore.load()
@@ -43,8 +47,8 @@ struct BubuPhotoWidgetProvider: TimelineProvider {
             .flatMap { $0.isEmpty ? nil : $0 } ?? "布布"
         let age = snapshot?.birthday.flatMap { WatchAgeText.text(birthday: $0) }
         let avatar = snapshot?.avatarData.flatMap { UIImage(data: $0) }
-        // 今日精选优先，其次本机照片。
-        for card in WatchReadModel.dailyPicks(from: snapshot) + WatchReadModel.memories(from: snapshot) {
+        // 与手表 App 同一组：家人近期照片在前，精选紧随其后（过期精选已被剔除）。
+        for card in WatchReadModel.deck(from: snapshot) {
             if let data = WatchPhotoStore.data(for: card.photoFileName), let image = UIImage(data: data) {
                 return BubuPhotoWidgetEntry(date: .now, memory: card, photo: image, avatar: avatar,
                                             name: name, ageText: age)
@@ -97,6 +101,7 @@ struct BubuPhotoWidgetView: View {
         .widgetURL(URL(string: "bubuwatch://photos"))
         .containerBackground(for: .widget) { Color.black.opacity(0.25) }
         .accessibilityLabel(entry.ageText.map { "\(entry.name)\($0)，打开照片" } ?? "打开\(entry.name)的照片")
+        .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
     }
 }
 

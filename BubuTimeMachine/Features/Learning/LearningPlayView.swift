@@ -20,6 +20,7 @@ struct LearningPlayView: View {
     @State private var player = NativeLearningAudioPlayer()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var current: LearningPlayItem? { items.indices.contains(index) ? items[index] : nil }
 
@@ -111,7 +112,7 @@ struct LearningPlayView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: player.isPlaying && !player.playingAnswer ? "speaker.wave.3.fill" : "ear.fill")
-                    .font(.title).symbolEffect(.variableColor.iterative, isActive: player.isPlaying && !player.playingAnswer)
+                    .font(.title).symbolEffect(.variableColor.iterative, isActive: player.isPlaying && !player.playingAnswer && !reduceMotion)
                 Text(activity.kind == "music" ? "听老师唱" : "再听老师说").font(BubuTheme.Font.headline)
             }
             .foregroundStyle(.white)
@@ -132,7 +133,7 @@ struct LearningPlayView: View {
                 ForEach(activity.choices) { choice in
                     Button {
                         guard !answered else { return }
-                        withAnimation(BubuMotion.quick) { chosen = choice.id; answered = true }
+                        withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) { chosen = choice.id; answered = true }
                         if choice.id == activity.correctChoice { BubuHaptics.success() } else { BubuHaptics.warning() }
                         record(item, choice: choice.id, assistance: nil)
                         if let answer = activity.answer {
@@ -143,12 +144,13 @@ struct LearningPlayView: View {
                                    highlighted: answered && choice.id == activity.correctChoice,
                                    dimmed: answered && choice.id != activity.correctChoice && choice.id == chosen)
                             .overlay {
-                                if answered && choice.id == activity.correctChoice && chosen == choice.id {
+                                if answered && choice.id == activity.correctChoice && chosen == choice.id && !reduceMotion {
                                     BubuBurst(count: 14, radius: 90).allowsHitTesting(false)
                                 }
                             }
+                            // 选错轻轻摇一下；减弱动态效果时不摇，只靠选项变淡 + 正确答案高亮提示。
                             .phaseAnimator([0.0, -6.0, 6.0, 0.0], trigger: answered && chosen == choice.id && choice.id != activity.correctChoice) { view, x in
-                                view.offset(x: x)
+                                view.offset(x: reduceMotion ? 0 : x)
                             } animation: { _ in .spring(duration: 0.12) }
                     }
                     .buttonStyle(BubuPressableStyle(scale: 0.94))
@@ -196,7 +198,7 @@ struct LearningPlayView: View {
 
     @ViewBuilder
     private func speakButtons(_ item: LearningPlayItem) -> some View {
-        bigChoice("说出来啦", symbol: "face.smiling.fill", tint: BubuTheme.Color.deepRose) {
+        bigChoice("说出来啦", symbol: "face.smiling.fill", tint: BubuTheme.Color.actionFill) {
             answered = true; record(item, choice: nil, assistance: false)
         }
         bigChoice("要听提示", symbol: "lightbulb.fill", tint: BubuTheme.Color.butterSurface, foreground: BubuTheme.Color.warmBrown) {
@@ -260,7 +262,7 @@ struct LearningPlayView: View {
     private var nextButton: some View {
         Button {
             player.stop()
-            withAnimation(BubuMotion.gentle) { index += 1 }
+            withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { index += 1 }
         } label: {
             Text(index + 1 < items.count ? "下一个" : "完成").font(BubuTheme.Font.headline)
                 .frame(maxWidth: 320).padding(.vertical, 14)
@@ -285,14 +287,12 @@ struct LearningPlayView: View {
     private var finished: some View {
         VStack(spacing: BubuTheme.Spacing.l) {
             BubuMascotBadge(size: 132, expression: .yeah)
-                .overlay { BubuBurst(count: 22, radius: 150) }
-                .phaseAnimator([0.0, 1.0]) { view, phase in
-                    view.scaleEffect(1 + phase * 0.04).rotationEffect(.degrees(phase * 2 - 1))
-                } animation: { _ in BubuMotion.breathe }
+                .overlay { if !reduceMotion { BubuBurst(count: 22, radius: 150) } }
+                .bubuBreathingWiggle(degrees: 1)
             Text("今天学完啦！").font(BubuTheme.Font.hugeTitle).foregroundStyle(BubuTheme.Color.warmBrown)
             Text("和老师一起玩了 \(items.count) 个小互动").font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
-            Button("回到课程") { dismiss() }.buttonStyle(.borderedProminent).tint(BubuTheme.Color.primary)
+            Button("回到课程") { dismiss() }.buttonStyle(.borderedProminent).tint(BubuTheme.Color.actionFill)
                 .accessibilityIdentifier("learning.play.done")
         }
         .padding()

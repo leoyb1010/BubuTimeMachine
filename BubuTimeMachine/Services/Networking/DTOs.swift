@@ -46,6 +46,8 @@ struct EntryDTO: Codable, Sendable, SyncCursorProviding {
     var editedAt: Date?
     var createdAt: Date
     var serverUpdatedAt: Date? = nil   // 服务器 updated，仅拉取路径填充，游标推进用
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct MediaDTO: Codable, Sendable, SyncCursorProviding {
@@ -79,6 +81,11 @@ struct MilestoneDTO: Codable, Sendable, SyncCursorProviding {
     var isCustom: Bool
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct FirstTimeDTO: Codable, Sendable, SyncCursorProviding {
@@ -91,6 +98,11 @@ struct FirstTimeDTO: Codable, Sendable, SyncCursorProviding {
     var entryLocalId: String?
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct FamilyMemberDTO: Codable, Sendable, SyncCursorProviding {
@@ -103,6 +115,11 @@ struct FamilyMemberDTO: Codable, Sendable, SyncCursorProviding {
     var isPrimary: Bool
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct ChildProfileDTO: Codable, Sendable, SyncCursorProviding {
@@ -122,6 +139,11 @@ struct ChildProfileDTO: Codable, Sendable, SyncCursorProviding {
     var medicalNotes: String? = nil
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct HealthRecordDTO: Codable, Sendable, SyncCursorProviding {
@@ -142,6 +164,11 @@ struct HealthRecordDTO: Codable, Sendable, SyncCursorProviding {
     var tags: [String]
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct VaccineRecordDTO: Codable, Sendable, SyncCursorProviding {
@@ -161,6 +188,8 @@ struct VaccineRecordDTO: Codable, Sendable, SyncCursorProviding {
     /// 记录级最后编辑时间（模型 `updatedAt`），作为 LWW 版本号推送到 clientUpdatedAt，
     /// 供通用 upsert 做「远端更新则不覆盖」的时间戳比对。
     var editedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct GrowthMeasurementDTO: Codable, Sendable, SyncCursorProviding {
@@ -176,6 +205,8 @@ struct GrowthMeasurementDTO: Codable, Sendable, SyncCursorProviding {
     var serverUpdatedAt: Date? = nil
     /// 记录级最后编辑时间（模型 `updatedAt`），LWW 版本号，见 VaccineRecordDTO.editedAt。
     var editedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct CommentDTO: Codable, Sendable, SyncCursorProviding {
@@ -189,6 +220,11 @@ struct CommentDTO: Codable, Sendable, SyncCursorProviding {
     var voiceWaveform: [Float]
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct VoiceNoteDTO: Codable, Sendable, SyncCursorProviding {
@@ -202,6 +238,11 @@ struct VoiceNoteDTO: Codable, Sendable, SyncCursorProviding {
     var waveform: [Float]
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct VoiceMemoDTO: Codable, Sendable, SyncCursorProviding {
@@ -215,6 +256,11 @@ struct VoiceMemoDTO: Codable, Sendable, SyncCursorProviding {
     var durationSeconds: Double?
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 struct TimeCapsuleDTO: Codable, Sendable, SyncCursorProviding {
@@ -232,6 +278,11 @@ struct TimeCapsuleDTO: Codable, Sendable, SyncCursorProviding {
     var cryptoVersion: Int? = nil
     var createdAt: Date
     var serverUpdatedAt: Date? = nil
+    /// 本机这条记录最后一次被用户编辑的时间（推送时作为 clientUpdatedAt 的 LWW 版本号；
+    /// 拉取/回执时解析远端 clientUpdatedAt）。nil = 未知，推送时退化为推送时刻。
+    var clientEditedAt: Date? = nil
+    /// 「全部重传」恢复模式：服务器已有同 localId 的记录时只带回远端版本，绝不 PATCH 覆盖。
+    var createOnly: Bool? = nil
 }
 
 /// 一次媒体上传请求。
@@ -253,6 +304,8 @@ struct MediaUploadRequest: Sendable {
     var height: Int? = nil
     var durationSeconds: Double? = nil
     var aiTags: [String] = []
+    /// 「全部重传」恢复模式：服务器已有这条媒体就不再覆盖上传，直接沿用远端文件。
+    var createOnly: Bool = false
 }
 
 /// 上传过程事件流。

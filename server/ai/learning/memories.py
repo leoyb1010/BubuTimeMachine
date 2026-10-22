@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 from datetime import date as Date
 import random
 
-from .online_timeline import place_city as _city
+from .online_timeline import place_city as _city, quality
 from .store import digest, valid_day
 
 MIN_ITEMS, MAX_ITEMS, MAX_CARDS = 5, 30, 6
@@ -28,7 +28,7 @@ THEMES = (
 
 
 def _quality(row):
-    return (row["adjusted"], row["item"]["media_type"] == "photo", min(len(row["description"]), 120), row["item"]["file_id"])
+    return (quality(row), row["item"]["file_id"])
 
 
 def _month_text(day):
@@ -68,14 +68,17 @@ def build(rows, labels, day):
             rest = [r for r in chosen if id(r) not in taken]
             chosen = best + rng.sample(rest, MAX_ITEMS - len(best))
         chosen = sorted(chosen, key=lambda r: (r["stamp"] or "", r["item"]["file_id"]))
+        # Screenshots, ID photos and adult close-ups never cover a card (they may still be inside it).
         cover = max(chosen, key=_quality)["item"]
         return {"id": digest([kind, key, [r["item"]["file_id"] for r in chosen]])[:16], "kind": kind, "title": title,
                 "subtitle": "%s · %d个瞬间" % (_span(chosen), len(chosen)), "cover_id": cover["file_id"],
                 "cover_url": "/learning/api/online-timeline/%s/preview?size=thumb&revision=%s" % (cover["file_id"], cover["content_hash"]),
+                "card_url": "/learning/api/online-timeline/%s/preview?size=card&revision=%s" % (cover["file_id"], cover["content_hash"]),
                 "item_ids": [r["item"]["file_id"] for r in chosen], "count": len(chosen)}
 
-    # 那年今天: ±3 days around this date in each earlier year, newest year first.
-    years = defaultdict(list)
+    # 那年今天: this exact date in each earlier year, newest year first; when that day alone is too
+    # thin, the ±3 days around it, titled as such (never "今天" for another date).
+    years, nearby = defaultdict(list), defaultdict(list)
     for row in rows:
         when = Date.fromisoformat(row["day"])
         if when.year >= anchor.year:
@@ -84,9 +87,17 @@ def build(rows, labels, day):
             same = anchor.replace(year=when.year)
         except ValueError:
             same = anchor.replace(year=when.year, day=28)
-        if abs((when - same).days) <= 3:
+        gap = abs((when - same).days)
+        if gap == 0:
             years[when.year].append(row)
-    found = [card("on_this_day", str(y), "%d年前的今天" % (anchor.year - y), years[y], "") for y in sorted(years, reverse=True)]
+        if gap <= 3:
+            nearby[when.year].append(row)
+    found = []
+    for y in sorted(nearby, reverse=True):
+        if len(years[y]) >= MIN_ITEMS:
+            found.append(card("on_this_day", str(y), "%d年前的今天" % (anchor.year - y), years[y], ""))
+        else:
+            found.append(card("on_this_day", str(y), "%d年前的这几天" % (anchor.year - y), nearby[y], ""))
     cards += [c for c in found if c][:CAPS["on_this_day"]]
 
     # 家人: one month together with a family member, rotating across people.

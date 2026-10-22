@@ -39,15 +39,25 @@ final class CaptureModel {
     /// 部分媒体导入失败：面板已关（记录已存），提示上移到首页层展示，避免随面板一起消失。
     var partialSaveWarning: String?
     var lastSavedSummary: String?
-    var note: String = ""
-    var mood: Mood?
+    /// 文字 / 心情 / 录音改动后去抖落盘：面板被打断、App 被系统回收也不丢（D9-07）。
+    var note: String = "" { didSet { if note != oldValue { scheduleDraftPersist() } } }
+    var mood: Mood? { didSet { if mood != oldValue { scheduleDraftPersist() } } }
+    /// 打开面板时找回了上次没写完的内容：面板顶部提示，可一键丢掉。
+    var restoredDraftNotice: String?
     var includeLocation = false
     var currentLocation: CapturedLocation?
     var locationError: String?
     var savedFlash = false
 
-    /// 录好的语音（待随本次记录一起保存）。
-    var pendingVoice: (fileName: String, duration: Double, waveform: [Float])?
+    /// 录好的语音（待随本次记录一起保存）。已落进媒体目录：登记为草稿录音，保存或丢弃前不算孤儿。
+    var pendingVoice: (fileName: String, duration: Double, waveform: [Float])? {
+        didSet {
+            if let fileName = pendingVoice?.fileName, fileName != oldValue?.fileName {
+                draftStore.trackDraftAudio(fileName)
+            }
+            if pendingVoice?.fileName != oldValue?.fileName { scheduleDraftPersist() }
+        }
+    }
 
     /// 分析进度提示文案（"正在看看这张照片…"）。
     var analyzingHint: String?
@@ -61,6 +71,8 @@ final class CaptureModel {
     private let mediaStore: MediaStore
     private let analyzer: PhotoAnalyzer
     private let operations: SaveOperations
+    private let draftStore: CaptureDraftStore
+    private var draftPersistTask: Task<Void, Never>?
     /// Copy every input before the first suspension; asynchronous callbacks and role
     /// changes cannot alter a record which is already being imported.
     private struct SaveDraft {
@@ -81,11 +93,13 @@ final class CaptureModel {
     private var previewTask: Task<Void, Never>?
 
     init(mediaStore: MediaStore, analyzer: PhotoAnalyzer, role: FamilyRole,
-         operations: SaveOperations = SaveOperations()) {
+         operations: SaveOperations = SaveOperations(),
+         draftStore: CaptureDraftStore = .standard) {
         self.mediaStore = mediaStore
         self.analyzer = analyzer
         self.role = role
         self.operations = operations
+        self.draftStore = draftStore
     }
 
     /// 丢弃未保存的待存语音：删掉已 importFile 落盘的 m4a，再清引用，避免孤儿文件。
@@ -95,12 +109,85 @@ final class CaptureModel {
         guard !isSaving else { return }
         if let v = pendingVoice {
             mediaStore.deleteMedia(named: v.fileName)
+            draftStore.untrackDraftAudio(v.fileName)
         }
         pendingVoice = nil
     }
 
+    // MARK: 草稿落盘（D9-07）
+
+    private func scheduleDraftPersist() {
+        draftPersistTask?.cancel()
+        draftPersistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            self?.persistDraftNow()
+        }
+    }
+
+    /// 立即落盘（面板进后台时调用）。没有可恢复内容时删除草稿文件。
+    func persistDraftNow() {
+        draftPersistTask?.cancel()
+        draftPersistTask = nil
+        draftStore.save(currentDraft)
+    }
+
+    private var currentDraft: CaptureDraft {
+        CaptureDraft(note: note, moodRaw: mood?.rawValue,
+                     voiceFileName: pendingVoice?.fileName,
+                     voiceDuration: pendingVoice?.duration ?? 0,
+                     voiceWaveform: pendingVoice?.waveform ?? [],
+                     savedAt: .now)
+    }
+
+    /// 「丢掉这一笔」：清空面板、删掉草稿录音和草稿文件。
+    func discardDraft() {
+        guard !isSaving else { return }
+        discardPendingVoice()
+        note = ""
+        mood = nil
+        pickedItems = []
+        cameraPhotos = []
+        cameraVideos = []
+        selectedPreviews = []
+        restoredDraftNotice = nil
+        draftStore.save(nil)
+    }
+
+    /// 找回上次没写完的内容。返回 true 表示恢复了。录音文件已不在则只恢复文字。
+    private func restoreDraftIfAvailable() -> Bool {
+        guard let draft = draftStore.load(), draft.hasContent else { return false }
+        note = draft.note
+        mood = draft.moodRaw.flatMap(Mood.init(rawValue:))
+        if let fileName = draft.voiceFileName, mediaStore.fileExists(forMedia: fileName) {
+            pendingVoice = (fileName, draft.voiceDuration, draft.voiceWaveform)
+        } else {
+            pendingVoice = nil
+        }
+        restoredDraftNotice = "上次没写完的内容帮你找回来了"
+        return true
+    }
+
     func startQuickCapture(prefillNote: String = "") {
         guard !isSaving else { return }
+        restoredDraftNotice = nil
+        // 上次被打断（切到相机/别的 App 后被系统回收）留下的文字和录音：先找回来，而不是清空。
+        if prefillNote.isEmpty, pendingVoice == nil, note.isEmpty, restoreDraftIfAvailable() {
+            includeLocation = false
+            currentLocation = nil
+            locationError = nil
+            pickedItems = []
+            cameraPhotos = []
+            cameraVideos = []
+            selectedPreviews = []
+            detectedTags = []
+            detectedLocation = nil
+            analyzingHint = nil
+            saveError = nil
+            lastSavedSummary = nil
+            showQuickCapture = true
+            return
+        }
         note = prefillNote
         mood = nil
         includeLocation = false
@@ -273,6 +360,7 @@ final class CaptureModel {
         if let voiceID, let voice = draft.voice {
             transcribeCommittedVoice(id: voiceID, entryID: entry.id, fileName: voice.fileName, container: uiContext.container)
         }
+        if let voice = draft.voice { draftStore.untrackDraftAudio(voice.fileName) }
         if let didCommit = operations.didCommit { didCommit(context) }
         else { refreshWidgetSnapshot(context: context) }
 
@@ -292,6 +380,8 @@ final class CaptureModel {
         note = ""
         mood = nil
         pendingVoice = nil
+        restoredDraftNotice = nil
+        draftStore.save(nil)   // 已存进记录：草稿作废
         capturePresented = false
         if operations.didCommit == nil { flashSaved() }
         return true
@@ -512,9 +602,100 @@ final class CaptureModel {
 
     private func refreshWidgetSnapshot(context: ModelContext) {
         guard let snapshot = SharedWidgetSnapshot.make(context: context) else { return }
-        SharedDefaults.saveWidgetSnapshot(snapshot)
-        WidgetRefresher.reload()
+        if SharedDefaults.saveWidgetSnapshotIfChanged(snapshot) { WidgetRefresher.reload() }
         BubuMomentSpotlightIndexer.schedule(context: context)
+    }
+}
+
+// MARK: - 记录此刻草稿（落盘）
+/// 只存文字、心情和已录好的语音（文件本身已在媒体目录）。相机照片仍在内存里，被回收会丢——
+/// 相册选的照片本来就在系统相册，重新选即可。
+struct CaptureDraft: Codable, Equatable, Sendable {
+    var note: String
+    var moodRaw: String?
+    var voiceFileName: String?
+    var voiceDuration: Double
+    var voiceWaveform: [Float]
+    var savedAt: Date
+
+    var hasContent: Bool {
+        !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || voiceFileName != nil
+    }
+}
+
+/// 草稿文件 + 「草稿录音」登记表。登记表让启动时能安全清理孤儿录音：
+/// 只删**登记过、且不被当前草稿和任何记录引用**的文件，绝不按目录扫删。
+@MainActor
+final class CaptureDraftStore {
+    static let standard = CaptureDraftStore(directory: FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("CaptureDraft", isDirectory: true))
+
+    private let directory: URL
+    private var draftURL: URL { directory.appendingPathComponent("draft.json") }
+    private var audioLedgerURL: URL { directory.appendingPathComponent("draft-audio.json") }
+
+    init(directory: URL) {
+        self.directory = directory
+    }
+
+    func load() -> CaptureDraft? {
+        guard let data = try? Data(contentsOf: draftURL) else { return nil }
+        return try? JSONDecoder().decode(CaptureDraft.self, from: data)
+    }
+
+    /// nil 或没有内容 = 删除草稿文件。
+    func save(_ draft: CaptureDraft?) {
+        guard let draft, draft.hasContent else {
+            try? FileManager.default.removeItem(at: draftURL)
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(draft).write(to: draftURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch {
+            // 草稿是尽力而为：写不进去也不影响当前面板里的内容。
+        }
+    }
+
+    private(set) var trackedAudio: Set<String> {
+        get {
+            guard let data = try? Data(contentsOf: audioLedgerURL),
+                  let names = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return Set(names)
+        }
+        set {
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? JSONEncoder().encode(newValue.sorted()).write(to: audioLedgerURL, options: .atomic)
+        }
+    }
+
+    func trackDraftAudio(_ fileName: String) { trackedAudio = trackedAudio.union([fileName]) }
+    func untrackDraftAudio(_ fileName: String) {
+        var names = trackedAudio
+        guard names.remove(fileName) != nil else { return }
+        trackedAudio = names
+    }
+
+    /// 启动后（延后、低优先级）调用：删掉登记过但已无人引用的草稿录音。返回删掉的文件名。
+    @discardableResult
+    func cleanupOrphanAudio(context: ModelContext, mediaStore: MediaStore) -> [String] {
+        let draftVoice = load()?.voiceFileName
+        var removed: [String] = []
+        var remaining = trackedAudio
+        for name in trackedAudio where name != draftVoice {
+            let referenced = ((try? context.fetchCount(FetchDescriptor<VoiceNote>(predicate: #Predicate { $0.localFileName == name }))) ?? 1) > 0
+                || ((try? context.fetchCount(FetchDescriptor<Comment>(predicate: #Predicate { $0.voiceFileName == name }))) ?? 1) > 0
+                || ((try? context.fetchCount(FetchDescriptor<VoiceMemo>(predicate: #Predicate { $0.localFileName == name }))) ?? 1) > 0
+            if !referenced {
+                mediaStore.deleteMedia(named: name)
+                removed.append(name)
+            }
+            remaining.remove(name)
+        }
+        if let draftVoice, trackedAudio.contains(draftVoice) { remaining.insert(draftVoice) }
+        trackedAudio = remaining
+        return removed
     }
 }
 

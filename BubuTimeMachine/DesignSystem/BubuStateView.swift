@@ -141,7 +141,7 @@ struct BubuStateRetryButton: View {
                 .font(BubuTheme.Font.body.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 22).padding(.vertical, 11)
-                .background(BubuTheme.Color.primary, in: Capsule())
+                .background(BubuTheme.Color.actionFill, in: Capsule())
         }
         .buttonStyle(BubuPressableStyle())
         .accessibilityIdentifier("state.action")

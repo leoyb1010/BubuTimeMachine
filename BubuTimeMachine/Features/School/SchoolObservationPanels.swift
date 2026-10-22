@@ -12,17 +12,17 @@ struct SchoolBehaviorPanel: View {
                 ForEach(Array([SchoolReportField.mood, .participation, .peers].enumerated()), id: \.offset) { index, field in
                     VStack(spacing: 8) {
                         HStack(spacing: 7) {
-                            Image(systemName: symbols[index]).font(.system(size: 19, weight: .semibold))
-                                .foregroundStyle(.white).frame(width: 35, height: 35)
+                            Image(systemName: symbols[index]).font(.system(.callout).weight(.semibold))
+                                .foregroundStyle(.white).frame(minWidth: 35, minHeight: 35)
                                 .background(colors[index], in: Circle()).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(["精神", "参与", "互动"][index]).font(.system(size: 10))
+                                Text(["精神", "参与", "互动"][index]).font(.system(.caption, design: .rounded))
                                 Text(report[field].isEmpty ? "未记录" : report[field])
                                     .font(.system(.subheadline, design: .rounded).weight(.bold))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        Text(meaning(field)).font(.system(size: 9)).foregroundStyle(SchoolPalette.secondary)
+                        Text(meaning(field)).font(.system(.caption2, design: .rounded)).foregroundStyle(SchoolPalette.secondary)
                     }.frame(maxWidth: .infinity).padding(.vertical, 10).padding(.horizontal, 3)
                         .background(colors[index].opacity(0.12), in: RoundedRectangle(cornerRadius: 17))
                         .accessibilityElement(children: .combine).accessibilityIdentifier("school.behavior." + field.rawValue)
@@ -46,7 +46,7 @@ struct SchoolBodyPanel: View {
     var body: some View {
         SchoolPanel(title: "身体与外观", symbol: "figure.child") {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "tshirt.fill").font(.system(size: 36)).foregroundStyle(BubuTheme.Color.lav)
+                Image(systemName: "tshirt.fill").font(.largeTitle).foregroundStyle(BubuTheme.Color.lav)
                     .padding(10).background(BubuTheme.Color.lav.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
@@ -108,7 +108,7 @@ struct SchoolTeacherPanel: View {
         SchoolPanel(title: "老师叮嘱", symbol: "backpack") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "backpack.fill").font(.system(size: 30)).foregroundStyle(SchoolPalette.coral).accessibilityHidden(true)
+                    Image(systemName: "backpack.fill").font(.title).foregroundStyle(SchoolPalette.coral).accessibilityHidden(true)
                     SchoolObservationText(title: "准备物品", value: report[.supplies], symbol: "bag")
                 }
                 Rectangle().fill(env.theme.theme.primary.opacity(0.16)).frame(height: 1)

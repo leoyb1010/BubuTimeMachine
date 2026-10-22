@@ -23,15 +23,19 @@ struct SimpleModeView: View {
     /// 布布本人的头像。头部显示的是「布布」的名字，配的头像就必须是布布，
     /// 不能是当前登录家人的 emoji——那会让人以为这台手机上的身份是布布。
     @State private var childAvatar: UIImage?
+    @ScaledMetric(relativeTo: .title) private var avatarSize: CGFloat = 66
+
+    /// 姥姥模式的所有文字都放到 AX5（App 在这里放开的最大档），不再停在全局的 AX2 上限。
+    static let elderCap = BubuBigActionButton.largestCategory
 
     private var role: FamilyRole { env.config.currentRole }
-    private var childName: String { profiles.first?.name ?? env.config.childName }
+    private var childName: String { ChildProfile.canonical(from: profiles)?.name ?? env.config.childName }
     /// 当前身份的成员卡（取其自定义头像），无则回退关系默认 emoji。
     private var currentMember: FamilyMember? {
         members.first { $0.relation == role.rawValue }
     }
     private var ageText: String {
-        guard let birthday = profiles.first?.birthday else { return "" }
+        guard let birthday = ChildProfile.canonical(from: profiles)?.birthday else { return "" }
         return AgeCalculator.ageDescription(birthday: birthday, at: .now)
     }
 
@@ -51,13 +55,13 @@ struct SimpleModeView: View {
                     // 三个大按钮改用设计系统里的共享组件（原来是本页私有方法，与主设计系统双轨）。
                     BubuBigActionButton(title: "拍一张", subtitle: "给\(childName)拍照片",
                                         systemImage: "camera.fill",
-                                        tint: BubuTheme.Color.primary) { openCamera() }
+                                        fill: .rose) { openCamera() }
                     BubuBigActionButton(title: "说一段", subtitle: "说句话给\(childName)",
                                         systemImage: "mic.fill",
-                                        tint: BubuTheme.Color.info) { showVoice = true }
+                                        fill: .sky) { showVoice = true }
                     BubuBigActionButton(title: "看\(childName)", subtitle: "翻翻最近的照片",
                                         systemImage: "photo.stack.fill",
-                                        tint: BubuTheme.Color.success) { showTimeline = true }
+                                        fill: .leaf) { showTimeline = true }
                     exitButton
                         .padding(.top, 6)
                 }
@@ -103,9 +107,9 @@ struct SimpleModeView: View {
         VStack(spacing: 8) {
             HStack(spacing: 7) {
                 Text(currentMember?.avatarEmoji ?? Relation(rawValue: role.rawValue)?.defaultEmoji ?? "🙂")
-                    .font(.system(size: 19))
+                    .font(BubuTheme.Font.scaled(19, cap: Self.elderCap))
                 Text(role.simpleModeName)
-                    .font(BubuTheme.Font.scaled(17, weight: .bold))
+                    .font(BubuTheme.Font.scaled(17, weight: .bold, cap: Self.elderCap))
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                 Spacer()
             }
@@ -115,21 +119,21 @@ struct SimpleModeView: View {
                 childAvatarCircle
                 VStack(alignment: .leading, spacing: 2) {
                     Text("你好呀")
-                        .font(BubuTheme.Font.scaled(18, weight: .bold))
+                        .font(BubuTheme.Font.scaled(18, weight: .bold, cap: Self.elderCap))
                         .foregroundStyle(BubuTheme.Color.secondaryText)
                     Text(childName)
-                        .font(BubuTheme.Font.scaled(34, weight: .black))
+                        .font(BubuTheme.Font.scaled(34, weight: .black, cap: Self.elderCap))
                         .foregroundStyle(BubuTheme.Color.warmBrown)
                     if !ageText.isEmpty {
                         Text(ageText)
-                            .font(BubuTheme.Font.scaled(18, weight: .bold))
+                            .font(BubuTheme.Font.scaled(18, weight: .bold, cap: Self.elderCap))
                             .foregroundStyle(BubuTheme.Color.deepRose)
                     }
                 }
                 Spacer()
             }
         }
-        .task(id: profiles.first?.avatarMediaFileName) { await loadChildAvatar() }
+        .task(id: ChildProfile.canonical(from: profiles)?.avatarMediaFileName) { await loadChildAvatar() }
     }
 
     /// 布布的头像圆：有档案头像就用真照片，没有就用固定的宝宝 emoji，绝不借用家人头像。
@@ -142,16 +146,16 @@ struct SimpleModeView: View {
                     .scaledToFill()
                     .clipShape(Circle())
             } else {
-                Text("👶").font(.system(size: 40))
+                Text("👶").font(BubuTheme.Font.scaled(40, cap: Self.elderCap))
             }
         }
-        .frame(width: 66, height: 66)
+        .frame(width: avatarSize, height: avatarSize)
         .overlay { Circle().stroke(BubuTheme.Color.peach.opacity(0.55), lineWidth: 2) }
         .accessibilityHidden(true)
     }
 
     private func loadChildAvatar() async {
-        guard let name = profiles.first?.avatarMediaFileName else {
+        guard let name = ChildProfile.canonical(from: profiles)?.avatarMediaFileName else {
             childAvatar = nil
             return
         }
@@ -169,7 +173,7 @@ struct SimpleModeView: View {
             withAnimation(.smooth) { exitToFullApp() }
         } label: {
             Text("切换到完整版")
-                .font(BubuTheme.Font.scaled(16, weight: .bold))
+                .font(BubuTheme.Font.scaled(16, weight: .bold, cap: Self.elderCap))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -196,11 +200,11 @@ struct SimpleModeView: View {
     private var voiceSheet: some View {
         VStack(spacing: 20) {
             Text("说给\(childName)")
-                .font(BubuTheme.Font.scaled(28, weight: .black))
+                .font(BubuTheme.Font.scaled(28, weight: .black, cap: Self.elderCap))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .padding(.top, 28)
             Text("点一下开始，说完再点一下")
-                .font(BubuTheme.Font.scaled(17, weight: .bold))
+                .font(BubuTheme.Font.scaled(17, weight: .bold, cap: Self.elderCap))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
             VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in
                 showVoice = false
@@ -209,7 +213,7 @@ struct SimpleModeView: View {
             .padding(.horizontal, 20)
             Spacer()
             Button("取消") { showVoice = false }
-                .font(BubuTheme.Font.scaled(18, weight: .bold))
+                .font(BubuTheme.Font.scaled(18, weight: .bold, cap: Self.elderCap))
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .padding(.bottom, 28)
         }
@@ -221,9 +225,9 @@ struct SimpleModeView: View {
     // MARK: 保存确认 / 进行中浮层
     private func confirmationOverlay(_ text: String) -> some View {
         VStack(spacing: 14) {
-            Text("❤️").font(BubuTheme.Font.scaled(64))
+            Text("❤️").font(BubuTheme.Font.scaled(64, cap: Self.elderCap))
             Text(text)
-                .font(BubuTheme.Font.scaled(26, weight: .black))
+                .font(BubuTheme.Font.scaled(26, weight: .black, cap: Self.elderCap))
                 .foregroundStyle(.white)
         }
         .padding(40)
@@ -239,7 +243,7 @@ struct SimpleModeView: View {
             VStack(spacing: 12) {
                 ProgressView().scaleEffect(1.6).tint(.white)
                 Text("正在收好…")
-                    .font(BubuTheme.Font.scaled(20, weight: .bold))
+                    .font(BubuTheme.Font.scaled(20, weight: .bold, cap: Self.elderCap))
                     .foregroundStyle(.white)
             }
             .padding(36)

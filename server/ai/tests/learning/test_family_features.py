@@ -151,7 +151,7 @@ def test_items_by_ids_and_highlights_prefer_on_this_day(tmp_path):
     ids = [i["id"][-1] for i in result["items"]]
     assert ids[:2] in (["1", "3"], ["2", "3"]) and "5" not in ids and "6" not in ids
     assert result["reason_by_id"]["%024x" % 4] == "最近精选"
-    assert result["reason_by_id"]["%024x" % 3] == "那年今天"
+    assert result["reason_by_id"]["%024x" % 3] == "那年这几天"  # ±3 days is never labelled 今天
     assert len(ids) <= 6 and len(set(ids)) == len(ids)
 
 
@@ -207,7 +207,7 @@ def test_memories_are_deterministic_bounded_and_rotate(tmp_path):
     assert first == Memories(timeline).memories(scope(), "2026-10-22")["items"]
     assert 1 <= len(first) <= 6 and all(c["count"] >= 5 and c["count"] == len(c["item_ids"]) for c in first)
     kinds = [c["kind"] for c in first]
-    assert kinds[0] == "on_this_day" and first[0]["title"] == "1年前的今天"
+    assert kinds[0] == "on_this_day" and first[0]["title"] == "1年前的这几天"  # the exact day alone is too thin
     assert {"family", "trip", "theme"} <= set(kinds)
     assert next(c for c in first if c["kind"] == "trip")["title"] == "三亚之旅"
     assert first[0]["cover_url"].startswith("/learning/api/online-timeline/%s/preview" % first[0]["cover_id"])
@@ -266,7 +266,7 @@ def test_monthly_report_is_validated_and_generated_once(tmp_path):
     assert monthly.generate("2026-09") == report and len(bridge.calls) == 1
     assert monthly.generate("2026-08") is None
     listed = monthly.list(scope())["items"]
-    assert listed[0]["month"] == "2026-09" and listed[0]["photos"] == 8 and listed[0]["places"] == ["深圳市 · 公园"]
+    assert listed[0]["month"] == "2026-09" and listed[0]["photos"] == 8 and listed[0]["places"] == ["公园"]
     assert 1 <= len(listed[0]["highlight_ids"]) <= 6
     # Too long twice: clipped, and her full name still appears.
     bridge.reply = {"title": "一" * 30, "summary": "她" * 300}

@@ -284,6 +284,7 @@ struct SpeakPracticeCard: View {
     @State private var available = false
     @State private var heard = ""
     @State private var celebration = 0
+    @State private var starsShown = 0
     @State private var recognizer = SpeechPracticeRecognizer()
     @State private var listenTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -318,7 +319,10 @@ struct SpeakPracticeCard: View {
                 .accessibilityLabel("要说的话：\(target)")
             micButton
             feedback
+                .id(feedbackKey)
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95)))
         }
+        .animation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion), value: feedbackKey)
         .padding(BubuTheme.Spacing.l)
         .frame(maxWidth: .infinity)
         .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
@@ -339,7 +343,7 @@ struct SpeakPracticeCard: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(phase == .listening ? BubuTheme.Color.deepRose : BubuTheme.Color.primary)
+                    .fill(phase == .listening ? BubuTheme.Color.actionFillDeep : BubuTheme.Color.actionFill)
                     .frame(width: 96, height: 96)
                     .shadow(color: BubuTheme.Color.primary.opacity(0.35), radius: 12, y: 6)
                 Image(systemName: phase == .modeling ? "speaker.wave.2.fill" : "mic.fill")
@@ -347,8 +351,9 @@ struct SpeakPracticeCard: View {
                     .foregroundStyle(.white)
                     .symbolEffect(.variableColor.iterative, isActive: busy && !reduceMotion)
             }
-            .scaleEffect(phase == .listening && !reduceMotion ? 1.06 : 1)
-            .animation(reduceMotion ? nil : BubuMotion.breathe, value: phase == .listening)
+            // 只在「听」的时候呼吸；phaseAnimator 的 isActive 一关就整段停下，
+            // 不会像 repeatForever 那样在打分后还继续一张一缩。
+            .modifier(ListeningBreath(active: phase == .listening && !reduceMotion))
         }
         .buttonStyle(BubuPressableStyle(scale: 0.92))
         .disabled(phase == .modeling)
@@ -371,11 +376,16 @@ struct SpeakPracticeCard: View {
             VStack(spacing: 6) {
                 HStack(spacing: 4) {
                     ForEach(0..<3, id: \.self) { index in
-                        Image(systemName: index < stars(score) ? "star.fill" : "star")
+                        let lit = index < stars(score)
+                        Image(systemName: lit ? "star.fill" : "star")
                             .font(.title2)
-                            .foregroundStyle(index < stars(score) ? BubuTheme.Color.butter : BubuTheme.Color.hairline)
+                            .foregroundStyle(lit ? BubuTheme.Color.butter : BubuTheme.Color.hairline)
+                            // 庆祝分层：卡片先换，星星再一颗接一颗弹出（每颗晚 0.08s）。
+                            .scaleEffect(starsShown > index || !lit ? 1 : 0.2)
+                            .opacity(starsShown > index || !lit ? 1 : 0)
                     }
                 }
+                .task(id: celebration) { await popStars(stars(score)) }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(stars(score)) 颗星")
                 Text(score >= 85 ? "说得真棒！" : "说出来啦！").font(BubuTheme.Font.headline)
@@ -398,6 +408,29 @@ struct SpeakPracticeCard: View {
     }
 
     private func stars(_ score: Int) -> Int { score >= 90 ? 3 : score >= 70 ? 2 : 1 }
+
+    /// 反馈区按阶段换场（scored 同一个阶段里分数变了也算一次）。
+    private var feedbackKey: String {
+        switch phase {
+        case .idle: "idle"
+        case .modeling: "modeling"
+        case .listening: "listening"
+        case .scored(let score): "scored-\(score)-\(celebration)"
+        case .retry: "retry"
+        case .denied: "denied"
+        }
+    }
+
+    private func popStars(_ count: Int) async {
+        if reduceMotion { starsShown = count; return }
+        starsShown = 0
+        try? await Task.sleep(for: .milliseconds(180))
+        for index in 0..<count {
+            guard !Task.isCancelled else { return }
+            withAnimation(BubuMotion.quick) { starsShown = index + 1 }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+    }
 
     private func start() {
         listenTask?.cancel()
@@ -446,5 +479,21 @@ struct SpeakPracticeCard: View {
             BubuHaptics.tapLight()
         }
         onScored(score, passed)
+    }
+}
+
+/// 麦克风「在听」时的轻呼吸。只有 active 时才挂动画，一结束整段移除、按钮立刻静止。
+private struct ListeningBreath: ViewModifier {
+    let active: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if active {
+            content.phaseAnimator([1.0, 1.06]) { view, scale in
+                view.scaleEffect(scale)
+            } animation: { _ in .easeInOut(duration: 0.9) }
+        } else {
+            content
+        }
     }
 }

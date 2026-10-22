@@ -102,7 +102,7 @@ struct MilestoneEditSheet: View {
     /// 落盘失败：不放庆祝、不关页面，让用户能重试。
     @State private var saveFailed = false
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
     private let emojiChoices = ["🌟","🍼","👣","🗣️","🦷","🚶","🏃","🎂","🥄","🚽","📚","🎨","🎵","💪","🧩","🌈"]
 

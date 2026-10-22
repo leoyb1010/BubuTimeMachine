@@ -52,7 +52,7 @@ private struct SecondBrainUnavailable: View {
     }
 }
 
-// MARK: - 每月成长小报
+// MARK: - 每月成长小报（布布成长月刊）
 
 struct MonthlyReportView: View {
     @Environment(AppEnvironment.self) private var env
@@ -68,14 +68,21 @@ struct MonthlyReportView: View {
                 VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
                     if let client {
                         if loading && reports.isEmpty {
-                            ProgressView("正在翻开成长小报…").frame(maxWidth: .infinity).padding(.vertical, 60)
+                            ProgressView("正在翻开成长月刊…").frame(maxWidth: .infinity).padding(.vertical, 60)
                         } else if reports.isEmpty {
-                            Text(errorText ?? "第一期小报会在下个月 1 号自动生成。")
-                                .font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText)
-                                .frame(maxWidth: .infinity).padding(.vertical, 60)
-                        }
-                        ForEach(Array(reports.enumerated()), id: \.element.id) { index, report in
-                            MonthlyReportCard(report: report, client: client).entranceEffect(index: index)
+                            VStack(spacing: BubuTheme.Spacing.m) {
+                                BubuMascotBadge(size: 96, expression: .thinking)
+                                Text(errorText ?? "第一期小报会在下个月 1 号自动生成。")
+                                    .font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText)
+                                    .multilineTextAlignment(.center)
+                                if errorText != nil {
+                                    Button("再试一次") { Task { await load(client) } }
+                                        .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                                }
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 60)
+                        } else {
+                            MonthlyMagazineShelf(reports: reports, client: client)
                         }
                     } else {
                         SecondBrainUnavailable(title: "每月成长小报")
@@ -85,79 +92,21 @@ struct MonthlyReportView: View {
                 .bubuContentColumn(860)
             }
         }
-        .navigationTitle("每月成长小报")
+        .navigationTitle("成长小报")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: client?.scope) {
             guard let client else { loading = false; return }
-            do { reports = try await client.get("api/monthly", as: MonthlyReportList.self).items; errorText = nil }
-            catch { errorText = learningErrorText(error) }
-            loading = false
+            await load(client)
         }
         .accessibilityIdentifier("brain.monthly")
     }
-}
 
-private struct MonthlyReportCard: View {
-    let report: MonthlyReportDTO
-    let client: BubuLearningClient
-    @State private var items: [OnlineTimelineItem] = []
-    @State private var selected: OnlineTimelineItem?
-
-    /// "深圳市 · 尚云花园" → "尚云花园"; at most three, no repeats.
-    private var shortPlaces: [String] {
-        var result: [String] = []
-        for place in report.places {
-            let short = place.components(separatedBy: " · ").last?.trimmingCharacters(in: .whitespaces) ?? place
-            if !short.isEmpty, !result.contains(short) { result.append(short) }
-            if result.count == 3 { break }
-        }
-        return result
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(OnlineTimelineBrowser.monthTitle(report.month)).font(BubuTheme.Font.caption.weight(.bold))
-                    .foregroundStyle(BubuTheme.Color.deepRose)
-                Spacer()
-                Text("照片 \(report.photos) · 视频 \(report.videos)").font(BubuTheme.Font.caption)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-            Text(report.title).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
-            if !items.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(items) { item in
-                            Button { selected = item } label: {
-                                Color.clear.frame(width: 112, height: 140)
-                                    .overlay { LearningRemoteImage(path: item.previewUrl, client: client, label: item.description, contentMode: .fill, diskCache: true) }
-                                    .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
-                            }.buttonStyle(BubuPressableStyle())
-                        }
-                    }
-                }
-            }
-            Text(report.summary).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
-            if !report.firsts.isEmpty {
-                Label("这个月的第一次：" + report.firsts.joined(separator: "、"), systemImage: "star.fill")
-                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.deepRose)
-            }
-            if !shortPlaces.isEmpty {
-                Label("去过：" + shortPlaces.joined(separator: "、"), systemImage: "mappin.and.ellipse")
-                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-            }
-        }
-        .padding(BubuTheme.Spacing.l)
-        .background(BubuTheme.Color.card.opacity(0.95), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .navigationDestination(item: $selected) { item in
-            OnlineTimelineDetailPager(client: client, items: items, initial: item, loadMore: {}, hasMore: false)
-        }
-        .task {
-            guard items.isEmpty, !report.highlightIds.isEmpty else { return }
-            items = (try? await client.get("api/online-timeline/items",
-                                           query: [URLQueryItem(name: "ids", value: report.highlightIds.prefix(12).joined(separator: ","))],
-                                           as: OnlineTimelineItems.self).items) ?? []
-        }
+    private func load(_ client: BubuLearningClient) async {
+        loading = true
+        do { reports = try await client.get("api/monthly", as: MonthlyReportList.self).items; errorText = nil }
+        catch let error where !isCancellation(error) { errorText = learningErrorText(error) }
+        catch {}
+        loading = false
     }
 }
 
@@ -223,7 +172,7 @@ struct BubuVoicesView: View {
         } label: {
             HStack(spacing: BubuTheme.Spacing.m) {
                 ZStack {
-                    Circle().fill(playing ? BubuTheme.Color.primary : BubuTheme.Color.pinkSurface)
+                    Circle().fill(playing ? BubuTheme.Color.actionFill : BubuTheme.Color.pinkSurface)
                     if voice.loading == clip.id {
                         ProgressView().tint(BubuTheme.Color.deepRose)
                     } else {
@@ -272,6 +221,13 @@ struct RecognitionView: View {
     @State private var batchBusy = false
     @State private var lastDecision: LastDecision?
     @State private var showHistory = false
+    /// Cards whose decision is in flight: a second tap during the fly-out animation is ignored.
+    @State private var deciding: Set<String> = []
+    /// Size of the current round, for the progress bar.
+    @State private var roundSize = 0
+
+    /// A short round keeps 认一认 light even when a thousand photos wait.
+    static let roundLimit = 10
 
     private struct LastDecision: Equatable {
         let candidate: RecognitionCandidateDTO
@@ -295,12 +251,13 @@ struct RecognitionView: View {
                     }
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("recognition.mode")
+                    if !queue.isEmpty || remaining > 0 { pendingHeader }
                     if batchMode {
                         Text("勾选几张一起确认，只影响布布的时光，不改第二大脑。")
                             .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
                     } else {
-                        Text("第二大脑不太确定这些照片里有没有布布。右滑“是布布”，左滑“不是”。只影响布布的时光，不改第二大脑。")
-                            .font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
+                        Text("右滑“是布布”，左滑“不是”。只影响布布的时光，不改第二大脑。")
+                            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
                     }
                     if let errorText, !queue.isEmpty {
                         SecondBrainErrorBanner(text: errorText) { self.errorText = nil }
@@ -321,33 +278,27 @@ struct RecognitionView: View {
                             }
                         }
                         .frame(maxHeight: .infinity)
+                        // The undo chip sits above the buttons so it never covers them.
+                        undoSlot(client)
                         HStack(spacing: BubuTheme.Spacing.l) {
                             decisionButton("不是", symbol: "xmark", tint: BubuTheme.Color.softFill, foreground: BubuTheme.Color.warmBrown) {
                                 Task { await decide(top, yes: false, client: client) }
                             }
                             .accessibilityIdentifier("recognition.no")
-                            decisionButton("是布布", symbol: "heart.fill", tint: BubuTheme.Color.primary, foreground: .white) {
+                            decisionButton("是布布", symbol: "heart.fill", tint: BubuTheme.Color.actionFill, foreground: .white) {
                                 Task { await decide(top, yes: true, client: client) }
                             }
                             .accessibilityIdentifier("recognition.yes")
                         }
-                        Text("本轮还剩 \(queue.count) 张 · 全部待确认约 \(max(remaining, queue.count)) 张")
-                            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                            .contentTransition(.numericText())
+                        .disabled(deciding.contains(top.id))
                     }
+                    if queue.isEmpty { undoSlot(client) }
                 } else {
                     SecondBrainUnavailable(title: "认一认")
                 }
             }
             .padding(BubuTheme.Spacing.l)
             .bubuContentColumn(640)
-        }
-        .overlay(alignment: .bottom) {
-            if let lastDecision, let client {
-                undoChip(lastDecision, client: client)
-                    .padding(.bottom, BubuTheme.Spacing.section)
-                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-            }
         }
         .navigationTitle("认一认")
         .navigationBarTitleDisplayMode(.inline)
@@ -371,6 +322,39 @@ struct RecognitionView: View {
         }
         .onChange(of: batchMode) { _, _ in picked = []; BubuHaptics.selection() }
         .accessibilityIdentifier("brain.recognition")
+    }
+
+    /// The pending count, front and centre: how many photos wait overall, and this round's progress.
+    private var pendingHeader: some View {
+        let total = max(remaining, queue.count)
+        let done = max(0, roundSize - queue.count)
+        return VStack(alignment: .leading, spacing: BubuTheme.Spacing.s) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(total)").font(BubuTheme.Font.hugeTitle.monospacedDigit()).foregroundStyle(BubuTheme.Color.deepRose)
+                    .contentTransition(.numericText())
+                Text("张可能是布布，等你认一认").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                Spacer(minLength: 0)
+            }
+            if !batchMode, roundSize > 0 {
+                ProgressView(value: Double(done), total: Double(max(roundSize, 1))).tint(BubuTheme.Color.primary)
+                Text(queue.isEmpty ? "这一轮认完啦" : "这一轮 \(done) / \(roundSize) · 认完 \(roundSize) 张就好")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    .contentTransition(.numericText())
+            }
+        }
+        .padding(BubuTheme.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BubuTheme.Color.pinkSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("recognition.pending")
+    }
+
+    @ViewBuilder
+    private func undoSlot(_ client: BubuLearningClient) -> some View {
+        if let lastDecision {
+            undoChip(lastDecision, client: client)
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     private func finished(_ client: BubuLearningClient) -> some View {
@@ -515,7 +499,7 @@ struct RecognitionView: View {
                     Task { await decideBatch(yes: false, client: client) }
                 }
                 .accessibilityIdentifier("recognition.batch.no")
-                decisionButton("都是布布", symbol: "heart.fill", tint: BubuTheme.Color.primary, foreground: .white) {
+                decisionButton("都是布布", symbol: "heart.fill", tint: BubuTheme.Color.actionFill, foreground: .white) {
                     Task { await decideBatch(yes: true, client: client) }
                 }
                 .accessibilityIdentifier("recognition.batch.yes")
@@ -533,9 +517,11 @@ struct RecognitionView: View {
         loading = true
         defer { loading = false }
         do {
-            let list = try await client.get("api/recognition/candidates", query: [URLQueryItem(name: "limit", value: "20")],
+            let list = try await client.get("api/recognition/candidates",
+                                            query: [URLQueryItem(name: "limit", value: String(Self.roundLimit))],
                                             as: RecognitionCandidateList.self)
             queue = list.items
+            roundSize = list.items.count
             remaining = list.remaining ?? list.items.count
             picked = []
             errorText = nil
@@ -545,7 +531,8 @@ struct RecognitionView: View {
     }
 
     private func decide(_ candidate: RecognitionCandidateDTO, yes: Bool, client: BubuLearningClient) async {
-        guard queue.first?.id == candidate.id else { return }
+        guard queue.first?.id == candidate.id, deciding.insert(candidate.id).inserted else { return }
+        defer { deciding.remove(candidate.id) }
         yes ? BubuHaptics.success() : BubuHaptics.selection()
         if !reduceMotion {
             withAnimation(Self.swipe) { drag = CGSize(width: yes ? 700 : -700, height: 60) }
@@ -563,8 +550,10 @@ struct RecognitionView: View {
             withAnimation(reduceMotion ? nil : BubuMotion.gentle) { lastDecision = LastDecision(candidate: candidate, yes: yes) }
         } catch {
             withAnimation(motion) {
-                queue.insert(candidate, at: 0)
-                remaining += 1
+                if !queue.contains(where: { $0.id == candidate.id }) {
+                    queue.insert(candidate, at: 0)
+                    remaining += 1
+                }
             }
             errorText = learningErrorText(error, fallback: "没有保存成功（需要家长账号），请稍后再试。")
         }

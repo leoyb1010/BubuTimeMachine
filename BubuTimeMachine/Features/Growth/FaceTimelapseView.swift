@@ -376,7 +376,7 @@ struct FaceTimelapseView: View {
     }
 
     private func start() async {
-        guard let birthday = profiles.first?.birthday else { return }
+        guard let birthday = ChildProfile.canonical(from: profiles)?.birthday else { return }
         await model.build(client: client, birthday: birthday)
     }
 
@@ -388,7 +388,7 @@ struct FaceTimelapseView: View {
         case .failed(let message):
             stateCard(expression: .thinking, text: message)
         default:
-            if profiles.first == nil {
+            if ChildProfile.canonical(from: profiles) == nil {
                 stateCard(expression: .thinking, text: "先在档案里填上布布的生日，才能按月龄排好每一张脸。")
             } else if model.frames.count >= 2 {
                 FaceTimelapsePlayer(frames: model.frames)
@@ -521,7 +521,7 @@ struct FaceTimelapsePlayer: View {
                             .font(BubuTheme.Font.headline)
                             .foregroundStyle(.white)
                             .frame(width: 48, height: 48)
-                            .background(BubuTheme.Color.primary, in: Circle())
+                            .background(BubuTheme.Color.actionFill, in: Circle())
                             .contentTransition(.symbolEffect(.replace))
                     }
                     .buttonStyle(BubuPressableStyle())

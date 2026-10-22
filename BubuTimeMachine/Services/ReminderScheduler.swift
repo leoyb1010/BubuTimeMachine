@@ -154,7 +154,7 @@ final class ReminderScheduler {
             d.fetchLimit = Self.onThisDayScanLimit
             return (try? context.fetch(d)) ?? []
         }()
-        let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first
+        let profile = ChildProfile.canonical(in: context)
         var bucket: [Int: [Entry]] = [:]
         for e in entries {
             let c = cal.dateComponents([.month, .day], from: e.happenedAt)
@@ -242,7 +242,7 @@ final class ReminderScheduler {
         let allIds = VaccineDose.schedule.flatMap { ["\(vaccinePrefix)\($0.id).pre", "\(vaccinePrefix)\($0.id).due"] }
         center.removePendingNotificationRequests(withIdentifiers: allIds)
 
-        guard let profile = try? context.fetch(FetchDescriptor<ChildProfile>()).first else { return }
+        guard let profile = ChildProfile.canonical(in: context) else { return }
         let recorded = Set(((try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []).compactMap(\.doseId))
         let cal = Calendar.current
         let now = Date.now

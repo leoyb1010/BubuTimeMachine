@@ -13,6 +13,8 @@ nonisolated enum NativeLearningPlaybackPolicy {
 
 /// Authenticated media is loaded through the client, never through an unauthenticated AsyncImage URL.
 /// Decoded at the displayed pixel size (bucketed) so a grid of thumbnails stays small in memory.
+/// While loading it shows a soft fill, never a spinner,
+/// and the picture fades in — a screen of per-cell spinners reads as "slow" and pops one by one.
 struct LearningRemoteImage: View {
     let path: String
     let client: BubuLearningClient
@@ -21,6 +23,7 @@ struct LearningRemoteImage: View {
     var diskCache = false
     var maxHeight: CGFloat? = nil
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var image: UIImage?
     @State private var imagePath = ""
     @State private var failed = false
@@ -28,13 +31,20 @@ struct LearningRemoteImage: View {
     /// Longest side in pixels; 0 until the first layout.
     @State private var bucket = 0
 
-    private var key: String { client.scope + "|" + path + "|" + String(bucket) }
+    private var key: String { LearningImagePipeline.key(scope: client.scope, path: path, bucket: bucket) }
 
     var body: some View {
+        let shown = cached ?? (imagePath == path ? image : nil)
         ZStack {
-            if let image = cached ?? (imagePath == path ? image : nil) {
-                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
+            if shown == nil {
+                BubuTheme.Color.softFill.opacity(0.6)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
+            if let shown {
+                Image(uiImage: shown).resizable().aspectRatio(contentMode: contentMode)
                     .accessibilityLabel(label)
+                    .transition(.opacity)
             } else if failed {
                 VStack(spacing: BubuTheme.Spacing.s) {
                     Image(systemName: "photo.badge.exclamationmark").font(.title3)
@@ -43,11 +53,10 @@ struct LearningRemoteImage: View {
                 }
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: maxHeight)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: shown != nil)
         .onGeometryChange(for: CGFloat.self) { max($0.size.width, $0.size.height) } action: { side in
             guard side > 0 else { return }
             // Only grow: a smaller layout reuses the sharper image already decoded.
@@ -58,10 +67,8 @@ struct LearningRemoteImage: View {
             guard bucket > 0, cached == nil || retry > 0 else { return }
             failed = false
             do {
-                let data = try await client.mediaData(path, cache: diskCache)
+                let decoded = try await LearningImagePipeline.load(path, client: client, bucket: bucket, diskCache: diskCache)
                 try Task.checkCancellation()
-                guard let decoded = await Self.decode(data, maxPixel: bucket) else { failed = true; return }
-                LearningImageMemory.shared.store(decoded, for: key)
                 image = decoded
                 imagePath = path
             } catch where isCancellation(error) {
@@ -72,15 +79,14 @@ struct LearningRemoteImage: View {
     /// Any already-decoded copy at this size or sharper.
     private var cached: UIImage? {
         guard bucket > 0 else { return nil }
-        for size in LearningImageDecoder.buckets where size >= bucket {
-            if let hit = LearningImageMemory.shared.image(client.scope + "|" + path + "|" + String(size)) { return hit }
-        }
-        return nil
+        return LearningImagePipeline.cached(scope: client.scope, path: path, atLeast: bucket)
     }
 
-    @concurrent
-    private static func decode(_ data: Data, maxPixel: Int) async -> UIImage? {
-        LearningImageDecoder.downsample(data, maxPixel: maxPixel)
+    /// Warms disk and memory for cells about to scroll into view (call from a row's `onAppear`).
+    /// `pointSize` is the cell's longest side.
+    static func prefetch(_ path: String, client: BubuLearningClient, pointSize: CGFloat, displayScale: CGFloat) async {
+        await LearningImagePipeline.prefetch(path, client: client,
+                                             bucket: LearningImageDecoder.bucket(forPixels: pointSize * displayScale))
     }
 }
 

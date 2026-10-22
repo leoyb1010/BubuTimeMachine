@@ -112,20 +112,33 @@ enum BubuActivityController {
     // MARK: 课程上传 / 解析
 
     /// 正在跟踪的课程（创建成功后才有 id）。同一时刻只跟踪一节课。
-    private static var courseUploadID: String?
-    private static var courseUploadStartedAt: Date?
+    /// 存进 UserDefaults：App 被挂起/杀掉后，下次启动或回前台还能找到它、按服务端状态收尾。
+    private static let courseIDKey = "bubu.liveActivity.courseUpload.id"
+    private static let courseStartedKey = "bubu.liveActivity.courseUpload.startedAt"
+    private static var courseUploadID: String? {
+        get { UserDefaults.standard.string(forKey: courseIDKey) }
+        set { UserDefaults.standard.set(newValue, forKey: courseIDKey) }
+    }
+    private static var courseUploadStartedAt: Date? {
+        get { UserDefaults.standard.object(forKey: courseStartedKey) as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: courseStartedKey) }
+    }
     private static var lastCourseUploadState: BubuActivityAttributes.ContentState?
+    /// 本进程里是否真的有压缩/上传在跑。启动时发现「上传中」的活动而本进程没在传，说明上次被杀/挂起了。
+    private(set) static var courseUploadInProgress = false
     /// 解析可能要几十分钟；超过这个时间仍没结果就收起，避免锁屏一直挂着。
     static let courseUploadTimeout: TimeInterval = 45 * 60
 
     /// 点「上传」时调用。已有上传 Activity 时先结束旧的。
-    static func startCourseUpload(title: String, childName: String) {
+    static func startCourseUpload(title: String, childName: String, schoolDate: String? = nil) {
         endCourseUploadActivities(final: nil)
         courseUploadID = nil
         courseUploadStartedAt = .now
+        courseUploadInProgress = true
         lastCourseUploadState = nil
         guard isEnabled else { return }
-        let attributes = BubuActivityAttributes(kind: .courseUpload, title: title, unlockAt: nil, childName: childName)
+        let attributes = BubuActivityAttributes(kind: .courseUpload, title: title, unlockAt: nil, childName: childName,
+                                                deepLink: schoolDate.map(BubuActivityAttributes.learningURL(schoolDate:)))
         let state = BubuActivityAttributes.ContentState(startedAt: .now, elapsedText: "",
                                                         uploadPhase: .compressing, progress: 0)
         do {
@@ -137,7 +150,7 @@ enum BubuActivityController {
         }
     }
 
-    /// 课程已在服务端创建：之后由首页轮询按课程状态推进。
+    /// 课程已在服务端创建：之后按课程状态推进（首页轮询 + 启动/回前台核对）。
     static func attachCourseUpload(courseID: String) {
         courseUploadID = courseID
     }
@@ -145,6 +158,7 @@ enum BubuActivityController {
     /// 压缩/上传过程中的进度。压缩进度按 5% 一档节流，避免频繁刷新锁屏。
     static func updateCourseUpload(phase: CourseUploadActivityPhase, progress: Double? = nil,
                                    step: Int? = nil, steps: Int? = nil) {
+        if phase != .compressing && phase != .uploading { courseUploadInProgress = false }
         let state = BubuActivityAttributes.ContentState(startedAt: courseUploadStartedAt ?? .now, elapsedText: "",
                                                         uploadPhase: phase, progress: progress, step: step, steps: steps)
         if let last = lastCourseUploadState, last.uploadPhase == phase, last.step == step,
@@ -161,29 +175,80 @@ enum BubuActivityController {
         }
     }
 
-    /// 上传本身失败（课程已删除）：显示温和的失败态后收起。
+    /// 上传本身没完成（网络断了、被挂起）：显示温和的失败态后收起。
     static func failCourseUpload() {
-        courseUploadID = nil
+        courseUploadInProgress = false
         updateCourseUpload(phase: .failed)
     }
 
     /// 首页每次拿到课程列表时调用：跟踪的课程到了草稿/失败就结束；超时也结束。
     static func syncCourseUpload(with courses: [(id: String, state: String)]) {
         guard let id = courseUploadID else { return }
-        if let started = courseUploadStartedAt, Date.now.timeIntervalSince(started) > courseUploadTimeout {
-            courseUploadID = nil
+        if isTimedOut {
+            clearTracking()
             endCourseUploadActivities(final: nil)
             return
         }
         guard let course = courses.first(where: { $0.id == id }),
               let phase = CourseUploadActivityPhase.from(courseState: course.state),
               phase != .uploading else { return }
-        if phase.isTerminal { courseUploadID = nil }
         updateCourseUpload(phase: phase)
     }
 
-    private static func finishCourseUpload(_ state: BubuActivityAttributes.ContentState) {
+    /// App 启动 / 回到前台时调用（任何页面）：把留在锁屏上的课程活动按实际情况推进或收尾。
+    /// - 超时：直接收起。
+    /// - 显示「压缩中/上传中」但本进程没在传：上次被挂起或杀掉了，显示「没有完成」。
+    /// - 已有课程 id：问一次服务端，到了草稿/失败就收尾，还在解析就保持。
+    /// - 找不到这节课（被删了）：收起。
+    static func reconcileCourseUploads(client: BubuLearningClient?) async {
+        let activities = Activity<BubuActivityAttributes>.activities.filter { $0.attributes.kind == .courseUpload }
+        guard !activities.isEmpty else {
+            if !courseUploadInProgress { clearTracking() }
+            return
+        }
+        guard !courseUploadInProgress else { return }
+        let phase = activities.compactMap { $0.content.state.uploadPhase }.first
+        let action = CourseUploadReconciler.action(phase: phase, trackedID: courseUploadID,
+                                                   timedOut: isTimedOut, hasClient: client != nil)
+        switch action {
+        case .keep:
+            return
+        case .dismiss:
+            clearTracking()
+            endCourseUploadActivities(final: nil)
+        case .markFailed:
+            failCourseUpload()
+        case .askServer(let id):
+            guard let client else { return }
+            do {
+                let course = try await client.get("api/courses/\(id)", as: LearningCourseDetailDTO.self)
+                guard courseUploadID == id else { return }
+                if let next = CourseUploadActivityPhase.from(courseState: course.state) {
+                    // 服务端还停在「上传中」= 文件没传齐，而本进程已经不在传了。
+                    updateCourseUpload(phase: next == .uploading ? .failed : next)
+                }
+            } catch let error as LearningServiceError where error == .server(404) {
+                clearTracking()
+                endCourseUploadActivities(final: nil)
+            } catch {
+                log.error("核对课程上传状态失败：\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private static var isTimedOut: Bool {
+        guard let started = courseUploadStartedAt else { return false }
+        return Date.now.timeIntervalSince(started) > courseUploadTimeout
+    }
+
+    private static func clearTracking() {
         courseUploadID = nil
+        courseUploadStartedAt = nil
+    }
+
+    private static func finishCourseUpload(_ state: BubuActivityAttributes.ContentState) {
+        clearTracking()
+        courseUploadInProgress = false
         endCourseUploadActivities(final: state)
     }
 
@@ -195,7 +260,7 @@ enum BubuActivityController {
         Task {
             for activity in Activity<BubuActivityAttributes>.activities where ids.contains(activity.id) {
                 if let final {
-                    // 结果在锁屏停留几分钟，家长解锁就能看到「草稿可审核」；失败只停留一小会儿。
+                    // 结果在锁屏停留一会儿（点一下直达那天的学习页）；失败只停留一小会儿。
                     let linger: TimeInterval = final.uploadPhase == .ready ? 10 * 60 : 2 * 60
                     await activity.end(.init(state: final, staleDate: nil),
                                        dismissalPolicy: .after(.now.addingTimeInterval(linger)))
@@ -215,11 +280,12 @@ enum BubuActivityController {
     static func startSleepTimer(childName: String, startedAt: Date) {}
     static func endSleepTimer(elapsedText: String) {}
     static func startCapsuleCountdown(title: String, unlockAt: Date, childName: String) {}
-    static func startCourseUpload(title: String, childName: String) {}
+    static func startCourseUpload(title: String, childName: String, schoolDate: String? = nil) {}
     static func attachCourseUpload(courseID: String) {}
     static func updateCourseUpload(phase: CourseUploadActivityPhase, progress: Double? = nil,
                                    step: Int? = nil, steps: Int? = nil) {}
     static func failCourseUpload() {}
     static func syncCourseUpload(with courses: [(id: String, state: String)]) {}
+    static func reconcileCourseUploads(client: BubuLearningClient?) async {}
 }
 #endif

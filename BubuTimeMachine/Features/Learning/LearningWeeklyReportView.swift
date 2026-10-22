@@ -241,7 +241,23 @@ struct LearningWeeklyReportView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
                     weekSwitcher
-                    if let summary {
+                    if let errorText, summary != nil {
+                        // 刷新失败但还留着这一周的旧数据：明说，并给重试，不把旧数据当成新数据。
+                        HStack(alignment: .top, spacing: BubuTheme.Spacing.s) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(BubuTheme.Color.warning)
+                                .accessibilityHidden(true)
+                            Text("没能刷新：\(errorText)").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.warmBrown)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            Button("重试") { Task { await load() } }.font(BubuTheme.Font.caption.weight(.bold))
+                                .tint(BubuTheme.Color.deepRose).frame(minHeight: 44)
+                        }
+                        .padding(.horizontal, BubuTheme.Spacing.m).padding(.vertical, BubuTheme.Spacing.xs)
+                        .background(BubuTheme.Color.butterSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("learning.weekly.error")
+                    }
+                    if let summary, summary.weekStart == weekStart {
                         summaryCard(summary)
                         dailyChart(summary)
                         accuracySection(summary)
@@ -257,6 +273,7 @@ struct LearningWeeklyReportView: View {
                         }
                     } else {
                         ProgressView("正在整理这一周…").frame(maxWidth: .infinity).padding(.vertical, 60)
+                            .accessibilityIdentifier("learning.weekly.loading")
                     }
                 }
                 .padding(BubuTheme.Spacing.item)
@@ -276,6 +293,7 @@ struct LearningWeeklyReportView: View {
         HStack {
             Button { shift(-7) } label: { Label("上一周", systemImage: "chevron.left") }
             Spacer()
+            if loading && summary != nil { ProgressView().controlSize(.small) }
             Text("\(dayLabel(weekStart)) – \(dayLabel(weekEnd))")
                 .font(BubuTheme.Font.body.weight(.semibold))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
@@ -455,7 +473,10 @@ struct LearningWeeklyReportView: View {
     }
 
     private func shift(_ days: Int) {
+        // 换周时立刻清掉上一周的内容和错误，页头和内容永远是同一周。
         weekStart = LearningWeeklySummary.calendar.date(byAdding: .day, value: days, to: weekStart) ?? weekStart
+        summary = nil
+        errorText = nil
     }
 
     private func load() async {
@@ -465,13 +486,15 @@ struct LearningWeeklyReportView: View {
         var base = [URLQueryItem]()
         if let childID { base.append(URLQueryItem(name: "child_id", value: childID)) }
         let reviewDay = min(weekEnd, .now)
-        let courseQuery = base + [URLQueryItem(name: "start", value: BubuLearningDates.dayString(weekStart)),
-                                  URLQueryItem(name: "end", value: BubuLearningDates.dayString(weekEnd))]
+        let range = [URLQueryItem(name: "start", value: BubuLearningDates.dayString(weekStart)),
+                     URLQueryItem(name: "end", value: BubuLearningDates.dayString(weekEnd))]
+        let courseQuery = base + range
         let reviewQuery = base + [URLQueryItem(name: "period", value: "week"),
                                   URLQueryItem(name: "date", value: BubuLearningDates.dayString(reviewDay))]
         do {
             async let courseList = client.get("api/courses", query: courseQuery, as: LearningCourseList.self)
-            async let attemptList = client.get("api/attempts", query: base, as: LearningAttemptRecordList.self)
+            // 带上周的起止日期：服务端支持时只返回这一周，不再受「最新 1000 条」截断；不支持时会忽略。
+            async let attemptList = client.get("api/attempts", query: base + range, as: LearningAttemptRecordList.self)
             async let reviewList = client.get("api/reviews", query: reviewQuery, as: LearningReviewDTO.self)
             let (courses, attempts) = try await (courseList, attemptList)
             // 复习建议拿不到不影响周报其他部分。
@@ -482,7 +505,8 @@ struct LearningWeeklyReportView: View {
             errorText = nil
         } catch is CancellationError {
         } catch {
-            if summary == nil { errorText = learningErrorText(error) }
+            guard requested == weekStart else { return }
+            errorText = learningErrorText(error)
         }
     }
 }

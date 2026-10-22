@@ -86,7 +86,7 @@ enum EntryWriter {
 
     /// 读取当前布布档案（Intent 念年龄 / 小组件取生日用）。无档案返回 nil。
     static func currentChildProfile(in context: ModelContext) -> ChildProfile? {
-        try? context.fetch(FetchDescriptor<ChildProfile>()).first
+        ChildProfile.canonical(in: context)
     }
 }
 

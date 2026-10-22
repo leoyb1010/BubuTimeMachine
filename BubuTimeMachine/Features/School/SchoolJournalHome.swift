@@ -9,11 +9,13 @@ struct SchoolJournalHome: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Namespace private var dateSelection
     @State private var day = Calendar.current.startOfDay(for: Date.now)
     @State private var composing = false
     @State private var calendarOpen = false
     @State private var scrollRevision = 0
+    @ScaledMetric(relativeTo: .title3) private var actionCircle: CGFloat = 40
 
     private var week: [Date] {
         let weekday = Calendar.current.component(.weekday, from: day)
@@ -23,9 +25,10 @@ struct SchoolJournalHome: View {
     var body: some View {
         ScrollViewReader { proxy in
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center) {
-                    Text("幼儿园").font(.system(size: 27, weight: .heavy, design: .rounded))
+                    Text("幼儿园").font(BubuTheme.Font.title)
+                        .accessibilityAddTraits(.isHeader)
                     Spacer()
                     NavigationLink { SchoolJournalHistory() } label: {
                         headerAction("历史", symbol: "clock.arrow.circlepath", filled: false)
@@ -34,25 +37,31 @@ struct SchoolJournalHome: View {
                         headerAction("记录", symbol: "plus", filled: true)
                     }.accessibilityIdentifier("journal.primary")
                 }.buttonStyle(.plain)
-                ZStack(alignment: .bottom) {
-                    Image(systemName: "heart.fill").font(.system(size: 12)).rotationEffect(.degrees(-18))
-                        .foregroundStyle(SchoolPalette.coral.opacity(0.6)).offset(x: -70, y: -22).accessibilityHidden(true)
-                    Image("SchoolGirl").resizable().scaledToFit().frame(width: 118, height: 82)
-                        .offset(x: -8, y: -10).accessibilityHidden(true)
-                        .opacity(typeSize.isAccessibilitySize ? 0 : 1)
-                    HStack(alignment: .bottom, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Button { calendarOpen = true } label: {
+                // 日期与吉祥物一行；周历单独占满整行，日期格不小于 44pt。
+                HStack(alignment: .bottom, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button { calendarOpen = true } label: {
+                            HStack(spacing: 4) {
                                 Text("\(Calendar.current.component(.month, from: day))月\(Calendar.current.component(.day, from: day))日")
-                                    .font(.system(.subheadline, design: .rounded).weight(.bold))
-                            }.buttonStyle(.plain).accessibilityIdentifier("school.choose-date")
-                            Text(day.formatted(.dateTime.weekday(.wide).locale(Locale(identifier: "zh_CN"))))
-                                .font(.caption).foregroundStyle(SchoolPalette.secondary)
-                            Text("今天也很棒呀！").font(.system(size: 11)).foregroundStyle(SchoolPalette.ink)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                        weekStrip.frame(width: 158)
-                    }.padding(.bottom, 18)
-                }.frame(height: typeSize.isAccessibilitySize ? 140 : 52)
+                                    .font(BubuTheme.Font.headline)
+                                Image(systemName: "chevron.down").font(.caption.weight(.bold)).accessibilityHidden(true)
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityIdentifier("school.choose-date")
+                            .accessibilityHint("打开日历选择哪一天")
+                        Text(day.formatted(.dateTime.weekday(.wide).locale(Locale(identifier: "zh_CN"))))
+                            .font(BubuTheme.Font.caption).foregroundStyle(SchoolPalette.secondary)
+                        Text("今天也很棒呀！").font(.system(.footnote, design: .rounded)).foregroundStyle(SchoolPalette.ink)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    if !typeSize.isAccessibilitySize {
+                        Image("SchoolGirl").resizable().scaledToFit().frame(width: 118, height: 82)
+                            .overlay(alignment: .topLeading) {
+                                Image(systemName: "heart.fill").font(.caption).rotationEffect(.degrees(-18))
+                                    .foregroundStyle(SchoolPalette.coral.opacity(0.6)).offset(x: -10, y: 2)
+                            }
+                            .accessibilityHidden(true)
+                    }
+                }
+                weekStrip
                 NavigationLink { DailyLearningHomeView(initialDay: day) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "graduationcap.fill").foregroundStyle(env.theme.theme.textAccent)
@@ -79,7 +88,7 @@ struct SchoolJournalHome: View {
                     }.padding(.vertical, 12).contentShape(Rectangle())
                 }.buttonStyle(.plain)
             }
-            .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 10).bubuContentColumn(760)
+            .padding(.horizontal, BubuTheme.Spacing.item).padding(.top, 4).padding(.bottom, BubuTheme.Spacing.item).bubuContentColumn(760)
             .id("school.day-top")
         }
         .onChange(of: scrollRevision) { _, _ in
@@ -88,8 +97,17 @@ struct SchoolJournalHome: View {
         }
         .foregroundStyle(BubuTheme.Color.warmBrown)
         .background {
+            // 纸张铺满整屏（含状态栏）：GeometryReader 先忽略安全区拿到全屏尺寸，再在全屏范围内裁切，
+            // 底下垫一层与纸张同色的底色，状态栏下不会再露出白条。
             if colorScheme == .dark { BubuTheme.Color.background.ignoresSafeArea() }
-            else { Image("SchoolPaper").resizable().scaledToFill().ignoresSafeArea().clipped() }
+            else {
+                GeometryReader { proxy in
+                    Image("SchoolPaper").resizable().scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height).clipped()
+                }
+                .background(SchoolPalette.paper)
+                .ignoresSafeArea()
+            }
         }
         .tint(env.theme.theme.textAccent)
         .toolbar(.hidden, for: .navigationBar)
@@ -106,6 +124,11 @@ struct SchoolJournalHome: View {
         }
         .accessibilityIdentifier("school.home")
         .bubuSensoryFeedback(.selection, trigger: day)
+        // 每日学习的入口在这一页：回到前台时顺手把锁屏上留下的课程上传活动推进或收尾。
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await BubuActivityController.reconcileCourseUploads(client: BubuLearningClient(env: env)) }
+        }
         .overlay(alignment: .bottom) {
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("-uitest-motion-check") {
@@ -115,6 +138,7 @@ struct SchoolJournalHome: View {
             #endif
         }
         .task {
+            await BubuActivityController.reconcileCourseUploads(client: BubuLearningClient(env: env))
             #if DEBUG && targetEnvironment(simulator)
             SchoolJournalFixture.insertIfRequested(into: modelContext)
             if ProcessInfo.processInfo.arguments.contains("-uitest-in-memory"),
@@ -139,40 +163,57 @@ struct SchoolJournalHome: View {
 
     private func headerAction(_ title: String, symbol: String, filled: Bool) -> some View {
         VStack(spacing: 2) {
-            Image(systemName: symbol).font(.system(size: 23, weight: .semibold))
+            Image(systemName: symbol).font(.system(.title3).weight(.semibold))
                 .foregroundStyle(filled ? .white : SchoolPalette.ink)
-                .frame(width: 36, height: 36)
-                .background(filled ? SchoolPalette.coral : BubuTheme.Color.card, in: Circle())
-            Text(title).font(.system(size: 10))
-        }.frame(minWidth: 44, minHeight: 48)
+                .frame(width: actionCircle, height: actionCircle)
+                .background(filled ? SchoolPalette.coralInk : BubuTheme.Color.card, in: Circle())
+            Text(title).font(.system(.caption, design: .rounded).weight(.medium))
+        }.frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
     }
 
+    @ViewBuilder
     private var weekStrip: some View {
-        HStack(spacing: 1) {
+        HStack(spacing: 2) {
             Button { shiftWeek(-7) } label: {
-                Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold)).frame(width: 15, height: 44)
-            }.accessibilityLabel("上一周")
-            // Five consecutive days keep Saturday/Sunday selectable, unlike a fixed school-week strip.
-            ForEach((-2...2), id: \.self) { offset in
-                let date = Calendar.current.date(byAdding: .day, value: offset, to: day) ?? day
-                let selected = offset == 0
-                Button { selectDay(date) } label: {
-                    VStack(spacing: 5) {
-                        Text(["周日", "周一", "周二", "周三", "周四", "周五", "周六"][Calendar.current.component(.weekday, from: date) - 1])
-                            .font(.system(size: 8))
-                        Text("\(Calendar.current.component(.day, from: date))")
-                            .font(.system(size: 12, weight: selected ? .bold : .medium, design: .rounded)).monospacedDigit()
-                    }.frame(maxWidth: .infinity, minHeight: 40)
-                        .foregroundStyle(selected ? .white : SchoolPalette.ink)
-                        .background(selected ? SchoolPalette.coral : .clear, in: Capsule())
-                }.buttonStyle(.plain).disabled(date > Date.now)
-                    .accessibilityLabel(BubuDateFormat.shortDate(date))
-                    .accessibilityAddTraits(selected ? .isSelected : [])
+                Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 44, height: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("上一周")
+            // 大字号下五个日期格放不下：改成可横向滑动的一行，格子保持 ≥ 64pt。
+            if typeSize.isAccessibilitySize {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) { dayCells(minWidth: 72) }
+                }
+            } else {
+                dayCells(minWidth: 44)
             }
             Button { shiftWeek(7) } label: {
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).frame(width: 15, height: 44)
-            }.accessibilityLabel("下一周").disabled(Calendar.current.isDateInToday(day))
-        }.padding(5).background(BubuTheme.Color.card.opacity(0.85), in: Capsule())
+                Image(systemName: "chevron.right").font(.body.weight(.semibold)).frame(width: 44, height: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("下一周").disabled(Calendar.current.isDateInToday(day))
+        }
+        .padding(4)
+        .background(BubuTheme.Color.card.opacity(0.85), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
+    }
+
+    /// Five consecutive days keep Saturday/Sunday selectable, unlike a fixed school-week strip.
+    private func dayCells(minWidth: CGFloat) -> some View {
+        ForEach((-2...2), id: \.self) { offset in
+            let date = Calendar.current.date(byAdding: .day, value: offset, to: day) ?? day
+            let selected = offset == 0
+            Button { selectDay(date) } label: {
+                VStack(spacing: 2) {
+                    Text(["周日", "周一", "周二", "周三", "周四", "周五", "周六"][Calendar.current.component(.weekday, from: date) - 1])
+                        .font(.system(.caption2, design: .rounded))
+                    Text("\(Calendar.current.component(.day, from: date))")
+                        .font(.system(.body, design: .rounded).weight(selected ? .bold : .medium)).monospacedDigit()
+                }
+                .frame(maxWidth: .infinity, minHeight: 52).frame(minWidth: minWidth)
+                .foregroundStyle(selected ? .white : SchoolPalette.ink)
+                .background(selected ? SchoolPalette.coralInk : .clear,
+                            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain).disabled(date > Date.now)
+                .accessibilityLabel(BubuDateFormat.shortDate(date))
+                .accessibilityAddTraits(selected ? .isSelected : [])
+        }
     }
     private func shiftWeek(_ offset: Int) {
         if let next = Calendar.current.date(byAdding: .day, value: offset, to: day) {
@@ -261,7 +302,7 @@ private struct SchoolDayEntries: View {
             }
             ForEach(entries) { entry in
                 if let report = SchoolDailyReport.from(note: entry.note) {
-                    SchoolReportCard(entry: entry, report: report, profileName: profiles.first?.name, profileBirthday: profiles.first?.birthday,
+                    SchoolReportCard(entry: entry, report: report, profileName: ChildProfile.canonical(from: profiles)?.name, profileBirthday: ChildProfile.canonical(from: profiles)?.birthday,
                                      onCorrectedDate: onCorrectedDate)
                 } else {
                     NavigationLink { EntryDetailView(entry: entry) } label: {

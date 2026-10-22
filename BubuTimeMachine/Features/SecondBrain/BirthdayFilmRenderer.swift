@@ -87,6 +87,8 @@ nonisolated enum BirthdayFilmRenderer {
             for frame in 0..<frameCount {
                 try Task.checkCancellation()
                 while !input.isReadyForMoreMediaData {
+                    // A failed writer never becomes ready again; leave instead of spinning forever.
+                    guard writer.status == .writing else { throw writer.error ?? BirthdayFilmError.writer }
                     try await Task.sleep(for: .milliseconds(4))
                 }
                 guard let pool = adaptor.pixelBufferPool else { throw BirthdayFilmError.writer }

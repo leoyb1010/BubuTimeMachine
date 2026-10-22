@@ -29,7 +29,7 @@ struct CapsuleComposeView: View {
     @State private var loadedIdentity: CapsuleDraftCommit.Identity?
 
     private var theme: Color { env.theme.theme.primary }
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private let emojiChoices = ["💌","🎁","🌟","🎂","🧸","🌷","📮","🕰️","💝","🍼"]
 
     init(editing: TimeCapsule? = nil) {
@@ -307,7 +307,7 @@ struct CapsuleComposeView: View {
                     // 蜡章：从上方重重落下，带一点旋转的「盖章感」
                     ZStack {
                         Circle()
-                            .fill(BubuTheme.Color.deepRose)
+                            .fill(BubuTheme.Color.actionFill)
                             .frame(width: 58, height: 58)
                             .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 2).padding(5))
                             .shadow(color: .black.opacity(0.3), radius: 6, y: 3)

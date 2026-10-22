@@ -338,7 +338,11 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         return _call(service_factory, 'reviews', scope, scope.require_child(child_id), period, date)
 
     @router.get('/attempts')
-    def attempts(child_id: str | None = Query(None, max_length=128), scope: FamilyScope = Depends(_scope)):
+    def attempts(child_id: str | None = Query(None, max_length=128), start: str | None = Query(None, max_length=10),
+                 end: str | None = Query(None, max_length=10), scope: FamilyScope = Depends(_scope)):
+        # Optional yyyy-MM-dd window (Asia/Shanghai days, inclusive) for the weekly learning report.
+        if start or end:
+            return _call(service_factory, 'attempts', scope, scope.require_child(child_id), start, end)
         return _call(service_factory, 'attempts', scope, scope.require_child(child_id))
 
     @router.post('/attempts')
@@ -367,8 +371,9 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
                         start: str | None = Query(None, max_length=10), end: str | None = Query(None, max_length=10),
                         order: Literal['asc', 'desc'] = 'desc', page: int = Query(1, ge=1, le=10000),
                         limit: int = Query(40, ge=1, le=100), person: str | None = Query(None, max_length=40),
-                        scope: FamilyScope = Depends(_scope)):
-        return _timeline(service_factory, 'feed', scope, query, kind, start, end, order, page, limit, person)
+                        collapse_bursts: bool = False, scope: FamilyScope = Depends(_scope)):
+        return _timeline(service_factory, 'feed', scope, query, kind, start, end, order, page, limit, person,
+                         collapse_bursts)
 
     @router.get('/online-timeline/people')
     def online_people(scope: FamilyScope = Depends(_scope)):
@@ -481,7 +486,7 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         return _feature(service_factory, 'social', 'heart', scope, fid, body.on)
 
     @router.get('/online-timeline/{fid}/preview')
-    def online_preview(fid: str, size: Literal['thumb', 'large'] = 'thumb', scope: FamilyScope = Depends(_scope)):
+    def online_preview(fid: str, size: Literal['thumb', 'card', 'large'] = 'thumb', scope: FamilyScope = Depends(_scope)):
         return _file(_timeline(service_factory, 'media', scope, fid, size))
 
     @router.get('/online-timeline/{fid}/original')

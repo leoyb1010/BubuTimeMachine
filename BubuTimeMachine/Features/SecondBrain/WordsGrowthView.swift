@@ -53,7 +53,11 @@ struct WordsGrowthView: View {
         .task(id: client?.scope) {
             guard let client else { loading = false; return }
             do {
-                let response = try await client.get("api/words", as: WordsResponseDTO.self)
+                let raw = try await client.get("api/words", as: WordsResponseDTO.self)
+                // Hide speech-recognition fragments and recount, so the headline matches the chips.
+                let response = WordsResponseDTO(months: SecondBrainHygiene.cleanedMonths(raw.months),
+                                                firsts: SecondBrainHygiene.cleanedFirsts(raw.firsts),
+                                                sourceCount: raw.sourceCount, pending: raw.pending)
                 data = response
                 selectedMonth = response.months.last?.month
                 errorText = nil
@@ -76,9 +80,13 @@ struct WordsGrowthView: View {
         HStack(spacing: BubuTheme.Spacing.m) {
             BubuMascotBadge(size: 60, expression: .happy)
             VStack(alignment: .leading, spacing: 4) {
-                Text("会说 \(data.months.last?.total ?? data.firsts.count) 个词啦")
+                Text("录到她说过的 \(data.months.last?.total ?? data.firsts.count) 个词")
                     .font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
-                if let count = data.sourceCount, count > 0 {
+                    .contentTransition(.numericText())
+                if let first = data.months.first?.month {
+                    Text("从 \(SecondBrainMonths.caption(first)) 开始记录" + ((data.sourceCount ?? 0) > 0 ? " · \(data.sourceCount ?? 0) 段确认过的声音" : ""))
+                        .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                } else if let count = data.sourceCount, count > 0 {
                     Text("来自 \(count) 段确认过的布布说的话").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 }
                 if let pending = data.pending, pending > 0 {
@@ -97,7 +105,13 @@ struct WordsGrowthView: View {
         let points = data.months.filter { $0.date != nil }
         let selected = data.months.first { $0.month == selectedMonth }
         return VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
-            Text("累计会说的词").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("累计录到的词").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                if let first = points.first?.month {
+                    Text("曲线从开始录音的 \(SecondBrainMonths.caption(first)) 算起，不是她学会的时间")
+                        .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                }
+            }
             Chart(points) { month in
                 AreaMark(x: .value("月份", month.date!, unit: .month), y: .value("累计", month.total))
                     .foregroundStyle(LinearGradient(colors: [BubuTheme.Color.primary.opacity(0.35), BubuTheme.Color.primary.opacity(0.03)],
@@ -147,9 +161,10 @@ struct WordsGrowthView: View {
                     }
                 }
             }
+            .secondBrainCarouselBleed(BubuTheme.Spacing.l)
             if let selected {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("\(SecondBrainMonths.caption(selected.month)) · 新学会 \(selected.newWords.count) 个，累计 \(selected.total) 个")
+                    Text("\(SecondBrainMonths.caption(selected.month)) · 新录到 \(selected.newWords.count) 个，累计 \(selected.total) 个")
                         .font(BubuTheme.Font.caption.weight(.bold)).foregroundStyle(BubuTheme.Color.deepRose)
                     if selected.newWords.isEmpty {
                         Text("这个月没有新词，在练习已经会的。").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)

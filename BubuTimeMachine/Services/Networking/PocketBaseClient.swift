@@ -201,6 +201,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             // 并发编辑保护：远端这条被别的设备改得更【新】（editedAt 更晚）就不覆盖，
             // 把远端版本原样带回，调用方按 newer-wins 应用到本地——旧编辑不再吃掉新编辑。
             let remote = Self.entryDTO(from: existingObj, fallback: dto)
+            // 「全部重传」恢复模式：服务器已有就以服务器为准，绝不用本机旧副本覆盖。
+            if dto.createOnly == true { return remote }
             if let remoteEdited = remote.editedAt, remoteEdited > (dto.editedAt ?? .distantPast) {
                 return remote
             }
@@ -211,8 +213,14 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                           json: body)
             return Self.entryDTO(from: updated, fallback: dto)
         }
-        let created = try await post(collection: "entries", json: body)
-        return Self.entryDTO(from: created, fallback: dto)
+        do {
+            let created = try await post(collection: "entries", json: body)
+            return Self.entryDTO(from: created, fallback: dto)
+        } catch let error as APIError where Self.isDuplicateLocalId(error) {
+            // 上一次 POST 其实已在服务器落地（响应丢了 / 超时重发）：按已存在处理，重新走一次比对。
+            guard let existingObj = try await findRecordObject(collection: "entries", localId: dto.localId) else { throw error }
+            return Self.entryDTO(from: existingObj, fallback: dto)
+        }
     }
 
     func fetchEntries(since: Date?) async throws -> [EntryDTO] {
@@ -226,7 +234,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertMilestone(_ dto: MilestoneDTO) async throws -> MilestoneDTO {
-        let obj = try await upsert(collection: "milestones", localId: dto.localId, body: Self.milestoneBody(dto))
+        let obj = try await upsert(collection: "milestones", localId: dto.localId, body: Self.milestoneBody(dto), createOnly: dto.createOnly == true)
         return Self.milestoneDTO(from: obj, fallback: dto)
     }
 
@@ -235,7 +243,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertFirstTime(_ dto: FirstTimeDTO) async throws -> FirstTimeDTO {
-        let obj = try await upsert(collection: "firsttimes", localId: dto.localId, body: Self.firstTimeBody(dto))
+        let obj = try await upsert(collection: "firsttimes", localId: dto.localId, body: Self.firstTimeBody(dto), createOnly: dto.createOnly == true)
         return Self.firstTimeDTO(from: obj, fallback: dto)
     }
 
@@ -244,7 +252,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertFamilyMember(_ dto: FamilyMemberDTO) async throws -> FamilyMemberDTO {
-        let obj = try await upsert(collection: "members", localId: dto.localId, body: Self.memberBody(dto))
+        let obj = try await upsert(collection: "members", localId: dto.localId, body: Self.memberBody(dto), createOnly: dto.createOnly == true)
         return Self.memberDTO(from: obj, fallback: dto)
     }
 
@@ -253,7 +261,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertChildProfile(_ dto: ChildProfileDTO) async throws -> ChildProfileDTO {
-        let obj = try await upsert(collection: "childprofile", localId: dto.localId, body: Self.childProfileBody(dto))
+        let obj = try await upsert(collection: "childprofile", localId: dto.localId, body: Self.childProfileBody(dto), createOnly: dto.createOnly == true)
         return self.childProfileDTO(from: obj, fallback: dto)
     }
 
@@ -267,7 +275,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertHealthRecord(_ dto: HealthRecordDTO) async throws -> HealthRecordDTO {
-        let obj = try await upsert(collection: "healthrecords", localId: dto.localId, body: Self.healthBody(dto))
+        let obj = try await upsert(collection: "healthrecords", localId: dto.localId, body: Self.healthBody(dto), createOnly: dto.createOnly == true)
         return Self.healthDTO(from: obj, fallback: dto)
     }
 
@@ -276,7 +284,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertVaccineRecord(_ dto: VaccineRecordDTO) async throws -> VaccineRecordDTO {
-        let obj = try await upsert(collection: "vaccinerecords", localId: dto.localId, body: Self.vaccineBody(dto))
+        let obj = try await upsert(collection: "vaccinerecords", localId: dto.localId, body: Self.vaccineBody(dto), createOnly: dto.createOnly == true)
         return Self.vaccineDTO(from: obj, fallback: dto)
     }
 
@@ -302,7 +310,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertGrowthMeasurement(_ dto: GrowthMeasurementDTO) async throws -> GrowthMeasurementDTO {
-        let obj = try await upsert(collection: "growthmeasurements", localId: dto.localId, body: Self.growthBody(dto))
+        let obj = try await upsert(collection: "growthmeasurements", localId: dto.localId, body: Self.growthBody(dto), createOnly: dto.createOnly == true)
         return Self.growthDTO(from: obj, fallback: dto)
     }
 
@@ -311,7 +319,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertComment(_ dto: CommentDTO) async throws -> CommentDTO {
-        let obj = try await upsert(collection: "comments", localId: dto.localId, body: Self.commentBody(dto))
+        let obj = try await upsert(collection: "comments", localId: dto.localId, body: Self.commentBody(dto), createOnly: dto.createOnly == true)
         return self.commentDTO(from: obj, fallback: dto)
     }
 
@@ -326,7 +334,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertVoiceNote(_ dto: VoiceNoteDTO) async throws -> VoiceNoteDTO {
-        let obj = try await upsert(collection: "voicenotes", localId: dto.localId, body: Self.voiceNoteBody(dto))
+        let obj = try await upsert(collection: "voicenotes", localId: dto.localId, body: Self.voiceNoteBody(dto), createOnly: dto.createOnly == true)
         return self.voiceNoteDTO(from: obj, fallback: dto)
     }
 
@@ -341,7 +349,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     func upsertVoiceMemo(_ dto: VoiceMemoDTO) async throws -> VoiceMemoDTO {
-        let obj = try await upsert(collection: "voicememos", localId: dto.localId, body: Self.voiceMemoBody(dto))
+        let obj = try await upsert(collection: "voicememos", localId: dto.localId, body: Self.voiceMemoBody(dto), createOnly: dto.createOnly == true)
         return self.voiceMemoDTO(from: obj, fallback: dto)
     }
 
@@ -356,7 +364,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
 
     func upsertTimeCapsule(_ dto: TimeCapsuleDTO) async throws -> TimeCapsuleDTO {
         let obj = try await upsert(collection: "timecapsules", localId: dto.localId,
-                                   body: Self.timeCapsuleBody(dto))
+                                   body: Self.timeCapsuleBody(dto), createOnly: dto.createOnly == true)
         return self.timeCapsuleDTO(from: obj, fallback: dto)
     }
 
@@ -566,18 +574,22 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     // 爸爸发的照片妈妈手机秒到：SSE 长连收到任何订阅集合的写入就发一个信号，
     // SyncEngine 收到信号立刻跑一轮增量同步（复用既有 merge 全逻辑，实现最小、行为一致）。
 
-    func realtimeStream() -> AsyncStream<Void>? {
+    func realtimeStream() -> AsyncStream<RealtimeSignal>? {
         AsyncStream { continuation in
             let task = Task { [weak self] in
                 var backoff: Double = 2
                 while !Task.isCancelled {
                     guard let self else { return }
                     do {
-                        try await self.runRealtimeOnce { continuation.yield(()) }
+                        try await self.runRealtimeOnce(
+                            onConnected: { continuation.yield(.connected) },
+                            onEvent: { continuation.yield(.change) })
                         backoff = 2   // 正常断开（服务器重启等）：快速重连
                     } catch {
                         // 连接失败按指数退避，最长 60s
                     }
+                    // 无论正常断开还是失败，都先告诉同步层「长连没了」，让它回到 30 秒轮询兜底。
+                    continuation.yield(.disconnected)
                     if Task.isCancelled { break }
                     try? await Task.sleep(for: .seconds(backoff))
                     backoff = min(backoff * 2, 60)
@@ -589,7 +601,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
     }
 
     /// 一次 SSE 会话：连上 → 拿 clientId → 提交订阅 → 逐事件产出信号；连接断开返回。
-    private func runRealtimeOnce(onEvent: @escaping @Sendable () -> Void) async throws {
+    private func runRealtimeOnce(onConnected: @escaping @Sendable () -> Void,
+                                 onEvent: @escaping @Sendable () -> Void) async throws {
         let url = baseURL.appendingPathComponent("api/realtime")
         var req = URLRequest(url: url)
         req.timeoutInterval = 3600
@@ -614,6 +627,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                           let clientId = obj["clientId"] as? String else { continue }
                     try await subscribeRealtime(clientId: clientId)
                     subscribed = true
+                    onConnected()
                 } else if !eventName.isEmpty, eventName != "PB_CONNECT" {
                     onEvent()
                 }
@@ -664,23 +678,42 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         return try await send(url: url, method: "POST", json: json)
     }
 
-    private func upsert(collection: String, localId: String, body: [String: Any]) async throws -> [String: Any] {
+    private func upsert(collection: String, localId: String, body: [String: Any],
+                        createOnly: Bool = false) async throws -> [String: Any] {
         if let existing = try await findRecordObject(collection: collection, localId: localId) {
-            // 通用 LWW 版本保护（S-P2）：把 Entry 已有的 editedAt 并发保护下沉到所有业务集合。
-            // 远端这条比本地推送的版本更【新】时不覆盖，把远端版本原样带回，调用方按 newer-wins 应用——
-            // 旧的本地推送不再静默盖掉新的远端版本。版本号取 clientUpdatedAt：
-            // 对 vaccine/growth（模型有 updatedAt，push 时写入真实编辑时间）是真正的编辑时间比对；
-            // 其余仅有 createdAt 的集合退化为「推送时刻」比对（行为与旧版 last-write-wins 一致，无回归），
-            // 一旦这些集合将来补上编辑时间戳即自动获得同样保护。
-            if Self.remoteVersionIsNewer(remote: existing, thanBody: body) {
-                return existing
-            }
-            guard let existingId = existing["id"] as? String else {
-                throw APIError.server(500, "记录缺少 id 字段")
-            }
-            return try await patch(collection: collection, id: existingId, json: body)
+            return try await resolveExisting(existing, collection: collection, body: body, createOnly: createOnly)
         }
-        return try await post(collection: collection, json: body)
+        do {
+            return try await post(collection: collection, json: body)
+        } catch let error as APIError where Self.isDuplicateLocalId(error) {
+            // POST 超时后被重发，第一次其实已落地：唯一索引报 not-unique。重新取回按已存在处理，
+            // 不再把「服务器拒绝，请检查连接配置」这种误报甩给用户（D9-06）。
+            guard let existing = try await findRecordObject(collection: collection, localId: localId) else { throw error }
+            return try await resolveExisting(existing, collection: collection, body: body, createOnly: createOnly)
+        }
+    }
+
+    /// PocketBase 唯一索引冲突（localId 已存在）。
+    static func isDuplicateLocalId(_ error: APIError) -> Bool {
+        guard case .server(let code, let message) = error, code == 400 else { return false }
+        return message.contains("validation_not_unique")
+    }
+
+    /// 远端已有同 localId：恢复模式只带回远端；否则按编辑时间 LWW 决定 PATCH 还是带回远端。
+    private func resolveExisting(_ existing: [String: Any], collection: String,
+                                 body: [String: Any], createOnly: Bool) async throws -> [String: Any] {
+        if createOnly { return existing }
+        // 通用 LWW 版本保护：远端这条比本地推送的版本更【新】时不覆盖，把远端版本原样带回，
+        // 调用方按 newer-wins 应用。版本号 clientUpdatedAt 现在是**真实编辑时间**
+        // （SyncEditLedger 在本机保存时打点；vaccine/growth 用模型 updatedAt），不再是推送时刻——
+        // 离线很久的旧编辑迟到推送，盖不掉家人后来的新编辑（D9-02）。
+        if Self.remoteVersionIsNewer(remote: existing, thanBody: body) {
+            return existing
+        }
+        guard let existingId = existing["id"] as? String else {
+            throw APIError.server(500, "记录缺少 id 字段")
+        }
+        return try await patch(collection: collection, id: existingId, json: body)
     }
 
     /// LWW 比对：远端 clientUpdatedAt 严格晚于本地推送 body 的 clientUpdatedAt。
@@ -915,7 +948,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         var uploadFields = fields
         uploadFields["localId"] = localId
-        Self.addSyncTimestamp(to: &uploadFields)
+        // 给已存在的记录补挂文件不是内容编辑：不改它的 clientUpdatedAt（LWW 版本号仍是真实编辑时间）。
+        if existingId == nil, uploadFields["clientUpdatedAt"] == nil { Self.addSyncTimestamp(to: &uploadFields) }
         uploadFields = await activeRecordFields(uploadFields, defaultIsDeleted: existingId == nil)
         let bodyURL = try multipartBodyFile(boundary: boundary, fields: uploadFields,
                                             fileField: fileField, fileURL: fileURL, fileName: fileName)
@@ -934,6 +968,14 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
 
     private func multipartUpload(_ file: MediaUploadRequest, token: String,
                                  onProgress: @escaping @Sendable (Double) -> Void) async throws -> UploadedFileResult {
+        if file.createOnly,
+           let existing = try await findRecordObject(collection: "media", localId: file.mediaId.uuidString),
+           let id = existing["id"] as? String {
+            // 「全部重传」恢复模式：服务器已有这条媒体就沿用远端文件，不用本机副本覆盖。
+            onProgress(1)
+            return UploadedFileResult(recordId: id,
+                                      storedFileName: Self.storedFileName(in: existing, fileField: "file", fallback: file.fileName))
+        }
         let existingId = try await findRecord(collection: "media", localId: file.mediaId.uuidString)
         let url = existingId.map {
             baseURL.appendingPathComponent("api/collections/media/records/\($0)")
@@ -1180,7 +1222,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "happenedAt": jsonDate(dto.happenedAt, formatter: iso),
             "ageDescription": jsonValue(dto.ageDescription)
         ]
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1197,7 +1239,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             ageDescription: obj["ageDescription"] as? String ?? fallback?.ageDescription,
                             isCustom: obj["isCustom"] as? Bool ?? fallback?.isCustom ?? false,
                             createdAt: date("created") ?? fallback?.createdAt ?? .now,
-                            serverUpdatedAt: serverUpdatedDate(obj))
+                            serverUpdatedAt: serverUpdatedDate(obj),
+                            clientEditedAt: date("clientUpdatedAt"))
     }
 
     private static func firstTimeBody(_ dto: FirstTimeDTO) -> [String: Any] {
@@ -1210,7 +1253,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "confirmedByParent": dto.confirmedByParent,
             "entryLocalId": jsonValue(dto.entryLocalId)
         ]
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1225,12 +1268,13 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             confirmedByParent: obj["confirmedByParent"] as? Bool ?? fallback?.confirmedByParent ?? false,
                             entryLocalId: obj["entryLocalId"] as? String ?? fallback?.entryLocalId,
                             createdAt: date("created") ?? fallback?.createdAt ?? .now,
-                            serverUpdatedAt: serverUpdatedDate(obj))
+                            serverUpdatedAt: serverUpdatedDate(obj),
+                            clientEditedAt: date("clientUpdatedAt"))
     }
 
     private static func memberBody(_ dto: FamilyMemberDTO) -> [String: Any] {
         var body: [String: Any] = ["localId": dto.localId, "name": dto.name, "relation": dto.relation, "avatarEmoji": dto.avatarEmoji, "themeColorHex": dto.themeColorHex, "isPrimary": dto.isPrimary]
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1242,8 +1286,9 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                         avatarEmoji: obj["avatarEmoji"] as? String ?? fallback?.avatarEmoji ?? "🙂",
                         themeColorHex: obj["themeColorHex"] as? String ?? fallback?.themeColorHex ?? "#F28C9E",
                         isPrimary: obj["isPrimary"] as? Bool ?? fallback?.isPrimary ?? false,
-                        createdAt: fallback?.createdAt ?? .now,
-                        serverUpdatedAt: serverUpdatedDate(obj))
+                        createdAt: (obj["created"] as? String).flatMap { flexibleDate($0) } ?? fallback?.createdAt ?? .now,
+                        serverUpdatedAt: serverUpdatedDate(obj),
+                        clientEditedAt: (obj["clientUpdatedAt"] as? String).flatMap { flexibleDate($0) })
     }
 
     private static func childProfileBody(_ dto: ChildProfileDTO) -> [String: Any] {
@@ -1261,7 +1306,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         if let schoolStart = dto.schoolStartDate { body["schoolStartDate"] = iso.string(from: schoolStart) }
         if let allergies = dto.allergies { body["allergies"] = allergies }
         if let notes = dto.medicalNotes { body["medicalNotes"] = notes }
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1281,8 +1326,10 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                schoolStartDate: date("schoolStartDate") ?? fallback?.schoolStartDate,
                                allergies: Self.nonEmptyString(obj["allergies"]) ?? fallback?.allergies,
                                medicalNotes: Self.nonEmptyString(obj["medicalNotes"]) ?? fallback?.medicalNotes,
-                               createdAt: fallback?.createdAt ?? .now,
-                               serverUpdatedAt: Self.serverUpdatedDate(obj))
+                               // 服务器 created 是全家设备一致的「哪份档案最早」依据（ChildProfile.canonical 用它）。
+                               createdAt: date("created") ?? fallback?.createdAt ?? .now,
+                               serverUpdatedAt: Self.serverUpdatedDate(obj),
+                               clientEditedAt: date("clientUpdatedAt"))
     }
 
     private static func vaccineBody(_ dto: VaccineRecordDTO) -> [String: Any] {
@@ -1367,7 +1414,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "temperatureCelsius": jsonValue(dto.temperatureCelsius)
         ]
         body["tags"] = dto.tags
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1390,12 +1437,13 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                                temperatureCelsius: obj["temperatureCelsius"] as? Double ?? fallback?.temperatureCelsius,
                                tags: obj["tags"] as? [String] ?? fallback?.tags ?? [],
                                createdAt: date("created") ?? fallback?.createdAt ?? .now,
-                               serverUpdatedAt: Self.serverUpdatedDate(obj))
+                               serverUpdatedAt: Self.serverUpdatedDate(obj),
+                               clientEditedAt: date("clientUpdatedAt"))
     }
 
     private static func commentBody(_ dto: CommentDTO) -> [String: Any] {
         var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "voiceDuration": dto.voiceDuration, "voiceWaveform": dto.voiceWaveform, "text": jsonValue(dto.text)]
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1413,12 +1461,13 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                           voiceDuration: obj["voiceDuration"] as? Double ?? fallback?.voiceDuration ?? 0,
                           voiceWaveform: obj["voiceWaveform"] as? [Float] ?? fallback?.voiceWaveform ?? [],
                           createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now,
-                          serverUpdatedAt: Self.serverUpdatedDate(obj))
+                          serverUpdatedAt: Self.serverUpdatedDate(obj),
+                          clientEditedAt: (obj["clientUpdatedAt"] as? String).flatMap { Self.flexibleDate($0) })
     }
 
     private static func voiceNoteBody(_ dto: VoiceNoteDTO) -> [String: Any] {
         var body: [String: Any] = ["localId": dto.localId, "entryLocalId": dto.entryLocalId, "authorRole": dto.authorRole, "durationSeconds": dto.durationSeconds, "waveform": dto.waveform, "transcript": jsonValue(dto.transcript)]
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1436,7 +1485,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             transcript: obj["transcript"] as? String ?? fallback?.transcript,
                             waveform: obj["waveform"] as? [Float] ?? fallback?.waveform ?? [],
                             createdAt: (obj["created"] as? String).flatMap { iso.date(from: $0) ?? Self.flexibleDate($0) } ?? fallback?.createdAt ?? .now,
-                            serverUpdatedAt: Self.serverUpdatedDate(obj))
+                            serverUpdatedAt: Self.serverUpdatedDate(obj),
+                            clientEditedAt: (obj["clientUpdatedAt"] as? String).flatMap { Self.flexibleDate($0) })
     }
 
     private static func voiceMemoBody(_ dto: VoiceMemoDTO) -> [String: Any] {
@@ -1449,7 +1499,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             "ageYears": jsonValue(dto.ageYears),
             "durationSeconds": jsonValue(dto.durationSeconds)
         ]
-        addSyncTimestamp(to: &body)
+        addSyncTimestamp(to: &body, date: dto.clientEditedAt ?? .now)
         return body
     }
 
@@ -1468,7 +1518,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
                             recordedAt: date("recordedAt") ?? fallback?.recordedAt ?? .now,
                             durationSeconds: obj["durationSeconds"] as? Double ?? fallback?.durationSeconds,
                             createdAt: date("created") ?? fallback?.createdAt ?? .now,
-                            serverUpdatedAt: Self.serverUpdatedDate(obj))
+                            serverUpdatedAt: Self.serverUpdatedDate(obj),
+                            clientEditedAt: date("clientUpdatedAt"))
     }
 
     private static func timeCapsuleBody(_ dto: TimeCapsuleDTO) -> [String: Any] {
@@ -1494,7 +1545,7 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         ]
         if let emoji = dto.coverEmoji { fields["coverEmoji"] = emoji }
         if let version = dto.cryptoVersion { fields["cryptoVersion"] = String(version) }
-        addSyncTimestamp(to: &fields)
+        addSyncTimestamp(to: &fields, date: dto.clientEditedAt ?? .now)
         return fields
     }
 
@@ -1515,7 +1566,8 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
             coverEmoji: obj["coverEmoji"] as? String ?? fallback?.coverEmoji,
             cryptoVersion: Self.intValue(obj["cryptoVersion"]) ?? fallback?.cryptoVersion,
             createdAt: date("created") ?? fallback?.createdAt ?? .now,
-            serverUpdatedAt: Self.serverUpdatedDate(obj)
+            serverUpdatedAt: Self.serverUpdatedDate(obj),
+            clientEditedAt: date("clientUpdatedAt")
         )
     }
 

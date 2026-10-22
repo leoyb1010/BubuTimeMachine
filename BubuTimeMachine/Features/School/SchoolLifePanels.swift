@@ -2,6 +2,10 @@ import SwiftUI
 
 enum SchoolPalette {
     static let coral = Color(red: 0.97, green: 0.47, blue: 0.51)
+    /// 白字底色用的深珊瑚（白字对比度 ≥ 4.5:1）；浅珊瑚只做装饰。
+    static let coralInk = Color(red: 0.753, green: 0.267, blue: 0.337) // #C04456
+    /// SchoolPaper 图片的底色，图片铺不到的地方（状态栏下）用它垫底。
+    static let paper = Color(red: 254 / 255, green: 245 / 255, blue: 237 / 255)
     static let orange = Color(red: 1, green: 0.61, blue: 0.35)
     static let green = Color(red: 0.51, green: 0.74, blue: 0.40)
     static let violet = Color(red: 0.62, green: 0.55, blue: 0.90)
@@ -20,18 +24,18 @@ struct SchoolPanel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 7) {
-                Image(systemName: symbol).font(.system(size: 20, weight: .semibold)).foregroundStyle(accent)
+                Image(systemName: symbol).font(.system(.title3).weight(.semibold)).foregroundStyle(accent)
                 Text(title).font(.system(.headline, design: .rounded).weight(.bold)).foregroundStyle(SchoolPalette.ink)
                 Spacer(minLength: 0)
                 if !typeSize.isAccessibilitySize && !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 10)).foregroundStyle(SchoolPalette.secondary).lineLimit(1).minimumScaleFactor(0.85)
-                    Image(systemName: "heart.fill").font(.system(size: 11)).foregroundStyle(SchoolPalette.coral.opacity(0.7))
+                    Text(subtitle).font(.system(.caption, design: .rounded)).foregroundStyle(SchoolPalette.secondary).lineLimit(1).minimumScaleFactor(0.85)
+                    Image(systemName: "heart.fill").font(.caption2).foregroundStyle(SchoolPalette.coral.opacity(0.7))
                 }
             }
             content
         }
-        .padding(.horizontal, 10).padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
-        .background(BubuTheme.Color.card.opacity(0.88), in: RoundedRectangle(cornerRadius: 23))
+        .padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(BubuTheme.Color.card.opacity(0.88), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
     }
 }
 
@@ -67,7 +71,7 @@ struct SchoolMealsPanel: View {
                         Text(field.rawValue).font(.system(.caption, design: .rounded).weight(.semibold))
                             .lineLimit(1).minimumScaleFactor(0.8)
                         Text("\(meal.rating.isEmpty ? "未填" : meal.rating) · \(meal.speed.isEmpty ? "未填" : meal.speed)")
-                            .font(.system(size: 10)).foregroundStyle(SchoolPalette.ink)
+                            .font(.system(.caption, design: .rounded)).foregroundStyle(SchoolPalette.ink)
                             .frame(maxWidth: .infinity).padding(.vertical, 3)
                             .background(color.opacity(0.10), in: Capsule())
                         if !meal.notes.isEmpty { Text(meal.notes.joined(separator: "；")).font(.caption2) }
@@ -93,11 +97,11 @@ struct SchoolMilkPanel: View {
                         Image("SchoolBottle").resizable().scaledToFit().frame(width: 36, height: 52)
                             .saturation(raw.isEmpty ? 0 : 1).opacity(raw.isEmpty ? 0.35 : 1).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("第\(index + 1)次").font(.system(size: 10, weight: .semibold))
+                            Text("第\(index + 1)次").font(.system(.caption, design: .rounded).weight(.semibold))
                             Text(raw.isEmpty ? "未记录" : (volume ?? "已记录"))
                                 .font(.system(.headline, design: .rounded).weight(.bold)).monospacedDigit()
                             if !raw.isEmpty {
-                                Text(detail).font(.system(size: 9)).foregroundStyle(SchoolPalette.secondary)
+                                Text(detail).font(.system(.caption, design: .rounded)).foregroundStyle(SchoolPalette.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -136,7 +140,7 @@ struct SchoolNapPanel: View {
                     Text(report[.nap].isEmpty ? "午睡时间未记录" : report[.nap]).font(.subheadline)
                 }
                 Label("睡眠质量：" + (report[.napQuality].isEmpty ? "未记录" : report[.napQuality]), systemImage: "face.smiling.fill")
-                    .font(.system(size: 11, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 4)
+                    .font(.system(.footnote, design: .rounded).weight(.medium)).padding(.horizontal, 12).padding(.vertical, 6)
                     .background(BubuTheme.Color.card.opacity(0.55), in: Capsule())
             }.foregroundStyle(SchoolPalette.violet)
                 .padding(.horizontal, 8).padding(.vertical, 5).frame(maxWidth: .infinity)
@@ -146,7 +150,7 @@ struct SchoolNapPanel: View {
     private func endpoint(_ time: String, caption: String) -> some View {
         VStack(spacing: 3) {
             Text(time).font(.system(.subheadline, design: .rounded).weight(.bold)).monospacedDigit().foregroundStyle(SchoolPalette.ink)
-            Text(caption).font(.system(size: 9))
+            Text(caption).font(.system(.caption2, design: .rounded))
         }
     }
 }
@@ -161,7 +165,7 @@ struct SchoolTemperaturePanel: View {
                     HStack(spacing: 5) {
                         Image(index == 2 ? "SchoolMoon" : "SchoolSun").resizable().scaledToFit().frame(width: 33, height: 36).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(["早", "中", "晚"][index]).font(.system(size: 10))
+                            Text(["早", "中", "晚"][index]).font(.system(.caption, design: .rounded))
                             Text(report[field].isEmpty ? "未记录" : report[field].replacingOccurrences(of: "°C", with: "°"))
                                 .font(.system(.subheadline, design: .rounded).weight(.semibold)).monospacedDigit()
                                 .lineLimit(1).minimumScaleFactor(0.8)

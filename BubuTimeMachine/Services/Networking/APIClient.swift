@@ -43,8 +43,9 @@ protocol APIClient: Sendable {
     /// 并让删除也能推进增量游标。
     func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone]
 
-    /// 实时变更流（SSE 长连）：远端有任何写入就产出一个信号。不支持的后端返回 nil。
-    func realtimeStream() -> AsyncStream<Void>?
+    /// 实时变更流（SSE 长连）：连上/断开/远端写入各产出一个信号。不支持的后端返回 nil。
+    /// SyncEngine 据 connected/disconnected 决定前台轮询是 30 秒还是慢速兜底。
+    func realtimeStream() -> AsyncStream<RealtimeSignal>?
     func uploadTimeCapsuleBlob(capsuleId: UUID, dto: TimeCapsuleDTO, fileURL: URL, fileName: String) -> AsyncThrowingStream<UploadEvent, Error>
     func deleteTimeCapsule(remoteId: String) async throws
     func downloadFile(from remoteURL: String) async throws -> Data
@@ -100,5 +101,15 @@ enum APIError: LocalizedError, Sendable {
 // MARK: - 默认实现（Mock / 旧后端无需支持 tombstone）
 extension APIClient {
     func fetchDeletedTombstones(collection: String, since: Date?) async throws -> [RemoteTombstone] { [] }
-    func realtimeStream() -> AsyncStream<Void>? { nil }
+    func realtimeStream() -> AsyncStream<RealtimeSignal>? { nil }
+}
+
+/// SSE 长连的状态与变更信号。
+enum RealtimeSignal: Sendable, Equatable {
+    /// 已订阅成功：远端写入会实时推送过来。
+    case connected
+    /// 长连断开（正在退避重连）。
+    case disconnected
+    /// 远端有写入，需要跑一轮增量同步。
+    case change
 }

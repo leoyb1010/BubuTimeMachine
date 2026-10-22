@@ -14,9 +14,18 @@ nonisolated enum SyncBackoff {
     /// 指数增长的最大档位（2^4 = 16 倍，正好触到上限）。
     static let maxExponent = 4
 
+    /// SSE 长连在线时的慢速兜底轮询：实时推送已经覆盖家人的更新，轮询只防漏（D4-04）。
+    static let realtimeSafetyInterval: TimeInterval = 300
+
     static func interval(failures: Int) -> TimeInterval {
         guard failures > 0 else { return baseInterval }
         let factor = pow(2.0, Double(min(failures, maxExponent)))
         return min(baseInterval * factor, maxInterval)
+    }
+
+    /// 长连在线：至少 5 分钟一次；断开回到上面的失败退避曲线（成功时 30 秒）。
+    static func interval(failures: Int, realtimeConnected: Bool) -> TimeInterval {
+        let backoff = interval(failures: failures)
+        return realtimeConnected ? max(backoff, realtimeSafetyInterval) : backoff
     }
 }

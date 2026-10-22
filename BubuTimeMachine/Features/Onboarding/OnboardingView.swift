@@ -219,7 +219,7 @@ struct OnboardingView: View {
 
         // 常规建档。若档案已存在（例如同步先一步到达），复用而不是再插一个
         let profile: ChildProfile
-        if let existing = existingProfiles.first {
+        if let existing = ChildProfile.canonical(from: existingProfiles) {
             profile = existing
         } else {
             profile = ChildProfile(name: childName.isEmpty ? "布布" : childName, birthday: birthday)

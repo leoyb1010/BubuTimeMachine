@@ -76,9 +76,32 @@ final class ServerConfig {
     }
     var accountPassword: String {
         didSet {
-            if accountPassword.isEmpty { KeychainStore.delete(Self.passwordKey) }
-            else { KeychainStore.set(accountPassword, for: Self.passwordKey) }
+            if accountPassword.isEmpty {
+                KeychainStore.delete(Self.passwordKey)
+                credentialSaveFailed = false
+            } else {
+                // 写不进钥匙串时这次运行照常同步（密码还在内存里），但下次冷启动会读不到、悄悄变离线。
+                // 记下来让界面提示「需要重新登录」，而不是等家人发现照片没同步（D9-09）。
+                credentialSaveFailed = !KeychainStore.setVerified(accountPassword, for: Self.passwordKey)
+            }
         }
+    }
+
+    /// 本次登录的密码没能存进钥匙串。
+    private(set) var credentialSaveFailed = false
+
+    /// 填过账号却读不到密码：换了新手机（钥匙串条目只在本机）或上次没存住。同步已悄悄停了，需要重新登录。
+    var needsReauthentication: Bool {
+        credentialSaveFailed ||
+        (!accountEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && accountPassword.isEmpty)
+    }
+
+    /// 给界面用的一句话；不需要时为 nil。
+    var reauthenticationMessage: String? {
+        guard needsReauthentication else { return nil }
+        return credentialSaveFailed
+            ? "密码没能安全保存到这台设备，下次打开会断开同步。请到「账号」里重新登录一次。"
+            : "需要重新登录才能继续同步：这台设备上没有找到账号密码（换手机或系统清理后常见）。"
     }
 
     /// AI 服务（FastAPI）地址。默认空：必须用户自己填，绝不默认把数据发到任何外部服务器。

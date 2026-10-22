@@ -12,7 +12,7 @@ import json
 import logging
 
 from .brain_bridge import BrainUnavailable
-from .online_timeline import LOCAL, short_place
+from .online_timeline import LOCAL, familiar, poi, quality
 
 log = logging.getLogger("bubu.learning.monthly")
 MAX_TITLE, MAX_SUMMARY, MAX_FACTS = 20, 160, 40
@@ -29,7 +29,7 @@ SYSTEM = (
 
 
 def _quality(row):
-    return (row["adjusted"], row["item"]["media_type"] == "photo", min(len(row["description"]), 120), row["item"]["file_id"])
+    return (quality(row), row["item"]["file_id"])
 
 
 def months_between(first: str, last: str) -> list[str]:
@@ -95,7 +95,8 @@ class Monthly:
         for row in sorted(picked.values(), key=lambda r: (r["stamp"] or "", r["item"]["file_id"])):
             if not row["description"]:
                 continue
-            parts = [row["day"], short_place(row["place"]) or ""]
+            found = poi(row["place"])
+            parts = [row["day"], " · ".join(p for p in found if p) if found else ""]
             if row["people"]:
                 parts.append("同框：" + "、".join(labels.get(p) or p for p in row["people"]))
             parts.append(("视频：" if row["item"]["media_type"] == "video" else "") + row["description"][:200])
@@ -178,12 +179,15 @@ class Monthly:
         self.timeline.authorize(scope)
         with self.store.db() as db:
             stored = [dict(r) for r in db.execute("SELECT * FROM monthly_reports WHERE family_id=? ORDER BY month DESC", (self.family,))]
-        rows_by_id = self.timeline.snapshot()["rows_by_id"]
+        snapshot = self.timeline.snapshot()
+        rows_by_id, labels = snapshot["rows_by_id"], snapshot.get("labels") or {}
         items = []
         for report in stored:
             rows = self._month_rows(report["month"])
-            places = Counter(short_place(r["place"]) for r in rows if short_place(r["place"]))
-            items.append({"month": report["month"], "title": report["title"], "summary": report["summary"],
+            # One tag per point of interest (bare and city-qualified names merge); raw GPS names never show.
+            places = Counter(found[1] for found in map(poi, (r["place"] for r in rows)) if found)
+            items.append({"month": report["month"], "title": familiar(report["title"], labels),
+                          "summary": familiar(report["summary"], labels),
                           "highlight_ids": [i for i in json.loads(report["highlight_ids"]) if i in rows_by_id],
                           "photos": sum(r["item"]["media_type"] == "photo" for r in rows),
                           "videos": sum(r["item"]["media_type"] == "video" for r in rows),

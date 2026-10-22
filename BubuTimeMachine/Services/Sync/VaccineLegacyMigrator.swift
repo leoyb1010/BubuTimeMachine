@@ -34,7 +34,7 @@ enum VaccineLegacyMigrator {
 
         let existing = (try? context.fetch(FetchDescriptor<VaccineRecord>())) ?? []
         let existingDoseIds = Set(existing.compactMap(\.doseId))
-        let birthday = ((try? context.fetch(FetchDescriptor<ChildProfile>())) ?? []).first?.birthday
+        let birthday = ChildProfile.canonical(in: context)?.birthday
 
         for doseId in doseIds where !existingDoseIds.contains(doseId) {
             guard let dose = VaccineDose.schedule.first(where: { $0.id == doseId }) else { continue }

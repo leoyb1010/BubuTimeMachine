@@ -196,12 +196,13 @@ final class AppEnvironment {
     /// reload 本身有 2 秒合并节流（见 WidgetRefresher），高频调用不会打爆当日预算。
     func refreshWidgetSnapshot(context: ModelContext) {
         guard !BubuStoreHealth.loadFailed else { return }
+        // 内容没变就不写盘、不 reload：回前台/每条手表记录都会调到这里（D4-05）。
+        // 档案还没建好（make 返回 nil）时仍 reload，让桌面刷成占位态而不是留着失效快照。
         if let snapshot = SharedWidgetSnapshot.make(context: context) {
-            SharedDefaults.saveWidgetSnapshot(snapshot)
+            if SharedDefaults.saveWidgetSnapshotIfChanged(snapshot) { WidgetRefresher.reload() }
+        } else {
+            WidgetRefresher.reload()
         }
-        // reload 放在 guard 之外：档案还没建好（make 返回 nil）时桌面也该刷成占位态，
-        // 而不是留着上一份已失效的快照。
-        WidgetRefresher.reload()
         BubuMomentSpotlightIndexer.schedule(context: context)
     }
 

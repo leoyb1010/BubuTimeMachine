@@ -11,16 +11,18 @@ from __future__ import annotations
 import re
 import time
 
+from .online_timeline import unsuitable
 from .store import Missing, digest
 
 # (key, title, words, excluded phrases)
 CONCEPTS = (
     ("crawling", "第一次爬行", ("爬行", "匍匐前进", "在地上爬", "学爬"), ("爬行垫", "爬爬垫")),
-    ("standing", "第一次扶站", ("扶站", "独自站立", "学站", "站起来", "站立"), ()),
+    ("standing", "第一次扶站", ("扶站", "独自站立", "学站", "站起来"), ()),
     ("walking", "第一次独立行走", ("学走路", "学步", "蹒跚", "迈步", "独自行走", "自己走路", "扶着走"), ("学步车",)),
     ("running", "第一次小跑", ("奔跑", "跑步", "小跑", "跑来跑去"), ("推着",)),
     ("tricycle", "第一次骑小车", ("三轮车", "滑步车", "平衡车", "扭扭车", "踏板车", "滑板车", "滑行车"), ("推车", "推着")),
-    ("bike", "第一次骑自行车", ("自行车", "单车", "骑车"), ("婴儿车", "推车", "儿童座椅")),
+    ("bike", "第一次骑自行车", ("骑自行车", "骑单车", "骑车", "骑着自行车", "骑着单车", "骑上自行车", "骑在自行车"),
+     ("婴儿车", "推车", "儿童座椅")),
     ("watermelon", "第一次吃西瓜", ("西瓜",), ("西瓜球", "弹力球", "西瓜玩具", "西瓜图案", "西瓜造型", "西瓜包", "西瓜帽")),
     ("self_feeding", "第一次自己吃饭", ("自己吃饭", "自主进食", "自己用勺", "握勺", "自己拿勺", "用勺子", "自己进食", "用叉子"), ("喂",)),
     ("brushing_teeth", "第一次自己刷牙", ("刷牙", "牙刷"), ()),
@@ -32,33 +34,72 @@ CONCEPTS = (
     ("plane", "第一次坐飞机", ("坐飞机", "飞机上", "机舱", "登机", "航班"), ("玩具飞机", "飞机玩具")),
     ("sea", "第一次看海", ("海边", "沙滩", "大海", "海浪"), ()),
     ("snow", "第一次看雪", ("玩雪", "雪地", "雪人", "下雪", "积雪"), ()),
-    ("birthday_cake", "第一次吹生日蜡烛", ("生日蛋糕", "吹蜡烛", "生日"), ()),
+    ("birthday_cake", "第一次吹生日蜡烛", ("蜡烛",), ()),
     ("haircut", "第一次理发", ("理发", "剪头发", "剃头"), ()),
     ("zoo", "第一次动物园", ("动物园",), ()),
 )
 # She must be in the same clause as the matched word ("张云拿着勺子喂饭" is not her first).
 CHILD_TOKENS = ("布布", "袁晨希", "女婴", "婴儿", "幼童", "幼儿", "女童", "小女孩", "女孩", "宝宝", "她", "孩子")
 TITLES = {key: title for key, title, _, _ in CONCEPTS}
+# Things she does herself: she must be the subject, named before the word, with no
+# watching/listening/being held in between ("布布看爸妈跳舞", "抱着布布站立" are not hers).
+ACTIONS = {"crawling", "standing", "walking", "running", "tricycle", "bike", "watermelon", "self_feeding",
+           "brushing_teeth", "swimming", "drawing", "singing", "dancing", "birthday_cake"}
+PASSIVE = ("看", "听", "抱着", "抱起", "被", "望着", "注视", "盯着", "欣赏", "陪着")
+HELD = ("抱着", "抱起", "抱在", "怀里", "怀中", "搂着", "托着")
+HELD_SENSITIVE = {"crawling", "standing", "walking", "running", "dancing"}
+# Youngest plausible age in months; earlier "occurrences" are someone else or a misreading.
+MIN_MONTHS = {"crawling": 4, "standing": 6, "walking": 9, "running": 12, "tricycle": 12, "bike": 24, "self_feeding": 8,
+              "brushing_teeth": 12, "drawing": 10, "singing": 12, "dancing": 9, "kindergarten": 12, "birthday_cake": 11}
 STATUSES = {"candidate", "confirmed", "dismissed"}
 # A type the family dismissed this often only proposes clauses naming her explicitly, listed last.
 DISMISS_LIMIT = 3
 NAMES = ("布布", "袁晨希")
+OTHERS = re.compile(r"男孩子?们?|男童|(?:其他|别的|另一名?|两名|几名|多名)\S{0,2}?(?:孩子|幼儿|幼童|儿童|小朋友|女孩|女童)"
+                    r"|孩子们|小朋友们|幼儿们")
 
 
-def matches(row, words, excluded, strict=False) -> bool:
-    """A concept word in a description clause that also names her; tags/events only when there is no description."""
+def _her_action(clause, words, tokens, held_sensitive):
+    if held_sensitive and any(h in clause for h in HELD):
+        return False
+    for word in words:
+        at = clause.find(word)
+        if at < 0:
+            continue
+        before = clause[:at]
+        named = [(before.rfind(t), t) for t in tokens if t in before]
+        if not named:
+            continue
+        position, token = max(named)
+        if not any(p in before[position + len(token):] for p in PASSIVE):
+            return True
+    return False
+
+
+def matches(row, words, excluded, strict=False, action=False, held_sensitive=False) -> bool:
+    """A concept word in a description clause that also names her (as the subject for actions);
+    tags/events only when there is no description."""
     item = row["item"]
     texts = [str((item.get("analysis") or {}).get("description") or ""), row["description"]]
     tokens = NAMES if strict else CHILD_TOKENS
     for text in texts:
         for clause in re.split(r"[，,。；;！!？?\n]", text):
-            if any(w in clause for w in words) and not any(x in clause for x in excluded) \
-                    and any(t in clause for t in tokens):
+            clause = OTHERS.sub("", clause)  # "男孩子们在骑车" is not her
+            if not any(w in clause for w in words) or any(x in clause for x in excluded):
+                continue
+            if action and _her_action(clause, words, tokens, held_sensitive):
+                return True
+            if not action and any(t in clause for t in tokens):
                 return True
     if any(texts) or strict:
         return False
     labels = " ".join(row.get("tags") or []) + " " + (row.get("event") or "")
     return any(w in labels for w in words) and not any(x in labels for x in excluded)
+
+
+def _months_after(day: str, months: int) -> str:
+    year, month = int(day[:4]), int(day[5:7]) - 1 + months
+    return "%04d-%02d-%s" % (year + month // 12, month % 12 + 1, min(day[8:10], "28"))
 
 
 class Firsts:
@@ -80,13 +121,16 @@ class Firsts:
         confirmed = {r["concept"] for r in stored if r["status"] == "confirmed"}
         dismissed = {(r["concept"], r["item_id"]) for r in stored if r["status"] == "dismissed"}
         weak = self._weak(stored)
+        born = self.timeline.born
         found = {}
         for key, _, words, excluded in CONCEPTS:
             if key in confirmed:
                 continue
+            earliest = _months_after(born, MIN_MONTHS.get(key, 0)) if born else ""
             for row in rows:
-                if row["day"] and (key, row["item"]["file_id"]) not in dismissed \
-                        and matches(row, words, excluded, strict=key in weak):
+                if row["day"] and row["day"] >= earliest and not unsuitable(row) and (key, row["item"]["file_id"]) not in dismissed \
+                        and matches(row, words, excluded, strict=key in weak, action=key in ACTIONS,
+                                    held_sensitive=key in HELD_SENSITIVE):
                     found[key] = row
                     break
         now = time.time()
@@ -128,6 +172,18 @@ class Firsts:
         rows = [r for r in stored if r["status"] != "dismissed" and (status == "all" or r["status"] == status)]
         rows.sort(key=lambda r: r["status"] == "candidate" and r["concept"] in weak)  # stable: keeps day order
         return {"items": [p for p in (self._public(r, by_id) for r in rows) if p]}
+
+    def lookup(self, question):
+        """For 布布问答: (concept words, item ids) of the 第一次 types a question names, confirmed before candidates."""
+        question = str(question or "")
+        keys = [key for key, title, words, _ in CONCEPTS
+                if title.removeprefix("第一次").removeprefix("第一天") in question or any(w in question for w in words)]
+        if not keys:
+            return [], []
+        stored = sorted((r for r in self._rows() if r["concept"] in keys and r["status"] != "dismissed"),
+                        key=lambda r: (r["status"] != "confirmed", r["day"]))
+        words = [w for key, _, ws, _ in CONCEPTS if key in keys for w in ws]
+        return words, [r["item_id"] for r in stored]
 
     def confirmed_in_month(self, month):
         return [TITLES.get(r["concept"], r["concept"]) for r in self._rows()

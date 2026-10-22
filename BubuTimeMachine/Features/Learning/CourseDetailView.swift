@@ -63,9 +63,11 @@ struct CourseDetailView: View {
         }
         .confirmationDialog("重新生成这节课？", isPresented: $confirmRegenerate, titleVisibility: .visible) {
             Button("重新生成") { Task { await regenerate() } }
+            Button("取消", role: .cancel) {}
         } message: { Text("新的题目需要家长重新核对，核对前布布暂时不能玩这节课。") }
         .confirmationDialog("删除这节课？", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("删除", role: .destructive) { Task { await delete() } }
+            Button("取消", role: .cancel) {}
         } message: { Text("课程素材和互动都会从每日学习中移除，布布的时光不受影响。") }
         .task { await load() }
         .task(id: course?.state == "processing" || awaitingPack != nil) {
@@ -120,7 +122,7 @@ struct CourseDetailView: View {
                     .font(BubuTheme.Font.body)
                 if canReview {
                     Button("再试一次") { Task { await regenerate() } }.buttonStyle(.borderedProminent)
-                        .tint(BubuTheme.Color.primary)
+                        .tint(BubuTheme.Color.actionFill)
                 }
             }
         case "no_lesson":

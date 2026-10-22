@@ -20,7 +20,7 @@ WORKER_STALE = 900  # one loop can include several slow model calls
 PROBE = r'''
 import json, sqlite3, sys
 from pathlib import Path
-out = {"learning_store": False, "brain_library": False, "heartbeat": None, "backup": None}
+out = {"learning_store": False, "brain_library": False, "heartbeat": None, "backup": None, "backup_marker": None}
 def open_ro(path):
     return sqlite3.connect(Path(path).as_uri() + "?mode=ro", uri=True, timeout=2)
 if sys.argv[1]:
@@ -39,18 +39,31 @@ if sys.argv[2]:
         out["brain_library"] = True
     except Exception:
         pass
+if len(sys.argv) > 3 and sys.argv[3]:
+    try:
+        marker = Path(sys.argv[3])
+        # The nightly mirror's learning folder (or one file in it): the newest of its snapshot files.
+        files = [marker / n for n in ("manifest.json", "learning.sqlite", ".bubu-learning-backup")] if marker.is_dir() else [marker]
+        times = [f.stat().st_mtime for f in files if f.is_file()]
+        out["backup_marker"] = {"at": max(times)} if times else None
+    except Exception:
+        pass
 print(json.dumps(out))
 '''
 
 
-def probe(state_dir=None, brain_root=None, timeout=5.0) -> dict:
+def probe(state_dir=None, brain_root=None, timeout=5.0, marker=None) -> dict:
+    """`marker`: the nightly restic mirror's learning backup (LEARNING_BACKUP_MARKER), a folder or a file;
+    it lives on the external disk, so it is read in the same killable subprocess."""
+    marker = marker if marker is not None else os.environ.get("LEARNING_BACKUP_MARKER", "").strip()
     state_dir = state_dir if state_dir is not None else os.environ.get("LEARNING_STATE_DIR", "").strip()
     brain_root = brain_root if brain_root is not None else os.environ.get("LEARNING_BRAIN_ROOT", "").strip()
     database = str(Path(state_dir).expanduser() / "learning.sqlite") if state_dir else ""
     library = str(Path(brain_root).expanduser() / "data/library.sqlite") if brain_root else ""
     failed = {"learning_store": False, "brain_library": False, "heartbeat": None, "backup": None}
     try:
-        process = subprocess.Popen([sys.executable, "-I", "-B", "-c", PROBE, database, library],
+        process = subprocess.Popen([sys.executable, "-I", "-B", "-c", PROBE, database, library,
+                                    str(Path(marker).expanduser()) if marker else ""],
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except OSError:
         return failed
@@ -96,8 +109,11 @@ class Status:
         self.timeline.authorize(scope)
         root = getattr(self.timeline.bridge, "root", None)
         result = self.probe(str(self.store.root), str(root) if root else "", 4.0)
-        beat, backup = _at(result.get("heartbeat")), _at(result.get("backup"))
-        snapshot = self.timeline.peek()
+        beat = _at(result.get("heartbeat"))
+        # The worker's own daily copy or the nightly restic mirror, whichever is newer.
+        backups = [b for b in (_at(result.get("backup")), _at(result.get("backup_marker"))) if b is not None]
+        backup = max(backups) if backups else None
+        snapshot = self.timeline.peek(wait=2.0)
         captions = voices = None
         if result["learning_store"]:
             try:
@@ -115,4 +131,5 @@ class Status:
                 "worker_heartbeat_at": _local(beat), "snapshot_at": _local(self.timeline.built_at),
                 "captions_pending": captions, "voices_pending": voices, "backup_at": _local(backup),
                 "items": None if snapshot is None else len(snapshot["rows"]),
+                "preparing": snapshot is None and bool(brain),
                 "checked_at": datetime.now(timezone.utc).astimezone(LOCAL).isoformat(timespec="seconds")}

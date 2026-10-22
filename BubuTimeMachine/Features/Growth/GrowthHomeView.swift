@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import TipKit
 
 // MARK: - 成长总览
 /// 一个成长引擎，多处消费：里程碑、实测数据、健康、疫苗和“第一次”共享入口，
@@ -16,6 +17,8 @@ struct GrowthHomeView: View {
     @Query(sort: \FirstTime.happenedAt, order: .reverse) private var firstTimes: [FirstTime]
 
     private var theme: Color { env.theme.theme.primary }
+    /// 文字用可读强调色：粉彩 primary 落在白卡上做小字只有 2~3:1。
+    private var accentText: Color { env.theme.theme.textAccent }
     private var achievedMilestones: [Milestone] { milestones.filter(\.isAchieved) }
     private var latestHeight: Double? {
         GrowthMeasurementResolver.latestValue(.height, from: measurements)
@@ -35,19 +38,13 @@ struct GrowthHomeView: View {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
                 overview
                     .entranceEffect(index: 0)
-                primaryLinks
+                memoriesHubCard
                     .entranceEffect(index: 1)
-                NavigationLink { AIStudioHomeView() } label: {
-                    Label("回忆与作品 · 原魔法屋", systemImage: "book.pages.fill")
-                        .font(BubuTheme.Font.headline)
-                        .foregroundStyle(env.theme.theme.textAccent)
-                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                }
-                firstTimesSection
+                primaryLinks
                     .entranceEffect(index: 2)
-                GrowthUpgradeSections().entranceEffect(index: 3)
+                GrowthUpgradeSections().entranceEffect(index: 4)
                 recentGrowth
-                    .entranceEffect(index: 3)
+                    .entranceEffect(index: 4)
             }
             .padding()
             .bubuContentColumn()
@@ -91,6 +88,42 @@ struct GrowthHomeView: View {
                 .symbolEffect(.pulse, value: achievedMilestones.count)
                 .accessibilityHidden(true)
         }
+    }
+
+    /// 回忆与作品的入口：以前是一行无箭头的标题字，看着像下面「第一次」的小标题，
+    /// 问答、生日影片、语言成长线、去过的地方全藏在后面。现在是一张带预览和箭头的卡。
+    private var memoriesHubCard: some View {
+        NavigationLink { AIStudioHomeView() } label: {
+            HStack(spacing: 14) {
+                BubuMascotBadge(size: 52, expression: .drawing)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("回忆与作品")
+                        .font(BubuTheme.Font.body.weight(.heavy))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                    Text("布布问答 · 生日影片 · 语言成长线 · 去过的地方 · 认一认")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(BubuTheme.Font.caption.weight(.bold))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                LinearGradient(colors: [BubuTheme.Color.card, BubuTheme.Color.pinkSurface.opacity(0.55)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
+            )
+            .bubuCardShadow()
+            .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        }
+        .buttonStyle(BubuPressableStyle())
+        .accessibilityIdentifier("growth.memories-hub")
+        .popoverTip(MemoriesHubTip())
     }
 
     private var overviewText: String {
@@ -168,7 +201,7 @@ struct GrowthHomeView: View {
                 Spacer()
                 Text("\(firstTimes.count) 条")
                     .font(BubuTheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(theme)
+                    .foregroundStyle(accentText)
             }
             if firstTimes.isEmpty {
                 Text("记录里被确认的“第一次”会自动汇到这里。")
@@ -214,7 +247,7 @@ struct GrowthHomeView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("最近点亮")
                             .font(BubuTheme.Font.caption.weight(.semibold))
-                            .foregroundStyle(theme)
+                            .foregroundStyle(accentText)
                         Text(latest.title)
                             .font(BubuTheme.Font.body.weight(.bold))
                             .foregroundStyle(BubuTheme.Color.warmBrown)

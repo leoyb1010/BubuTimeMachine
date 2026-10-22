@@ -602,7 +602,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(element(named: "幼儿园", in: app).exists)
         let identityCard = element(named: "home.identity-card", in: app)
         XCTAssertTrue(identityCard.waitForExistence(timeout: 15),
-                      "iPhone 首页必须展示完整布布身份卡，不能用简化封面替代")
+                      "iPhone 首页必须展示可翻面的布布身份条（首屏「今天」大图上方）")
         let flipButton = app.buttons["home.identity-card.flip"]
         XCTAssertTrue(flipButton.waitForExistence(timeout: 10), "身份卡必须提供稳定、可发现的翻面按钮")
         flipButton.tap()

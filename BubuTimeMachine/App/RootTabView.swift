@@ -12,13 +12,21 @@ struct RootTabView: View {
     @State private var selection = 0
     @State private var quickCaptureTrigger = 0
     @State private var timelinePath: [UUID] = []
+    /// 首页以外的 Tab 点「记录此刻」时，就地弹出记录面板，不再把人拽回首页。
+    @State private var rootCapture: CaptureModel?
+    @State private var captureToast: BubuToastState?
 
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
-    /// All retained tab stacks publish the same visibility. An inactive school
-    /// stack must not leave its hidden preference behind when another tab opens.
-    private var systemTabBarVisibility: Visibility {
-        selection == 3 && !isWide ? .hidden : .visible
-    }
+
+    init() { _ = Self.navigationTitleAppearance }
+
+    /// 导航标题统一暖棕（系统默认纯黑/纯白和奶油底、马卡龙卡片不搭）。
+    /// 只改标题文字属性，不碰导航栏背景，Liquid Glass 材质保持系统默认。
+    private static let navigationTitleAppearance: Void = {
+        let bar = UINavigationBar.appearance()
+        bar.titleTextAttributes = [.foregroundColor: BubuTheme.Color.warmBrownUIColor]
+        bar.largeTitleTextAttributes = [.foregroundColor: BubuTheme.Color.warmBrownUIColor]
+    }()
 
     /// 每日学习是独立入口；用独立 tag，避免改动已有 0~4 的直达参数。
     static let learningTab = 5
@@ -32,18 +40,9 @@ struct RootTabView: View {
     }
 
     var body: some View {
+        // 幼儿园 Tab 以前藏起系统底栏、换成自绘平底栏：图标、材质、高度都和其他页不同，
+        // 还丢了「记录此刻」附件和 VoiceOver 的标签栏语义。现在每个 Tab 都用同一条系统 Liquid Glass 底栏。
         tabsWithRecordAccessory
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if selection == 3 && !isWide {
-                    HStack(spacing: 0) {
-                        schoolNavigationItem("首页", symbol: "house", tab: 0)
-                        schoolNavigationItem("时光", symbol: "photo", tab: 1)
-                        schoolNavigationItem("学习", symbol: "graduationcap", tab: Self.learningTab)
-                        schoolNavigationItem("成长", symbol: "chart.bar", tab: 2)
-                        schoolNavigationItem("幼儿园", symbol: "house.fill", tab: 3)
-                    }.padding(.top, 7).background(BubuTheme.Color.cream)
-                }
-            }
             // 切 Tab 此前手上没有任何回音：内容过渡做了、记录按钮的轻触做了，
             // 唯独最高频的这个动作是哑的。bubuSensoryFeedback 全仓只用了 2 处，严重低用。
             .bubuSensoryFeedback(.selection, trigger: selection)
@@ -60,7 +59,7 @@ struct RootTabView: View {
             .tabViewSidebarBottomBar {
                 if isWide {
                     Button(action: openQuickCapture) {
-                        Label("记一笔", systemImage: "plus.circle.fill")
+                        Label(BubuTheme.Copy.recordNow, systemImage: "plus.circle.fill")
                             .font(BubuTheme.Font.body.weight(.semibold))
                             .foregroundStyle(env.theme.theme.textAccent)
                     }
@@ -77,6 +76,8 @@ struct RootTabView: View {
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             // 全 App 统一圆体：散落的 .caption / .system(size:) 也随设计语言变圆润。
             .fontDesign(.rounded)
+            // 开发语言已是 zh-Hans；这里再兜底一次，日期选择器/格式化在任何设备地区下都显示中文月份。
+            .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
             // 第一次连上家庭服务时，先说明第二大脑如何整理内容，再展示回忆、时光与学习。
             .secondBrainConsent(active: BubuLearningClient(env: env) != nil && !OnlineTimelineView.skipsConsentForUITest)
             .ignoresSafeArea(.keyboard)
@@ -110,27 +111,32 @@ struct RootTabView: View {
             .onChange(of: selection) { _, tab in
                 if tab == 1 { openPendingTimelineEntryIfReady() }
             }
-    }
-
-    private func schoolNavigationItem(_ title: String, symbol: String, tab: Int) -> some View {
-        Button { selection = tab } label: {
-            VStack(spacing: 3) {
-                Image(systemName: symbol).font(.system(size: 22, weight: .medium))
-                Text(title).font(.system(size: 11))
-            }.frame(maxWidth: .infinity, minHeight: 45)
-                .contentShape(Rectangle())
-                .foregroundStyle(selection == tab ? SchoolPalette.coral : BubuTheme.Color.secondaryText)
-        }.buttonStyle(.plain).accessibilityLabel(title)
-            .accessibilityAddTraits(selection == tab ? .isSelected : [])
+            .sheet(isPresented: Binding(get: { rootCapture?.showQuickCapture ?? false },
+                                        set: { rootCapture?.showQuickCapture = $0 })) {
+                if let rootCapture { QuickCaptureSheet(model: rootCapture) }
+            }
+            .onChange(of: rootCapture?.savedFlash) { _, flashed in
+                if flashed == true {
+                    captureToast = BubuToastState(message: BubuTheme.Copy.savedLocally, systemImage: "checkmark.circle.fill")
+                }
+            }
+            .alert("部分照片没导入", isPresented: Binding(
+                get: { rootCapture?.partialSaveWarning != nil },
+                set: { if !$0 { rootCapture?.partialSaveWarning = nil } })) {
+                Button("好") { rootCapture?.partialSaveWarning = nil }
+            } message: {
+                Text(rootCapture?.partialSaveWarning ?? "")
+            }
+            .bubuToast($captureToast)
     }
 
     @ViewBuilder
     private var tabsWithRecordAccessory: some View {
         if #available(iOS 26.1, *) {
-            tabs.tabViewBottomAccessory(isEnabled: !isWide && selection != 3) {
+            tabs.tabViewBottomAccessory(isEnabled: !isWide) {
                 BubuRecordAccessory { openQuickCapture() }
             }
-        } else if !isWide && selection != 3 {
+        } else if !isWide {
             tabs.tabViewBottomAccessory {
                 BubuRecordAccessory { openQuickCapture() }
             }
@@ -146,8 +152,6 @@ struct RootTabView: View {
                     CaptureHomeView(openTimeline: { selection = 1 },
                                     quickCaptureTrigger: quickCaptureTrigger)
                 }
-                .toolbar(systemTabBarVisibility, for: .tabBar)
-                .bubuTabContentTransition(isActive: selection == 0)
             }
 
             Tab("时光", systemImage: "clock.fill", value: 1) {
@@ -157,32 +161,23 @@ struct RootTabView: View {
                         // 通知/小组件/搜索直达的家人记录仍可打开，但不再作为时光主列表。
                         .navigationDestination(for: UUID.self) { TimelineEntryDestination(entryID: $0) }
                 }
-                    .toolbar(systemTabBarVisibility, for: .tabBar)
-                    .bubuTabContentTransition(isActive: selection == 1)
             }
 
             Tab("学习", systemImage: "graduationcap.fill", value: Self.learningTab) {
                 NavigationStack { DailyLearningHomeView() }
-                    .toolbar(systemTabBarVisibility, for: .tabBar)
-                    .bubuTabContentTransition(isActive: selection == Self.learningTab)
             }
 
             Tab("成长", systemImage: "chart.xyaxis.line", value: 2) {
                 NavigationStack { GrowthHomeView() }
-                    .toolbar(systemTabBarVisibility, for: .tabBar)
-                    .bubuTabContentTransition(isActive: selection == 2)
             }
 
             Tab("幼儿园", systemImage: "house.lodge.fill", value: 3) {
                 NavigationStack { MemoryJournalView() }
-                    .toolbar(systemTabBarVisibility, for: .tabBar)
-                    .bubuTabContentTransition(isActive: selection == 3)
             }
 
             #if targetEnvironment(macCatalyst)
             Tab("档案馆", systemImage: "archivebox.fill", value: 4) {
                 NavigationStack { MacArchiveWorkspaceView() }
-                    .toolbar(systemTabBarVisibility, for: .tabBar)
             }
             #endif
         }
@@ -207,10 +202,24 @@ struct RootTabView: View {
         .accessibilityHidden(true)
     }
 
+    /// 在哪个 Tab 点，就在哪个 Tab 上弹记录面板。首页仍交给首页自己的面板
+    /// （保存后的「第一次」识别、首页贴纸都挂在那里）；其余页面用根部面板，不切 Tab。
     private func openQuickCapture() {
-        selection = 0
-        quickCaptureTrigger += 1
+        if selection == 0 {
+            quickCaptureTrigger += 1
+        } else {
+            presentRootCapture()
+        }
         BubuHaptics.tapLight()
+    }
+
+    private func presentRootCapture() {
+        if rootCapture == nil {
+            rootCapture = CaptureModel(mediaStore: env.mediaStore, analyzer: env.photoAnalyzer,
+                                       role: env.config.currentRole)
+        }
+        rootCapture?.role = env.config.currentRole
+        rootCapture?.startQuickCapture()
     }
 
     private func consumePendingRoute() {
@@ -224,12 +233,10 @@ struct RootTabView: View {
             // 冷启动时在这里立刻写 path 会得到一帧没有 destination 的白屏。
         }
         if router.pendingQuickCapture {
-            selection = 0
+            // Siri / 小组件 / 控制中心：冷启动时首页可能还没挂载，统一走根部面板，
+            // 不切 Tab、不等 350ms。
             router.pendingQuickCapture = false
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(350))
-                quickCaptureTrigger += 1
-            }
+            presentRootCapture()
         }
     }
 
@@ -265,7 +272,6 @@ struct RootTabView: View {
 /// 系统底部附件会在 Tab 展开/收缩间变形；内容跟随 placement 调整，避免压缩时塞两行文字。
 private struct BubuRecordAccessory: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(AppEnvironment.self) private var env
     let action: () -> Void
 
@@ -275,33 +281,27 @@ private struct BubuRecordAccessory: View {
                 Image(systemName: "plus.circle.fill")
                     .font(BubuTheme.Font.scaled(20, weight: .bold))
                     .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, env.theme.theme.primary)
+                    .foregroundStyle(.white, env.theme.theme.actionFill)
+                // 一行字，用 .primary/.secondary 让玻璃的 vibrancy 随底下内容自适应：
+                // 固定暖棕压在照片上时对比度只有 2:1 左右。副标题已移到记录面板里。
                 if placement == .expanded {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("记录此刻")
-                            .font(BubuTheme.Font.body.weight(.semibold))
-                            .foregroundStyle(BubuTheme.Color.warmBrown)
-                            .lineLimit(1)
-                        if !dynamicTypeSize.isAccessibilitySize {
-                            Text("照片、声音和一句话一起收好")
-                                .font(BubuTheme.Font.caption)
-                                .foregroundStyle(BubuTheme.Color.secondaryText)
-                                .lineLimit(1)
-                        }
-                    }
+                    Text(BubuTheme.Copy.recordNow)
+                        .font(BubuTheme.Font.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up")
                         .font(BubuTheme.Font.caption.weight(.bold))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .foregroundStyle(.secondary)
                 } else {
                     Text("记录")
                         .font(BubuTheme.Font.caption.weight(.bold))
-                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .foregroundStyle(.primary)
                 }
             }
             .padding(.horizontal, 14)
             .frame(maxWidth: placement == .expanded ? .infinity : nil,
-                   minHeight: placement == .expanded ? 48 : 36)
+                   minHeight: placement == .expanded ? 44 : 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

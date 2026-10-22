@@ -15,6 +15,7 @@ struct QuickCaptureSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @FocusState private var noteFocused: Bool
     @State private var showCamera = false
     @State private var showVideoCamera = false
@@ -35,6 +36,9 @@ struct QuickCaptureSheet: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: BubuTheme.Spacing.item) {
+                            if let restored = model.restoredDraftNotice {
+                                restoredDraftBanner(restored)
+                            }
                             primaryActions(proxy: proxy)
                             naturalCaptureEntry
 
@@ -144,6 +148,7 @@ struct QuickCaptureSheet: View {
                 Button("丢掉这一笔", role: .destructive) {
                     guard !model.isSaving else { return }
                     BubuHaptics.warning()
+                    model.discardDraft()
                     model.showQuickCapture = false
                 }
                 Button("继续记", role: .cancel) {}
@@ -153,14 +158,18 @@ struct QuickCaptureSheet: View {
             .onChange(of: model.pickedItems) { _, _ in
                 model.updatePreviews()   // 单飞：内部自动取消上一次加载，防网格错位
             }
+            // 被孩子打断、切去相机或别的 App：进后台前把文字和录音落盘，被系统回收也能找回（D9-07）。
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { model.persistDraftNow() }
+            }
             // 写了半屏字、选了 9 张照片，一滑就全没了——重开面板时 startQuickCapture()
             // 会把 note / pickedItems / mood / pendingVoice 全部清零，不是「草稿留着」，是真丢。
-            // 有内容时禁掉下滑关闭，走「以后再说」的二次确认。
+            // 有内容时禁掉下滑关闭，走「不记了」的二次确认。
             // 本仓录音中已有同款保护（VoiceComponents 的 interactiveDismissDisabled）。
             .interactiveDismissDisabled(model.canSave || model.isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("以后再说") {
+                    Button("不记了") {
                         if model.canSave { discardConfirm = true }
                         else { model.showQuickCapture = false }
                     }
@@ -181,6 +190,26 @@ struct QuickCaptureSheet: View {
                 }
             }
         }
+    }
+
+    private func restoredDraftBanner(_ text: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.uturn.backward.circle.fill")
+                .foregroundStyle(theme)
+            Text(text)
+                .font(BubuTheme.Font.caption.weight(.medium))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+            Spacer(minLength: 8)
+            Button("不要了") {
+                BubuHaptics.tapLight()
+                model.discardDraft()
+            }
+            .font(BubuTheme.Font.caption.weight(.semibold))
+            .foregroundStyle(BubuTheme.Color.secondaryText)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(theme.opacity(0.08), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     private var naturalCaptureEntry: some View {

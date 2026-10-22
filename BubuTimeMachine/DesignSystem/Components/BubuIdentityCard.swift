@@ -1,8 +1,12 @@
+import SwiftData
 import SwiftUI
 
-// MARK: - 布布个人身份卡
-/// 首页顶部的「学生证/工作证」风格卡片：头像、姓名、年龄、生日、来到世界第几天、
-/// 出生地、短 ID 与条码装饰。克制配色 + 玻璃质感，点击进入资料编辑。
+// MARK: - 布布身份卡（首页小档案）
+/// 首页顶部约 110–120pt 的小档案：大头像（柔光环）+ 圆体名字 + 年龄 / 第 N 天 + 2 个信息小签
+/// （生日倒计时、最新身高体重或星座）。轻点翻面看性别 / 血型 / 星座 / 出生地。
+/// - 只读本机已有数据：ChildProfile、GrowthMeasurement（统一走 GrowthMeasurementResolver）。
+/// - 字号最小 12pt；卡面用动态马卡龙柔面（深色压暗同色相 + 米白字），文字对比度两种模式都 ≥ 4.5:1。
+/// - 信息小签用流式布局，大字号时自动换行；翻面在 90° 侧立时换面，减少动态效果时直接切换。
 struct BubuIdentityCard: View {
     let profile: ChildProfile
     let theme: BubuThemeDefinition
@@ -10,26 +14,34 @@ struct BubuIdentityCard: View {
 
     /// 翻面状态由首页持有，避免 iPad 宽屏父布局刷新时把卡片重建回正面。
     @Binding var isFlipped: Bool
-    @State private var sheenProgress: CGFloat = -1.2
+    /// 当前绕 Y 轴的角度：0 正对；翻面时先转到 90° 侧立、换面，再从 -90° 转回 0。
+    @State private var turn: Double = 0
+    @State private var avatar: UIImage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // UIFontMetrics does not inherit SwiftUI's dynamicTypeSize cap. Apply the
-    // card's existing xxxLarge limit at the actual font source, without changing its design.
-    private func cardFont(_ size: CGFloat, weight: Font.Weight = .regular,
-                          design: Font.Design = .rounded) -> Font {
-        BubuTheme.Font.scaled(size, weight: weight, design: design, cap: .extraExtraExtraLarge)
+    @Query private var measurements: [GrowthMeasurement]
+
+    init(profile: ChildProfile, theme: BubuThemeDefinition, mediaStore: MediaStore, isFlipped: Binding<Bool>) {
+        self.profile = profile
+        self.theme = theme
+        self.mediaStore = mediaStore
+        self._isFlipped = isFlipped
     }
+
+    private static let shape = RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
+
+    private func cardFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        BubuTheme.Font.scaled(size, weight: weight, design: .rounded, cap: .extraExtraExtraLarge)
+    }
+
+    // MARK: 数据
 
     private var ageText: String {
         AgeCalculator.ageDescription(birthday: profile.birthday, at: .now)
     }
 
     private var daysText: String {
-        "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天"   // 见下方 contentTransition
-    }
-
-    private var cardNo: String {
-        "BUBU20240522"
+        "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天"
     }
 
     /// 生日月：与 AppIconManager.apply(isBirthdayMonth:) 同一条规则，图标与卡片徽章联动。
@@ -38,377 +50,296 @@ struct BubuIdentityCard: View {
             == Calendar.current.component(.month, from: profile.birthday)
     }
 
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            card
-                .contentShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-                .onTapGesture { flip() }
-                .accessibilityIdentifier("home.identity-card")
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel(isFlipped
-                    ? "布布身份卡背面，性别、血型、出生地，轻点翻回正面"
-                    : "布布身份卡，\(profile.name)，\(ageText)，\(daysText)，轻点翻面查看性别、血型、出生地")
-                .accessibilityValue(isFlipped ? "背面" : "正面")
-
-            Button(action: flip) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                    Text(isFlipped ? "翻回正面" : (isBirthdayMonth ? "生日月 · 翻面" : "轻点翻面"))
-                }
-                .font(cardFont(9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.textAccent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.white.opacity(0.34), in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.48), lineWidth: 0.7))
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("home.identity-card.flip")
-            .accessibilityLabel(isFlipped ? "翻回身份卡正面" : "翻看身份卡背面")
-            .padding(.top, 10)
-            .padding(.trailing, 12)
-        }
-        .bubuSensoryFeedback(.impact(weight: .light), trigger: isFlipped)
-        // 身份卡是固定比例的高密度证件版式；完整内容由 VoiceOver 标签一次读出。
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .task(id: isFlipped) {
-            guard !reduceMotion else {
-                sheenProgress = 2.2
-                return
-            }
-            sheenProgress = -1.2
-            await Task.yield()
-            withAnimation(BubuMotion.smooth) {
-                sheenProgress = 2.2
-            }
-        }
+    private var birthdayChipText: String {
+        let days = AgeCalculator.daysUntilNextBirthday(birthday: profile.birthday)
+        return days == 0 ? "今天生日" : "生日还有 \(days) 天"
     }
 
-    private var card: some View {
-        ZStack {
-            front
-                .opacity(isFlipped ? 0 : 1)
-                .allowsHitTesting(!isFlipped)
-            back
-                .opacity(isFlipped ? 1 : 0)
-                .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0))
-                // 背面透明时仍会命中、吞掉正面点击——按翻面态开关命中（P2f）
-                .allowsHitTesting(isFlipped)
+    private var constellation: String {
+        let c = Calendar.current.dateComponents([.month, .day], from: profile.birthday)
+        let month = c.month ?? 1, day = c.day ?? 1
+        let cuts = [20, 19, 21, 20, 21, 22, 23, 23, 23, 24, 23, 22]
+        let names = ["摩羯", "水瓶", "双鱼", "白羊", "金牛", "双子", "巨蟹", "狮子", "处女", "天秤", "天蝎", "射手", "摩羯"]
+        return names[day < cuts[month - 1] ? month - 1 : month] + "座"
+    }
+
+    /// 最新身高 / 体重（任一存在即显示），没有实测就返回 nil。
+    private var growthText: String? {
+        func fmt(_ v: Double) -> String { v.formatted(.number.precision(.fractionLength(0...1))) }
+        let height = GrowthMeasurementResolver.latestValue(.height, from: measurements).map { "\(fmt($0)) cm" }
+        let weight = GrowthMeasurementResolver.latestValue(.weight, from: measurements).map { "\(fmt($0)) kg" }
+        let parts = [height, weight].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    // MARK: 主体
+
+    var body: some View {
+        Group {
+            if isFlipped { back } else { front }
         }
-        .background(cardBackground)
-        .overlay(alignment: .topTrailing) {
-            Circle()
-                .fill(.white.opacity(0.18))
-                .frame(width: 96, height: 96)
-                .offset(x: 28, y: 36)
-        }
-        // 马卡龙闪烁小星点缀（仅正面、低频）
-        .overlay(alignment: .topTrailing) {
-            if !isFlipped {
-                BubuSparkle(size: 15, color: .white.opacity(0.95))
-                    .offset(x: -18, y: 16)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if !isFlipped {
-                BubuSparkle(size: 10, color: .white.opacity(0.8), delay: 0.7)
-                    .offset(x: 18, y: 30)
-            }
-        }
-        // 一次性的镜面高光：首次出现与每次翻面各扫过一次，不常驻循环。
-        .overlay {
-            GeometryReader { geometry in
-                LinearGradient(
-                    colors: [.clear, .white.opacity(0.08), .white.opacity(0.42), .clear],
-                    startPoint: .top,
-                    endPoint: .bottom)
-                    .frame(width: geometry.size.width * 0.34)
-                    .rotationEffect(.degrees(14))
-                    .offset(x: geometry.size.width * sheenProgress)
-                    .blendMode(.screen)
-            }
-            .allowsHitTesting(false)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [.white.opacity(0.78), theme.primary.opacity(0.20), .white.opacity(0.34)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing),
-                    lineWidth: 1)
-                .padding(0.5)
-        }
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Self.shape)
+        .onTapGesture { flip() }
+        .accessibilityIdentifier("home.identity-card")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(isFlipped
+            ? "布布身份卡背面，\(backSummary)，轻点翻回正面"
+            : "布布身份卡，\(profile.name)，\(ageText)，\(daysText)，\(frontChipSummary)，轻点翻面查看性别、血型、出生地")
+        .accessibilityValue(isFlipped ? "背面" : "正面")
+        .overlay(alignment: .topTrailing) { flipButton }
+        .background { decorativeBackground }
+        .clipShape(Self.shape)
+        .overlay { Self.shape.stroke(BubuTheme.Color.hairline.opacity(0.45), lineWidth: 0.7) }
         .bubuCardShadow()
-        // leotexiao Flip Card：双面共用真实透视空间，Spring 由品牌 ceremony token 统一。
-        .rotation3DEffect(
-            .degrees(isFlipped ? 180 : 0),
-            axis: (x: 0, y: 1, z: 0),
-            perspective: 0.68)
+        .rotation3DEffect(.degrees(turn), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
+        .bubuSensoryFeedback(.impact(weight: .light), trigger: isFlipped)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .task(id: profile.avatarMediaFileName) { await loadAvatar() }
+    }
+
+    private var flipButton: some View {
+        Button(action: flip) {
+            Image(systemName: isFlipped ? "arrow.uturn.left" : "arrow.triangle.2.circlepath")
+                .font(cardFont(13, weight: .bold))
+                .foregroundStyle(BubuTheme.Color.primaryInk)
+                .frame(width: 32, height: 32)
+                .background(BubuTheme.Color.elevatedCard.opacity(0.85), in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(4)
+        .accessibilityIdentifier("home.identity-card.flip")
+        .accessibilityLabel(isFlipped ? "翻回身份卡正面" : "翻看身份卡背面")
     }
 
     private func flip() {
-        // 统一用 BubuMotion.ceremony（可打断 spring，典礼感节奏）——翻面途中可随时再点反向翻回。
-        withAnimation(reduceMotion ? nil : BubuMotion.ceremony) {
+        guard !reduceMotion else {
             isFlipped.toggle()
+            return
+        }
+        withAnimation(BubuMotion.quick, completionCriteria: .logicallyComplete) {
+            turn = 90
+        } completion: {
+            isFlipped.toggle()
+            turn = -90
+            withAnimation(BubuMotion.gentle) { turn = 0 }
         }
     }
 
     // MARK: 正面
 
     private var front: some View {
-        VStack(spacing: 0) {
-            clipBar
-
-            HStack(alignment: .center, spacing: 10) {
-                avatarBlock
-
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("BUBU IDENTITY")
-                                .font(cardFont(9, weight: .bold, design: .rounded))
-                                .tracking(1.4)
-                                .foregroundStyle(theme.textAccent)
-
-                            Text(profile.name)
-                                .font(cardFont(23, weight: .black, design: .rounded))
-                                .foregroundStyle(BubuTheme.Color.warmBrown)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.6)
-                            Text("中文名 · \(profile.name)")
-                                .font(cardFont(10.5, weight: .bold, design: .rounded))
-                                .foregroundStyle(theme.textAccent)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        HStack(spacing: 4) {
-                            Circle().fill(.white.opacity(0.92)).frame(width: 5, height: 5)
-                            Text("ACTIVE")
-                        }
-                        .font(cardFont(10, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(theme.actionFill, in: Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.42), lineWidth: 0.8))
+        HStack(alignment: .center, spacing: 14) {
+            avatarView
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(profile.name)
+                        .font(cardFont(23, weight: .heavy))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    if isBirthdayMonth {
+                        Text("生日月")
+                            .font(cardFont(12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(theme.actionFill, in: Capsule())
                     }
-
-                    infoGrid
-
-                    HStack(spacing: 8) {
-                        barcode
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("No.\(cardNo)")
-                                .font(cardFont(9.5, weight: .bold, design: .monospaced))
-                                .foregroundStyle(BubuTheme.Color.secondaryText)
-                            Text("小小探险家 · 家庭认证")
-                                .font(cardFont(10.5, weight: .semibold, design: .rounded))
-                                .foregroundStyle(theme.textAccent)
-                        }
-                        Spacer()
+                }
+                .padding(.trailing, 34)   // 给右上角翻面按钮留位
+                Text("\(Text(ageText).fontWeight(.bold).foregroundStyle(BubuTheme.Color.warmBrown)) · \(daysText)")
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .font(cardFont(15, weight: .semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.numericText())
+                FlowLayout(spacing: 6) {
+                    chip(symbol: "gift.fill", text: birthdayChipText)
+                    if let growthText {
+                        chip(symbol: "ruler.fill", text: growthText)
+                    } else {
+                        chip(symbol: "sparkles", text: constellation)
                     }
-                    .padding(.top, 2)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
         }
     }
 
-    // MARK: 背面（轻点头像进入；任意处轻点翻回）
+    private func chip(symbol: String?, emoji: String? = nil, text: String) -> some View {
+        HStack(spacing: 4) {
+            if let emoji {
+                Text(emoji).font(cardFont(12))
+            } else if let symbol {
+                Image(systemName: symbol)
+                    .font(cardFont(12, weight: .bold))
+                    .foregroundStyle(BubuTheme.Color.primaryInk)
+            }
+            Text(text)
+                .font(cardFont(13, weight: .semibold))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(BubuTheme.Color.elevatedCard.opacity(0.78), in: Capsule())
+        .overlay { Capsule().stroke(BubuTheme.Color.hairline.opacity(0.35), lineWidth: 0.5) }
+    }
+
+    private var frontChipSummary: String {
+        [birthdayChipText, growthText ?? constellation].joined(separator: "，")
+    }
+
+    // MARK: 背面
 
     private var back: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("BUBU IDENTITY · 背面")
-                    .font(cardFont(10, weight: .bold, design: .rounded))
-                    .tracking(1.4)
-                    .foregroundStyle(theme.textAccent)
-                Spacer()
-                Image(systemName: "arrow.uturn.left.circle")
-                    .font(cardFont(14, weight: .semibold))
-                    .foregroundStyle(theme.textAccent)
+        VStack(alignment: .leading, spacing: 0) {
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 6) {
+                GridRow {
+                    fact("性别", profile.gender)
+                    fact("血型", profile.bloodType)
+                    fact("星座", constellation)
+                }
+                GridRow {
+                    fact("出生地", profile.birthPlace)
+                    fact("生日", profile.birthday.formatted(.dateTime.month().day()))
+                    if let highlight = backHighlight {
+                        fact(highlight.label, highlight.value)
+                    } else {
+                        fact("小名", nil)
+                    }
+                }
             }
-
-            if let nickname = profile.nickname, !nickname.isEmpty {
-                backRow(title: "小名", value: nickname)
-            }
-            backRow(title: "性别", value: profile.gender?.isEmpty == false ? profile.gender! : "未填写")
-            backRow(title: "血型", value: profile.bloodType?.isEmpty == false ? profile.bloodType! : "未填写")
-            backRow(title: "出生地", value: profile.birthPlace?.isEmpty == false ? profile.birthPlace! : "未填写")
-
-            // 这里以前印的是 profile.id 的 UUID。整张卡的学生证质感做得很好，
-            // 翻到背面看见一串机器码，人设瞬间就碎了——那串号码对布布毫无意义，
-            // 对调试也没用（真要查用日志）。换成她自己的东西。
-            VStack(alignment: .leading, spacing: 2) {
-                Text(backHighlight.label)
-                    .font(cardFont(9, weight: .black, design: .rounded))
-                    .foregroundStyle(theme.textAccent)
-                Text(backHighlight.value)
-                    .font(cardFont(13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
-
-            Text("轻点卡片翻回正面")
-                .font(cardFont(10))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-                .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.trailing, 36)   // 给右上角翻面按钮留位
         }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
     }
 
-    /// 背面那格印什么：上学了就印上学天数（这三年最值得记的一条），
-    /// 否则印小名，都没有就回到「来到世界第 N 天」——永远是一句关于布布的话。
-    private var backHighlight: (label: String, value: String) {
+    private func fact(_ title: String, _ value: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(cardFont(12, weight: .semibold))
+                .foregroundStyle(BubuTheme.Color.secondaryText)
+            Text(value?.isEmpty == false ? value! : "未填写")
+                .font(cardFont(15, weight: .bold))
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(BubuTheme.Color.elevatedCard.opacity(0.7),
+                    in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+    }
+
+    /// 第六格：上学了印上学天数，否则印小名。
+    private var backHighlight: (label: String, value: String)? {
         if let school = AgeCalculator.schoolDescription(schoolStartDate: profile.schoolStartDate) {
             return ("幼儿园", school)
         }
-        if let nickname = profile.nickname, !nickname.isEmpty {
-            return ("小名", nickname)
-        }
-        return ("来到世界", "第 \(AgeCalculator.daysSinceBirth(birthday: profile.birthday)) 天")
+        if let nickname = profile.nickname, !nickname.isEmpty { return ("小名", nickname) }
+        return nil
     }
 
-    private func backRow(title: String, value: String) -> some View {
-        HStack {
-            Text(title)
-                .font(cardFont(11, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.textAccent)
-            Spacer()
-            Text(value)
-                .font(cardFont(13, weight: .semibold, design: .rounded))
-                .foregroundStyle(BubuTheme.Color.warmBrown)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.white.opacity(0.38), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
+    private var backSummary: String {
+        func value(_ v: String?) -> String { v?.isEmpty == false ? v! : "未填写" }
+        return "性别\(value(profile.gender))，血型\(value(profile.bloodType))，\(constellation)，出生地\(value(profile.birthPlace))"
     }
 
-    private var clipBar: some View {
-        HStack {
-            Capsule()
-                .fill(.white.opacity(0.64))
-                .frame(width: 48, height: 6)
-                .shadow(color: .black.opacity(0.05), radius: 3, y: 1)
-            Spacer()
+    // MARK: 头像
+
+    private var avatarView: some View {
+        Group {
+            if let avatar {
+                Image(uiImage: avatar).resizable().scaledToFill()
+            } else {
+                BubuMascotBadge(size: 56, expression: .happy)
+            }
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 5)
+        .frame(width: 64, height: 64)
+        .background(BubuTheme.Color.cream)
+        .clipShape(Circle())
+        .padding(3)
+        .background(BubuTheme.Color.elevatedCard, in: Circle())
+        .padding(3)
+        .background {
+            Circle().fill(AngularGradient(
+                colors: [BubuTheme.Color.primary.opacity(0.75), BubuTheme.Color.butter,
+                         BubuTheme.Color.pink, BubuTheme.Color.lav, BubuTheme.Color.primary.opacity(0.75)],
+                center: .center))
+        }
+        .shadow(color: BubuTheme.Color.primary.opacity(0.22), radius: 8, y: 3)
+        .overlay(alignment: .topTrailing) {
+            BubuSparkle(size: 14, color: BubuTheme.Color.butter, animated: !reduceMotion)
+                .offset(x: 2, y: -2)
+                .accessibilityHidden(true)
+        }
+        .overlay(alignment: .bottomLeading) {
+            BubuSparkle(size: 9, color: BubuTheme.Color.pink, animated: !reduceMotion, delay: 0.6)
+                .offset(x: -2, y: 0)
+                .accessibilityHidden(true)
+        }
     }
 
-    @ViewBuilder
-    private var avatarBlock: some View {
-        ZStack(alignment: .bottomTrailing) {
-            Group {
-                if let name = profile.avatarMediaFileName,
-                   let data = mediaStore.data(forMedia: name),
-                   let image = UIImage(data: data) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    BubuMascotBadge(size: 82, expression: .happy)
+    private func loadAvatar() async {
+        guard let name = profile.avatarMediaFileName else { avatar = nil; return }
+        let url = mediaStore.mediaURL(for: name)
+        avatar = await HomeImageDecoder.decode(file: url, maxPixel: 200)
+    }
+
+    // MARK: 装饰底
+
+    /// 不透明底 + 动态马卡龙柔面（浅=粉→奶黄，深=压暗同色相）+ 柔光圆斑 + 点阵 + 星点。
+    /// 装饰只用低透明度，文字仍落在 warmBrown / secondaryText 可读的范围里。
+    private var decorativeBackground: some View {
+        ZStack {
+            BubuTheme.Color.elevatedCard
+            LinearGradient(
+                colors: [
+                    BubuTheme.Color.pinkSurface.opacity(0.8),
+                    BubuTheme.Color.heroSurfaceMid.opacity(0.5),
+                    BubuTheme.Color.butterSurface.opacity(0.75),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing)
+            Canvas { ctx, size in
+                let step: CGFloat = 13
+                for x in stride(from: size.width * 0.45, through: size.width, by: step) {
+                    for y in stride(from: 6, through: size.height, by: step) {
+                        ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 2.2, height: 2.2)),
+                                 with: .color(BubuTheme.Color.heroSurfaceHighlight.opacity(0.55)))
+                    }
                 }
             }
-            .frame(width: 90, height: 96)
-            .background(BubuTheme.Color.cream, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous)
-                    .stroke(.white.opacity(0.65), lineWidth: 1)
+            .mask(LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .leading, endPoint: .trailing))
+        }
+        .overlay(alignment: .topTrailing) {
+            Circle()
+                .fill(BubuTheme.Color.heroSurfaceHighlight.opacity(0.45))
+                .frame(width: 150, height: 150)
+                .blur(radius: 6)
+                .offset(x: 50, y: -70)
+        }
+        .overlay(alignment: .bottomLeading) {
+            Circle()
+                .fill(BubuTheme.Color.heroSurfaceHighlight.opacity(0.35))
+                .frame(width: 110, height: 110)
+                .blur(radius: 8)
+                .offset(x: -40, y: 55)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            HStack(alignment: .bottom, spacing: 10) {
+                BubuSparkle(size: 8, color: BubuTheme.Color.butter, animated: !reduceMotion, delay: 0.3)
+                BubuSparkle(size: 13, color: BubuTheme.Color.pink, animated: !reduceMotion, delay: 0.9)
             }
-            .shadow(color: theme.primary.opacity(0.18), radius: 8, y: 4)
-
-            Text("布布")
-                .font(cardFont(11, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(theme.actionFill, in: Capsule())
-                .offset(x: 6, y: 6)
+            .padding(.trailing, 18)
+            .padding(.bottom, 12)
         }
-    }
-
-    private var infoGrid: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 6) {
-                idChip(title: "AGE", value: ageText)
-                idChip(title: "DAY", value: daysText)
-            }
-            HStack(spacing: 6) {
-                idChip(title: "BIRTH", value: BubuDateFormat.shortDate(profile.birthday))
-                idChip(title: "FROM", value: profile.birthPlace?.isEmpty == false ? profile.birthPlace! : "地球小站")
-            }
-        }
-    }
-
-    private func idChip(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(cardFont(9, weight: .black, design: .rounded))
-                .foregroundStyle(theme.textAccent)
-            Text(value)
-                .font(cardFont(11.5, weight: .semibold, design: .rounded))
-                .foregroundStyle(BubuTheme.Color.warmBrown)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                // 年龄/天数每日跳变时数字像里程表滚动（AGE/DAY chip），其余文本无副作用。
-                .contentTransition(.numericText())
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            LinearGradient(
-                colors: [.white.opacity(0.46), .white.opacity(0.30)],
-                startPoint: .top,
-                endPoint: .bottom),
-            in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous)
-                .stroke(.white.opacity(0.32), lineWidth: 0.7)
-        }
-    }
-
-    private var barcode: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<12, id: \.self) { idx in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(BubuTheme.Color.warmBrown.opacity(idx.isMultiple(of: 3) ? 0.55 : 0.28))
-                    .frame(width: idx.isMultiple(of: 4) ? 3 : 2,
-                           height: CGFloat([10, 15, 8, 13, 17, 9][idx % 6]))
-            }
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
-    }
-
-    private var cardBackground: some ShapeStyle {
-        // 奶油马卡龙：peach → pink → lav 柔粉渐变（对照设计稿 Hero 卡）。
-        LinearGradient(
-            colors: [
-                BubuTheme.Color.heroSurfaceTop.opacity(0.55),
-                BubuTheme.Color.heroSurfaceMid.opacity(0.45),
-                BubuTheme.Color.heroSurfaceEnd.opacity(0.45),
-                BubuTheme.Color.heroSurfaceHighlight.opacity(0.30)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 }

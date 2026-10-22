@@ -8,6 +8,7 @@ import AVKit
 struct BirthdayFilmView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     private struct Moment: Identifiable, Hashable {
         let plan: FilmMomentPlan
@@ -24,6 +25,15 @@ struct BirthdayFilmView: View {
     @State private var phase: Phase = .loading
     @State private var player: AVPlayer?
     @State private var job: Task<Void, Never>?
+    /// Set when the app went to the background mid-render: the encoder stops there, so the job is cancelled on purpose.
+    @State private var interruptedByBackground = false
+
+    private var isWorking: Bool {
+        switch phase {
+        case .downloading, .rendering: true
+        default: false
+        }
+    }
 
     private var kept: [Moment] { moments.filter { !removed.contains($0.id) } }
 
@@ -48,6 +58,13 @@ struct BirthdayFilmView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: client?.scope) { if let client, moments.isEmpty { await load(client) } }
         .onDisappear { job?.cancel(); player?.pause() }
+        .onChange(of: scenePhase) { _, newPhase in
+            // The video encoder is unavailable in the background; stop cleanly instead of stalling.
+            if newPhase == .background, isWorking {
+                interruptedByBackground = true
+                job?.cancel()
+            }
+        }
         .accessibilityIdentifier("brain.birthday-film")
     }
 
@@ -73,7 +90,18 @@ struct BirthdayFilmView: View {
         case .failed(let message):
             VStack(spacing: BubuTheme.Spacing.m) {
                 SecondBrainErrorBanner(text: message)
-                Button("再试一次") { Task { await load(client) } }.buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                if kept.count >= 3 {
+                    // Rendering failed: keep the photos the parent picked and try again directly.
+                    Button("再试一次") { start(client) }.buttonStyle(.borderedProminent).tint(BubuTheme.Color.deepRose)
+                        .accessibilityIdentifier("film.retry")
+                    Button("重新挑选") {
+                        withAnimation(reduceMotion ? nil : BubuMotion.gentle) { phase = .picking }
+                    }
+                    .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                } else {
+                    Button("再试一次") { Task { await load(client) } }.buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                        .accessibilityIdentifier("film.retry")
+                }
             }
         case .picking:
             picker(client: client)
@@ -108,7 +136,7 @@ struct BirthdayFilmView: View {
                                     .overlay(alignment: .topTrailing) {
                                         Image(systemName: isRemoved ? "plus.circle.fill" : "checkmark.circle.fill")
                                             .font(BubuTheme.Font.headline).symbolRenderingMode(.palette)
-                                            .foregroundStyle(.white, isRemoved ? BubuTheme.Color.secondaryText : BubuTheme.Color.primary)
+                                            .foregroundStyle(.white, isRemoved ? BubuTheme.Color.secondaryText : BubuTheme.Color.actionFill)
                                             .padding(6)
                                     }
                                 Text(moment.plan.caption).font(BubuTheme.Font.scaled(11, weight: .semibold))
@@ -147,6 +175,9 @@ struct BirthdayFilmView: View {
             ProgressView(value: min(max(value, 0), 1)).tint(BubuTheme.Color.primary)
             Text("\(Int((min(max(value, 0), 1) * 100).rounded()))%").font(BubuTheme.Font.caption.monospacedDigit())
                 .foregroundStyle(BubuTheme.Color.secondaryText).contentTransition(.numericText())
+            Label("大约 1 分钟，请停在这一页，屏幕会保持常亮", systemImage: "iphone")
+                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                .multilineTextAlignment(.center)
             Button("取消", role: .cancel) { job?.cancel() }.font(BubuTheme.Font.caption)
         }
         .padding(BubuTheme.Spacing.l)
@@ -185,8 +216,14 @@ struct BirthdayFilmView: View {
         do {
             async let reportsTask = client.get("api/monthly", as: MonthlyReportList.self)
             async let firstsTask = client.get("api/firsts", query: [URLQueryItem(name: "status", value: "all")], as: GrowthFirstListDTO.self)
-            let reports = (try? await reportsTask)?.items ?? []
-            let firsts = (try? await firstsTask)?.items ?? []
+            let reportsResult: Result<MonthlyReportList, Error>
+            let firstsResult: Result<GrowthFirstListDTO, Error>
+            do { reportsResult = .success(try await reportsTask) } catch { reportsResult = .failure(error) }
+            do { firstsResult = .success(try await firstsTask) } catch { firstsResult = .failure(error) }
+            // Both sources unreachable (offline, server down): show a retryable error, not "no material yet".
+            if case .failure(let error) = reportsResult, case .failure = firstsResult { throw error }
+            let reports = (try? reportsResult.get())?.items ?? []
+            let firsts = (try? firstsResult.get())?.items ?? []
             let plans = BirthdayFilmPlanner.select(months: SecondBrainMonths.trailing(12, endingAt: .now),
                                                    reports: reports, firsts: firsts, perMonth: 2)
             let items = try await client.timelineItems(ids: plans.map(\.itemId))
@@ -194,7 +231,7 @@ struct BirthdayFilmView: View {
             moments = plans.compactMap { plan in byID[plan.itemId].map { Moment(plan: plan, item: $0) } }
             removed = []
             phase = .picking
-        } catch is CancellationError {
+        } catch let error where isCancellation(error) {
         } catch {
             phase = .failed(learningErrorText(error))
         }
@@ -207,17 +244,30 @@ struct BirthdayFilmView: View {
             .reduce("") { $0.isEmpty ? $1 : $0 + " – " + $1 }
         BubuHaptics.tapLight()
         job?.cancel()
+        interruptedByBackground = false
         job = Task {
+            // Keep the screen awake and ask for background time while the film is assembled.
+            let keepAlive = LearningUploadKeepAlive()
+            defer { keepAlive.end() }
             phase = .downloading(0)
             do {
-                var frames: [FilmFrameInput] = []
-                for (index, moment) in chosen.enumerated() {
-                    try Task.checkCancellation()
-                    // Large preview of a photo, or the poster frame of a video.
-                    if let data = try? await client.mediaData(moment.item.largeUrl) {
-                        frames.append(FilmFrameInput(imageData: data, caption: moment.plan.caption))
+                // Large preview of a photo, or the poster frame of a video; LearningMediaGate caps concurrency.
+                let paths = chosen.map(\.item.largeUrl)
+                var downloaded = [Data?](repeating: nil, count: paths.count)
+                try await withThrowingTaskGroup(of: (Int, Data?).self) { group in
+                    for (index, path) in paths.enumerated() {
+                        group.addTask { (index, try? await client.mediaData(path)) }
                     }
-                    phase = .downloading(Double(index + 1) / Double(chosen.count))
+                    var finished = 0
+                    for try await (index, data) in group {
+                        try Task.checkCancellation()
+                        downloaded[index] = data
+                        finished += 1
+                        phase = .downloading(Double(finished) / Double(paths.count))
+                    }
+                }
+                let frames = zip(chosen, downloaded).compactMap { moment, data in
+                    data.map { FilmFrameInput(imageData: $0, caption: moment.plan.caption) }
                 }
                 guard frames.count >= 3 else { throw LearningServiceError.unavailableMedia }
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("布布的又一年.mp4")
@@ -229,8 +279,13 @@ struct BirthdayFilmView: View {
                 player = AVPlayer(url: url)
                 BubuHaptics.success()
                 withAnimation(reduceMotion ? nil : BubuMotion.gentle) { phase = .done(url) }
-            } catch is CancellationError {
-                phase = .picking
+            } catch let error where isCancellation(error) {
+                if interruptedByBackground {
+                    interruptedByBackground = false
+                    phase = .failed("离开这一页后影片就停下来了。挑好的照片都还在，点「再试一次」接着做。")
+                } else {
+                    phase = .picking
+                }
             } catch {
                 phase = .failed(learningErrorText(error, fallback: "影片没有生成成功，请稍后再试。"))
             }

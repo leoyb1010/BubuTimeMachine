@@ -2,6 +2,8 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
+import BackgroundTasks
+import OSLog
 
 // MARK: - 每日学习
 /// 独立入口：家长按日期上传幼儿园课程视频，服务端解析出原声互动课，家长核对后开放给布布。
@@ -34,6 +36,7 @@ struct DailyLearningHomeView: View {
 struct DailyLearningHome: View {
     let client: BubuLearningClient
     @Environment(BubuRouter.self) private var router
+    @Environment(\.scenePhase) private var scenePhase
     @State private var day: Date
     @State private var context: LearningContextDTO?
     @State private var courses: [LearningCourseDTO] = []
@@ -82,6 +85,11 @@ struct DailyLearningHome: View {
             }
         }
         .task(id: "\(dayString)|\(refreshTick)") { await load() }
+        .task { await BubuActivityController.reconcileCourseUploads(client: client) }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await BubuActivityController.reconcileCourseUploads(client: client) }
+        }
         .task(id: router.pendingLearningDay) {
             guard let raw = router.pendingLearningDay else { return }
             router.pendingLearningDay = nil
@@ -133,7 +141,7 @@ struct DailyLearningHome: View {
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 8)
                         .foregroundStyle(selected ? Color.white : BubuTheme.Color.warmBrown)
-                        .background(selected ? BubuTheme.Color.primary : BubuTheme.Color.softFill.opacity(0.45),
+                        .background(selected ? BubuTheme.Color.actionFill : BubuTheme.Color.softFill.opacity(0.45),
                                     in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -397,7 +405,7 @@ struct CourseStateBadge: View {
     }
     private var background: Color {
         switch state {
-        case "published": BubuTheme.Color.primary
+        case "published": BubuTheme.Color.actionFill
         case "draft": BubuTheme.Color.butterSurface
         case "failed", "uploading": BubuTheme.Color.danger.opacity(0.12)
         default: BubuTheme.Color.softFill
@@ -422,7 +430,17 @@ struct CourseUploadSheet: View {
     @State private var uploading = false
     @State private var progressText: String?
     @State private var errorText: String?
+    /// 上传中断（网络断了、App 被挂起）时保留已建好的课程和已传上的文件，「继续上传」从断点接着传。
+    @State private var resume: UploadResume?
     @Environment(\.dismiss) private var dismiss
+
+    private struct UploadResume {
+        let courseID: String
+        /// 已压缩/排好序的全部文件（含我们自己生成的压缩副本）。
+        let files: [LearningUploadFile]
+        /// 已经传上的个数。
+        var uploaded: Int
+    }
 
     init(client: BubuLearningClient, day: Date, childID: String?, onUploaded: @escaping (LearningCourseDetailDTO) -> Void) {
         self.client = client
@@ -490,7 +508,7 @@ struct CourseUploadSheet: View {
                     Section {
                         HStack { ProgressView(); Text(progressText) }
                     } footer: {
-                        Label("上传中请保持在本页，屏幕不会自动锁定；锁屏上也能看到进度。", systemImage: "hand.raised.fill")
+                        Label("上传中屏幕不会自动锁定；切到别的 App 也会尽量接着传，锁屏上能看到进度。万一断了，回来点「继续上传」从断点接着传。", systemImage: "hand.raised.fill")
                     }
                     .accessibilityIdentifier("learning.upload.progress")
                 }
@@ -505,7 +523,10 @@ struct CourseUploadSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(uploading) }
                 ToolbarItem(placement: .confirmationAction) {
-                    if uploading { ProgressView() } else {
+                    if uploading { ProgressView() } else if resume != nil {
+                        Button("继续上传") { Task { await upload() } }
+                            .accessibilityIdentifier("learning.upload.resume")
+                    } else {
                         Button("上传") { Task { await upload() } }.disabled(!canSubmit)
                             .accessibilityIdentifier("learning.upload.submit")
                     }
@@ -515,6 +536,7 @@ struct CourseUploadSheet: View {
             .onDisappear {
                 // Picked copies live in tmp and can be hundreds of MB; drop them if the sheet closes early.
                 for file in files { try? FileManager.default.removeItem(at: file.url) }
+                for file in resume?.files ?? [] { try? FileManager.default.removeItem(at: file.url) }
             }
             #if DEBUG
             .task {
@@ -588,69 +610,97 @@ struct CourseUploadSheet: View {
         uploading = true; errorText = nil
         var ready: [LearningUploadFile] = []
         var created: String?
+        var uploadedCount = 0
         var finished = false
         let courseTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 压缩 + 上传最多几分钟：申请后台时间、屏幕不自动锁定，锁屏/灵动岛显示进度。
+        // 压缩 + 上传最多几分钟：申请系统的「继续处理」任务（切走也接着跑，系统显示进度）
+        // 和后台时间、屏幕不自动锁定，锁屏/灵动岛显示进度。
         let keepAlive = LearningUploadKeepAlive()
-        BubuActivityController.startCourseUpload(title: courseTitle, childName: "布布")
+        BubuActivityController.startCourseUpload(title: courseTitle, childName: "布布",
+                                                 schoolDate: BubuLearningDates.dayString(day))
         defer {
-            keepAlive.end()
+            keepAlive.end(success: finished)
             if !finished { BubuActivityController.failCourseUpload() }
             uploading = false; progressText = nil
-            // Compressed copies are ours; the picked originals stay for a retry.
-            for file in ready where !files.contains(file) { try? FileManager.default.removeItem(at: file.url) }
+            if finished || created == nil {
+                // Compressed copies are ours; the picked originals stay for a retry.
+                for file in ready where !files.contains(file) { try? FileManager.default.removeItem(at: file.url) }
+            }
         }
         do {
-            let toCompress = files.filter { $0.mimeType.hasPrefix("video/") && Self.size(of: $0.url) > Self.compressAboveBytes }
-            var compressed = 0
-            for (index, file) in files.enumerated() {
-                if toCompress.contains(file) {
-                    let label = "正在压缩第 \(index + 1) 个视频…"
-                    progressText = label
-                    let done = compressed, total = toCompress.count
-                    BubuActivityController.updateCourseUpload(phase: .compressing, progress: Double(done) / Double(total))
-                    ready.append(try await Self.compress(file) { fraction in
-                        Task { @MainActor in
-                            let overall = (Double(done) + fraction) / Double(total)
-                            progressText = "\(label) \(Int((fraction * 100).rounded()))%"
-                            BubuActivityController.updateCourseUpload(phase: .compressing, progress: overall)
-                        }
-                    })
-                    compressed += 1
-                } else {
-                    ready.append(file)
+            if let saved = resume {
+                // 断点续传：课程已经建好，压缩副本还在，从没传上的那个文件接着传。
+                ready = saved.files
+                created = saved.courseID
+                uploadedCount = saved.uploaded
+                BubuActivityController.attachCourseUpload(courseID: saved.courseID)
+            } else {
+                let toCompress = files.filter { $0.mimeType.hasPrefix("video/") && Self.size(of: $0.url) > Self.compressAboveBytes }
+                var compressed = 0
+                for (index, file) in files.enumerated() {
+                    if toCompress.contains(file) {
+                        let label = "正在压缩第 \(index + 1) 个视频…"
+                        progressText = label
+                        let done = compressed, total = toCompress.count
+                        BubuActivityController.updateCourseUpload(phase: .compressing, progress: Double(done) / Double(total))
+                        keepAlive.report(CourseUploadActivityPhase.compressing.overallProgress(progress: Double(done) / Double(total)))
+                        ready.append(try await Self.compress(file) { fraction in
+                            Task { @MainActor in
+                                let overall = (Double(done) + fraction) / Double(total)
+                                progressText = "\(label) \(Int((fraction * 100).rounded()))%"
+                                BubuActivityController.updateCourseUpload(phase: .compressing, progress: overall)
+                                keepAlive.report(CourseUploadActivityPhase.compressing.overallProgress(progress: overall))
+                            }
+                        })
+                        compressed += 1
+                    } else {
+                        ready.append(file)
+                    }
                 }
+                if let large = ready.first(where: { Self.size(of: $0.url) > Self.maxRequestBytes }) {
+                    errorText = "「\(large.fileName)」压缩后仍超过 90 MB，请在相册里剪成几段（每段几分钟）再上传。"
+                    return
+                }
+                // Teacher audio goes first so the course always starts with real speech.
+                ready.sort { !$0.mimeType.hasPrefix("image/") && $1.mimeType.hasPrefix("image/") }
             }
-            if let large = ready.first(where: { Self.size(of: $0.url) > Self.maxRequestBytes }) {
-                errorText = "「\(large.fileName)」压缩后仍超过 90 MB，请在相册里剪成几段（每段几分钟）再上传。"
-                return
+            var course: LearningCourseDetailDTO?
+            if created == nil {
+                progressText = ready.count > 1 ? "正在上传第 1/\(ready.count) 个文件…" : "正在上传…"
+                BubuActivityController.updateCourseUpload(phase: .uploading, step: 1, steps: ready.count)
+                keepAlive.report(CourseUploadActivityPhase.uploading.overallProgress(step: 1, steps: ready.count))
+                let first = try await client.createCourse(childID: childID, schoolDate: BubuLearningDates.dayString(day),
+                                                          title: courseTitle,
+                                                          kind: kind, language: language, first: ready[0], totalFiles: ready.count)
+                course = first
+                created = first.id
+                uploadedCount = 1
+                BubuActivityController.attachCourseUpload(courseID: first.id)
             }
-            // Teacher audio goes first so the course always starts with real speech.
-            ready.sort { !$0.mimeType.hasPrefix("image/") && $1.mimeType.hasPrefix("image/") }
-            progressText = ready.count > 1 ? "正在上传第 1/\(ready.count) 个文件…" : "正在上传…"
-            BubuActivityController.updateCourseUpload(phase: .uploading, step: 1, steps: ready.count)
-            var course = try await client.createCourse(childID: childID, schoolDate: BubuLearningDates.dayString(day),
-                                                       title: courseTitle,
-                                                       kind: kind, language: language, first: ready[0], totalFiles: ready.count)
-            created = course.id
-            BubuActivityController.attachCourseUpload(courseID: course.id)
-            for (index, file) in ready.enumerated().dropFirst() {
+            guard let courseID = created else { return }
+            for index in ready.indices.dropFirst(uploadedCount) {
                 progressText = "正在上传第 \(index + 1)/\(ready.count) 个文件…"
                 BubuActivityController.updateCourseUpload(phase: .uploading, step: index + 1, steps: ready.count)
-                course = try await client.addCourseFile(courseID: course.id, file: file)
+                keepAlive.report(CourseUploadActivityPhase.uploading.overallProgress(step: index + 1, steps: ready.count))
+                course = try await client.addCourseFile(courseID: courseID, file: ready[index])
+                uploadedCount = index + 1
             }
             finished = true
-            // 文件都到了：服务端开始解析，之后由首页轮询推进到「草稿可审核」。
-            BubuActivityController.updateCourseUpload(phase: CourseUploadActivityPhase.from(courseState: course.state) ?? .parsing)
+            resume = nil
+            // 文件都到了：服务端开始解析，之后由首页轮询 / 回前台核对推进到「草稿可审核」。
+            let state = course?.state ?? "processing"
+            BubuActivityController.updateCourseUpload(phase: CourseUploadActivityPhase.from(courseState: state) ?? .parsing)
             for file in files { try? FileManager.default.removeItem(at: file.url) }
-            onUploaded(course)
+            if let course { onUploaded(course) }
             dismiss()
         } catch {
-            // Don't leave a half-uploaded lesson behind; retrying creates a clean one.
             if let created {
-                _ = try? await client.send("DELETE", "api/courses/\(created)", as: CourseDeleted.self)
+                // 不删已建好的课程：已传上的文件留着，下次从断点接着传，不用重新压缩、重新上传。
+                resume = UploadResume(courseID: created, files: ready, uploaded: uploadedCount)
+                errorText = learningErrorText(error, fallback: "上传断了") + "。已传上 \(uploadedCount)/\(ready.count) 个文件，点「继续上传」接着传。"
+            } else {
+                errorText = learningErrorText(error, fallback: "上传没有完成，请检查网络后重试。")
             }
-            errorText = learningErrorText(error, fallback: "上传没有完成，请检查网络后重试。如果课程里显示“上传未完成”，可以删除后重新上传。")
         }
     }
 
@@ -708,10 +758,20 @@ struct CourseUploadSheet: View {
     }
 }
 
-/// 上传期间：申请后台执行时间（切走/锁屏时多撑一会儿），并关闭自动锁屏；结束时恢复原状。
+/// 上传期间：
+/// - iOS 26 的 BGContinuedProcessingTask：家长切到微信也接着压缩、上传，系统在灵动岛/通知里显示进度
+///   （需要 Info.plist 的 BGTaskSchedulerPermittedIdentifiers 里有 `continuedTaskID`，没有时安静跳过）；
+/// - 兜底再申请一段普通后台时间，并关闭自动锁屏；结束时恢复原状。
 @MainActor
 final class LearningUploadKeepAlive {
+    nonisolated static let continuedTaskID = "com.bubu.timemachine.course-upload"
+    private static let log = Logger(subsystem: "com.bubu.timemachine", category: "LearningUpload")
+    private static var registered = false
+    private static weak var current: LearningUploadKeepAlive?
+
     private var task: UIBackgroundTaskIdentifier = .invalid
+    private var continued: BGContinuedProcessingTask?
+    private var fraction: Double = 0
     private let previousIdleDisabled: Bool
     private var ended = false
 
@@ -721,12 +781,23 @@ final class LearningUploadKeepAlive {
         task = UIApplication.shared.beginBackgroundTask(withName: "bubu.learning.course-upload") { [weak self] in
             self?.endBackgroundTask()
         }
+        Self.current = self
+        Self.submitContinuedProcessing()
     }
 
-    func end() {
+    /// 整体进度 0...1，同步给系统的继续处理任务。
+    func report(_ value: Double) {
+        fraction = min(max(value, 0), 1)
+        continued?.progress.completedUnitCount = Int64((fraction * 100).rounded())
+    }
+
+    func end(success: Bool = true) {
         guard !ended else { return }
         ended = true
         UIApplication.shared.isIdleTimerDisabled = previousIdleDisabled
+        if success { continued?.progress.completedUnitCount = 100 }
+        continued?.setTaskCompleted(success: success)
+        continued = nil
         endBackgroundTask()
     }
 
@@ -734,6 +805,44 @@ final class LearningUploadKeepAlive {
         guard task != .invalid else { return }
         UIApplication.shared.endBackgroundTask(task)
         task = .invalid
+    }
+
+    private static var permitted: Bool {
+        (Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String])?
+            .contains(continuedTaskID) ?? false
+    }
+
+    private static func submitContinuedProcessing() {
+        // 未在 Info.plist 声明时注册会直接抛异常，所以先确认再注册。
+        guard permitted else { return }
+        if !registered {
+            registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: continuedTaskID, using: .main) { task in
+                nonisolated(unsafe) let task = task
+                MainActor.assumeIsolated { attach(task) }
+            }
+        }
+        guard registered else { return }
+        let request = BGContinuedProcessingTaskRequest(identifier: continuedTaskID,
+                                                       title: "上传课程视频", subtitle: "压缩并传到家里的服务器")
+        request.strategy = .fail
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            log.error("继续处理任务提交失败：\(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func attach(_ task: BGTask) {
+        guard let continued = task as? BGContinuedProcessingTask, let current, !current.ended else {
+            task.setTaskCompleted(success: true)
+            return
+        }
+        continued.progress.totalUnitCount = 100
+        continued.progress.completedUnitCount = Int64((current.fraction * 100).rounded())
+        nonisolated(unsafe) let expiring = continued
+        // 系统收回时如实结束；上传会因此中断，家长回来点「继续上传」从断点接着传。
+        continued.expirationHandler = { expiring.setTaskCompleted(success: false) }
+        current.continued = continued
     }
 }
 

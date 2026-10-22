@@ -184,7 +184,7 @@ def test_worker_heartbeat_voices_backlog_and_daily_backup(tmp_path, monkeypatch)
     root = tmp_path / "backups"
     monkeypatch.setenv("LEARNING_BACKUP_DIR", str(root))
     worker.periodic(now=0, today=date(2026, 10, 22))
-    assert 3 <= processed[0] <= 5
+    assert processed[0] == 20  # a real batch, bounded by the clip time budget
     assert (root / "2026-10-22/learning.sqlite").is_file()
     assert store.get_cursor("learning-backup")["day"] == "2026-10-22"
     worker.periodic(now=10, today=date(2026, 10, 22))
@@ -235,12 +235,9 @@ def test_status_fields_are_null_when_unknown_and_never_block(tmp_path):
     now = time.time()
     status = Status(timeline, lambda *a: {"learning_store": True, "brain_library": True,
                                           "heartbeat": {"at": now - 10}, "backup": {"at": now - 3600}})
-    first = status.status(scope())
-    assert first["ok"] and first["worker_alive"] and first["items"] is None and first["snapshot_at"] is None
+    first = status.status(scope())  # right after a restart: waits briefly for the first snapshot
+    assert first["ok"] and first["worker_alive"] and first["items"] == 2 and first["preparing"] is False
     assert first["voices_pending"] is None and first["backup_at"].endswith("+08:00")
-    deadline = time.monotonic() + 5
-    while timeline.peek() is None and time.monotonic() < deadline:
-        time.sleep(0.02)
     second = status.status(scope())
     assert second["items"] == 2 and second["captions_pending"] == 2 and second["snapshot_at"]
     assert str(tmp_path) not in json.dumps(second, ensure_ascii=False)
@@ -452,7 +449,7 @@ def test_social_comments_hearts_recent_and_ntfy(tmp_path, monkeypatch):
     deadline = time.monotonic() + 3
     while not pushed and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert pushed == [("http://127.0.0.1:9/bubu-family", "姥姥评论了布布的一条时光", "Bearer tk_test")]
+    assert pushed == [("http://127.0.0.1:9/bubu-family", "姥姥给布布的一条时光留言了", "Bearer tk_test")]
     social.comment(member("mom", ""), fid, "嗯")
     view = social.social(member("mom", ""), fid)
     assert [(c["author"], c["mine"]) for c in view["comments"]] == [("姥姥", False), ("家人", True)]

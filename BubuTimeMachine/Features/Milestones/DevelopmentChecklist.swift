@@ -293,7 +293,7 @@ struct DevelopmentChecklistCard: View {
     @AppStorage(DevChecklistTicks.key) private var ticksRaw = ""
 
     var body: some View {
-        let age = ageInMonths(profiles.first?.birthday) ?? 12
+        let age = ageInMonths(ChildProfile.canonical(from: profiles)?.birthday) ?? 12
         let band = DevelopmentChecklist.bands[DevelopmentChecklist.currentBandIndex(ageMonths: age)]
         let ticks = DevChecklistTicks.decode(ticksRaw)
         let done = band.items.filter { ticks.contains($0.id) }.count
@@ -344,7 +344,7 @@ struct DevelopmentChecklistView: View {
     @State private var tickTrigger = 0
     @Namespace private var chipNamespace
 
-    private var ageMonths: Int { ageInMonths(profiles.first?.birthday) ?? 12 }
+    private var ageMonths: Int { ageInMonths(ChildProfile.canonical(from: profiles)?.birthday) ?? 12 }
     private var bands: [DevChecklistBand] { DevelopmentChecklist.visibleBands(ageMonths: ageMonths) }
     private var currentMonths: Int {
         DevelopmentChecklist.bandMonths[DevelopmentChecklist.currentBandIndex(ageMonths: ageMonths)]

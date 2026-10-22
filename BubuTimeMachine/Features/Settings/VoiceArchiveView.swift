@@ -14,7 +14,7 @@ struct VoiceArchiveView: View {
     @State private var recordKind: VoiceMemo.Kind = .childVoice
 
     private var theme: Color { env.theme.theme.primary }
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
 
     /// 按岁分组（降序）。
     private var grouped: [(age: Int, memos: [VoiceMemo])] {
@@ -132,7 +132,7 @@ struct VoiceMemoRecorderSheet: View {
     @State private var transcript: String?
 
     private var theme: Color { env.theme.theme.primary }
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
 
     var body: some View {
         NavigationStack {

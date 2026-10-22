@@ -64,7 +64,7 @@ def create_features():
     voices=Voices(online,bridge,processor)
     return {'online_timeline':online,'memories':Memories(online),'firsts':firsts,
             'monthly':Monthly(online,bridge,firsts),'voices':voices,
-            'recognition':Recognition(bridge,online),'ask':Ask(online,bridge),'words':Words(online,voices),
+            'recognition':Recognition(bridge,online),'ask':Ask(online,bridge,firsts),'words':Words(online,voices),
             'places':Places(online),'social':Social(online),'status':Status(online)}
 
 

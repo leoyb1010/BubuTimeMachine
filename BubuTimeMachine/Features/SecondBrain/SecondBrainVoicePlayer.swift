@@ -118,7 +118,7 @@ struct SecondBrainThumb: View {
             .overlay(alignment: .bottomTrailing) {
                 if item.isVideo {
                     Image(systemName: "play.circle.fill").font(BubuTheme.Font.headline)
-                        .symbolRenderingMode(.palette).foregroundStyle(.white, BubuTheme.Color.primary)
+                        .symbolRenderingMode(.palette).foregroundStyle(.white, BubuTheme.Color.actionFill)
                         .padding(6).accessibilityHidden(true)
                 }
             }

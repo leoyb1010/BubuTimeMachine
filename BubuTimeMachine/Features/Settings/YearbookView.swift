@@ -19,7 +19,7 @@ struct YearbookView: View {
     /// 第二大脑每月成长小报（连了家庭服务器才有；离线时为空，年册只用本机数据）。
     @State private var monthlyReports: [YearbookMonthlyReport] = []
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
 
     var body: some View {

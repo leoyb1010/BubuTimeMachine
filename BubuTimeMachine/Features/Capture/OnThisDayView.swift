@@ -13,7 +13,7 @@ struct OnThisDayView: View {
 
     @State private var startQuickCapture = false
 
-    private var profile: ChildProfile? { profiles.first }
+    private var profile: ChildProfile? { ChildProfile.canonical(from: profiles) }
     private var theme: Color { env.theme.theme.primary }
 
     var body: some View {
