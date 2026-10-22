@@ -222,3 +222,7 @@ def _fact_subsets(facts):
     if len(base) >= 4:
         yield base[: len(base) // 2]
         yield base[len(base) // 2:]
+    if len(base) >= 8:
+        quarter = len(base) // 4
+        for index in range(4):
+            yield base[index * quarter:(index + 1) * quarter]
