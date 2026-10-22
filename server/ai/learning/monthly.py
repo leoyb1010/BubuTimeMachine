@@ -107,6 +107,21 @@ class Monthly:
             row = db.execute("SELECT * FROM monthly_reports WHERE family_id=? AND month=?", (self.family, month)).fetchone()
         return dict(row) if row else None
 
+    def _write(self, user):
+        title = summary = ""
+        for attempt in range(2):
+            prompt = user if not attempt else user + "\n\n上一次超出字数，请严格控制：标题≤20字，小结≤160字。"
+            try:
+                reply = self.bridge.complete_json(SYSTEM, prompt, SCHEMA, effort="medium")
+            except BrainUnavailable:
+                # Medium reasoning on a busy month can exceed the gate's 180 s; low writes from the same facts.
+                reply = self.bridge.complete_json(SYSTEM, prompt, SCHEMA, effort="low")
+            title = " ".join(str(reply.get("title") or "").split()).strip("「」《》\"'")
+            summary = " ".join(str(reply.get("summary") or "").split())
+            if title and summary and len(title) <= MAX_TITLE and len(summary) <= MAX_SUMMARY:
+                break
+        return title, summary
+
     def generate(self, month, *, force=False):
         """Write one month's report; returns it, or None when there is nothing to write."""
         if not force and self.report(month):
@@ -116,22 +131,22 @@ class Monthly:
         facts = self._facts(rows, highlights)
         if not facts:
             return None
-        user = "月份：%s年%d月\n照片%d张，视频%d段。\n%s" % (
+        header = "月份：%s年%d月\n照片%d张，视频%d段。\n" % (
             month[:4], int(month[5:]), sum(r["item"]["media_type"] == "photo" for r in rows),
-            sum(r["item"]["media_type"] == "video" for r in rows), "\n".join(facts))
+            sum(r["item"]["media_type"] == "video" for r in rows))
         title = summary = ""
-        for attempt in range(2):
-            prompt = user if not attempt else user + "\n\n上一次超出字数，请严格控制：标题≤20字，小结≤160字。"
+        last_error = None
+        # The provider's safety filter can block a month (baby bath/diaper/feeding scenes). Fall back to
+        # fewer, gentler facts instead of leaving the month empty.
+        for subset in _fact_subsets(facts):
             try:
-                reply = self.bridge.complete_json(SYSTEM, prompt, SCHEMA, effort="medium")
-            except BrainUnavailable:
-                # Medium reasoning on a busy month can exceed the brain gate's 180 s; low still
-                # writes from the same facts.
-                reply = self.bridge.complete_json(SYSTEM, prompt, SCHEMA, effort="low")
-            title = " ".join(str(reply.get("title") or "").split()).strip("「」《》\"'")
-            summary = " ".join(str(reply.get("summary") or "").split())
-            if title and summary and len(title) <= MAX_TITLE and len(summary) <= MAX_SUMMARY:
-                break
+                title, summary = self._write(header + "\n".join(subset))
+                if title and summary:
+                    break
+            except BrainUnavailable as exc:
+                last_error = exc
+        if not title and last_error is not None:
+            raise last_error
         if not title or not summary:
             raise ValueError("月报内容为空")
         if "袁晨希" not in summary:
@@ -192,3 +207,18 @@ if __name__ == "__main__":
             print(month, "ok" if result else "empty", (result or {}).get("title", ""), flush=True)
         except Exception as exc:
             print(month, "failed", type(exc).__name__, flush=True)
+
+
+GENTLE_SKIP = ("洗澡", "澡盆", "浴", "尿布", "纸尿裤", "换尿布", "哺乳", "喂奶", "母乳", "乳", "胸", "裸", "光着", "光屁股", "内裤", "泳衣", "如厕", "便便")
+
+
+def _fact_subsets(facts):
+    """Full facts, then without care-scene wording, then each half of those."""
+    yield facts
+    gentle = [f for f in facts if not any(word in f for word in GENTLE_SKIP)]
+    if gentle and gentle != facts:
+        yield gentle
+    base = gentle or facts
+    if len(base) >= 4:
+        yield base[: len(base) // 2]
+        yield base[len(base) // 2:]
