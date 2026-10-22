@@ -31,12 +31,17 @@ public nonisolated struct WatchSnapshot: Codable, Sendable {
     /// v3: phone-curated, photo-only reading deck. nil means an older phone;
     /// an empty array is authoritative (no eligible photos). Never a health feed.
     public var photoCards: [WatchMemory]?
+    /// v4: 服务端「今日精选」（≤6，照片走同一个照片包）。nil = 旧手机或尚无精选。
+    public var dailyPicks: [WatchMemory]?
+    /// 精选所属日期（Asia/Shanghai，yyyy-MM-dd）。手表据此判断「新的一天的精选到了」。
+    public var dailyPicksDay: String?
 
     public init(childName: String, birthday: Date?, roleRaw: String,
                 achievedMilestones: Int, totalMilestones: Int,
                 recent: [WatchRecent], avatarData: Data? = nil, updatedAt: Date,
                 memories: [WatchMemory]? = nil, todayStats: [String: Int]? = nil,
-                sleepingSince: Date? = nil, photoCards: [WatchMemory]? = nil) {
+                sleepingSince: Date? = nil, photoCards: [WatchMemory]? = nil,
+                dailyPicks: [WatchMemory]? = nil, dailyPicksDay: String? = nil) {
         self.childName = childName
         self.birthday = birthday
         self.roleRaw = roleRaw
@@ -49,6 +54,8 @@ public nonisolated struct WatchSnapshot: Codable, Sendable {
         self.todayStats = todayStats
         self.sleepingSince = sleepingSince
         self.photoCards = photoCards
+        self.dailyPicks = dailyPicks
+        self.dailyPicksDay = dailyPicksDay
     }
 }
 
@@ -69,9 +76,12 @@ public nonisolated struct WatchMemory: Codable, Sendable, Identifiable, Hashable
     public var moodEmoji: String?
     /// 照片在手表本地缓存里的文件名。nil = 这段回忆没有照片。
     public var photoFileName: String?
+    /// 今日精选的理由（「那年今天」/「最近精选」）。本机照片为 nil。
+    public var reason: String?
 
     public init(id: String, dateText: String, note: String, ageText: String,
-                isOnThisDay: Bool = false, moodEmoji: String? = nil, photoFileName: String? = nil) {
+                isOnThisDay: Bool = false, moodEmoji: String? = nil, photoFileName: String? = nil,
+                reason: String? = nil) {
         self.id = id
         self.dateText = dateText
         self.note = note
@@ -79,6 +89,7 @@ public nonisolated struct WatchMemory: Codable, Sendable, Identifiable, Hashable
         self.isOnThisDay = isOnThisDay
         self.moodEmoji = moodEmoji
         self.photoFileName = photoFileName
+        self.reason = reason
     }
 }
 

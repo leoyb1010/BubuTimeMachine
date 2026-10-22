@@ -182,3 +182,30 @@ final class NativeLearningAudioPlayer {
 }
 
 private enum NativeLearningPlaybackError: Error { case unplayable }
+
+
+/// Section card for learning screens: BubuTheme fonts (follows Dynamic Type), warm surfaces, dark-mode aware.
+struct LearningPanel<Content: View>: View {
+    let title: String
+    let symbol: String
+    var subtitle = ""
+    var accent: Color = BubuTheme.Color.deepRose
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: BubuTheme.Spacing.s) {
+            HStack(spacing: BubuTheme.Spacing.s) {
+                Image(systemName: symbol).font(BubuTheme.Font.headline).foregroundStyle(accent)
+                Text(title).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                Spacer(minLength: 0)
+                if !subtitle.isEmpty {
+                    Text(subtitle).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).lineLimit(1)
+                }
+            }
+            content
+        }
+        .padding(BubuTheme.Spacing.item)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BubuTheme.Color.card.opacity(0.92), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+    }
+}

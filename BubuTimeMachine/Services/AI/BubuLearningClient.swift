@@ -7,14 +7,14 @@ import UIKit
 // Server JSON is snake_case; the decoder converts keys. Every URL the server
 // returns is a same-origin `/learning/...` path that still needs the bearer.
 
-nonisolated struct OnlineTimelineSegment: Decodable, Sendable, Hashable, Identifiable {
+nonisolated struct OnlineTimelineSegment: Codable, Sendable, Hashable, Identifiable {
     let id: String
     let start: Double
     let end: Double
     let text: String
 }
 
-nonisolated struct OnlineTimelineItem: Decodable, Sendable, Hashable, Identifiable {
+nonisolated struct OnlineTimelineItem: Codable, Sendable, Hashable, Identifiable {
     let id: String
     let contentHash: String
     let kind: String
@@ -28,12 +28,26 @@ nonisolated struct OnlineTimelineItem: Decodable, Sendable, Hashable, Identifiab
     let previewUrl: String
     let largeUrl: String
     let mediaUrl: String
+    // 2.25: layout, people, place and family decisions; optional for older servers.
+    let aspect: Double?
+    let people: [String]?
+    let place: String?
+    let confirmedByFamily: Bool?
+    let descriptionAdjusted: Bool?
+    let transcriptHidden: Int?
 
     var isVideo: Bool { kind == "video" }
+    /// Width / height, clamped so a panorama or a tall screenshot can't break a row.
+    var layoutAspect: Double { min(max(aspect ?? 1, 0.56), 2.2) }
     var capturedDate: Date? { capturedAt.flatMap(BubuLearningDates.parseISO) }
 }
 
-nonisolated struct OnlineTimelinePage: Decodable, Sendable {
+nonisolated struct OnlineTimelineMonthCount: Codable, Sendable, Hashable { let month: String; let count: Int }
+nonisolated struct OnlineTimelinePerson: Decodable, Sendable, Hashable { let name: String; let count: Int }
+nonisolated struct OnlineTimelinePeople: Decodable, Sendable { let items: [OnlineTimelinePerson] }
+nonisolated struct OnlineTimelineItems: Decodable, Sendable { let items: [OnlineTimelineItem] }
+
+nonisolated struct OnlineTimelinePage: Codable, Sendable {
     let items: [OnlineTimelineItem]
     let total: Int
     let page: Int
@@ -41,6 +55,7 @@ nonisolated struct OnlineTimelinePage: Decodable, Sendable {
     let photos: Int
     let videos: Int
     let snapshotId: String
+    let months: [OnlineTimelineMonthCount]?
 }
 
 nonisolated struct LearningContextDTO: Decodable, Sendable {
@@ -257,8 +272,15 @@ nonisolated struct BubuLearningClient: Sendable {
     private let token: @Sendable () async throws -> String
     private let session: URLSession
 
+    /// One ephemeral session for the whole app; clients are cheap values rebuilt with views.
+    static let sharedSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: configuration)
+    }()
+
     init(baseURL: URL, scope: String, token: @escaping @Sendable () async throws -> String,
-         session: URLSession = URLSession(configuration: .ephemeral)) {
+         session: URLSession = BubuLearningClient.sharedSession) {
         routes = LearningServiceRoutes(baseURL: baseURL)
         self.scope = scope
         self.token = token

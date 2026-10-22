@@ -100,6 +100,8 @@ struct CaptureHomeView: View {
                     // 「功能搬家」提示卡已移除：那次信息架构调整是 2.11.0 的事，
                     // 早就不是新消息了，却还常驻在首屏最值钱的位置上。
                     // 项目已经接了 TipKit，真要做渐进引导用它，不用再自养一套常驻横幅。
+                    // ③ 生日倒计时 + 第二大脑回忆轮播（未连接服务时只有倒计时）
+                    HomeMemoriesSection(birthday: profile?.birthday, childName: profile?.name ?? "布布")
                     if entries.isEmpty {
                         firstRecordEmptyState  // ③a 空库：单焦点，只说「记第一笔」
                     } else {

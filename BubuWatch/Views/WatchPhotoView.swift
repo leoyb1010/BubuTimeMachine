@@ -6,6 +6,9 @@ struct WatchPhotoView: View {
     @Environment(WatchConnector.self) private var connector
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("bubu.watch.celebratedPicksDay") private var celebratedPicksDay = ""
+    @State private var celebrating = false
     @State private var photos: [Photo] = []
     @State private var selection = WatchBrowseSelection()
     @State private var crown = 0.0
@@ -56,8 +59,16 @@ struct WatchPhotoView: View {
                             .clipped().accessibilityHidden(true)
                         if showsCaption {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(current.memory.dateText).font(.caption2)
-                                    .foregroundStyle(Color(red: 0.88, green: 0.65, blue: 0.72))
+                                HStack(spacing: 5) {
+                                    if let reason = current.memory.reason, !reason.isEmpty {
+                                        Text(reason).font(.caption2.weight(.bold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                            .background(Color(red: 0.882, green: 0.361, blue: 0.525), in: Capsule())
+                                    }
+                                    Text(current.memory.dateText).font(.caption2)
+                                        .foregroundStyle(Color(red: 0.88, green: 0.65, blue: 0.72))
+                                }
                                 if !current.memory.note.isEmpty {
                                     Text(current.memory.note).font(.footnote).lineLimit(2)
                                 }
@@ -78,7 +89,8 @@ struct WatchPhotoView: View {
                     .digitalCrownRotation($crown, from: 0, through: Double(max(1, displayed.count - 1)),
                                           by: 1, sensitivity: .low, isContinuous: false, isHapticFeedbackEnabled: true)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(current.memory.dateText)，\(current.memory.note)")
+                    .accessibilityLabel([current.memory.reason, current.memory.dateText, current.memory.note]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "，"))
                     .accessibilityValue("第 \(index + 1) 张，共 \(displayed.count) 张")
                     .accessibilityHint("转动表冠或左右滑动换照片，轻点切换说明")
                     .accessibilityAddTraits(.isButton)
@@ -88,6 +100,9 @@ struct WatchPhotoView: View {
                     }
                 }
             }
+        }
+        .overlay {
+            if celebrating { WatchSparkleView().ignoresSafeArea() }
         }
         .background(.black)
         .ignoresSafeArea(.container, edges: .bottom)
@@ -100,27 +115,42 @@ struct WatchPhotoView: View {
         .task(id: LoadKey(session: session, updatedAt: connector.snapshot?.updatedAt,
                           photoVersion: connector.photoVersion, active: scenePhase == .active)) {
             guard scenePhase == .active, loadedSession != session || photos.isEmpty else { return }
-            let candidates = WatchReadModel.memories(from: connector.snapshot)
-            let bytes = await Task.detached(priority: .utility) {
-                candidates.compactMap { card -> (WatchMemory, Data)? in
-                    guard let data = WatchPhotoStore.data(for: card.photoFileName) else { return nil }
-                    return (card, data)
-                }
-            }.value
+            let snapshot = connector.snapshot
+            // 今日精选优先；精选的图还没到（或没有精选）时回落到本机照片。
+            var ready = await Self.load(WatchReadModel.dailyPicks(from: snapshot))
+            let showsPicks = !ready.isEmpty
+            if !showsPicks { ready = await Self.load(WatchReadModel.memories(from: snapshot)) }
             guard !Task.isCancelled else { return }
-            let ready = bytes.compactMap { card, data -> Photo? in
-                guard let image = UIImage(data: data) else { return nil }
-                return Photo(memory: card, image: image)
-            }
             // Keep the previous cached batch while its replacement is in flight.
             // An explicit empty list, however, must withdraw now-ineligible items.
-            if !ready.isEmpty || connector.snapshot?.photoCards?.isEmpty == true {
+            if !ready.isEmpty || snapshot?.photoCards?.isEmpty == true {
                 photos = ready
                 selection.reconcile(with: ready.map(\.memory))
                 crown = Double(selection.index(in: ready.map(\.memory)))
             }
             loadedSession = session
             focused = photos.count > 1
+            if showsPicks, let day = snapshot?.dailyPicksDay, day != celebratedPicksDay {
+                celebratedPicksDay = day
+                if !reduceMotion {
+                    celebrating = true
+                    try? await Task.sleep(for: .seconds(WatchSparkleView.duration))
+                    celebrating = false
+                }
+            }
+        }
+    }
+
+    private static func load(_ candidates: [WatchMemory]) async -> [Photo] {
+        let bytes = await Task.detached(priority: .utility) {
+            candidates.compactMap { card -> (WatchMemory, Data)? in
+                guard let data = WatchPhotoStore.data(for: card.photoFileName) else { return nil }
+                return (card, data)
+            }
+        }.value
+        return bytes.compactMap { card, data -> Photo? in
+            guard let image = UIImage(data: data) else { return nil }
+            return Photo(memory: card, image: image)
         }
     }
 

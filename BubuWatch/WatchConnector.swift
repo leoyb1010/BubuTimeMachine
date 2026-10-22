@@ -36,7 +36,7 @@ final class WatchConnector: NSObject {
     }
 
     private func requestPhotosIfMissing() {
-        let names = WatchReadModel.memories(from: snapshot).compactMap(\.photoFileName)
+        let names = WatchReadModel.photoNames(from: snapshot)
         guard !names.isEmpty, names.contains(where: { WatchPhotoStore.data(for: $0) == nil }) else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
@@ -94,7 +94,7 @@ extension WatchConnector: WCSessionDelegate {
         WatchPhotoStore.save(items)
         WidgetCenter.shared.reloadAllTimelines()
         Task { @MainActor in
-            WatchPhotoStore.prune(keeping: Set(WatchReadModel.memories(from: self.snapshot).compactMap(\.photoFileName)))
+            WatchPhotoStore.prune(keeping: Set(WatchReadModel.photoNames(from: self.snapshot)))
             self.photoVersion += 1
         }
     }

@@ -104,18 +104,18 @@ struct CourseDetailView: View {
     private func stateSection(_ course: LearningCourseDetailDTO) -> some View {
         switch course.state {
         case "processing":
-            SchoolPanel(title: "正在解析", symbol: "waveform.badge.magnifyingglass") {
+            LearningPanel(title: "正在解析", symbol: "waveform.badge.magnifyingglass") {
                 Text("家里的服务器正在完整听老师的原声、看课堂画面，然后整理互动题。几分钟后回来看看就好，不用一直等。")
                     .font(BubuTheme.Font.body)
                 ProgressView().frame(maxWidth: .infinity)
             }
         case "uploading":
-            SchoolPanel(title: "上传没有完成", symbol: "icloud.slash", accent: BubuTheme.Color.danger) {
+            LearningPanel(title: "上传没有完成", symbol: "icloud.slash", accent: BubuTheme.Color.danger) {
                 Text("已收到 \(course.sourceCount)/\(course.expectedFiles ?? course.sourceCount) 个文件，上传中途断开了。请删除这节课后重新上传。")
                     .font(BubuTheme.Font.body)
             }
         case "failed":
-            SchoolPanel(title: "解析没有完成", symbol: "exclamationmark.triangle.fill", accent: BubuTheme.Color.danger) {
+            LearningPanel(title: "解析没有完成", symbol: "exclamationmark.triangle.fill", accent: BubuTheme.Color.danger) {
                 Text("素材解析或出题没有完成（例如网络中断、视频损坏或声音轨道不完整）。可以先再试一次；仍不行就删除后重新上传原片。")
                     .font(BubuTheme.Font.body)
                 if canReview {
@@ -124,7 +124,7 @@ struct CourseDetailView: View {
                 }
             }
         case "no_lesson":
-            SchoolPanel(title: "没有生成互动题", symbol: "text.badge.xmark") {
+            LearningPanel(title: "没有生成互动题", symbol: "text.badge.xmark") {
                 Text(course.pack?.payload.summary ?? "没有找到可核对的老师原声。")
                     .font(BubuTheme.Font.body)
                 if canReview {
@@ -132,11 +132,17 @@ struct CourseDetailView: View {
                 }
             }
         case "draft":
-            if let pack = course.pack, canReview { reviewSection(pack, course: course) }
+            if let pack = course.pack, canReview {
+                reviewSection(pack, course: course)
+            } else {
+                LearningPanel(title: "等家长核对", symbol: "hourglass") {
+                    Text("题目已经整理好，家长核对后就能和布布一起玩啦。").font(BubuTheme.Font.body)
+                }
+            }
         case "published":
             if let pack = course.pack { publishedSection(pack) }
         default:
-            SchoolPanel(title: "还在准备", symbol: "hourglass") {
+            LearningPanel(title: "还在准备", symbol: "hourglass") {
                 Text("家长核对后，这节课就会出现在这里。").font(BubuTheme.Font.body)
             }
         }
@@ -147,7 +153,7 @@ struct CourseDetailView: View {
 
     private func reviewSection(_ pack: LearningPackDTO, course: LearningCourseDetailDTO) -> some View {
         VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
-            SchoolPanel(title: "家长核对", symbol: "checkmark.seal.fill", subtitle: "确认后才会开放给布布") {
+            LearningPanel(title: "家长核对", symbol: "checkmark.seal.fill", subtitle: "确认后才会开放给布布") {
                 Text("请逐题播放老师原声，确认题目、答案和画面都对得上。不对的题可以直接移除。")
                     .font(BubuTheme.Font.body)
                 if !pack.payload.warnings.isEmpty {
@@ -191,7 +197,7 @@ struct CourseDetailView: View {
             BubuBigActionButton(title: "开始一起学", subtitle: "\(pack.payload.activities.count) 个老师原声小互动",
                                 systemImage: "play.fill") { playing = true }
                 .accessibilityIdentifier("learning.play")
-            SchoolPanel(title: "这节课的互动", symbol: "list.bullet.rectangle") {
+            LearningPanel(title: "这节课的互动", symbol: "list.bullet.rectangle") {
                 ForEach(pack.payload.activities) { activity in
                     HStack {
                         Text(activity.kindLabel).font(.caption.weight(.semibold))
@@ -206,7 +212,7 @@ struct CourseDetailView: View {
     }
 
     private func sourcesSection(_ course: LearningCourseDetailDTO) -> some View {
-        SchoolPanel(title: "课程素材", symbol: "film.stack", subtitle: "只用于每日学习", accent: SchoolPalette.violet) {
+        LearningPanel(title: "课程素材", symbol: "film.stack", subtitle: "只用于每日学习", accent: BubuTheme.Color.deepRose) {
             ForEach(course.sources) { source in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {

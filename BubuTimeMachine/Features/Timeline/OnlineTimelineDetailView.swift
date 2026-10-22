@@ -8,12 +8,13 @@ struct OnlineTimelineDetailPager: View {
     let initial: OnlineTimelineItem
     let loadMore: () async -> Void
     let hasMore: Bool
+    var onNotBubu: (String) -> Void = { _ in }
     @State private var current: String = ""
 
     var body: some View {
         TabView(selection: $current) {
             ForEach(items) { item in
-                OnlineTimelineDetailPage(client: client, item: item, isCurrent: current == item.id)
+                OnlineTimelineDetailPage(client: client, item: item, isCurrent: current == item.id, onNotBubu: onNotBubu)
                     .tag(item.id)
             }
         }
@@ -27,6 +28,7 @@ struct OnlineTimelineDetailPager: View {
                 Task { await loadMore() }
             }
         }
+        .sensoryFeedback(.selection, trigger: current)
         .accessibilityIdentifier("timeline.detail")
     }
 
@@ -41,8 +43,12 @@ struct OnlineTimelineDetailPage: View {
     let client: BubuLearningClient
     let item: OnlineTimelineItem
     let isCurrent: Bool
+    var onNotBubu: (String) -> Void = { _ in }
     @State private var player: AVPlayer?
     @State private var videoError: String?
+    @State private var zoom: CGFloat = 1
+    @State private var confirmNotBubu = false
+    @State private var actionError: String?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
@@ -50,7 +56,7 @@ struct OnlineTimelineDetailPage: View {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
                 media
                     .frame(maxWidth: .infinity)
-                    .frame(height: BubuAdaptive.value(sizeClass, compact: 380, regular: 560))
+                    .frame(height: mediaHeight)
                     .background(BubuTheme.Color.softFill.opacity(0.5))
                     .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 info
@@ -58,13 +64,22 @@ struct OnlineTimelineDetailPage: View {
             .padding(BubuTheme.Spacing.item)
             .bubuContentColumn(900)
         }
-        .onChange(of: isCurrent) { _, active in if !active { player?.pause() } }
+        .onChange(of: isCurrent) { _, active in if !active { player?.pause(); zoom = 1 } }
         .onDisappear {
             guard let player else { return }
             player.pause()
             // Let music or podcasts in other apps resume after a video.
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+        .confirmationDialog("这张里没有布布？", isPresented: $confirmNotBubu, titleVisibility: .visible) {
+            Button("不是布布，移出时光", role: .destructive) { Task { await markNotBubu() } }
+        } message: { Text("只会从布布的时光里移出，第二大脑的原片不受影响。可在「认一认」里改回。") }
+    }
+
+    /// Portrait photos get more height instead of a wide empty frame.
+    private var mediaHeight: CGFloat {
+        let base: CGFloat = BubuAdaptive.value(sizeClass, compact: 380, regular: 560)
+        return item.layoutAspect < 0.9 ? base * 1.25 : base
     }
 
     @ViewBuilder
@@ -75,17 +90,18 @@ struct OnlineTimelineDetailPage: View {
                     VideoPlayer(player: player).accessibilityIdentifier("timeline.video")
                 } else if let videoError {
                     VStack(spacing: BubuTheme.Spacing.s) {
-                        Image(systemName: "exclamationmark.triangle").font(.title2)
+                        Image(systemName: "exclamationmark.triangle").font(BubuTheme.Font.headline)
                         Text(videoError).font(BubuTheme.Font.caption).multilineTextAlignment(.center)
                         Button("重试") { Task { await prepareVideo() } }.buttonStyle(.bordered)
                     }.foregroundStyle(BubuTheme.Color.secondaryText).padding()
                 } else {
                     LearningRemoteImage(path: item.largeUrl, client: client, label: "视频封面", contentMode: .fit)
                     Button { Task { await prepareVideo(autoplay: true) } } label: {
-                        Image(systemName: "play.circle.fill").font(.system(size: 64))
+                        Image(systemName: "play.circle.fill").font(.system(size: 64, design: .rounded))
                             .symbolRenderingMode(.palette).foregroundStyle(.white, BubuTheme.Color.primary)
-                            .shadow(radius: 6)
+                            .shadow(color: BubuTheme.Color.deepRose.opacity(0.3), radius: 8)
                     }
+                    .buttonStyle(BubuPressableStyle(scale: 0.9))
                     .accessibilityLabel("播放视频")
                     .accessibilityIdentifier("timeline.video.play")
                 }
@@ -93,6 +109,11 @@ struct OnlineTimelineDetailPage: View {
         } else {
             LearningRemoteImage(path: item.largeUrl, client: client,
                                 label: item.description.isEmpty ? "布布的照片" : item.description, contentMode: .fit)
+                .scaleEffect(zoom)
+                .gesture(MagnifyGesture()
+                    .onChanged { zoom = min(max($0.magnification, 1), 4) }
+                    .onEnded { _ in withAnimation(BubuMotion.gentle) { zoom = 1 } })
+                .onTapGesture(count: 2) { withAnimation(BubuMotion.gentle) { zoom = zoom > 1 ? 1 : 2 } }
                 .accessibilityIdentifier("timeline.photo")
         }
     }
@@ -105,20 +126,27 @@ struct OnlineTimelineDetailPage: View {
                     .font(BubuTheme.Font.body.weight(.semibold))
                 Spacer(minLength: 0)
             }
-            Label(item.labelProvenanceText, systemImage: "brain.head.profile")
+            HStack(spacing: BubuTheme.Spacing.s) {
+                if let place = item.place, !place.isEmpty {
+                    Label(place, systemImage: "mappin.and.ellipse")
+                }
+                if let people = item.people, !people.isEmpty {
+                    Label("和" + people.joined(separator: "、"), systemImage: "person.2.fill")
+                }
+            }
+            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+            Label(item.confirmedByFamily == true ? "家人在「认一认」里确认过" : item.labelProvenanceText, systemImage: "brain.head.profile")
                 .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             if !item.description.isEmpty {
                 section("画面解析") { Text(item.description).font(BubuTheme.Font.body).textSelection(.enabled) }
             }
             if !item.tags.isEmpty {
-                section("标签") {
-                    OnlineTimelineTags(tags: item.tags)
-                }
+                section("标签") { OnlineTimelineTags(tags: item.tags) }
             }
             if !item.ocr.isEmpty {
                 section("画面里的文字") { Text(item.ocr).font(BubuTheme.Font.body).textSelection(.enabled) }
             }
-            if !item.segments.isEmpty {
+            if !item.segments.isEmpty || (item.transcriptHidden ?? 0) > 0 {
                 section("视频里说了什么") {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(item.segments) { segment in
@@ -130,17 +158,30 @@ struct OnlineTimelineDetailPage: View {
                                 }
                             } label: {
                                 HStack(alignment: .top, spacing: 10) {
-                                    Text(Self.timecode(segment.start)).font(.caption.monospacedDigit())
+                                    Text(Self.timecode(segment.start)).font(BubuTheme.Font.caption.monospacedDigit())
                                         .foregroundStyle(BubuTheme.Color.deepRose)
                                     Text(segment.text).font(BubuTheme.Font.body).frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(BubuPressableStyle())
+                        }
+                        if let hidden = item.transcriptHidden, hidden > 0 {
+                            Text("另有 \(hidden) 段听不清（多半是童言童语或英文），先不显示。")
+                                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                         }
                     }
                 }
             }
-            Text("以上是第二大脑的机器解析，可能有误；以原片为准。")
-                .font(.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+            HStack {
+                Text("以上是第二大脑的机器解析，可能有误；以原片为准。")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                Spacer(minLength: 8)
+                Button("不是布布？") { confirmNotBubu = true }
+                    .font(BubuTheme.Font.caption.weight(.semibold)).tint(BubuTheme.Color.deepRose)
+                    .accessibilityIdentifier("timeline.not-bubu")
+            }
+            if let actionError {
+                Text(actionError).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.danger)
+            }
         }
         .foregroundStyle(BubuTheme.Color.warmBrown)
         .padding(BubuTheme.Spacing.item)
@@ -151,6 +192,20 @@ struct OnlineTimelineDetailPage: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(BubuTheme.Font.caption.weight(.bold)).foregroundStyle(BubuTheme.Color.deepRose)
             content()
+        }
+    }
+
+    private nonisolated struct Decision: Encodable, Sendable { let decision: String }
+    private nonisolated struct Decided: Decodable, Sendable {}
+
+    private func markNotBubu() async {
+        actionError = nil
+        do {
+            _ = try await client.send("POST", "api/recognition/\(item.id)", body: Decision(decision: "no"), as: Decided.self)
+            BubuHaptics.success()
+            onNotBubu(item.id)
+        } catch {
+            actionError = learningErrorText(error, fallback: "没有移出成功，请稍后再试（需要家长账号）。")
         }
     }
 
@@ -174,7 +229,7 @@ struct OnlineTimelineDetailPage: View {
     }
 }
 
-private struct OnlineTimelineTags: View {
+struct OnlineTimelineTags: View {
     let tags: [String]
     var body: some View {
         ViewThatFits(in: .horizontal) {

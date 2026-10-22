@@ -38,6 +38,7 @@ struct RootTabView: View {
                     HStack(spacing: 0) {
                         schoolNavigationItem("首页", symbol: "house", tab: 0)
                         schoolNavigationItem("时光", symbol: "photo", tab: 1)
+                        schoolNavigationItem("学习", symbol: "graduationcap", tab: Self.learningTab)
                         schoolNavigationItem("成长", symbol: "chart.bar", tab: 2)
                         schoolNavigationItem("幼儿园", symbol: "house.fill", tab: 3)
                     }.padding(.top, 7).background(BubuTheme.Color.cream)
@@ -69,10 +70,13 @@ struct RootTabView: View {
                 }
             }
             .onChange(of: isWide) { _, wide in
-                if !wide && selection > 3 { selection = 1 }
+                // 档案馆只在宽屏侧栏出现；学习（tag 5）在所有宽度都可用。
+                if !wide && selection == 4 { selection = 1 }
             }
             .background { keyboardShortcuts }
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            // 全 App 统一圆体：散落的 .caption / .system(size:) 也随设计语言变圆润。
+            .fontDesign(.rounded)
             .ignoresSafeArea(.keyboard)
             .onAppear {
                 #if DEBUG
@@ -180,14 +184,15 @@ struct RootTabView: View {
 
     private var keyboardShortcuts: some View {
         Group {
+            // ⌘ 数字与视觉顺序一致：首页、时光、学习、成长、幼儿园（Mac 再加档案馆）。
             Button("") { selection = 0 }.keyboardShortcut("1", modifiers: .command)
             Button("") { selection = 1 }.keyboardShortcut("2", modifiers: .command)
-            Button("") { selection = 2 }.keyboardShortcut("3", modifiers: .command)
-            Button("") { selection = 3 }.keyboardShortcut("4", modifiers: .command)
+            Button("") { selection = Self.learningTab }.keyboardShortcut("3", modifiers: .command)
+            Button("") { selection = 2 }.keyboardShortcut("4", modifiers: .command)
+            Button("") { selection = 3 }.keyboardShortcut("5", modifiers: .command)
             #if targetEnvironment(macCatalyst)
-            Button("") { selection = 4 }.keyboardShortcut("5", modifiers: .command)
+            Button("") { selection = 4 }.keyboardShortcut("6", modifiers: .command)
             #endif
-            Button("") { selection = Self.learningTab }.keyboardShortcut("l", modifiers: .command)
             Button("") { openQuickCapture() }.keyboardShortcut("n", modifiers: .command)
         }
         .opacity(0)
@@ -202,7 +207,7 @@ struct RootTabView: View {
 
     private func consumePendingRoute() {
         if let tab = router.pendingTab {
-            selection = min(max(tab, 0), 3)
+            selection = tab == Self.learningTab ? tab : min(max(tab, 0), maximumSelectableTab)
             router.pendingTab = nil
         }
         if router.pendingEntryID != nil {

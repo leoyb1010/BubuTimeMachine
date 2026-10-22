@@ -42,6 +42,10 @@ struct AIStudioHomeView: View {
                                    subtitle: "精选照片成短片", tint: BubuTheme.Color.sky) {
                         GrowthMovieView()
                     }
+                    capabilityTile(icon: "calendar.badge.plus", title: "成长小报",
+                                   subtitle: "每月 1 号自动出刊", tint: BubuTheme.Color.mint) {
+                        MonthlyReportView()
+                    }
                 }
 
                 section("声音", subtitle: "听见布布慢慢长大") {
@@ -53,6 +57,17 @@ struct AIStudioHomeView: View {
                     capabilityTile(icon: "waveform.badge.mic", title: "成长之声",
                                    subtitle: "按岁归档的语音", tint: BubuTheme.Color.info) {
                         VoiceArchiveView()
+                    }
+                    capabilityTile(icon: "quote.bubble.fill", title: "布布的声音",
+                                   subtitle: "视频里她自己说的话", tint: BubuTheme.Color.pink) {
+                        BubuVoicesView()
+                    }
+                }
+
+                section("第二大脑", subtitle: "帮第二大脑把布布认得更准") {
+                    capabilityTile(icon: "person.crop.square.badge.camera", title: "认一认",
+                                   subtitle: "左滑右滑确认照片", tint: BubuTheme.Color.peach) {
+                        RecognitionView()
                     }
                 }
 

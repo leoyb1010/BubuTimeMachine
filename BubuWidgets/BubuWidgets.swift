@@ -20,6 +20,12 @@ struct BubuEntry: TimelineEntry {
     /// 会逼近 WidgetKit ~30MB 内存红线导致空白。故轮播 entry 只携带该槽位需要的一张图，
     /// 其 snapshot 的 photoImageData 被清空（其余轻量字段照常）。其它款不设此字段，走 snapshot.photoImageData。
     var carouselPhoto: Data? = nil
+    /// 今日精选（服务端）：有它时照片墙/相框展示精选，点击深链到在线时光详情。
+    var isDailyPicks = false
+    var wallLinks: [String: URL] = [:]
+    var pickURL: URL? = nil
+    var pickReason: String? = nil
+    var pickDateText: String? = nil
 }
 
 struct BubuProvider: TimelineProvider {
@@ -63,6 +69,12 @@ struct BubuMomentProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (BubuEntry) -> Void) {
         var snap = BubuWidgetData.loadSnapshot()
+        let picks = DailyPicksReader.load()
+        if !picks.isEmpty {
+            snap.photoImageData = []
+            completion(Self.pickEntry(picks, snapshot: snap, date: .now, slot: 0))
+            return
+        }
         let moments = Array(snap.moments.prefix(Self.wallSize))
         snap.photoImageData = []
         completion(BubuEntry(date: .now, snapshot: snap,
@@ -76,6 +88,17 @@ struct BubuMomentProvider: TimelineProvider {
         // 图片数据从 snapshot 剥离：每个 entry 只带本屏那几张，
         // 否则 8 个 entry 各拷一份会撞 WidgetKit 内存红线、小组件直接空白。
         snapshot.photoImageData = []
+
+        // 今日精选优先：≤6 张不重复铺墙，每 30 分钟换一个领头（底部那句话跟着换）。
+        let picks = DailyPicksReader.load()
+        if !picks.isEmpty {
+            let entries = (0..<Self.slots).map { slot in
+                Self.pickEntry(picks, snapshot: snapshot,
+                               date: Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60), slot: slot)
+            }
+            completion(Timeline(entries: entries, policy: .atEnd))
+            return
+        }
 
         guard !moments.isEmpty else {
             let next = Calendar.current.nextDate(after: .now, matching: DateComponents(hour: 0, minute: 5),
@@ -104,6 +127,21 @@ struct BubuMomentProvider: TimelineProvider {
                                      wallPhotos: wall.compactMap { BubuWidgetData.momentImageData(fileName: $0.photoFileName) }))
         }
         completion(Timeline(entries: entries, policy: .atEnd))
+    }
+
+    private static func pickEntry(_ picks: [(pick: WidgetDailyPick, data: Data)], snapshot: BubuSnapshot,
+                                  date: Date, slot: Int) -> BubuEntry {
+        let rotated = Array(picks[(slot % picks.count)...] + picks[..<(slot % picks.count)])
+        let moments = rotated.map { item in
+            SharedMoment(photoFileName: item.pick.file, title: item.pick.caption, note: nil,
+                         date: item.pick.capturedDate ?? date, moodEmoji: nil,
+                         isOnThisDay: item.pick.reason == "那年今天")
+        }
+        var links: [String: URL] = [:]
+        for item in picks { links[item.pick.file] = item.pick.url }
+        return BubuEntry(date: date, snapshot: snapshot, photoIndex: slot, moment: moments.first,
+                         wallMoments: moments, wallPhotos: rotated.map(\.data),
+                         isDailyPicks: true, wallLinks: links, pickURL: rotated.first?.pick.url)
     }
 
     /// 确定性洗牌（同一 seed 结果恒定）。
@@ -1222,7 +1260,7 @@ struct BubuMomentWallView: View {
                 smallWall(items).padding(10).bubuWallBackground(renderingMode)
             }
         }
-        .widgetURL(URL(string: "bubu://moment"))
+        .widgetURL(entry.pickURL ?? URL(string: "bubu://moment"))
     }
 
     // MARK: 大卡：标题行 + 3×3 图墙 + 底部一句话
@@ -1232,7 +1270,7 @@ struct BubuMomentWallView: View {
             header
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
                 ForEach(Array(items.prefix(9).enumerated()), id: \.offset) { _, item in
-                    tile(item, corner: 12, showBadge: true)
+                    linked(item) { tile(item, corner: 12, showBadge: true) }
                 }
             }
             if let lead = items.first?.moment {
@@ -1249,7 +1287,7 @@ struct BubuMomentWallView: View {
             header
             HStack(spacing: 5) {
                 ForEach(Array(items.prefix(4).enumerated()), id: \.offset) { _, item in
-                    tile(item, corner: 10, showBadge: true)
+                    linked(item) { tile(item, corner: 10, showBadge: true) }
                 }
             }
         }
@@ -1276,10 +1314,10 @@ struct BubuMomentWallView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Image(systemName: "photo.stack.fill")
+            Image(systemName: entry.isDailyPicks ? "sparkles" : "photo.stack.fill")
                 .font(.system(size: 11, weight: .black))
                 .foregroundColor(WidgetPalette.primary)
-            Text("布布的时光墙")
+            Text(entry.isDailyPicks ? "布布今日精选" : "布布的时光墙")
                 .font(.system(size: 12, weight: .black, design: .rounded))
                 .foregroundColor(WidgetPalette.warmBrown)
             Spacer(minLength: 0)
@@ -1292,6 +1330,17 @@ struct BubuMomentWallView: View {
                 }
             }
             BubuPlusLink(size: 22)
+        }
+    }
+
+    /// 精选瓦片各自深链到在线时光详情（中/大尺寸才支持 Link；小卡走 widgetURL）。
+    @ViewBuilder
+    private func linked<Content: View>(_ item: (moment: SharedMoment, image: UIImage),
+                                       @ViewBuilder content: () -> Content) -> some View {
+        if let url = entry.wallLinks[item.moment.photoFileName] {
+            Link(destination: url) { content() }
+        } else {
+            content()
         }
     }
 
@@ -1707,6 +1756,19 @@ struct BubuMemoryProvider: TimelineProvider {
         let photos = snapshot.photoImageData
         snapshot.photoImageData = []
         var entries: [BubuEntry] = []
+        // 今日精选优先：每 30 分钟换一张精选，点开就是那一张的在线详情。
+        let picks = DailyPicksReader.load()
+        if !picks.isEmpty {
+            for slot in 0..<12 {
+                let item = picks[slot % picks.count]
+                entries.append(BubuEntry(date: Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60),
+                                         snapshot: snapshot, carouselPhoto: item.data, isDailyPicks: true,
+                                         pickURL: item.pick.url, pickReason: item.pick.reason,
+                                         pickDateText: item.pick.dateText))
+            }
+            completion(Timeline(entries: entries, policy: .atEnd))
+            return
+        }
         for slot in 0..<12 {   // 6 小时 × 每 30 分钟
             let date = Date.now.addingTimeInterval(TimeInterval(slot) * 30 * 60)
             let photo = photos.isEmpty ? nil : photos[slot % photos.count]
@@ -1733,6 +1795,20 @@ struct BubuMemoryWidgetView: View {
             if let data = photoData, let image = BubuAvatar.downsampledImage(from: data, maxPixel: 800) {
                 Color.clear
                 VStack(alignment: .leading, spacing: 2) {
+                    if entry.isDailyPicks {
+                        HStack(spacing: 4) {
+                            if let reason = entry.pickReason, !reason.isEmpty {
+                                Text(reason)
+                                    .font(.system(size: 9.5, weight: .black, design: .rounded))
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(WidgetPalette.roseDeep.opacity(0.92), in: Capsule())
+                            }
+                            if let day = entry.pickDateText {
+                                Text(day).font(.system(size: 10, weight: .bold, design: .rounded)).opacity(0.9)
+                            }
+                        }
+                        .padding(.bottom, 2)
+                    }
                     Text(entry.snapshot.name)
                         .font(.system(size: 13, weight: .heavy, design: .rounded))
                     Text(entry.snapshot.ageText)
@@ -1776,7 +1852,7 @@ struct BubuMemoryWidget: Widget {
     let kind = "BubuMemoryWidget"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: BubuMemoryProvider()) { entry in
-            BubuMemoryWidgetView(entry: entry)
+            BubuMemoryWidgetView(entry: entry).widgetURL(entry.pickURL)
         }
         .configurationDisplayName("成长相框")
         .description("最近的照片每半小时自动换一张，桌面就是布布的相框。")

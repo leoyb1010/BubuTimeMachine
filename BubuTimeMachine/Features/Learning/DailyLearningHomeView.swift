@@ -27,6 +27,7 @@ struct DailyLearningHomeView: View {
         }
         .navigationTitle("每日学习")
         .navigationBarTitleDisplayMode(.inline)
+        .secondBrainConsent(active: BubuLearningClient(env: env) != nil && !OnlineTimelineView.skipsConsentForUITest)
         .accessibilityIdentifier("learning.home")
     }
 }
@@ -105,7 +106,7 @@ struct DailyLearningHome: View {
     // MARK: Sections
 
     private var weekHeader: some View {
-        SchoolPanel(title: day.formatted(.dateTime.month().day().weekday(.wide).locale(Locale(identifier: "zh_CN"))),
+        LearningPanel(title: day.formatted(.dateTime.month().day().weekday(.wide).locale(Locale(identifier: "zh_CN"))),
                     symbol: "calendar", subtitle: "按上课日期整理") {
             HStack(spacing: 6) {
                 ForEach(weekDates, id: \.self) { date in
@@ -167,7 +168,7 @@ struct DailyLearningHome: View {
 
     @ViewBuilder
     private var coursesSection: some View {
-        SchoolPanel(title: "这一天的课", symbol: "books.vertical.fill", subtitle: courses.isEmpty ? "" : "\(courses.count) 节") {
+        LearningPanel(title: "这一天的课", symbol: "books.vertical.fill", subtitle: courses.isEmpty ? "" : "\(courses.count) 节") {
             if loading && courses.isEmpty {
                 ProgressView().frame(maxWidth: .infinity).padding()
             } else if let errorText, courses.isEmpty {
@@ -192,10 +193,10 @@ struct DailyLearningHome: View {
     }
 
     private var reviewSection: some View {
-        SchoolPanel(title: "复习", symbol: "arrow.triangle.2.circlepath", subtitle: "只用已开放的课程", accent: SchoolPalette.violet) {
+        LearningPanel(title: "复习", symbol: "arrow.triangle.2.circlepath", subtitle: "只用已开放的课程", accent: BubuTheme.Color.deepRose) {
             HStack(spacing: BubuTheme.Spacing.s) {
-                reviewButton("本周复习", detail: "近 7 天", period: "week", tint: SchoolPalette.orange)
-                reviewButton("本月复习", detail: "近 30 天", period: "month", tint: SchoolPalette.green)
+                reviewButton("本周复习", detail: "近 7 天", period: "week", tint: BubuTheme.Color.butterSurface)
+                reviewButton("本月复习", detail: "近 30 天", period: "month", tint: BubuTheme.Color.mintSurface)
             }
         }
     }
@@ -203,7 +204,7 @@ struct DailyLearningHome: View {
     private var recentOtherDays: [LearningCourseDTO] { recent.filter { $0.schoolDate != dayString } }
 
     private var recentSection: some View {
-        SchoolPanel(title: "最近的课", symbol: "clock.arrow.circlepath", subtitle: "近 30 天，按日期积累", accent: SchoolPalette.green) {
+        LearningPanel(title: "最近的课", symbol: "clock.arrow.circlepath", subtitle: "近 30 天，按日期积累", accent: BubuTheme.Color.deepRose) {
             VStack(spacing: BubuTheme.Spacing.s) {
                 ForEach(recentOtherDays.prefix(12)) { course in
                     Button { opened = course } label: {
@@ -224,14 +225,14 @@ struct DailyLearningHome: View {
         Button { review = period } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(BubuTheme.Font.body.weight(.bold))
-                Text(detail).font(BubuTheme.Font.caption).opacity(0.85)
+                Text(detail).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(BubuTheme.Color.warmBrown)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(BubuTheme.Spacing.m)
             .background(tint, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubuPressableStyle())
         .accessibilityIdentifier("learning.review.\(period)")
     }
 
@@ -260,21 +261,25 @@ struct DailyLearningHome: View {
             var base = [URLQueryItem]()
             if let child { base.append(URLQueryItem(name: "child_id", value: child)) }
             let dayQuery = base + [URLQueryItem(name: "start", value: dayString), URLQueryItem(name: "end", value: dayString)]
-            let list = try await client.get("api/courses", query: dayQuery, as: LearningCourseList.self)
-            // A slow poll for the previous day must not overwrite the newly chosen day.
-            guard requestedDay == dayString else { return }
-            courses = list.items
-            if let first = weekDates.first, let last = weekDates.last {
-                let weekQuery = base + [URLQueryItem(name: "start", value: BubuLearningDates.dayString(first)),
-                                        URLQueryItem(name: "end", value: BubuLearningDates.dayString(last))]
-                let week = try await client.get("api/courses", query: weekQuery, as: LearningCourseList.self)
-                weekDays = Set(week.items.map(\.schoolDate))
-            }
+            let first = weekDates.first ?? day, last = weekDates.last ?? day
+            let weekQuery = base + [URLQueryItem(name: "start", value: BubuLearningDates.dayString(first)),
+                                    URLQueryItem(name: "end", value: BubuLearningDates.dayString(last))]
             let today = Date.now
             let monthAgo = Calendar(identifier: .gregorian).date(byAdding: .day, value: -30, to: today) ?? today
             let recentQuery = base + [URLQueryItem(name: "start", value: BubuLearningDates.dayString(monthAgo)),
                                       URLQueryItem(name: "end", value: BubuLearningDates.dayString(today))]
-            recent = try await client.get("api/courses", query: recentQuery, as: LearningCourseList.self).items
+            // Three independent reads in parallel; polling only refreshes while a course is processing.
+            async let dayList = client.get("api/courses", query: dayQuery, as: LearningCourseList.self)
+            async let weekList = client.get("api/courses", query: weekQuery, as: LearningCourseList.self)
+            async let recentList = client.get("api/courses", query: recentQuery, as: LearningCourseList.self)
+            let (list, week, latest) = try await (dayList, weekList, recentList)
+            // A slow poll for the previous day must not overwrite the newly chosen day.
+            guard requestedDay == dayString else { return }
+            withAnimation(BubuMotion.gentle) {
+                courses = list.items
+                weekDays = Set(week.items.map(\.schoolDate))
+                recent = latest.items
+            }
             errorText = nil
             await LearningAttemptOutbox.shared.flush(client: client)
         } catch is CancellationError {
@@ -431,7 +436,10 @@ struct CourseUploadSheet: View {
                             Text(Self.size(file.url)).font(.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                         }
                     }
-                    .onDelete { files.remove(atOffsets: $0) }
+                    .onDelete { offsets in
+                        for index in offsets { try? FileManager.default.removeItem(at: files[index].url) }
+                        files.remove(atOffsets: offsets)
+                    }
                 } header: {
                     Text("课程素材（最多 8 个）")
                 } footer: {
@@ -459,6 +467,10 @@ struct CourseUploadSheet: View {
                 }
             }
             .interactiveDismissDisabled(uploading)
+            .onDisappear {
+                // Picked copies live in tmp and can be hundreds of MB; drop them if the sheet closes early.
+                for file in files { try? FileManager.default.removeItem(at: file.url) }
+            }
             #if DEBUG
             .task {
                 // UI 测试无法操作系统相册面板；用测试环境变量直接放入宿主机上的测试视频。

@@ -54,6 +54,11 @@ final class WatchConnectivityManager: NSObject {
     /// 把概览快照推给手表（合并最新态，省电）。未激活时缓存，激活后补发。
     func push(_ snapshot: WatchSnapshot) {
         guard WCSession.isSupported() else { return }
+        // 今日精选每次都从 App Group 现读合并：本机快照与服务端精选各自刷新，谁后推都不覆盖对方。
+        var snapshot = snapshot
+        snapshot.dailyPicks = DailyPicksStore.watchCards()
+        snapshot.dailyPicksDay = DailyPicksStore.currentDay
+        lastSnapshot = snapshot
         let session = WCSession.default
         guard session.activationState == .activated else { pendingSnapshot = snapshot; return }
         guard let data = WatchLink.encode(snapshot) else { return }
@@ -62,9 +67,19 @@ final class WatchConnectivityManager: NSObject {
         } catch {
             log.error("push snapshot failed: \(error.localizedDescription)")
         }
-        pushPhotoBundle(names: photoNames(photoCards: snapshot.photoCards,
+        pushPhotoBundle(names: photoNames(photoCards: (snapshot.dailyPicks ?? []) + (snapshot.photoCards ?? []),
                                          memories: snapshot.memories, recent: snapshot.recent),
                         session: session)
+    }
+
+    /// 最近一次推送的快照，精选刷新后据此重推（不必重读库）。
+    private var lastSnapshot: WatchSnapshot?
+
+    /// DailyPicksStore 写完新精选后调用。还没推过快照时不做事——下次前台推快照自然带上精选。
+    func pushDailyPicks() {
+        guard var snapshot = lastSnapshot ?? pendingSnapshot else { return }
+        snapshot.updatedAt = .now
+        push(snapshot)
     }
 
     // MARK: 回忆照片包（transferFile）
@@ -587,6 +602,11 @@ enum WatchSnapshotBuilder {
         let store = MediaStore()
         var out: [(name: String, data: Data)] = []
         for name in names {
+            // 今日精选已是 ≤600px JPEG，原样发送。
+            if let pick = DailyPicksStore.photoData(named: name) {
+                out.append((name: name, data: pick))
+                continue
+            }
             let thumb = store.thumbnailURL(for: name)
             let url = FileManager.default.fileExists(atPath: thumb.path) ? thumb : store.mediaURL(for: name)
             guard FileManager.default.fileExists(atPath: url.path),

@@ -45,6 +45,7 @@ struct GrowthHomeView: View {
                 }
                 firstTimesSection
                     .entranceEffect(index: 2)
+                GrowthUpgradeSections().entranceEffect(index: 3)
                 recentGrowth
                     .entranceEffect(index: 3)
             }

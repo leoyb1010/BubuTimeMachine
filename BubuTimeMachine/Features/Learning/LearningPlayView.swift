@@ -117,8 +117,8 @@ struct LearningPlayView: View {
                 ForEach(activity.choices) { choice in
                     Button {
                         guard !answered else { return }
-                        chosen = choice.id
-                        answered = true
+                        withAnimation(BubuMotion.quick) { chosen = choice.id; answered = true }
+                        if choice.id == activity.correctChoice { BubuHaptics.success() } else { BubuHaptics.warning() }
                         record(item, choice: choice.id, assistance: nil)
                         if let answer = activity.answer {
                             player.play(clip: answer, activityKind: activity.kind, isAnswer: true, client: client)
@@ -127,8 +127,16 @@ struct LearningPlayView: View {
                         ChoiceTile(choice: choice, client: client,
                                    highlighted: answered && choice.id == activity.correctChoice,
                                    dimmed: answered && choice.id != activity.correctChoice && choice.id == chosen)
+                            .overlay {
+                                if answered && choice.id == activity.correctChoice && chosen == choice.id {
+                                    BubuBurst(count: 14, radius: 90).allowsHitTesting(false)
+                                }
+                            }
+                            .phaseAnimator([0.0, -6.0, 6.0, 0.0], trigger: answered && chosen == choice.id && choice.id != activity.correctChoice) { view, x in
+                                view.offset(x: x)
+                            } animation: { _ in .spring(duration: 0.12) }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(BubuPressableStyle(scale: 0.94))
                     .accessibilityIdentifier("learning.play.choice")
                 }
             }
@@ -158,7 +166,7 @@ struct LearningPlayView: View {
                     bigChoice("说出来啦", symbol: "face.smiling.fill", tint: BubuTheme.Color.primary) {
                         answered = true; record(item, choice: nil, assistance: false)
                     }
-                    bigChoice("要听提示", symbol: "lightbulb.fill", tint: SchoolPalette.orange) {
+                    bigChoice("要听提示", symbol: "lightbulb.fill", tint: BubuTheme.Color.butterSurface, foreground: BubuTheme.Color.warmBrown) {
                         answered = true; record(item, choice: nil, assistance: true)
                         player.play(clip: item.activity.answer, activityKind: item.activity.kind, isAnswer: true, client: client)
                     }
@@ -170,24 +178,27 @@ struct LearningPlayView: View {
     private func participation(_ item: LearningPlayItem, label: String) -> some View {
         Group {
             if !answered {
-                bigChoice(label, symbol: "music.note", tint: SchoolPalette.green) {
+                bigChoice(label, symbol: "music.note", tint: BubuTheme.Color.mintSurface, foreground: BubuTheme.Color.warmBrown) {
                     answered = true; record(item, choice: nil, assistance: nil)
                 }
             }
         }
     }
 
-    private func bigChoice(_ title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func bigChoice(_ title: String, symbol: String, tint: Color, foreground: Color = .white,
+                           action: @escaping () -> Void) -> some View {
+        Button { BubuHaptics.tapLight(); action() } label: {
             VStack(spacing: 8) {
-                Image(systemName: symbol).font(.system(size: 36))
+                Image(systemName: symbol).font(.system(size: 40, weight: .semibold, design: .rounded))
+                    .symbolEffect(.bounce, value: answered)
                 Text(title).font(BubuTheme.Font.headline)
             }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 120)
+            .foregroundStyle(foreground)
+            .frame(maxWidth: .infinity, minHeight: 128)
             .background(tint, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .shadow(color: BubuTheme.Color.deepRose.opacity(0.12), radius: 8, y: 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubuPressableStyle(scale: 0.95))
     }
 
     private var nextButton: some View {
@@ -217,8 +228,11 @@ struct LearningPlayView: View {
 
     private var finished: some View {
         VStack(spacing: BubuTheme.Spacing.l) {
-            Image(systemName: "star.circle.fill").font(.system(size: 88))
-                .symbolRenderingMode(.palette).foregroundStyle(.white, BubuTheme.Color.primary)
+            BubuMascotBadge(size: 132, expression: .yeah)
+                .overlay { BubuBurst(count: 22, radius: 150) }
+                .phaseAnimator([0.0, 1.0]) { view, phase in
+                    view.scaleEffect(1 + phase * 0.04).rotationEffect(.degrees(phase * 2 - 1))
+                } animation: { _ in BubuMotion.breathe }
             Text("今天学完啦！").font(BubuTheme.Font.hugeTitle).foregroundStyle(BubuTheme.Color.warmBrown)
             Text("和老师一起玩了 \(items.count) 个小互动").font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
@@ -226,6 +240,10 @@ struct LearningPlayView: View {
                 .accessibilityIdentifier("learning.play.done")
         }
         .padding()
+        .onAppear {
+            BubuSound.play(.milestone)
+            BubuHaptics.success()
+        }
     }
 
     private func record(_ item: LearningPlayItem, choice: String?, assistance: Bool?) {
@@ -307,7 +325,7 @@ struct LearningReviewView: View {
                                 playing = true
                             }
                             .accessibilityIdentifier("learning.review.start")
-                            SchoolPanel(title: "这次复习", symbol: "sparkles") {
+                            LearningPanel(title: "这次复习", symbol: "sparkles") {
                                 ForEach(review.items, id: \.self) { item in
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.activity.title).font(BubuTheme.Font.body.weight(.semibold))

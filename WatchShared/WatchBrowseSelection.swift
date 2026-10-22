@@ -32,14 +32,28 @@ public nonisolated struct WatchBrowseSelection: Sendable {
 /// Only the explicit photo deck is eligible. Legacy health/text feeds stay off screen.
 public nonisolated enum WatchReadModel {
     public static func memories(from snapshot: WatchSnapshot?) -> [WatchMemory] {
+        sanitized(snapshot?.photoCards, limit: 5)
+    }
+
+    /// 服务端今日精选（≤6）。有图时优先展示，取不到图再回落到本机照片。
+    public static func dailyPicks(from snapshot: WatchSnapshot?) -> [WatchMemory] {
+        sanitized(snapshot?.dailyPicks, limit: 6)
+    }
+
+    /// 手表缓存里应该有的全部照片名（缺图补发 / LRU 保留都按它）。
+    public static func photoNames(from snapshot: WatchSnapshot?) -> [String] {
+        (dailyPicks(from: snapshot) + memories(from: snapshot)).compactMap(\.photoFileName)
+    }
+
+    private static func sanitized(_ cards: [WatchMemory]?, limit: Int) -> [WatchMemory] {
         var ids = Set<String>(), names = Set<String>()
-        return Array((snapshot?.photoCards ?? []).filter {
+        return Array((cards ?? []).filter {
             guard let name = $0.photoFileName, !name.isEmpty,
                   name == (name as NSString).lastPathComponent,
                   name != ".", name != "..", !name.contains("\\"),
                   !ids.contains($0.id), !names.contains(name) else { return false }
             ids.insert($0.id); names.insert(name)
             return true
-        }.prefix(5))
+        }.prefix(limit))
     }
 }
