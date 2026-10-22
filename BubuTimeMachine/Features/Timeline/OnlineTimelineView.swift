@@ -157,7 +157,6 @@ struct OnlineTimelineBrowser: View {
     /// Opened item id → element id of the photo now in front, so going back zooms into that photo (audit D3-03).
     @State private var zoomFollow: [String: String] = [:]
 
-    private static let pageSize = 60
     /// Pages fetched to scroll into an older month; farther jumps become a date filter.
     private static let fillCap = 8
     private static let scrubberSpace = "timeline.scrubber.track"
@@ -796,7 +795,7 @@ struct OnlineTimelineBrowser: View {
     private func pagesNeeded(through month: String) -> Int {
         guard !months.isEmpty, query.anchor == nil else { return .max }
         let upTo = months.filter { $0.month >= month }.reduce(0) { $0 + $1.count }
-        return max(1, Int((Double(upTo - items.count) / Double(Self.pageSize)).rounded(.up)))
+        return max(1, Int((Double(upTo - items.count) / Double(OnlineTimelineQuery.pageSize)).rounded(.up)))
     }
 
     /// Waits until the current query's first page and its layout are on screen.
@@ -1156,24 +1155,11 @@ struct OnlineTimelineBrowser: View {
         return await Task.detached(priority: .userInitiated) { OnlineTimelineFeedCache.load(scope: scope, key: key) }.value
     }
 
-    private func parameters(_ request: OnlineTimelineQuery, page next: Int, limit: Int = OnlineTimelineBrowser.pageSize) -> [URLQueryItem] {
-        var (start, end) = request.range.bounds()
-        if let anchorEnd = request.anchorEndDay { end = end.map { min($0, anchorEnd) } ?? anchorEnd }
-        var result = [URLQueryItem(name: "kind", value: request.kind.rawValue),
-                      URLQueryItem(name: "order", value: request.newestFirst ? "desc" : "asc"),
-                      URLQueryItem(name: "page", value: String(next)),
-                      URLQueryItem(name: "limit", value: String(limit))]
-        if !request.text.isEmpty { result.append(URLQueryItem(name: "query", value: request.text)) }
-        if let person = request.person { result.append(URLQueryItem(name: "person", value: person)) }
-        if let start { result.append(URLQueryItem(name: "start", value: start)) }
-        if let end { result.append(URLQueryItem(name: "end", value: end)) }
-        return result
+    private func parameters(_ request: OnlineTimelineQuery, page next: Int, limit: Int = OnlineTimelineQuery.pageSize) -> [URLQueryItem] {
+        request.parameters(page: next, limit: limit)
     }
 
-    /// Offline-cache key: the first page's parameters for this query.
-    private func cacheKey(_ request: OnlineTimelineQuery) -> String {
-        parameters(request, page: 1).filter { $0.name != "page" }.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
-    }
+    private func cacheKey(_ request: OnlineTimelineQuery) -> String { request.cacheKey }
 
     private func apply(_ result: OnlineTimelinePage, replacing: Bool) {
         snapshot = result.snapshotId
@@ -1238,7 +1224,31 @@ nonisolated enum OnlineTimelineFeedCache {
     }
 }
 
-private struct OnlineTimelineCell: View {
+nonisolated extension OnlineTimelineQuery {
+    static let pageSize = 60
+
+    /// Request parameters for one page of the stream; shared by 时光 and the home page's 最近时光.
+    func parameters(page next: Int, limit: Int = OnlineTimelineQuery.pageSize) -> [URLQueryItem] {
+        var (start, end) = range.bounds()
+        if let anchorEnd = anchorEndDay { end = end.map { min($0, anchorEnd) } ?? anchorEnd }
+        var result = [URLQueryItem(name: "kind", value: kind.rawValue),
+                      URLQueryItem(name: "order", value: newestFirst ? "desc" : "asc"),
+                      URLQueryItem(name: "page", value: String(next)),
+                      URLQueryItem(name: "limit", value: String(limit))]
+        if !text.isEmpty { result.append(URLQueryItem(name: "query", value: text)) }
+        if let person { result.append(URLQueryItem(name: "person", value: person)) }
+        if let start { result.append(URLQueryItem(name: "start", value: start)) }
+        if let end { result.append(URLQueryItem(name: "end", value: end)) }
+        return result
+    }
+
+    /// Offline-cache key: the first page's parameters for this query.
+    var cacheKey: String {
+        parameters(page: 1).filter { $0.name != "page" }.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
+    }
+}
+
+struct OnlineTimelineCell: View {
     let item: OnlineTimelineItem
     let client: BubuLearningClient
 
@@ -1261,7 +1271,7 @@ private struct OnlineTimelineCell: View {
 }
 
 /// A family record in the grid: its photo, or a soft quote card for words/voice.
-private struct FamilyRecordCell: View {
+struct FamilyRecordCell: View {
     let entry: Entry
     @Environment(AppEnvironment.self) private var env
 

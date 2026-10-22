@@ -123,6 +123,9 @@ class LearningStore:
             # A course composes only after every announced file has arrived.
             if "expected_files" not in {r["name"] for r in db.execute("PRAGMA table_info(courses)")}:
                 db.execute("ALTER TABLE courses ADD COLUMN expected_files INTEGER NOT NULL DEFAULT 0")
+            # 2.28: the parent's short description of what was taught that day.
+            if "note" not in {r["name"] for r in db.execute("PRAGMA table_info(courses)")}:
+                db.execute("ALTER TABLE courses ADD COLUMN note TEXT NOT NULL DEFAULT ''")
             db.execute("INSERT OR IGNORE INTO analysis_history SELECT * FROM analyses")
             db.execute("COMMIT")
 
@@ -405,9 +408,10 @@ class LearningStore:
 
     # Parent-declared lessons. A course groups exactly the files of one upload.
     def create_course(self, family: str, child: str, day: str, title: str, kind: str,
-                      language: str = "en-US", created_by: str = "", expected_files: int = 0) -> dict:
+                      language: str = "en-US", created_by: str = "", expected_files: int = 0, note: str = "") -> dict:
         valid_day(day)
         title = " ".join(str(title).split())[:60]
+        note = self.clean_note(note)
         if not family or not child or not title:
             raise ValueError("课程缺少名称")
         if kind not in COURSE_KINDS or language not in {"en-US", "zh-CN"}:
@@ -416,8 +420,26 @@ class LearningStore:
             raise ValueError("课程文件数量无效")
         cid = uuid.uuid4().hex
         with self.db() as db:
-            db.execute("INSERT INTO courses(id,family_id,child_id,school_date,title,kind,language,created_by,created_at,expected_files) "
-                       "VALUES(?,?,?,?,?,?,?,?,?,?)", (cid, family, child, day, title, kind, language, created_by[:100], time.time(), expected_files))
+            db.execute("INSERT INTO courses(id,family_id,child_id,school_date,title,kind,language,created_by,created_at,expected_files,note) "
+                       "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (cid, family, child, day, title, kind, language, created_by[:100], time.time(), expected_files, note))
+        return self.course(family, cid)
+
+    @staticmethod
+    def clean_note(note) -> str:
+        if not isinstance(note, str):
+            raise ValueError("课程说明格式无效")
+        note = "\n".join(" ".join(line.split()) for line in note.strip().splitlines()).strip()
+        if len(note) > 2000:
+            raise ValueError("课程说明不超过2000字")
+        return note
+
+    def set_course_note(self, family: str, cid: str, note: str, nonce: str) -> dict:
+        """Store the note and regenerate the lesson from it (failed files are re-parsed first)."""
+        note = self.clean_note(note)
+        self.course(family, cid)
+        with self.db() as db:
+            db.execute("UPDATE courses SET note=? WHERE id=? AND family_id=? AND deleted=0", (note, cid, family))
+        self.retry_course(family, cid, nonce)
         return self.course(family, cid)
 
     def course(self, family: str, cid: str) -> dict:

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import AVFoundation
 import BackgroundTasks
 import OSLog
+import CryptoKit
 
 // MARK: - 每日学习
 /// 独立入口：家长按日期上传幼儿园课程视频，服务端解析出原声互动课，家长核对后开放给布布。
@@ -423,13 +424,17 @@ struct CourseUploadSheet: View {
     @State private var title = ""
     @State private var kind = LearningCourseKind.teaching
     @State private var language = "en-US"
-    @State private var files: [LearningUploadFile] = []
+    @State private var note = ""
+    @State private var selection = LearningUploadSelection()
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var importing = false
-    @State private var preparing = false
+    /// 正在读取/校验的导入批次数（相册和文件可以同时在导）。
+    @State private var preparingCount = 0
     @State private var uploading = false
     @State private var progressText: String?
     @State private var errorText: String?
+    /// 非错误的提示，例如「这段视频已经选过了」。
+    @State private var noticeText: String?
     /// 上传中断（网络断了、App 被挂起）时保留已建好的课程和已传上的文件，「继续上传」从断点接着传。
     @State private var resume: UploadResume?
     @Environment(\.dismiss) private var dismiss
@@ -448,6 +453,9 @@ struct CourseUploadSheet: View {
         self.onUploaded = onUploaded
         _day = State(initialValue: day)
     }
+
+    private var files: [LearningUploadFile] { selection.files }
+    private var preparing: Bool { preparingCount > 0 }
 
     private var canSubmit: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -479,11 +487,27 @@ struct CourseUploadSheet: View {
                     Text("一次上传就是一节课。同一天的不同课程请分开上传。")
                 }
                 Section {
-                    PhotosPicker(selection: $pickerItems, maxSelectionCount: 8, matching: .any(of: [.videos, .images])) {
+                    TextField("比如：秋天的英文儿歌，重点词 leaf、apple、umbrella", text: $note, axis: .vertical)
+                        .lineLimit(3...6)
+                        .onChange(of: note) { _, value in
+                            if value.count > LearningCourseNote.maxLength { note = String(value.prefix(LearningCourseNote.maxLength)) }
+                        }
+                        .accessibilityIdentifier("learning.upload.note")
+                } header: {
+                    Text("今天老师教了什么")
+                } footer: {
+                    Text("选填，但很有用：写下儿歌名、重点单词或做了什么活动，家里的服务器能更准地找到老师原声来出题。")
+                }
+                Section {
+                    PhotosPicker(selection: $pickerItems, maxSelectionCount: LearningUploadSelection.limit,
+                                 matching: .any(of: [.videos, .images])) {
                         Label("从相册选视频或教具照片", systemImage: "photo.on.rectangle.angled")
                     }
+                    // 上一批还在读取时不能再开选择器：否则正在导入的那段视频会被连带再选一次。
+                    .disabled(preparing || uploading || selection.isFull)
                     .accessibilityIdentifier("learning.upload.photos")
                     Button { importing = true } label: { Label("从文件选视频或录音", systemImage: "folder") }
+                        .disabled(preparing || uploading || selection.isFull)
                         .accessibilityIdentifier("learning.upload.files")
                     if preparing { HStack { ProgressView(); Text("正在准备文件…") } }
                     ForEach(files, id: \.url) { file in
@@ -496,8 +520,12 @@ struct CourseUploadSheet: View {
                         }
                     }
                     .onDelete { offsets in
-                        for index in offsets { try? FileManager.default.removeItem(at: files[index].url) }
-                        files.remove(atOffsets: offsets)
+                        for file in selection.remove(atOffsets: offsets) { try? FileManager.default.removeItem(at: file.url) }
+                    }
+                    if let noticeText {
+                        Label(noticeText, systemImage: "info.circle")
+                            .font(.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                            .accessibilityIdentifier("learning.upload.notice")
                     }
                 } header: {
                     Text("课程素材（最多 8 个）")
@@ -543,32 +571,38 @@ struct CourseUploadSheet: View {
                 // UI 测试无法操作系统相册面板；用测试环境变量直接放入宿主机上的测试视频。
                 guard ProcessInfo.processInfo.arguments.contains("-uitest-server-config"),
                       let paths = ProcessInfo.processInfo.environment["BUBU_UITEST_COURSE_FILES"], files.isEmpty else { return }
-                importFiles(paths.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
+                await importFiles(paths.split(separator: ":").map { URL(fileURLWithPath: String($0)) })
             }
             #endif
-            .onChange(of: pickerItems) { _, items in Task { await importPicked(items) } }
+            .onChange(of: pickerItems) { _, items in
+                guard !items.isEmpty else { return }
+                // 先清空选择，再导入：选择器下次打开时不会带着这一批，同一项也不会被导入两次。
+                pickerItems = []
+                Task { await importPicked(items) }
+            }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.movie, .audio, .image], allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result { importFiles(urls) }
+                if case .success(let urls) = result { Task { await importFiles(urls) } }
             }
         }
     }
 
     private func importPicked(_ items: [PhotosPickerItem]) async {
-        guard !items.isEmpty else { return }
-        preparing = true
-        defer { preparing = false; pickerItems = [] }
-        for item in items where files.count < 8 {
+        preparingCount += 1
+        defer { preparingCount -= 1 }
+        noticeText = nil
+        for item in items {
+            guard !selection.isFull else { break }
             do {
                 if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }),
                    let movie = try await item.loadTransferable(type: PickedMovie.self) {
                     let type = UTType(filenameExtension: movie.url.pathExtension) ?? .quickTimeMovie
-                    files.append(LearningUploadFile(url: movie.url, fileName: movie.url.lastPathComponent,
-                                                    mimeType: type.conforms(to: .mpeg4Movie) ? "video/mp4" : "video/quicktime"))
+                    await admit(LearningUploadFile(url: movie.url, fileName: movie.url.lastPathComponent,
+                                                   mimeType: type.conforms(to: .mpeg4Movie) ? "video/mp4" : "video/quicktime"))
                 } else if let data = try await item.loadTransferable(type: Data.self),
                           let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.88) {
                     let url = Self.temporary("jpg")
                     try jpeg.write(to: url)
-                    files.append(LearningUploadFile(url: url, fileName: "教具\(files.count + 1).jpg", mimeType: "image/jpeg"))
+                    await admit(LearningUploadFile(url: url, fileName: "教具\(files.count + 1).jpg", mimeType: "image/jpeg"))
                 }
             } catch {
                 errorText = "有个文件没能读取，请换一个再试。"
@@ -576,8 +610,12 @@ struct CourseUploadSheet: View {
         }
     }
 
-    private func importFiles(_ urls: [URL]) {
-        for url in urls where files.count < 8 {
+    private func importFiles(_ urls: [URL]) async {
+        preparingCount += 1
+        defer { preparingCount -= 1 }
+        noticeText = nil
+        for url in urls {
+            guard !selection.isFull else { break }
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             let type = UTType(filenameExtension: url.pathExtension)
@@ -596,9 +634,26 @@ struct CourseUploadSheet: View {
             let target = Self.temporary(url.pathExtension)
             do {
                 try FileManager.default.copyItem(at: url, to: target)
-                files.append(LearningUploadFile(url: target, fileName: url.lastPathComponent, mimeType: mime))
+                await admit(LearningUploadFile(url: target, fileName: url.lastPathComponent, mimeType: mime))
             } catch { errorText = "有个文件没能读取，请换一个再试。" }
         }
+    }
+
+    /// 按内容收进一份临时副本：和已选素材一模一样的就丢掉副本并提示，不会重复上传。
+    private func admit(_ file: LearningUploadFile) async {
+        do {
+            let digest = try await LearningUploadSelection.digest(of: file.url)
+            switch selection.add(file, digest: digest) {
+            case .added: return
+            case .duplicate:
+                noticeText = "有个素材和已选的内容完全一样，已自动去掉，不会重复上传。"
+            case .full:
+                noticeText = "最多 \(LearningUploadSelection.limit) 个素材，多出来的没有加入。"
+            }
+        } catch {
+            errorText = "有个文件没能读取，请换一个再试。"
+        }
+        try? FileManager.default.removeItem(at: file.url)
     }
 
     /// Proxy limit per request is about 100 MB; stay clearly below it.
@@ -671,7 +726,8 @@ struct CourseUploadSheet: View {
                 keepAlive.report(CourseUploadActivityPhase.uploading.overallProgress(step: 1, steps: ready.count))
                 let first = try await client.createCourse(childID: childID, schoolDate: BubuLearningDates.dayString(day),
                                                           title: courseTitle,
-                                                          kind: kind, language: language, first: ready[0], totalFiles: ready.count)
+                                                          kind: kind, language: language, note: LearningCourseNote.normalized(note),
+                                                          first: ready[0], totalFiles: ready.count)
                 course = first
                 created = first.id
                 uploadedCount = 1
@@ -755,6 +811,60 @@ struct CourseUploadSheet: View {
     private static func size(_ url: URL) -> String {
         let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
+/// 已选的课程素材，按内容指纹（SHA-256）去重。
+/// 同一段视频不管是在两次选择里各选了一次，还是上一批还在导入时又被连带选中，都只保留一份
+/// （线上曾出现一节课两个文件字节完全相同的情况）。
+nonisolated struct LearningUploadSelection: Sendable {
+    static let limit = 8
+    enum Outcome: Equatable, Sendable { case added, duplicate, full }
+
+    private(set) var files: [LearningUploadFile] = []
+    private var digests: [URL: String] = [:]
+
+    var isFull: Bool { files.count >= Self.limit }
+
+    mutating func add(_ file: LearningUploadFile, digest: String) -> Outcome {
+        if digests.values.contains(digest) { return .duplicate }
+        guard !isFull else { return .full }
+        files.append(file)
+        digests[file.url] = digest
+        return .added
+    }
+
+    /// Removes and returns the files at `offsets`, so the caller can delete their temporary copies.
+    mutating func remove(atOffsets offsets: IndexSet) -> [LearningUploadFile] {
+        let removed = offsets.map { files[$0] }
+        files.remove(atOffsets: offsets)
+        for file in removed { digests[file.url] = nil }
+        return removed
+    }
+
+    /// Streams the file through SHA-256 off the main actor; videos can be hundreds of MB.
+    @concurrent
+    static func digest(of url: URL) async throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 4 * 1_048_576), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// 家长对一节课的补充说明（「今天老师教了什么」），服务端上限 2000 字。
+nonisolated enum LearningCourseNote {
+    static let maxLength = 2000
+
+    /// Trimmed and capped; nil when empty so older servers never see the field.
+    /// The server counts code points, so the cap is on Unicode scalars (an emoji can be several).
+    static func normalized(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(String.UnicodeScalarView(trimmed.unicodeScalars.prefix(maxLength)))
     }
 }
 

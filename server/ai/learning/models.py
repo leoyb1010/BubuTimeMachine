@@ -128,3 +128,75 @@ def ground_draft(draft: Draft, sources: dict) -> dict:
                     choice["colors"] = label_colors(choice["label"])
                     choice["color"] = choice["colors"][0]
     return result
+
+
+# 2.28 content lessons: built from what the video shows/sings and the parent's note.
+# Prompts are spoken by our narrator voice (TTS); nothing claims to be the teacher.
+CHOICE_KINDS = {"listen_choice", "color_choice", "sort"}
+HAN = re.compile(r"[㐀-鿿]")
+
+
+class ContentChoice(StrictModel):
+    id: str = Field(min_length=1, max_length=60, pattern=r'^[a-zA-Z0-9_-]+$')
+    label: str = Field(min_length=1, max_length=40)
+    emoji: str | None = Field(default=None, max_length=8)
+    image_frame: int | None = Field(default=None, ge=0, le=63)
+
+
+class ContentActivity(StrictModel):
+    id: str = Field(min_length=1, max_length=60, pattern=r'^[a-zA-Z0-9_-]+$')
+    kind: Literal["listen_choice", "color_choice", "sort", "speak", "music"]
+    title: str = Field(min_length=1, max_length=60)
+    concept: str = Field(min_length=1, max_length=100)
+    instruction: str = Field(min_length=1, max_length=200)
+    prompt_text: str = Field(min_length=1, max_length=160)
+    answer_text: str | None = Field(default=None, max_length=160)
+    grounding: str = Field(min_length=2, max_length=200)
+    image_frame: int | None = Field(default=None, ge=0, le=63)
+    segment_ref: str | None = Field(default=None, max_length=100)
+    choices: list[ContentChoice] = Field(default_factory=list, max_length=4)
+    correct_choice: str | None = Field(default=None, max_length=60)
+
+    @model_validator(mode="after")
+    def consistent(self):
+        ids = [c.id for c in self.choices]
+        if len(ids) != len(set(ids)):
+            raise ValueError("选项编号重复")
+        if self.kind in CHOICE_KINDS:
+            if not 2 <= len(ids) <= 4 or self.correct_choice not in ids or not self.answer_text:
+                raise ValueError("选择题需要2到4个选项、正确答案和反馈")
+            if len({normalize(c.label) for c in self.choices}) != len(ids):
+                raise ValueError("选项文字重复")
+            right = next(c for c in self.choices if c.id == self.correct_choice)
+            if not normalize(right.label) or normalize(right.label) not in normalize(self.answer_text):
+                raise ValueError("反馈须说出正确答案")
+            if self.kind == "color_choice":
+                if any(not label_colors(c.label) for c in self.choices):
+                    raise ValueError("颜色题缺少可见色块")
+                if len({tuple(sorted(label_colors(c.label))) for c in self.choices}) != len(ids):
+                    raise ValueError("颜色选项重复")
+        elif self.choices or self.correct_choice:
+            raise ValueError("表达或儿歌活动不带选项")
+        if self.kind == "speak":
+            target = (self.answer_text or "").strip()
+            words = target.split()
+            if not target or (len(target) > 12 if HAN.search(target) else (len(words) > 6 or len(target) > 40)):
+                raise ValueError("跟说内容须是一句很短的话")
+        if self.kind != "music" and self.segment_ref:
+            raise ValueError("只有儿歌活动可以引用原片片段")
+        return self
+
+
+class ContentDraft(StrictModel):
+    """Schema shown to the model; the server re-validates each activity on its own."""
+    title: str = Field(min_length=1, max_length=100)
+    intro: str = Field(default="", max_length=300)
+    summary: str = Field(default="", max_length=500)
+    key_words: list[str] = Field(default_factory=list, max_length=12)
+    activities: list[ContentActivity] = Field(default_factory=list, max_length=8)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+
+
+def prompt_role(kind: str) -> str:
+    """Roles the app's playback policy accepts for a prompt of this kind."""
+    return "context" if kind == "music" else "question" if kind == "speak" else "cue"

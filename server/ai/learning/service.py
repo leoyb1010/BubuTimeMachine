@@ -19,8 +19,8 @@ from fastapi import HTTPException
 
 from memory_query import PocketBaseMemoryStore, _pb_quote
 from . import fsrs
-from .models import Draft, Segment, ground_draft, label_colors, normalize
-from .processing import MediaProcessor, ProcessingUnavailable
+from .models import Draft, Segment, ground_draft, label_colors, normalize, prompt_role
+from .processing import CONTENT_PIPELINE_VERSION, MediaProcessor, ProcessingUnavailable, clip_parameters
 from .store import COURSE_KINDS, Conflict, Missing, digest, valid_day
 
 
@@ -157,6 +157,8 @@ class LearningService:
             "course_id": pack.get("course_id", ""),
             "title": payload.get("title", "学习内容"),
             "payload": {"title": payload.get("title", "学习内容"), "summary": self._readable(pack, payload.get("summary", "")),
+                        "intro": self._readable(pack, payload.get("intro", "")),
+                        "key_words": [w for w in payload.get("key_words", []) if isinstance(w, str)],
                         "activities": [self._public_activity(pack["id"], a) for a in payload.get("activities", [])],
                         "warnings": [self._readable(pack, w) for w in payload.get("warnings", [])]},
             "confirmations": [{"activity_id": a["id"], "digest": digest(a)} for a in payload.get("activities", [])],
@@ -240,8 +242,64 @@ class LearningService:
             result[sid] = {**source, "analysis": analysis["payload"]}
         return result
 
+    def _validate_content(self, pack, sources):
+        """Content lessons: narrator prompts, frames from the course's own analysis, exact song clips."""
+        frames = {f.get("resource") for s in sources.values() for f in s["analysis"].get("frames", []) if isinstance(f, dict)}
+        def audio(clip):
+            name = clip.get("audio_resource")
+            if name is None:
+                return
+            if not isinstance(name, str) or not RESOURCE.fullmatch(name) or not name.endswith(".m4a") or clip.get("audio_hash") != name[:-4]:
+                raise ValueError("音频引用无效")
+        def image(owner):
+            name = owner.get("image_resource")
+            if name is not None and name not in frames:
+                raise ValueError("图片不是本课的采样画面")
+        activities = pack["payload"].get("activities", [])
+        if not activities or len({a["id"] for a in activities}) != len(activities):
+            raise ValueError("活动为空或编号重复")
+        for raw in activities:
+            if raw["kind"] not in {"listen_choice", "color_choice", "sort", "speak", "music"}:
+                raise ValueError("活动类型无效")
+            if not all(isinstance(raw.get(key), str) and raw[key] for key in ("id", "title", "concept", "instruction")):
+                raise ValueError("活动文字缺失")
+            prompt, answer = raw["prompt"], raw.get("answer")
+            if prompt.get("role") != prompt_role(raw["kind"]) or not isinstance(prompt.get("text"), str) or not prompt["text"]:
+                raise ValueError("题目角色无效")
+            audio(prompt); image(prompt)
+            if prompt.get("origin") == "source":
+                source = sources[prompt["source_id"]]
+                expected = clip_parameters(source, prompt["segment_id"])
+                if raw["kind"] != "music" or prompt.get("source_hash") != source["hash"] or any(prompt.get(k) != v for k, v in expected.items()):
+                    raise ValueError("原片片段不一致")
+            if answer is not None:
+                if answer.get("role") != "answer" or not isinstance(answer.get("text"), str) or not answer["text"]:
+                    raise ValueError("反馈无效")
+                audio(answer)
+            ids = [c["id"] for c in raw.get("choices", [])]
+            for choice in raw.get("choices", []):
+                image(choice)
+                if not isinstance(choice.get("label"), str) or not choice["label"]:
+                    raise ValueError("选项文字缺失")
+            if raw["kind"] in CHOICE_KINDS:
+                if not 2 <= len(ids) <= 4 or len(set(ids)) != len(ids) or raw.get("correct_choice") not in ids or answer is None:
+                    raise ValueError("选择题不完整")
+            elif ids or raw.get("correct_choice"):
+                raise ValueError("非选择题不带选项")
+            if raw["kind"] == "speak" and answer is None:
+                raise ValueError("跟说缺少目标")
+        for source in sources.values():
+            MediaProcessor.verify_file(self.store.asset_path(pack["family_id"], source["asset_id"]), source["hash"])
+        for name in self._resources(pack):
+            self.processor.resource_path(pack["family_id"], name)
+
     def _validate_materials(self, pack):
         sources = self._check_sources(pack)
+        if pack["payload"].get("pipeline_version") == CONTENT_PIPELINE_VERSION:
+            try:
+                return self._validate_content(pack, sources)
+            except (ValueError, TypeError, KeyError, AttributeError, OSError, ProcessingUnavailable) as exc:
+                raise Conflict("题目、声音或图片尚未核对完整，请重新生成。") from exc
         def reference(value):
             return {key: value[key] for key in ("source_id", "segment_id", "role")}
         try:
@@ -428,7 +486,7 @@ class LearningService:
         return {"window_start": start, "window_end": day, "items": [item for _, item in ordered]}
 
     # Parent-uploaded courses. Each upload is one lesson; nothing is picked from photos.
-    def create_course(self, scope, child_id, day, title, kind, language, files, total_files=0):
+    def create_course(self, scope, child_id, day, title, kind, language, files, total_files=0, note=""):
         """total_files > len(files) announces more files that follow via add_course_file."""
         scope.require_review()
         child = scope.require_child(child_id)
@@ -442,7 +500,7 @@ class LearningService:
             raise ValueError("每节课至少需要一段带老师声音的视频或音频")
         if any(mime not in UPLOAD_MIMES for _, _, mime in files):
             raise ValueError("不支持的文件格式")
-        course = self.store.create_course(scope.family_id, child, day, title, kind, language, scope.user_id, total)
+        course = self.store.create_course(scope.family_id, child, day, title, kind, language, scope.user_id, total, note)
         try:
             for index, (name, path, mime) in enumerate(files):
                 self.store.add_source(scope.family_id, child, day, "course:%s:%d" % (course["id"], index), name, Path(path),
@@ -496,9 +554,14 @@ class LearningService:
             state = ("failed" if failed else "processing") if scope.can_review else "waiting"
         else:
             state = pack["status"]
+            # A note change or retry is regenerating an unpublished lesson: show that, not the stale draft.
+            if state != "published" and self.store.compose_job_state(
+                    scope.family_id, course["child_id"], course["school_date"], course["id"]) in {"queued", "running"}:
+                state = "processing"
         if not scope.can_review and state != "published":
             state, pack = "waiting", None
         result = {key: course[key] for key in ("id", "child_id", "school_date", "title", "kind", "language")}
+        result["note"] = course.get("note") or ""
         result.update(created_at=_iso(course["created_at"]), state=state, source_count=len(sources),
                       expected_files=max(course["expected_files"], len(sources)),
                       activity_count=len(pack["payload"].get("activities", [])) if pack else 0,
@@ -521,6 +584,13 @@ class LearningService:
         scope.require_review()
         self._course(scope, cid)
         self.store.retry_course(scope.family_id, cid, uuid.uuid4().hex)
+        return self.course(scope, cid)
+
+    def update_course(self, scope, cid, note):
+        """PATCH courses/{cid}: save the parent's note and regenerate the lesson from it."""
+        scope.require_review()
+        self._course(scope, cid)
+        self.store.set_course_note(scope.family_id, cid, note, uuid.uuid4().hex)
         return self.course(scope, cid)
 
     def delete_course(self, scope, cid):

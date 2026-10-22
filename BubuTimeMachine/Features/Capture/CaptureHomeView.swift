@@ -38,6 +38,9 @@ struct CaptureHomeView: View {
     @State private var heroBackgroundImage: UIImage?
     /// 「今天」的第二大脑内容（今日精选 + 回忆），同一天只取一次。
     @State private var today = HomeTodayModel()
+    /// 「最近时光」：和时光 Tab 默认流同一份数据。
+    @State private var recent = HomeRecentModel()
+    @State private var openedRecent: OnlineTimelineItem?
     @AppStorage(SecondBrainConsentModifier.storageKey) private var secondBrainConsented = false
 
     // 首页统计缓存：全表派生值只在数据指纹变化时重算一次，
@@ -117,10 +120,10 @@ struct CaptureHomeView: View {
                     }
                     if entries.isEmpty {
                         firstRecordEmptyState  // 空库：单焦点，只说「记第一笔」
-                    } else {
-                        if !isWide { dailyQuestionStrip }   // 今日一问（轻条）
-                        recentMomentsSection   // ④ 最近时光（行卡）
+                    } else if !isWide {
+                        dailyQuestionStrip     // 今日一问（轻条）
                     }
+                    recentMomentsSection       // ④ 最近时光（与时光 Tab 同序的缩略图）
                     SaveHealthStrip()
                     // 给底部悬浮玻璃 Tab 栏留出空间
                     // 宽屏走侧栏、没有悬浮底栏，不需要这块预留
@@ -142,6 +145,14 @@ struct CaptureHomeView: View {
 }
             .refreshable { await pullToRefresh() }
             // 详情页转场移到此处（而非 RootTabView），以便与本页 zoomNS 配对实现缩放共享元素转场。
+            .navigationDestination(item: $openedRecent) { item in
+                if let client = recentClient {
+                    OnlineTimelineDetailPager(client: client, items: recent.items, initial: item,
+                                              loadMore: {}, hasMore: false,
+                                              onNotBubu: { id in recent.remove(id) })
+                        .navigationTransition(.zoom(sourceID: "o-" + item.id, in: zoomNS))
+                }
+            }
             .navigationDestination(for: UUID.self) { entryID in
                 if let entry = navigableEntries.first(where: { $0.id == entryID }) {
                     EntryDetailView(entry: entry)
@@ -172,10 +183,12 @@ struct CaptureHomeView: View {
                                      role: env.config.currentRole)
             }
             kickOffHomeRefresh()
+            Task { await recent.load(client: recentClient) }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // 拍完照切回 App 时立即消费 PhotoKit 增量，不等重启；仍只生成候选，不自动发布。
             kickOffHomeRefresh()
+            Task { await recent.load(client: recentClient) }
         }
         .onChange(of: quickCaptureTrigger) { _, _ in
             startQuickCapture()
@@ -192,6 +205,9 @@ struct CaptureHomeView: View {
         }
         .task(id: todayTaskKey) {
             await today.load(client: learningClient, consented: secondBrainConsented)
+        }
+        .task(id: todayTaskKey) {
+            await recent.load(client: recentClient)
         }
         .alert("这是布布的第一次吗？", isPresented: Binding(
             get: { firstTimeSuggestion != nil },
@@ -328,14 +344,20 @@ struct CaptureHomeView: View {
         kickOffHomeRefresh()
         env.syncEngine.syncNow()
         async let pause: Void? = try? Task.sleep(for: .milliseconds(650))
+        async let recentLoad: Void = recent.load(client: recentClient, force: true)
         await today.load(client: learningClient, consented: secondBrainConsented, force: true)
-        _ = await pause
+        _ = await (pause, recentLoad)
     }
 
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
     /// 家庭服务（第二大脑）客户端；未配置时为 nil，首页只显示本机内容。
     private var learningClient: BubuLearningClient? { BubuLearningClient(env: env) }
+
+    /// 「最近时光」读第二大脑：和今日精选一样，要先看过并同意那段说明（UI 测试可跳过说明）。
+    private var recentClient: BubuLearningClient? {
+        secondBrainConsented || OnlineTimelineView.skipsConsentForUITest ? learningClient : nil
+    }
 
     /// 换账号、同意说明或跨天时重新取「今天」。
     private var todayTaskKey: String {
@@ -1140,65 +1162,59 @@ struct CaptureHomeView: View {
         }
     }
 
-    // MARK: 最近时光（行卡，对照设计稿 MacMomentRow）
+    // MARK: 最近时光（与时光 Tab 默认流同一份、同一顺序）
+
+    private var recentElements: [OnlineTimelineElement] {
+        HomeRecentModel.elements(items: recent.items, family: entries.map(OnlineTimelineFamilyRef.init),
+                                 connected: recentClient != nil, hasMore: recent.hasMore, limit: isWide ? 8 : 6)
+    }
 
     @ViewBuilder
     private var recentMomentsSection: some View {
-        if !entries.isEmpty {
+        let elements = recentElements
+        if !elements.isEmpty {
             VStack(spacing: 10) {
                 HomeSectionHeader(title: "最近时光") {
                     Button { openTimeline?() } label: { HomeSectionActionLabel() }
                         .buttonStyle(.plain)
                         .accessibilityLabel("查看全部时光")
+                        .accessibilityIdentifier("home.recent.all")
                 }
-                // 宽屏两列，窄屏一列。
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: isWide ? 2 : 1),
-                          spacing: 10) {
-                    ForEach(entries.prefix(isWide ? 4 : 2)) { entry in
-                        NavigationLink(value: entry.id) { momentRow(entry) }
-                            .buttonStyle(.plain)
-                            .matchedTransitionSource(id: entry.id, in: zoomNS)
+                // 窄屏 3 列两行，宽屏 8 列一行；顺序与时光一致（最新在前）。
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: isWide ? 8 : 3),
+                          spacing: 6) {
+                    ForEach(elements) { element in
+                        recentTile(element)
+                            .aspectRatio(1, contentMode: .fit)
                     }
                 }
             }
         }
     }
 
-    private func momentRow(_ entry: Entry) -> some View {
-        HStack(spacing: 12) {
-            Group {
-                if let media = entry.coverMedia {
-                    MediaThumbnail(media: media, mediaStore: env.mediaStore)
-                } else {
-                    BubuDreamPhoto(hue: entry.id.bubuStableHue, height: 64,
-                                   cornerRadius: BubuTheme.Radius.sm, motif: entry.mood?.emoji ?? "◡")
+    @ViewBuilder
+    private func recentTile(_ element: OnlineTimelineElement) -> some View {
+        switch element {
+        case .online(let item, _, _):
+            if let client = recentClient {
+                Button { openedRecent = item } label: {
+                    Color.clear.overlay { OnlineTimelineCell(item: item, client: client) }
                 }
+                .buttonStyle(BubuPressableStyle())
+                .matchedTransitionSource(id: element.id, in: zoomNS)
+                .accessibilityIdentifier("home.recent.item")
             }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(BubuDateFormat.monthDay(entry.happenedAt))
-                    .font(BubuTheme.Font.scaled(12, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.primaryInk)
-                Text(entry.note?.isEmpty == false ? entry.note! : "记录此刻")
-                    .font(BubuTheme.Font.scaled(14.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(BubuTheme.Color.warmBrown)
-                    .lineLimit(1)
-                if let mood = entry.mood {
-                    Text("\(mood.emoji) \(mood.rawValue)")
-                        .font(BubuTheme.Font.scaled(12, weight: .medium, design: .rounded))
-                        .foregroundStyle(BubuTheme.Color.secondaryText)
-                        .lineLimit(1)
+        case .family(let record):
+            if let entry = entries.first(where: { $0.id == record.id }) {
+                NavigationLink(value: entry.id) {
+                    Color.clear.overlay { FamilyRecordCell(entry: entry) }
                 }
+                .buttonStyle(BubuPressableStyle())
+                .matchedTransitionSource(id: entry.id, in: zoomNS)
+                .accessibilityIdentifier("home.recent.family")
             }
-            Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.md, style: .continuous))
-        .bubuCardShadow()
     }
-
 
     /// 保存成功：布布「耶」贴纸弹入 + 成功触觉（haptic 在 CaptureModel.flashSaved 触发）。
     private var savedToast: some View {

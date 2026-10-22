@@ -69,6 +69,10 @@ class Segments(Input):
     date_confirmed: bool
 
 
+class CourseUpdate(Input):
+    note: str = Field(max_length=2000)
+
+
 class Decision(Input):
     decision: Literal['yes', 'no', 'undo']
 
@@ -502,6 +506,11 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
     def course(cid: str, scope: FamilyScope = Depends(_scope)):
         return _call(service_factory, 'course', scope, cid)
 
+    @router.patch('/courses/{cid}')
+    def update_course(cid: str, request: Request, scope: FamilyScope = Depends(_scope)):
+        scope.require_review(); body = _input(request, CourseUpdate)
+        return _call(service_factory, 'update_course', scope, cid, body.note)
+
     @router.post('/courses/{cid}/retry')
     def retry_course(cid: str, scope: FamilyScope = Depends(_scope)):
         return _call(service_factory, 'retry_course', scope, cid)
@@ -541,6 +550,7 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
                       kind: Literal['teaching', 'practice', 'song'] = Form(...),
                       language: Literal['en-US', 'zh-CN'] = Form('en-US'),
                       total_files: int = Form(0, ge=0, le=8),
+                      note: str = Form('', max_length=2000),
                       files: list[UploadFile] = File(...), scope: FamilyScope = Depends(_scope)):
         scope.require_review()
         if not 1 <= len(files) <= 8:
@@ -548,7 +558,7 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
         with tempfile.TemporaryDirectory(prefix='bubu-course-upload-') as tmp:
             saved = [_spool(upload, Path(tmp) / str(index)) for index, upload in enumerate(files)]
             return _call(service_factory, 'create_course', scope, scope.require_child(child_id), school_date,
-                         title, kind, language, saved, total_files)
+                         title, kind, language, saved, total_files, note)
 
     @uploads.post('/courses/{cid}/files')
     def add_course_file(cid: str, request: Request, file: UploadFile = File(...), scope: FamilyScope = Depends(_scope)):

@@ -86,3 +86,43 @@
 ### 学习周报
 沿用现有 `reviews` / `attempts` / `courses`，App 端汇总，无新接口。
 跟读练习沿用现有 attempt：`kind="speak"`（已支持），分数写在 `note`，格式 `score:85`。
+
+## 2.28 课程说明
+
+家长每天可以给一节课写一句“今天学了什么”。课程互动改为由**视频内容（画面描述、歌词/转写、画面文字、采样画面）+ 课程说明**生成，
+不再要求音轨里有老师提问。题目和反馈的声音由家里服务器用系统朗读声音合成（不是老师原声），没有可用声音时只显示文字。
+
+### `POST courses`（multipart，增加可选字段）
+- 新字段 `note`：字符串，0–2000 字，可省略（默认 `""`）。超长 → 422。其余字段不变。
+
+### `PATCH courses/{cid}` — 修改课程说明并重新生成
+- 权限：需要可审核（reviewer）；Cookie 会话需带 `X-Bubu-Learning: 1`（同其他写操作），原生 Bearer 不需要。
+- 请求：`Content-Type: application/json`，`{"note": "今天学了秋天的英文儿歌，重点词 leaf, apple, umbrella"}`
+  （`note` 必填，字符串，≤2000 字，空字符串表示清空；不接受其他字段 → 422）。
+- 服务端去掉首尾空白、合并行内多余空格（保留换行），保存后像 `POST courses/{cid}/retry` 一样重新排队：
+  有解析失败的文件先重新解析，否则直接重新生成课程（新版本 draft 取代本课旧版本，已发布的旧版本变为 superseded，互动记录保留）。
+- 响应：与 `GET courses/{cid}` 相同的课程详情（含 `note`）。重新生成期间未发布的课程 `state` 为 `processing`（`retry` 同样如此）；
+  已发布的课程在新版本生成前保持 `published`。错误：403 无权限 / 404 课程不存在 / 422 内容无效。
+
+### 课程返回增加 `note`
+- `GET courses?...` 每项、`GET courses/{cid}`、`POST courses`、`POST courses/{cid}/retry`、`PATCH courses/{cid}` 的课程对象增加
+  `"note": "…"`（没有时为 `""`）。
+
+### 课程包（pack.payload）增加字段
+```json
+{"title": "10.22", "summary": "今天的学习要点……", "intro": "给家长的一两句话：今天学了什么、怎么陪孩子玩",
+ "key_words": ["leaf", "apple", "umbrella"],
+ "activities": [{"id": "a1", "kind": "listen_choice", "title": "找苹果", "concept": "apple", "instruction": "听一听，苹果在哪里？",
+                 "correct_choice": "apple",
+                 "prompt": {"role": "cue", "text": "Where is the apple? 苹果在哪里？", "audio_url": "/learning/api/packs/<pid>/resources/<sha>.m4a", "image_url": null},
+                 "answer": {"role": "answer", "text": "Yes! Apple! 是苹果！", "audio_url": "…m4a"},
+                 "choices": [{"id": "apple", "label": "apple", "image_url": "/learning/api/packs/<pid>/resources/<sha>.jpg"},
+                             {"id": "umbrella", "label": "☂️ umbrella", "image_url": null}]}],
+ "warnings": []}
+```
+- 新增 `intro`（≤300 字）、`key_words`（≤12 个）。旧课程包没有时分别为 `""` / `[]`。
+- 活动结构、`kind`（listen_choice / color_choice / sort / speak / music）、`role`、选项与 `confirmations` 不变；
+  `prompt.source_id/segment_id/start/end` 只在 music 剪取原片歌词时出现，其余题目没有这些字段（App 已按可选处理）。
+- `audio_url` 可能为 `null`（服务器没有朗读声音），此时显示 `text`。没有合适画面的选项用 emoji + 文字作为 `label`。
+- 题目声音：中文/中英混合用 Tingting（备选 Meijia），纯英文用 Samantha（备选 Karen），单段不超过 12 秒。
+- 一节课里上传了内容完全相同的文件时，服务端按内容哈希只存一份素材、只解析一次，`warnings` 会提示“只按一份处理”。

@@ -18,6 +18,7 @@ struct CourseDetailView: View {
     @State private var confirmDelete = false
     @State private var confirmRegenerate = false
     @State private var awaitingPack: String?
+    @State private var editingNote = false
     @State private var player = NativeLearningAudioPlayer()
     @Environment(\.dismiss) private var dismiss
 
@@ -28,6 +29,7 @@ struct CourseDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
                         header(course)
+                        if showsNoteSection(course) { noteSection(course) }
                         stateSection(course)
                         if !course.sources.isEmpty { sourcesSection(course) }
                     }
@@ -78,6 +80,11 @@ struct CourseDetailView: View {
             }
         }
         .onDisappear { player.stop() }
+        .sheet(isPresented: $editingNote) {
+            CourseNoteEditor(initial: course?.note ?? "", needsReReview: course?.state == "published" || course?.state == "draft") { text in
+                await saveNote(text)
+            }
+        }
         .fullScreenCover(isPresented: $playing) {
             if let pack = course?.pack {
                 LearningPlayView(client: client, childID: childID,
@@ -130,7 +137,16 @@ struct CourseDetailView: View {
                 Text(course.pack?.payload.summary ?? "没有找到可核对的老师原声。")
                     .font(BubuTheme.Font.body)
                 if canReview {
-                    Button("再试一次生成") { Task { await regenerate() } }.buttonStyle(.bordered)
+                    Text(Self.hasNote(course)
+                         ? "可以把说明写得更具体些（儿歌名、老师反复说的词、做了什么活动），再按说明重新生成。"
+                         : "告诉家里的服务器老师今天教了什么（比如儿歌名、重点单词），它会照着说明再找一遍老师原声。")
+                        .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    Button { editingNote = true } label: {
+                        Label(Self.hasNote(course) ? "修改说明并重新生成" : "补充说明并重新生成", systemImage: "square.and.pencil")
+                    }
+                    .buttonStyle(.borderedProminent).tint(BubuTheme.Color.actionFill)
+                    .accessibilityIdentifier("learning.course.note.add")
+                    Button("不改说明，直接再试一次") { Task { await regenerate() } }.buttonStyle(.bordered)
                 }
             }
         case "draft":
@@ -213,6 +229,37 @@ struct CourseDetailView: View {
         }
     }
 
+    private static func hasNote(_ course: LearningCourseDetailDTO) -> Bool {
+        !(course.note?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    /// no_lesson 的空状态自己带「补充说明」入口；那里没有说明时不再重复一块。
+    private func showsNoteSection(_ course: LearningCourseDetailDTO) -> Bool {
+        Self.hasNote(course) || (canReview && course.state != "no_lesson")
+    }
+
+    private func noteSection(_ course: LearningCourseDetailDTO) -> some View {
+        LearningPanel(title: "今天老师教了什么", symbol: "text.bubble", subtitle: "家长补充的说明") {
+            if let note = course.note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+                Text(note).font(BubuTheme.Font.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("learning.course.note")
+            } else {
+                Text("还没有写。写下儿歌名、重点单词或活动，出题会更准。")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+            }
+            if canReview && course.state != "no_lesson" {
+                Button { editingNote = true } label: {
+                    Label(Self.hasNote(course) ? "修改说明并重新生成" : "补充说明并重新生成", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                .disabled(course.state == "processing" || course.state == "uploading")
+                .accessibilityIdentifier("learning.course.note.edit")
+            }
+        }
+    }
+
     private func sourcesSection(_ course: LearningCourseDetailDTO) -> some View {
         LearningPanel(title: "课程素材", symbol: "film.stack", subtitle: "只用于每日学习", accent: BubuTheme.Color.deepRose) {
             ForEach(course.sources) { source in
@@ -275,6 +322,7 @@ struct CourseDetailView: View {
         let dateConfirmed: Bool
         struct Confirmation: Encodable, Sendable { let activityId: String; let digest: String; let verified: Bool }
     }
+    private nonisolated struct NoteBody: Encodable, Sendable { let note: String }
     private nonisolated struct ExcludeBody: Encodable, Sendable { let revision: Int; let activityId: String }
     private nonisolated struct Queued: Decodable, Sendable { let queued: Bool }
     private nonisolated struct Deleted: Decodable, Sendable { let deleted: Bool }
@@ -316,6 +364,25 @@ struct CourseDetailView: View {
             awaitingPack = previous
             actionError = "已经开始重新整理，完成后这里会自动更新。"
         } catch { actionError = learningErrorText(error) }
+    }
+
+    /// Saves the note; the server stores it and regenerates the lesson, so poll the same way as retry.
+    private func saveNote(_ text: String) async -> String? {
+        actionError = nil
+        player.stop()
+        let previous = course?.pack?.id ?? ""
+        do {
+            _ = try await client.send("PATCH", "api/courses/\(courseID)",
+                                      body: NoteBody(note: LearningCourseNote.normalized(text) ?? ""),
+                                      as: LearningEmptyResponse.self)
+            awaitingPack = previous
+            await load()
+            actionError = "说明已保存，正在按说明重新整理，完成后这里会自动更新。"
+            onChange()
+            return nil
+        } catch {
+            return learningErrorText(error, fallback: "说明没有保存成功，请检查网络后重试。")
+        }
     }
 
     private func delete() async {
@@ -473,5 +540,70 @@ private struct LearningOriginalClipSheet: View {
         } catch {
             errorText = learningErrorText(error, fallback: "原片暂时打不开，请检查网络后重试。")
         }
+    }
+}
+
+/// 编辑「今天老师教了什么」：保存后服务端按说明重新生成这节课。
+private struct CourseNoteEditor: View {
+    let initial: String
+    let needsReReview: Bool
+    let onSave: (String) async -> String?
+    @State private var text: String
+    @State private var saving = false
+    @State private var errorText: String?
+    @Environment(\.dismiss) private var dismiss
+
+    init(initial: String, needsReReview: Bool, onSave: @escaping (String) async -> String?) {
+        self.initial = initial
+        self.needsReReview = needsReReview
+        self.onSave = onSave
+        _text = State(initialValue: initial)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("比如：秋天的英文儿歌，重点词 leaf、apple、umbrella", text: $text, axis: .vertical)
+                        .lineLimit(4...10)
+                        .onChange(of: text) { _, value in
+                            if value.count > LearningCourseNote.maxLength { text = String(value.prefix(LearningCourseNote.maxLength)) }
+                        }
+                        .accessibilityIdentifier("learning.note.field")
+                } header: {
+                    Text("今天老师教了什么")
+                } footer: {
+                    Text(needsReReview
+                         ? "保存后会按这段说明重新整理互动题，新题目需要家长重新核对。"
+                         : "写下儿歌名、重点单词或做了什么活动。保存后会按这段说明重新整理互动题。")
+                }
+                if let errorText {
+                    Section { Text(errorText).foregroundStyle(BubuTheme.Color.danger) }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(BubuTheme.Color.background)
+            .navigationTitle("补充说明")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(saving) }
+                ToolbarItem(placement: .confirmationAction) {
+                    if saving { ProgressView() } else {
+                        Button("保存并重新生成") { Task { await save() } }
+                            .disabled(LearningCourseNote.normalized(text) == nil)
+                            .accessibilityIdentifier("learning.note.save")
+                    }
+                }
+            }
+            .interactiveDismissDisabled(saving)
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func save() async {
+        saving = true
+        errorText = await onSave(text)
+        saving = false
+        if errorText == nil { dismiss() }
     }
 }

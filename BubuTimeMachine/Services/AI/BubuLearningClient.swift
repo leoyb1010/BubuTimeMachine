@@ -177,6 +177,8 @@ nonisolated struct LearningCourseDTO: Decodable, Sendable, Hashable, Identifiabl
     let expectedFiles: Int?
     let activityCount: Int
     let pack: LearningPackRefDTO?
+    /// Parent's note on what the teacher taught; absent on older servers.
+    var note: String? = nil
 
     var kindLabel: String { LearningCourseKind(rawValue: kind)?.label ?? "课程" }
 }
@@ -194,6 +196,8 @@ nonisolated struct LearningCourseDetailDTO: Decodable, Sendable, Hashable, Ident
     let activityCount: Int
     let pack: LearningPackDTO?
     let sources: [LearningSourceDTO]
+    /// Parent's note on what the teacher taught; absent on older servers.
+    var note: String? = nil
 
     var kindLabel: String { LearningCourseKind(rawValue: kind)?.label ?? "课程" }
 }
@@ -474,10 +478,13 @@ nonisolated struct BubuLearningClient: Sendable {
     /// how many follow; the server composes only after all of them have arrived.
     @concurrent
     func createCourse(childID: String?, schoolDate: String, title: String, kind: LearningCourseKind,
-                      language: String, first: LearningUploadFile, totalFiles: Int) async throws -> LearningCourseDetailDTO {
+                      language: String, note: String? = nil,
+                      first: LearningUploadFile, totalFiles: Int) async throws -> LearningCourseDetailDTO {
         var fields = [("school_date", schoolDate), ("title", title), ("kind", kind.rawValue),
                       ("language", language), ("total_files", String(totalFiles))]
         if let childID { fields.insert(("child_id", childID), at: 0) }
+        // Parent's "今天老师教了什么"; only sent when filled in.
+        if let note, !note.isEmpty { fields.append(("note", note)) }
         return try await multipart("api/courses", fields: fields, fileField: "files", file: first)
     }
 

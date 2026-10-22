@@ -25,7 +25,7 @@ class FakeService:
     def source_file(self,s,sid): return self.tmp/'media.wav','audio/wav'
     def resource(self,s,pid,name): return self.tmp/'media.wav','audio/wav'
     def __getattr__(self,name):
-        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search','courses','course','delete_course','create_course','retry_course'}: raise AttributeError(name)
+        if name not in {'sources','exclude','regenerate','update_segments','reviews','attempts','media_analysis','timeline_search','courses','course','delete_course','create_course','retry_course','update_course'}: raise AttributeError(name)
         def forward(scope,*args):
             self.calls.append((name,args))
             return {'method':name}
@@ -255,17 +255,20 @@ def test_old_native_query_only_selects_public_shell_not_old_child_resources(setu
 def test_course_upload_is_multipart_reviewer_only_and_not_capped_like_json(setup):
     client,state,service=setup
     received={}
-    def create_course(scope,child,day,title,kind,language,files,total_files=0):
-        received.update(total_files=total_files,child=child,day=day,title=title,kind=kind,language=language,
+    def create_course(scope,child,day,title,kind,language,files,total_files=0,note=''):
+        received.update(total_files=total_files,note=note,child=child,day=day,title=title,kind=kind,language=language,
                         files=[(name,mime,Path(path).read_bytes()) for name,path,mime in files])
         return {'id':'course-1'}
     service.create_course=create_course
     big=b'v'*(300*1024)
-    form={'school_date':'2026-10-21','title':'Fruit words','kind':'teaching'}
+    form={'school_date':'2026-10-21','title':'Fruit words','kind':'teaching','note':'今天学了秋天的英文儿歌，重点词 leaf, apple'}
     upload=[('files',('words.mov',big,'video/quicktime')),('files',('card.jpg',b'card','image/jpeg'))]
     response=client.post('/learning/api/courses',data=form,files=upload,headers={**BEARER,**CSRF})
     assert response.status_code==200 and response.json()=={'id':'course-1'}
     assert received['child']=='child-local' and received['files'][0]==('words.mov','video/quicktime',big)
+    assert received['note']=='今天学了秋天的英文儿歌，重点词 leaf, apple'
+    too_long={**form,'note':'字'*2001}
+    assert client.post('/learning/api/courses',data=too_long,files=upload,headers={**BEARER,**CSRF}).status_code==422
     state['user']='grandma'
     assert client.post('/learning/api/courses',data=form,files=upload,headers={**BEARER,**CSRF}).status_code==403
 
@@ -390,3 +393,16 @@ def test_brain_routes_return_503_when_library_slots_are_exhausted(setup,monkeypa
     assert client.get('/learning/api/status',headers=BEARER).status_code==200  # status never waits for the library
     slots.release()
     assert client.get('/learning/api/places',headers=BEARER).status_code==200
+
+
+def test_course_note_patch_is_reviewer_only_csrf_and_bounded(setup):
+    client,state,service=setup
+    client.get('/learning',headers=BEARER)
+    body={'note':'今天学了秋天的英文儿歌，重点词 leaf, apple, umbrella'}
+    assert client.patch('/learning/api/courses/c1',json=body).status_code==403  # cookie session without CSRF header
+    assert client.patch('/learning/api/courses/c1',json=body,headers=CSRF).status_code==200
+    assert service.calls[-1]==('update_course',('c1',body['note']))
+    assert client.patch('/learning/api/courses/c1',json={'note':'x'*2001},headers=BEARER).status_code==422
+    assert client.patch('/learning/api/courses/c1',json={'note':'x','title':'y'},headers=BEARER).status_code==422
+    state['user']='grandma'
+    assert client.patch('/learning/api/courses/c1',json=body,headers=BEARER).status_code==403
