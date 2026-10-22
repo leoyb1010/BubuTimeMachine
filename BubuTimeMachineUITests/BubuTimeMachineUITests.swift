@@ -23,7 +23,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         rootNavigationButton(named: "时光", in: app).tap()
         // 未连接家庭服务时，在线时光给出明确的连接提示，而不是空白或旧的本机列表。
         XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "连接家庭服务后可看")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "未连接家里的服务器")).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot("timeline-online-offline", to: self)
         assertRootNavigation(in: app)
         XCUIDevice.shared.orientation = .portrait
@@ -38,10 +38,10 @@ final class BubuTimeMachineUITests: XCTestCase {
         let settings = app.buttons["设置"]
         XCTAssertTrue(settings.waitForExistence(timeout: 12))
         settings.tap()
-        let recognition = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "认布布与精选")).firstMatch
+        let recognition = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "本机认脸")).firstMatch
         XCTAssertTrue(recognition.waitForExistence(timeout: 5))
         recognition.tap()
-        XCTAssertTrue(app.navigationBars["认布布与精选"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["本机认脸"].waitForExistence(timeout: 5))
         app.swipeUp()
         assertRootNavigation(in: app)
         attachScreenshot("tabs-visible-in-recognition-settings", to: self)
@@ -79,7 +79,7 @@ final class BubuTimeMachineUITests: XCTestCase {
             XCTAssertTrue(record.isHittable)
             record.tap()
             XCTAssertTrue(app.navigationBars["记录此刻"].waitForExistence(timeout: 5))
-            app.buttons["以后再说"].tap()
+            app.buttons["不记了"].tap()
             assertRootNavigation(in: app)
             app.swipeUp()
             assertRootNavigation(in: app)
@@ -622,7 +622,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.buttons["保存"].exists)
         attachScreenshot("quick-capture", to: self)
 
-        app.buttons["以后再说"].tap()
+        app.buttons["不记了"].tap()
         XCTAssertTrue(record.waitForExistence(timeout: 5))
     }
 
@@ -676,8 +676,8 @@ final class BubuTimeMachineUITests: XCTestCase {
         }
         XCTAssertTrue(returnedToInput, "重试保存后应回到智能记录输入页")
         app.buttons["关闭"].tap()
-        XCTAssertTrue(app.buttons["以后再说"].waitForExistence(timeout: 8))
-        app.buttons["以后再说"].tap()
+        XCTAssertTrue(app.buttons["不记了"].waitForExistence(timeout: 8))
+        app.buttons["不记了"].tap()
         let timeline = element(named: "时光", in: app)
         XCTAssertTrue(timeline.waitForExistence(timeout: 8))
         timeline.tap()
@@ -693,7 +693,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "连接家庭服务后可看")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "未连接家里的服务器")).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot("timeline", to: self)
     }
 
@@ -719,8 +719,15 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(edit.waitForExistence(timeout: 12))
         edit.tap()
         let note = app.descendants(matching: .any).matching(identifier: "entry.note").firstMatch
-        for _ in 0..<4 { if note.isHittable { break }; app.swipeUp() }
-        XCTAssertTrue(note.isHittable)
+        // iPhone 底部常驻「记录此刻」附件浮在内容上方：输入框要完整滚到附件之上再点，
+        // 否则点到的是附件（会就地弹出记录面板），而不是输入框。
+        let accessory = app.buttons["root.record"]
+        func noteIsClear() -> Bool {
+            guard note.isHittable else { return false }
+            return !accessory.exists || note.frame.maxY <= accessory.frame.minY
+        }
+        for _ in 0..<6 { if noteIsClear() { break }; app.swipeUp() }
+        XCTAssertTrue(noteIsClear())
         note.tap()
         note.typeText(" Synthetic retry edit")
         edit.tap()

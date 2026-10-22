@@ -45,7 +45,7 @@ struct ChildIdentitySettingsView: View {
                 }
                 .disabled(working || profile?.avatarMediaFileName == nil)
             } header: {
-                Text("认布布与精选")
+                Text("本机认脸")
             } footer: {
                 Text("只用来给待整理照片加“可能是布布”的建议。即使很确定，也不会自动发布、上传或删除照片。")
             }
@@ -72,7 +72,7 @@ struct ChildIdentitySettingsView: View {
                 }
             }
         }
-        .navigationTitle("认布布与精选")
+        .navigationTitle("本机认脸")
         .navigationBarTitleDisplayMode(.inline)
         .bubuContentColumn(760)
         .scrollContentBackground(.hidden)
