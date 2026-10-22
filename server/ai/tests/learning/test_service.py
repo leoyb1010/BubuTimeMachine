@@ -289,7 +289,10 @@ def test_reviews_use_fsrs_due_dates_and_cap_five(app):
     with store.db() as db:
         db.execute("UPDATE attempts SET created_at=?", (at,))
     same_day = service.reviews(scope(review=False), CHILD, "week", "2026-10-19")
-    assert "listen" not in [r["activity_id"] for r in same_day["items"]]  # just practised: not due yet
+    # Just practised: not due, so it comes after anything due, offered as an optional replay.
+    listen = next(r for r in same_day["items"] if r["activity_id"] == "listen")
+    assert listen["reason"] == "刚学过不久，想玩也可以再听一次。"
+    assert same_day["items"][-1]["activity_id"] == "listen"
     next_day = service.reviews(scope(review=False), CHILD, "week", "2026-10-20")
     assert next_day["items"][0]["activity_id"] == "listen"
     assert next_day["items"][0]["reason"] == "上次需要一点提示，再轻松玩一次。"

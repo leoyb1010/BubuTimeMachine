@@ -167,6 +167,7 @@ struct MemoryDetailView: View {
     @State private var items: [OnlineTimelineItem] = []
     @State private var selected: OnlineTimelineItem?
     @State private var failed = false
+    @State private var loaded = false
     @Namespace private var zoom
 
     var body: some View {
@@ -182,8 +183,11 @@ struct MemoryDetailView: View {
                     }
                     if failed {
                         Text("回忆暂时打不开，请稍后再试。").font(BubuTheme.Font.body)
-                    } else if items.isEmpty {
+                    } else if !loaded {
                         ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+                    } else if items.isEmpty {
+                        Text("这组回忆里的照片已经移出布布的时光了。").font(BubuTheme.Font.body)
+                            .foregroundStyle(BubuTheme.Color.secondaryText)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 6)], spacing: 6) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
@@ -214,6 +218,7 @@ struct MemoryDetailView: View {
                 items = try await client.get("api/online-timeline/items", query: [URLQueryItem(name: "ids", value: ids)],
                                              as: OnlineTimelineItems.self).items
             } catch { failed = true }
+            loaded = true
         }
     }
 }

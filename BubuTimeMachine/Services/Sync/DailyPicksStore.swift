@@ -23,7 +23,16 @@ final class DailyPicksStore {
 
     /// 唯一入口：打开时光 / 回到前台时调用。未配置家庭服务时什么都不做。
     func refreshIfNeeded(env: AppEnvironment, force: Bool = false) {
-        guard let client = BubuLearningClient(env: env) else { return }
+        guard let client = BubuLearningClient(env: env) else {
+            // Family service disconnected: second-brain photos must leave the widgets and Watch too.
+            if let directory = Self.directory,
+               let files = try? FileManager.default.contentsOfDirectory(atPath: directory.path), !files.isEmpty {
+                try? FileManager.default.removeItem(at: directory)
+                WidgetCenter.shared.reloadAllTimelines()
+                WatchConnectivityManager.shared.pushDailyPicks()
+            }
+            return
+        }
         guard running == nil else { return }
         let today = BubuLearningDates.dayString(.now)
         let defaults = UserDefaults.standard

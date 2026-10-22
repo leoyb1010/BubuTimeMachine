@@ -5,7 +5,7 @@ import SwiftUI
 /// 这与“默认离线”的本机记录不同，所以第一次连接时如实说明，家人确认后才继续。
 struct SecondBrainConsentModifier: ViewModifier {
     let active: Bool
-    @AppStorage("bubu.privacy.secondBrain.v1") private var accepted = false
+    @AppStorage("bubu.privacy.secondBrain.v2") private var accepted = false
     @Environment(\.dismiss) private var dismiss
 
     func body(content: Content) -> some View {
@@ -33,6 +33,8 @@ private struct SecondBrainConsentSheet: View {
                 Text("布布的照片是怎么被整理的").font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
                 point("photo.stack", "时光里的照片和视频，来自家里 Mac mini 上的第二大脑。原片只存在家里的硬盘上。")
                 point("sparkles", "画面描述、识别文字、视频转写和“这是不是布布”的归类，由第二大脑调用云端 Gemini 模型完成，只上传压缩后的缩略图或短片段。")
+                point("text.bubble", "为了让描述读起来像家里人说话，第二大脑会把描述文字（含布布的全名）交给 Gemini 改写称呼；每月成长小报会把当月的描述、地点和家人称谓交给 Gemini 写成一段话。")
+                point("waveform", "「布布的声音」会把视频里几秒钟的短音频（可能包含大人的声音）交给 Gemini 复听，确认她说了什么。")
                 point("graduationcap", "每日学习里上传的课程视频，保存在家庭服务器，并由 Gemini 解析出题；只有家人账号能看。")
                 point("lock.shield", "这些内容都要用家庭账号登录才能打开，不会公开分享；家人记下的文字和语音仍然只存在手机里，除非开启同步。")
                 point("gearshape", "随时可以在设置里断开家庭服务，断开后时光只显示家人记录。")

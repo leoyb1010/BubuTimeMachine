@@ -73,7 +73,7 @@ struct OnlineTimelineDetailPage: View {
         }
         .confirmationDialog("这张里没有布布？", isPresented: $confirmNotBubu, titleVisibility: .visible) {
             Button("不是布布，移出时光", role: .destructive) { Task { await markNotBubu() } }
-        } message: { Text("只会从布布的时光里移出，第二大脑的原片不受影响。可在「认一认」里改回。") }
+        } message: { Text("只会从布布的时光里移出，第二大脑的原片不受影响。") }
     }
 
     /// Portrait photos get more height instead of a wide empty frame.

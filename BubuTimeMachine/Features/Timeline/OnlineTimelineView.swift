@@ -18,7 +18,6 @@ struct OnlineTimelineView: View {
         }
         .navigationTitle("时光")
         .navigationBarTitleDisplayMode(.inline)
-        .secondBrainConsent(active: BubuLearningClient(env: env) != nil && !Self.skipsConsentForUITest)
         .accessibilityIdentifier("timeline.online")
     }
 }
@@ -170,6 +169,9 @@ struct OnlineTimelineBrowser: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
+                        // Measure the row width inside all paddings so justified rows never overflow.
+                        Color.clear.frame(height: 0)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
                         header.id("timeline.top")
                         if client != nil { sourcePicker }
                         if source != .family { filterBar }
@@ -180,7 +182,6 @@ struct OnlineTimelineBrowser: View {
                     .padding(.trailing, showsScrubber ? 18 : 0)
                     .padding(.bottom, 32)
                     .bubuContentColumn(1100)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
                 }
                 .refreshable { await reload() }
                 .onChange(of: query.anchorMonth) { _, _ in proxy.scrollTo("timeline.top", anchor: .top) }
@@ -458,11 +459,14 @@ struct OnlineTimelineBrowser: View {
                         .font(BubuTheme.Font.caption.weight(.bold)).foregroundStyle(.white)
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(BubuTheme.Color.deepRose, in: Capsule())
+                        .fixedSize()
                         .offset(x: -22, y: offset(for: scrubbing, height: height) - 12)
                         .transition(.scale.combined(with: .opacity))
+                        .allowsHitTesting(false)
                 }
             }
-            .frame(width: 140, height: height, alignment: .topTrailing)
+            // Only a slim track at the edge takes touches; photos under it stay tappable and scrollable.
+            .frame(width: 26, height: height, alignment: .topTrailing)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in
@@ -473,19 +477,20 @@ struct OnlineTimelineBrowser: View {
                     if let scrubbing { query.anchorMonth = scrubbing == months.first?.month ? nil : scrubbing }
                     withAnimation(BubuMotion.gentle) { scrubbing = nil }
                 })
+            .accessibilityElement()
+            .accessibilityLabel("按月份跳转")
+            .accessibilityValue(Self.monthTitle(query.anchorMonth ?? months.first?.month ?? ""))
+            .accessibilityAdjustableAction { direction in
+                let index = months.firstIndex { $0.month == (query.anchorMonth ?? months.first?.month) } ?? 0
+                let next = direction == .increment ? min(index + 1, months.count - 1) : max(index - 1, 0)
+                query.anchorMonth = next == 0 ? nil : months[next].month
+            }
+            .accessibilityIdentifier("timeline.scrubber")
             .padding(.top, 120)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .frame(width: 140)
+        .frame(width: 26)
         .sensoryFeedback(.selection, trigger: scrubbing)
-        .accessibilityElement()
-        .accessibilityLabel("按月份跳转")
-        .accessibilityAdjustableAction { direction in
-            let index = months.firstIndex { $0.month == (query.anchorMonth ?? months.first?.month) } ?? 0
-            let next = direction == .increment ? min(index + 1, months.count - 1) : max(index - 1, 0)
-            query.anchorMonth = next == 0 ? nil : months[next].month
-        }
-        .accessibilityIdentifier("timeline.scrubber")
     }
 
     /// Segment length follows how many items a month holds, like Immich's scrubber.
@@ -534,7 +539,9 @@ struct OnlineTimelineBrowser: View {
     private var elements: [TimelineElement] {
         switch source {
         case .brain:
-            return items.map(TimelineElement.online)
+            // Search returns relevance first; the grid groups by month, so show it in date order.
+            let list = items.map(TimelineElement.online)
+            return query.text.isEmpty ? list : list.sorted { query.newestFirst ? $0.date > $1.date : $0.date < $1.date }
         case .family:
             return query.newestFirst ? filteredEntries.map(TimelineElement.family) : filteredEntries.reversed().map(TimelineElement.family)
         case .merged:
@@ -565,7 +572,13 @@ struct OnlineTimelineBrowser: View {
             let photos = group.filter { if case .online(let i) = $0 { return !i.isVideo } else { return false } }.count
             let videos = group.filter { if case .online(let i) = $0 { return i.isVideo } else { return false } }.count
             let family = group.count - photos - videos
-            let places = Set(group.compactMap { if case .online(let i) = $0 { return i.place } else { return nil } }).prefix(2)
+            // "深圳市 · 潜龙 · 曼海宁" → "曼海宁": the month header stays one line.
+            var places: [String] = []
+            for case .online(let item) in group {
+                if let place = item.place?.components(separatedBy: " · ").last?.trimmingCharacters(in: .whitespaces),
+                   !place.isEmpty, !places.contains(place) { places.append(place) }
+                if places.count == 2 { break }
+            }
             var parts: [String] = []
             if photos > 0 { parts.append("照片 \(photos)") }
             if videos > 0 { parts.append("视频 \(videos)") }

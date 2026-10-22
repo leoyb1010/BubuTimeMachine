@@ -77,6 +77,8 @@ struct RootTabView: View {
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             // 全 App 统一圆体：散落的 .caption / .system(size:) 也随设计语言变圆润。
             .fontDesign(.rounded)
+            // 第一次连上家庭服务时，先说明第二大脑如何整理内容，再展示回忆、时光与学习。
+            .secondBrainConsent(active: BubuLearningClient(env: env) != nil && !OnlineTimelineView.skipsConsentForUITest)
             .ignoresSafeArea(.keyboard)
             .onAppear {
                 #if DEBUG

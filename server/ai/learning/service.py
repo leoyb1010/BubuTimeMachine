@@ -399,10 +399,15 @@ class LearningService:
                     priority, reason = (1, 0.0), "这段原声还没一起玩过。"
                 else:
                     is_due, recall, last = state
-                    if not is_due:
+                    if is_due:
+                        priority = (0, recall)
+                        reason = "上次需要一点提示，再轻松玩一次。" if last == fsrs.AGAIN else "隔几天，再听一次熟悉的原声。"
+                    elif pack["school_date"] >= start:
+                        # Not due yet, but from this week/month: offered after everything due,
+                        # so a review right after a lesson is never an empty page.
+                        priority, reason = (2, recall), "刚学过不久，想玩也可以再听一次。"
+                    else:
                         continue
-                    priority = (0, recall)
-                    reason = "上次需要一点提示，再轻松玩一次。" if last == fsrs.AGAIN else "隔几天，再听一次熟悉的原声。"
                 selected[key] = (priority, {"pack_id": pack["id"], "activity_id": activity["id"], "concept": activity.get("concept", ""),
                                           "reason": reason, "activity": self._public_activity(pack["id"], activity)})
         ordered = sorted(selected.values(), key=lambda value: value[0])[:5]

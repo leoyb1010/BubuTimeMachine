@@ -1,5 +1,7 @@
 """第一次: earliest timeline occurrence of curated growth concepts, for parents to confirm.
 
+Titles match the app's preset milestone titles so confirming lights the preset.
+
 Offline keyword matching over (family-adjusted) descriptions, tags and events of
 items already in her timeline; no model calls. Candidates and family decisions
 live in learning.sqlite. Dismissing a candidate proposes the next occurrence.
@@ -13,26 +15,26 @@ from .store import Missing, digest
 
 # (key, title, words, excluded phrases)
 CONCEPTS = (
-    ("crawling", "第一次爬", ("爬行", "匍匐前进", "在地上爬", "学爬"), ("爬行垫", "爬爬垫")),
-    ("standing", "第一次站起来", ("扶站", "独自站立", "学站", "站起来", "站立"), ()),
-    ("walking", "第一次走路", ("学走路", "学步", "蹒跚", "迈步", "独自行走", "自己走路", "扶着走"), ("学步车",)),
-    ("running", "第一次奔跑", ("奔跑", "跑步", "小跑", "跑来跑去"), ("推着",)),
+    ("crawling", "第一次爬行", ("爬行", "匍匐前进", "在地上爬", "学爬"), ("爬行垫", "爬爬垫")),
+    ("standing", "第一次扶站", ("扶站", "独自站立", "学站", "站起来", "站立"), ()),
+    ("walking", "第一次独立行走", ("学走路", "学步", "蹒跚", "迈步", "独自行走", "自己走路", "扶着走"), ("学步车",)),
+    ("running", "第一次小跑", ("奔跑", "跑步", "小跑", "跑来跑去"), ("推着",)),
     ("tricycle", "第一次骑小车", ("三轮车", "滑步车", "平衡车", "扭扭车", "踏板车", "滑板车", "滑行车"), ("推车", "推着")),
     ("bike", "第一次骑自行车", ("自行车", "单车", "骑车"), ("婴儿车", "推车", "儿童座椅")),
     ("watermelon", "第一次吃西瓜", ("西瓜",), ("西瓜球", "弹力球", "西瓜玩具", "西瓜图案", "西瓜造型", "西瓜包", "西瓜帽")),
     ("self_feeding", "第一次自己吃饭", ("自己吃饭", "自主进食", "自己用勺", "握勺", "自己拿勺", "用勺子", "自己进食", "用叉子"), ("喂",)),
-    ("brushing_teeth", "第一次刷牙", ("刷牙", "牙刷"), ()),
+    ("brushing_teeth", "第一次自己刷牙", ("刷牙", "牙刷"), ()),
     ("swimming", "第一次游泳", ("游泳", "泳池", "泳圈"), ()),
-    ("drawing", "第一次画画", ("画画", "涂鸦", "蜡笔", "绘画", "画笔"), ()),
+    ("drawing", "第一次涂鸦", ("画画", "涂鸦", "蜡笔", "绘画", "画笔"), ()),
     ("singing", "第一次唱歌", ("唱歌", "哼唱", "唱儿歌"), ("播放",)),
     ("dancing", "第一次跳舞", ("跳舞", "舞蹈", "随音乐扭动"), ()),
     ("kindergarten", "第一天上幼儿园", ("幼儿园", "入园"), ()),
     ("plane", "第一次坐飞机", ("坐飞机", "飞机上", "机舱", "登机", "航班"), ("玩具飞机", "飞机玩具")),
     ("sea", "第一次看海", ("海边", "沙滩", "大海", "海浪"), ()),
-    ("snow", "第一次玩雪", ("玩雪", "雪地", "雪人", "下雪", "积雪"), ()),
+    ("snow", "第一次看雪", ("玩雪", "雪地", "雪人", "下雪", "积雪"), ()),
     ("birthday_cake", "第一次吹生日蜡烛", ("生日蛋糕", "吹蜡烛", "生日"), ()),
     ("haircut", "第一次理发", ("理发", "剪头发", "剃头"), ()),
-    ("zoo", "第一次去动物园", ("动物园",), ()),
+    ("zoo", "第一次动物园", ("动物园",), ()),
 )
 # She must be in the same clause as the matched word ("张云拿着勺子喂饭" is not her first).
 CHILD_TOKENS = ("布布", "袁晨希", "女婴", "婴儿", "幼童", "幼儿", "女童", "小女孩", "女孩", "宝宝", "她", "孩子")

@@ -27,7 +27,6 @@ struct DailyLearningHomeView: View {
         }
         .navigationTitle("每日学习")
         .navigationBarTitleDisplayMode(.inline)
-        .secondBrainConsent(active: BubuLearningClient(env: env) != nil && !OnlineTimelineView.skipsConsentForUITest)
         .accessibilityIdentifier("learning.home")
     }
 }
