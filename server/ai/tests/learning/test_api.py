@@ -278,3 +278,45 @@ def test_course_files_can_follow_one_per_request(setup):
     assert response.status_code==200 and added==[('course-1','card.jpg','image/jpeg',b'card')]
     state['user']='grandma'
     assert client.post('/learning/api/courses/course-1/files',files={'file':('x.jpg',b'x','image/jpeg')},headers={**BEARER,**CSRF}).status_code==403
+
+
+def test_family_feature_routes_scope_reviewer_and_errors(setup):
+    client,state,service=setup
+    class Feature:
+        def __init__(self,name):self.name=name
+        def __getattr__(self,method):
+            def call(scope,*args):
+                service.calls.append((self.name,method,args))
+                if args and args[0]=='missing':raise Missing('secret path')
+                if method=='audio':return service.tmp/'media.wav','audio/mp4'
+                if method=='preview':return service.tmp/'media.wav','image/jpeg'
+                return {'items':[],'feature':self.name}
+            return call
+    root='/learning/api/'
+    assert client.get(root+'memories?date=2026-10-22',headers=BEARER).status_code==503
+    for name in ('online_timeline','memories','firsts','monthly','voices','recognition'):
+        setattr(service,name,Feature(name))
+    for path,expected in [('online-timeline?person=姥姥&query=海边',('online_timeline','feed')),
+                          ('online-timeline/people',('online_timeline','people')),
+                          ('online-timeline/items?ids=a,b',('online_timeline','items')),
+                          ('online-timeline/highlights?date=2026-10-22',('online_timeline','highlights')),
+                          ('memories?date=2026-10-22',('memories','memories')),('firsts?status=all',('firsts','list')),
+                          ('monthly',('monthly','list')),('voices',('voices','list')),
+                          ('recognition/candidates?limit=5',('recognition','candidates'))]:
+        response=client.get(root+path,headers=BEARER)
+        assert response.status_code==200,path
+        assert service.calls[-1][:2]==expected
+    assert service.calls[0][2][-1]=='姥姥' and service.calls[0][2][0]=='海边'
+    assert client.get(root+'memories',headers=BEARER).status_code==200 and len(service.calls[-1][2][0])==10
+    assert client.get(root+'voices/v1/audio',headers=BEARER).headers['content-type']=='audio/mp4'
+    assert client.get(root+'recognition/f1/preview',headers=BEARER).status_code==200
+    assert client.get(root+'firsts?status=bogus',headers=BEARER).status_code==422
+    assert client.post(root+'firsts/f1/confirm',headers=BEARER,json={}).status_code==200
+    assert client.post(root+'firsts/missing/dismiss',headers=BEARER,json={}).status_code==404
+    assert client.post(root+'recognition/f1',headers=BEARER,json={'decision':'maybe'}).status_code==422
+    response=client.post(root+'recognition/f1',headers=BEARER,json={'decision':'no'})
+    assert response.status_code==200 and service.calls[-1]==('recognition','decide',('f1','no'))
+    state['user']='grandma'
+    assert client.post(root+'recognition/f1',headers=BEARER,json={'decision':'yes'}).status_code==403
+    assert client.post(root+'firsts/f1/confirm',headers=BEARER,json={}).status_code==403
+    assert client.get(root+'firsts',headers=BEARER).status_code==200

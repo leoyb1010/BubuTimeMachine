@@ -64,6 +64,10 @@ class Segments(Input):
     date_confirmed: bool
 
 
+class Decision(Input):
+    decision: Literal['yes', 'no']
+
+
 class Attempt(Input):
     id: str = Field(min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9_-]+$')
     child_id: str = Field(min_length=1, max_length=128)
@@ -134,6 +138,30 @@ def _timeline(service_factory, method: str, scope, *args):
         raise HTTPException(404, '素材已不在布布专属库中。') from None
     except ValueError:
         raise HTTPException(422, '筛选条件无效，请检查后重试。') from None
+
+
+def _feature(service_factory, name: str, method: str, scope, *args):
+    """Family features built on the online timeline; 503 until a person is configured."""
+    from .brain_bridge import BrainUnavailable
+    feature = getattr(service_factory(), name, None)
+    if feature is None:
+        raise HTTPException(503, '布布专属素材库尚未启用。')
+    try:
+        return getattr(feature, method)(scope, *args)
+    except Missing:
+        raise HTTPException(404, '内容不存在或已移除。') from None
+    except Conflict:
+        raise HTTPException(409, '内容已更新，请重新加载。') from None
+    except ValueError:
+        raise HTTPException(422, '请求内容无效，请检查后重试。') from None
+    except BrainUnavailable:
+        raise HTTPException(503, '第二大脑素材库暂时不可用，请稍后重试。') from None
+
+
+def _today() -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
 
 
 def _file(result) -> FileResponse:
@@ -298,8 +326,64 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
     def online_timeline(query: str = Query('', max_length=500), kind: Literal['all', 'photo', 'video'] = 'all',
                         start: str | None = Query(None, max_length=10), end: str | None = Query(None, max_length=10),
                         order: Literal['asc', 'desc'] = 'desc', page: int = Query(1, ge=1, le=10000),
-                        limit: int = Query(40, ge=1, le=100), scope: FamilyScope = Depends(_scope)):
-        return _timeline(service_factory, 'feed', scope, query, kind, start, end, order, page, limit)
+                        limit: int = Query(40, ge=1, le=100), person: str | None = Query(None, max_length=40),
+                        scope: FamilyScope = Depends(_scope)):
+        return _timeline(service_factory, 'feed', scope, query, kind, start, end, order, page, limit, person)
+
+    @router.get('/online-timeline/people')
+    def online_people(scope: FamilyScope = Depends(_scope)):
+        return _timeline(service_factory, 'people', scope)
+
+    @router.get('/online-timeline/items')
+    def online_items(ids: str = Query(..., max_length=2000), scope: FamilyScope = Depends(_scope)):
+        return _timeline(service_factory, 'items', scope, ids)
+
+    @router.get('/online-timeline/highlights')
+    def online_highlights(date: str | None = Query(None, max_length=10), scope: FamilyScope = Depends(_scope)):
+        return _timeline(service_factory, 'highlights', scope, date or _today())
+
+    @router.get('/memories')
+    def memories(date: str | None = Query(None, max_length=10), scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'memories', 'memories', scope, date or _today())
+
+    @router.get('/firsts')
+    def firsts(status: Literal['candidate', 'confirmed', 'all'] = 'candidate', scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'firsts', 'list', scope, status)
+
+    @router.post('/firsts/{fid}/confirm')
+    def confirm_first(fid: str, scope: FamilyScope = Depends(_scope)):
+        scope.require_review()
+        return _feature(service_factory, 'firsts', 'confirm', scope, fid)
+
+    @router.post('/firsts/{fid}/dismiss')
+    def dismiss_first(fid: str, scope: FamilyScope = Depends(_scope)):
+        scope.require_review()
+        return _feature(service_factory, 'firsts', 'dismiss', scope, fid)
+
+    @router.get('/monthly')
+    def monthly(scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'monthly', 'list', scope)
+
+    @router.get('/voices')
+    def voices(scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'voices', 'list', scope)
+
+    @router.get('/voices/{vid}/audio')
+    def voice_audio(vid: str, scope: FamilyScope = Depends(_scope)):
+        return _file(_feature(service_factory, 'voices', 'audio', scope, vid))
+
+    @router.get('/recognition/candidates')
+    def recognition_candidates(limit: int = Query(20, ge=1, le=100), scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'recognition', 'candidates', scope, limit)
+
+    @router.get('/recognition/{fid}/preview')
+    def recognition_preview(fid: str, scope: FamilyScope = Depends(_scope)):
+        return _file(_feature(service_factory, 'recognition', 'preview', scope, fid))
+
+    @router.post('/recognition/{fid}')
+    def recognition_decide(fid: str, request: Request, scope: FamilyScope = Depends(_scope)):
+        scope.require_review(); body = _input(request, Decision)
+        return _feature(service_factory, 'recognition', 'decide', scope, fid, body.decision)
 
     @router.get('/online-timeline/{fid}/preview')
     def online_preview(fid: str, size: Literal['thumb', 'large'] = 'thumb', scope: FamilyScope = Depends(_scope)):

@@ -40,15 +40,38 @@ def components():
 
 
 @lru_cache(maxsize=1)
+def create_features():
+    """Online timeline plus the features built on it; empty without a configured person."""
+    store,bridge,processor,pocketbase,timeline,family,child=components()
+    subject=os.environ.get("LEARNING_SUBJECT_ID","").strip()
+    if not subject:return {}
+    from .online_timeline import OnlineTimeline, SemanticGateway
+    from .memories import Memories
+    from .firsts import Firsts
+    from .monthly import Monthly
+    from .voices import Voices
+    from .recognition import Recognition
+    born=os.environ.get("LEARNING_SUBJECT_BIRTH_DATE","").strip() or None
+    gateway=SemanticGateway(bridge.root/'data/gateway-private.json',
+                            os.environ.get('LEARNING_GATEWAY_URL','').strip() or 'http://127.0.0.1:8878')
+    online=OnlineTimeline(bridge,processor,store,family,child,subject,born=born,semantic=gateway)
+    firsts=Firsts(online)
+    return {'online_timeline':online,'memories':Memories(online),'firsts':firsts,
+            'monthly':Monthly(online,bridge,firsts),'voices':Voices(online,bridge,processor),
+            'recognition':Recognition(bridge,online)}
+
+
+FEATURES=('online_timeline','memories','firsts','monthly','voices','recognition')
+
+
+@lru_cache(maxsize=1)
 def get_service():
     from .service import LearningService
     store,bridge,processor,pocketbase,timeline,family,child=components()
-    from .online_timeline import OnlineTimeline
     service=LearningService(store,processor,brain_sync=timeline,pocketbase=pocketbase)
-    subject=os.environ.get("LEARNING_SUBJECT_ID","").strip()
-    # Without a configured person the timeline routes answer 503; courses keep working.
-    born=os.environ.get("LEARNING_SUBJECT_BIRTH_DATE","").strip() or None
-    service.online_timeline=OnlineTimeline(bridge,processor,store,family,child,subject,born=born) if subject else None
+    # Without a configured person these routes answer 503; courses keep working.
+    features=create_features()
+    for name in FEATURES:setattr(service,name,features.get(name))
     return service
 
 
@@ -56,4 +79,5 @@ def create_worker():
     from .worker import LearningWorker
     store,bridge,processor,pocketbase,timeline,family,child=components()
     return LearningWorker(store,bridge,processor,family=family,child=child,pocketbase=pocketbase,
-                          subject=os.environ.get("LEARNING_SUBJECT_ID","").strip() or None)
+                          subject=os.environ.get("LEARNING_SUBJECT_ID","").strip() or None,
+                          features=create_features())

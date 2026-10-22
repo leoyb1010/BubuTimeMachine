@@ -411,3 +411,43 @@ def test_videos_named_by_existing_video_analysis_join_the_subject(library):
     assert by_id[named]["provenance"] == "video_analysis_mention" and by_id[named]["media_type"] == "video"
     assert by_id[named]["confidence"] is None
     assert result["excluded"]["sensitive"] == 1
+
+
+def test_snapshot_adds_family_people_places_and_event_without_changing_revision(library):
+    root, db, _ = library
+    first, _, _ = add(library)
+    second, _, _ = add(library, 2)
+    before = BrainBridge(root).subject_snapshot(SUBJECT)
+    db.execute("INSERT INTO memories VALUES('c'||?,'person','郑德兰','布布姥姥、姥姥','2026-10-20')", ("c" * 15,))
+    db.execute("INSERT INTO memory_photos VALUES(?,?,0.9,'accepted','2026-10-20')", ("c" * 16, first))
+    db.execute("INSERT INTO memory_photos VALUES(?,?,0.9,'checked','2026-10-20')", (OTHER, first))
+    db.execute("ALTER TABLE media_assets ADD COLUMN place TEXT DEFAULT ''")
+    db.execute("UPDATE media_assets SET place='中国 · 深圳市 · 公园' WHERE file_id=?", (first,))
+    db.execute("CREATE TABLE media_place_guess(file_id TEXT PRIMARY KEY,place TEXT,basis TEXT,at TEXT)")
+    db.execute("INSERT INTO media_place_guess VALUES(?,'中国 · 三亚市','近邻','2026')", (second,))
+    db.commit()
+    after = BrainBridge(root).subject_snapshot(SUBJECT)
+    rows = {i["file_id"]: i for i in after["items"]}
+    assert rows[first]["people"] == ["郑德兰"] and rows[second]["people"] == []
+    assert rows[first]["place"] == "中国 · 深圳市 · 公园" and rows[second]["place"] == "中国 · 三亚市"
+    assert rows[first]["event"] == "画画" and after["people_labels"] == {"郑德兰": "姥姥"}
+    assert after["snapshot_id"] == before["snapshot_id"]
+
+
+def test_items_by_ids_and_recognition_candidates(library):
+    root, db, _ = library
+    shown, _, _ = add(library)
+    uncertain, _, _ = add(library, 2, state="checked")
+    unjudged, _, _ = add(library, 3, subject=OTHER)
+    low, _, _ = add(library, 4, state="checked")
+    hidden, _, _ = add(library, 5, state="checked", sensitive=1)
+    db.execute("UPDATE memory_photos SET confidence=0.2 WHERE file_id=?", (low,))
+    db.execute("UPDATE media_assets SET category='01_照片/01_女儿' WHERE file_id IN (?,?)", (unjudged, shown))
+    db.execute("UPDATE media_assets SET captured_at='2026-10-21T10:00:00+08:00' WHERE file_id=?", (unjudged,))
+    db.commit()
+    bridge = BrainBridge(root)
+    found = bridge.recognition_candidates(SUBJECT)
+    assert [(i["file_id"], i["confidence"]) for i in found] == [(unjudged, None), (uncertain, 0.9)]
+    assert [i["file_id"] for i in bridge.items_by_ids([uncertain, hidden, "bad", uncertain], SUBJECT)] == [uncertain]
+    with pytest.raises(ValueError):
+        bridge.recognition_candidates("bad")

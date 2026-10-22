@@ -53,7 +53,7 @@ class Processor:
 def timeline(tmp_path):
     items = [row(tmp_path, 1, day="2026-10-18T09:00:00+08:00", description="布布吃南瓜", tags=["南瓜"]),
              row(tmp_path, 2, kind="video", day="2026-10-20T21:00:00+08:00", description="唱儿歌",
-                 segments=[{"id": "s1", "start": 0, "end": 2, "text": "pumpkin song"}], provenance="video_analysis_mention"),
+                 segments=[{"id": "s1", "start": 0, "end": 2, "text": "我们一起唱 pumpkin"}], provenance="video_analysis_mention"),
              row(tmp_path, 3, day="2026-10-19T23:30:00+08:00", description="画画"),
              row(tmp_path, 4, description="", tags=[])]  # unparsed: never shown
     bridge, processor = Bridge(items), Processor()
@@ -142,3 +142,11 @@ def test_nothing_before_birth_is_shown(tmp_path):
     import pytest as _pytest
     with _pytest.raises(Missing):
         service.media(scope(), "%024x" % 1)
+
+
+def test_chinese_phrase_tolerates_a_short_gap(tmp_path):
+    items = [row(tmp_path, 1, description="布布（袁晨希）坐在桌边吃着西瓜"),
+             row(tmp_path, 2, description="吃完饭后去买西瓜和葡萄回家"),
+             row(tmp_path, 3, description="布布在画画")]
+    service = OnlineTimeline(Bridge(items), Processor(), LearningStore(tmp_path / "state"), FAMILY, CHILD, "s")
+    assert [i["id"][-1] for i in service.feed(scope(), query="吃西瓜")["items"]] == ["1"]

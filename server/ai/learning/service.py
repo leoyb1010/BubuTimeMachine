@@ -18,6 +18,7 @@ import httpx
 from fastapi import HTTPException
 
 from memory_query import PocketBaseMemoryStore, _pb_quote
+from . import fsrs
 from .models import Draft, Segment, ground_draft, label_colors, normalize
 from .processing import MediaProcessor, ProcessingUnavailable
 from .store import COURSE_KINDS, Conflict, Missing, digest, valid_day
@@ -361,16 +362,27 @@ class LearningService:
         return {"items": [self._attempt_public(scope, row) for row in self.store.attempts(scope.family_id, child_id)]}
 
     def reviews(self, scope, child_id, period, day):
+        """FSRS-4.5 picks what is due (Good = answered alone, Again = wrong or helped); ≤5 per session."""
         scope.require_child(child_id); valid_day(day)
         if period not in {"week", "month"}:
             raise ValueError("复习范围无效")
-        start = (Date.fromisoformat(day) - timedelta(days=6 if period == "week" else 29)).isoformat()
+        today = Date.fromisoformat(day)
+        start = (today - timedelta(days=6 if period == "week" else 29)).isoformat()
         history = {}
         for attempt in self.attempts(scope, child_id)["items"]:
-            history.setdefault((attempt.get("concept"), attempt["kind"]), attempt)
+            if attempt.get("kind") == "unknown" or attempt.get("event_kind") not in {"choice", "speaking_attempt", "participation"}:
+                continue
+            try:
+                when = datetime.fromtimestamp(float(attempt["created_at"]), ZoneInfo("Asia/Shanghai")).date()
+            except (KeyError, TypeError, ValueError, OverflowError):
+                continue
+            if when > today:
+                continue
+            failed = attempt.get("correct") is False or attempt.get("assistance") is True
+            history.setdefault((attempt.get("concept"), attempt["kind"]), []).append((when, fsrs.AGAIN if failed else fsrs.GOOD))
         selected = {}
         for pack in self.store.packs(scope.family_id, child_id, published_only=True, courses_only=True):
-            if not start <= pack["school_date"] <= day:
+            if pack["school_date"] > day:
                 continue
             try:
                 pack = self._pack(scope, pack["id"], published=True)
@@ -380,13 +392,20 @@ class LearningService:
                 key = (activity.get("concept"), activity["kind"])
                 if key in selected:
                     continue
-                attempt = history.get(key)
-                needs_help = attempt and (attempt.get("correct") is False or attempt.get("assistance") is True)
-                priority = 0 if needs_help else 1 if not attempt else 2
-                reason = "上次需要一点提示，再轻松玩一次。" if needs_help else "这段原声还没一起玩过。" if not attempt else "隔几天，再听一次熟悉的原声。"
+                state = fsrs.due(history.get(key, []), today)
+                if state is None:
+                    if pack["school_date"] < start:
+                        continue
+                    priority, reason = (1, 0.0), "这段原声还没一起玩过。"
+                else:
+                    is_due, recall, last = state
+                    if not is_due:
+                        continue
+                    priority = (0, recall)
+                    reason = "上次需要一点提示，再轻松玩一次。" if last == fsrs.AGAIN else "隔几天，再听一次熟悉的原声。"
                 selected[key] = (priority, {"pack_id": pack["id"], "activity_id": activity["id"], "concept": activity.get("concept", ""),
                                           "reason": reason, "activity": self._public_activity(pack["id"], activity)})
-        ordered = sorted(selected.values(), key=lambda value: value[0])[:8 if period == "week" else 12]
+        ordered = sorted(selected.values(), key=lambda value: value[0])[:5]
         return {"window_start": start, "window_end": day, "items": [item for _, item in ordered]}
 
     # Parent-uploaded courses. Each upload is one lesson; nothing is picked from photos.

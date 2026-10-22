@@ -147,8 +147,101 @@ class BrainBridge:
                 item["source_revision"] = _digest([item["source_revision"], provenance, confidence, row["at"]])
                 items.append(item)
             items.extend(self._subject_videos(connection, names, {i["file_id"] for i in items}, excluded))
+            labels = self._annotate(connection, subject_id, items)
             snapshot_id = _digest([subject_id, [(i["file_id"], i["source_revision"]) for i in items], excluded])
-            return {"complete": True, "snapshot_id": snapshot_id, "items": items, "excluded": excluded}
+            return {"complete": True, "snapshot_id": snapshot_id, "items": items, "excluded": excluded,
+                    "people_labels": labels}
+
+    def _annotate(self, connection, subject_id: str, items: list[dict]) -> dict:
+        """Co-occurring family members and guessed places; kept out of source_revision.
+
+        Returns name -> kinship label (布布姥姥 -> 姥姥) for display.
+        """
+        labels: dict[str, str] = {}
+        people: dict[str, list[str]] = {}
+        for row in connection.execute(
+            "SELECT p.file_id,m.name,m.aliases FROM memory_photos p JOIN memories m ON m.id=p.memory_id "
+            "WHERE m.kind='person' AND p.state='accepted' AND p.memory_id!=? ORDER BY m.name", (subject_id,),
+        ):
+            name = (row["name"] or "").strip()
+            if not name:
+                continue
+            people.setdefault(row["file_id"], []).append(name)
+            if name not in labels:
+                alias = next((a.strip() for a in re.split(r"[,，、;；\n]", row["aliases"] or "")
+                              if a.strip().startswith("布布") and len(a.strip()) > 2), "")
+                labels[name] = alias.removeprefix("布布").removeprefix("的") or name
+        guesses: dict[str, str] = {}
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_place_guess'").fetchone():
+            ids = [i["file_id"] for i in items if not i.get("place")]
+            for offset in range(0, len(ids), 400):
+                batch = ids[offset:offset + 400]
+                for row in connection.execute("SELECT file_id,place FROM media_place_guess WHERE file_id IN ("
+                                              + ",".join("?" * len(batch)) + ")", batch):
+                    if row["place"]:
+                        guesses[row["file_id"]] = row["place"]
+        for item in items:
+            item["people"] = list(dict.fromkeys(people.get(item["file_id"], [])))
+            if not item.get("place"):
+                item["place"] = guesses.get(item["file_id"], "")
+        return labels
+
+    def items_by_ids(self, ids: list[str], subject_id: str = "") -> list[dict]:
+        """Exact library items a family member explicitly confirmed; sensitive ones never return."""
+        ids = [i for i in dict.fromkeys(ids) if isinstance(i, str) and re.fullmatch(r"[a-f0-9]{24}", i)]
+        if not ids:
+            return []
+        with self._database() as connection:
+            hidden = self._sensitive_ids(connection, ids)
+            items = []
+            for fid in ids:
+                if fid in hidden:
+                    continue
+                try:
+                    item = self._item(connection, fid)
+                except BrainUnavailable:
+                    continue
+                if item is not None:
+                    items.append(item)
+            self._annotate(connection, subject_id, items)
+            return items
+
+    def recognition_candidates(self, subject_id: str, min_confidence: float = 0.5,
+                               category: str = "01_照片/01_女儿") -> list[dict]:
+        """Photos the library judged uncertain for the subject, or filed under her folder without judgement.
+
+        Newest first. Families decide; nothing here is treated as confirmation.
+        """
+        if not re.fullmatch(r"[a-f0-9]{16}", subject_id):
+            raise ValueError("人物编号格式无效")
+        with self._database() as connection:
+            rows = connection.execute(
+                "SELECT p.file_id,p.confidence FROM memory_photos p JOIN media_assets m ON m.file_id=p.file_id "
+                "WHERE p.memory_id=? AND p.state='checked' AND p.confidence>=? AND m.media_kind='photo' "
+                "UNION ALL SELECT m.file_id,NULL FROM media_assets m WHERE m.category=? AND m.media_kind='photo' "
+                "AND NOT EXISTS(SELECT 1 FROM memory_photos p WHERE p.file_id=m.file_id AND p.memory_id=?)",
+                (subject_id, float(min_confidence), category, subject_id),
+            ).fetchall()
+            confidence = {}
+            for row in rows:
+                confidence.setdefault(row["file_id"], row["confidence"])
+            ids = sorted(confidence)
+            hidden = self._sensitive_ids(connection, ids)
+            items = []
+            for fid in ids:
+                if fid in hidden:
+                    continue
+                try:
+                    item = self._item(connection, fid)
+                except BrainUnavailable:
+                    continue
+                if item is None:
+                    continue
+                value = confidence[fid]
+                item["confidence"] = round(float(value), 3) if value is not None and math.isfinite(float(value)) else None
+                items.append(item)
+            items.sort(key=lambda i: (str(i.get("captured_at") or ""), i["file_id"]), reverse=True)
+            return items
 
     def _subject_videos(self, connection, names: list[str], seen: set[str], excluded: dict) -> list[dict]:
         """Videos whose existing second-brain video analysis names the subject.
@@ -387,7 +480,9 @@ class BrainBridge:
                 continue
             if path is None:
                 continue
-            analysis = self._analysis(connection, asset)
+            extra: dict = {}
+            analysis = self._analysis(connection, asset, extra)
+            columns = asset.keys()
             item = {
                 "file_id": fid, "content_hash": location["sha256"],
                 "captured_at": asset["captured_at"], "media_type": asset["media_kind"],
@@ -396,6 +491,10 @@ class BrainBridge:
             item["source_revision"] = _digest([
                 fid, location["id"], location["sha256"], asset["captured_at"], analysis,
             ])
+            # Display-only facts below stay out of source_revision (timeline sync keys on it).
+            item.update(place=str(asset["place"] or "") if "place" in columns else "",
+                        category=str(asset["category"] or "") if "category" in columns else "",
+                        event=extra.get("event", ""))
             return item
         if unavailable_root:
             raise BrainUnavailable("第二大脑原片存储尚未连接。")
@@ -424,7 +523,7 @@ class BrainBridge:
             return None
 
     @staticmethod
-    def _analysis(connection, asset) -> dict:
+    def _analysis(connection, asset, extra: dict | None = None) -> dict:
         fid = asset["file_id"]
         video = asset["media_kind"] == "video"
         table, text = ("media_video_gemini", "summary") if video else ("media_gemini", "description")
@@ -432,6 +531,8 @@ class BrainBridge:
         warnings = ["existing_analysis_not_bound_to_content_hash", "historical_model_version_not_recorded"]
         if row is None:
             warnings.append("analysis_pending")
+        elif extra is not None:
+            extra["event"] = str(row["event"] or "")
         if video:
             warnings.append("video_visual_coverage_first_90_seconds")
         segments = []

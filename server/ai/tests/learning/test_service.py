@@ -277,6 +277,28 @@ def test_reviews_include_only_published_and_keep_activity_type_separate(app):
     assert review["items"][0]["activity_id"] == "listen"
 
 
+def test_reviews_use_fsrs_due_dates_and_cap_five(app):
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Zone
+    store, _, _, service = app
+    _, published = lesson(app, day="2026-10-19")
+    publish(service, published)
+    service.save_attempt(scope(review=False), {"id": "wrong", "child_id": CHILD, "pack_id": published["id"],
+        "activity_id": "listen", "kind": "listen_choice", "choice": "pumpkin"})
+    at = _dt(2026, 10, 19, 20, 0, tzinfo=_Zone("Asia/Shanghai")).timestamp()
+    with store.db() as db:
+        db.execute("UPDATE attempts SET created_at=?", (at,))
+    same_day = service.reviews(scope(review=False), CHILD, "week", "2026-10-19")
+    assert "listen" not in [r["activity_id"] for r in same_day["items"]]  # just practised: not due yet
+    next_day = service.reviews(scope(review=False), CHILD, "week", "2026-10-20")
+    assert next_day["items"][0]["activity_id"] == "listen"
+    assert next_day["items"][0]["reason"] == "上次需要一点提示，再轻松玩一次。"
+    assert len(next_day["items"]) <= 5
+    # Long after the week window only due cards remain; never-played old ones drop out.
+    later = service.reviews(scope(review=False), CHILD, "week", "2026-12-01")
+    assert [r["activity_id"] for r in later["items"]] == ["listen"]
+
+
 def fact(app, *, mid="media1", sha=None, family=FAMILY):
     pb = app[2]
     sha = sha or hashlib.sha256(b"pb original").hexdigest()

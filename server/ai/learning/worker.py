@@ -19,13 +19,15 @@ from .store import Conflict, Missing, digest
 log = logging.getLogger('bubu.learning.worker')
 
 class LearningWorker:
-    def __init__(self, store, bridge, processor, *, family, child, pocketbase=None, subject=None):
+    def __init__(self, store, bridge, processor, *, family, child, pocketbase=None, subject=None, features=None):
         if not family or not child: raise ValueError('学习任务须配置家庭和孩子')
         self.store, self.bridge, self.processor = store, bridge, processor
         self.family, self.child = family, child
         self.pocketbase = pocketbase
         self.subject = subject
         self.captioned_at = 0.0
+        self.features = features or {}
+        self.step_at = {}
 
     @contextmanager
     def lock(self):
@@ -163,13 +165,43 @@ class LearningWorker:
         except Exception:
             log.warning('timeline caption batch failed')
 
+    def _due(self, name, every, now):
+        if now-self.step_at.get(name,-1e18)<every:return False
+        self.step_at[name]=now;return True
+
+    def periodic(self, now=None, today=None):
+        """Family features: cheap, time-guarded, at most one model call per pass; failures only logged."""
+        features=self.features
+        now=time.monotonic() if now is None else now
+        today=(today or datetime.now(ZoneInfo('Asia/Shanghai')).date()).isoformat()
+        cursor='feature-day:'+self.family
+        done=self.store.get_cursor(cursor,{})
+        if 'firsts' in features and done.get('firsts')!=today and self._due('firsts',3600,now):
+            try:
+                features['firsts'].compute();done['firsts']=today;self.store.set_cursor(cursor,done)
+            except Exception:log.warning('firsts recompute failed')
+        if 'monthly' in features and self._due('monthly',3600,now):
+            try:
+                if features['monthly'].generate_due(datetime.fromisoformat(today).date()):return
+            except Exception:log.warning('monthly report failed')
+        if 'voices' in features and self._due('voices',1200,now):
+            try:
+                if done.get('voices')!=today:
+                    features['voices'].sync_candidates();done['voices']=today;self.store.set_cursor(cursor,done)
+                features['voices'].process(1)
+            except Exception:log.warning('voice archive step failed')
+
     def run(self,once=False):
         with self.lock():
             while True:
                 self.caption_new_timeline_items()
+                drained=False
                 for _ in range(10):
                     self.process_media_requests()
-                    if not self.process_one():break
+                    if not self.process_one():
+                        drained=True;break
+                # Lesson jobs always go first; feature steps only run on an empty queue.
+                if drained:self.periodic()
                 if once:return
                 time.sleep(5)
 
