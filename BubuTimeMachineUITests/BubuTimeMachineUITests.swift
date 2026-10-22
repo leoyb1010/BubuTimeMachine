@@ -23,7 +23,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         rootNavigationButton(named: "时光", in: app).tap()
         // 未连接家庭服务时，在线时光给出明确的连接提示，而不是空白或旧的本机列表。
         XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["连接家庭服务后查看"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "连接家庭服务后可看")).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot("timeline-online-offline", to: self)
         assertRootNavigation(in: app)
         XCUIDevice.shared.orientation = .portrait
@@ -549,10 +549,10 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["journal.save"].tap()
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.waitForExistence(timeout: 8))
         attachScreenshot("school-saved", to: self)
-        // 时光主流程只读第二大脑的布布专属素材；幼儿园记录留在幼儿园页，不混入时光。
+        // 2.25 起时光合成一条：家人记下的幼儿园记录也出现在时光里（未连接服务时只显示家人记录）。
         element(named: "时光", in: app).tap()
         XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "搭了小房子")).firstMatch.waitForExistence(timeout: 8))
     }
 
     @MainActor
@@ -693,7 +693,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["连接家庭服务后查看"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "连接家庭服务后可看")).firstMatch.waitForExistence(timeout: 5))
         attachScreenshot("timeline", to: self)
     }
 

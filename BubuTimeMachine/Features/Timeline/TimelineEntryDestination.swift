@@ -17,7 +17,8 @@ struct TimelineEntryDestination: View {
         if let entry = entries.first {
             EntryDetailView(entry: entry)
         } else {
-            ContentUnavailableView("这条时光暂时找不到", systemImage: "clock.badge.questionmark")
+            BubuStateView(.empty, title: "这条时光暂时找不到", message: "可能已经被家人归档或删除了。")
+                .frame(maxHeight: .infinity)
                 .background(BubuTheme.Color.background.ignoresSafeArea())
         }
     }

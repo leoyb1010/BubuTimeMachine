@@ -38,16 +38,20 @@ def test_failed_copy_preserves_previous_good_backup_file(tmp_path,monkeypatch):
     store=LearningStore(tmp_path/'source')
     source=store.add_source('f','c','2026-10-20','input','card.jpg',b'evidence','image/jpeg')
     target=tmp_path/'backup';backup(store.root,target)
-    asset=store.asset('f',source['asset_id']);original=store.asset_path('f',asset['id'])
-    saved=target/asset['path'];normal_copy=shutil.copyfile
+    good=(target/'learning.sqlite').read_bytes()
+    saved=target/store.asset('f',source['asset_id'])['path']
+    store.add_source('f','c','2026-10-21','input2','card2.jpg',b'more evidence','image/jpeg')
+    normal_copy=shutil.copyfile;copied=[]
     def interrupted(src,dst,*args,**kwargs):
-        if Path(src)==original:
+        copied.append(Path(src).name)
+        if Path(src).name=='learning.sqlite':
             Path(dst).write_bytes(b'partial')
             raise OSError('simulated disk interruption')
         return normal_copy(src,dst,*args,**kwargs)
     monkeypatch.setattr(shutil,'copyfile',interrupted)
     with pytest.raises(OSError):backup(store.root,target)
-    assert saved.read_bytes()==b'evidence'
+    assert (target/'learning.sqlite').read_bytes()==good and saved.read_bytes()==b'evidence'
+    assert saved.name not in copied  # unchanged evidence is not copied again
 
 
 def test_backup_refuses_missing_derived_evidence_referenced_by_snapshot(tmp_path):

@@ -451,3 +451,74 @@ def test_items_by_ids_and_recognition_candidates(library):
     assert [i["file_id"] for i in bridge.items_by_ids([uncertain, hidden, "bad", uncertain], SUBJECT)] == [uncertain]
     with pytest.raises(ValueError):
         bridge.recognition_candidates("bad")
+
+
+def test_auto_events_read_albums_without_writing(library):
+    root, db, _ = library
+    db.executescript('''
+        CREATE TABLE media_albums(id INTEGER PRIMARY KEY,name TEXT,query TEXT,kind TEXT,year INTEGER,created_at TEXT,story TEXT,
+            cover_id TEXT,day TEXT,place TEXT,group_key TEXT,item_count INTEGER,event TEXT,method TEXT,updated_at TEXT);
+        CREATE TABLE album_items(album_id INTEGER,file_id TEXT,position INTEGER);
+        INSERT INTO media_albums(id,name,kind,story,cover_id,day,place) VALUES(1,'海边的周末','auto_event','踩沙子','b','2025-07-12','舟山');
+        INSERT INTO media_albums(id,name,kind) VALUES(2,'手动相册','manual');
+        INSERT INTO album_items VALUES(1,'b',2),(1,'a',1),(2,'c',1);
+    ''')
+    db.commit()
+    before = sorted(p.name for p in (root / "data").iterdir())
+    events = BrainBridge(root).auto_events()
+    assert events == [{"id": "1", "title": "海边的周末", "story": "踩沙子", "day": "2025-07-12", "place": "舟山",
+                       "cover_id": "b", "file_ids": ["a", "b"]}]
+    assert sorted(p.name for p in (root / "data").iterdir()) == before
+    db.execute("DROP TABLE media_albums")
+    db.commit()
+    assert BrainBridge(root).auto_events() == []
+
+
+def test_complete_json_failure_categories_and_bounded_timeout(library, monkeypatch):
+    from learning.brain_bridge import BrainBlocked, BrainTimeout
+    seen = {}
+
+    def runner(error):
+        def run(command, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(command, 1, json.dumps({"ok": False, "error": error}), "")
+        return run
+    bridge = BrainBridge(library[0], python_executable="/test/python")
+    monkeypatch.setattr(brain_bridge.subprocess, "run", runner("blocked"))
+    with pytest.raises(BrainBlocked):
+        bridge.complete_json("s", "u", {"type": "object"})
+    assert 180 < seen["timeout"] <= 210
+    monkeypatch.setattr(brain_bridge.subprocess, "run", runner("timeout"))
+    with pytest.raises(BrainTimeout):
+        bridge.complete_json("s", "u", {"type": "object"}, timeout=60)
+    assert seen["timeout"] == 60
+    monkeypatch.setattr(brain_bridge.subprocess, "run", runner("unavailable"))
+    with pytest.raises(BrainUnavailable) as caught:
+        bridge.complete_json("s", "u", {"type": "object"})
+    assert type(caught.value) is BrainUnavailable
+
+    def slow(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+    monkeypatch.setattr(brain_bridge.subprocess, "run", slow)
+    with pytest.raises(BrainTimeout):
+        bridge.complete_json("s", "u", {"type": "object"})
+
+
+@pytest.mark.parametrize("raised,category", [("ModelBlocked('filtered')", "blocked"),
+                                             ("TimeoutError('timed out')", "timeout"),
+                                             ("RuntimeError('模型接口暂不可用')", "unavailable")])
+def test_runner_reports_only_a_failure_category(library, raised, category):
+    from learning.brain_bridge import BrainBlocked, BrainTimeout
+    root = library[0]
+    (root / "app/brain.py").write_text('''
+import threading
+ANALYSIS_CONTEXT=threading.local()
+PURPOSE=threading.local()
+class ModelBlocked(RuntimeError):pass
+def chat(*args, **kwargs):
+    raise __RAISED__
+'''.replace("__RAISED__", raised))
+    expected = {"blocked": BrainBlocked, "timeout": BrainTimeout, "unavailable": BrainUnavailable}[category]
+    with pytest.raises(expected) as caught:
+        BrainBridge(root).complete_json("system", "user", {"type": "object"})
+    assert "filtered" not in str(caught.value) and "timed out" not in str(caught.value)

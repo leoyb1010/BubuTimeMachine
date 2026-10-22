@@ -14,6 +14,11 @@ final class BubuRouter {
     var pendingEntryID: UUID?
     /// 小组件/手表“今日精选”指向的第二大脑素材；在线时光消费后打开详情。
     var pendingOnlineID: String?
+    /// Siri / 链接指定的日期（yyyy-MM-dd）：时光跳到那个月，每日学习切到那一天。
+    var pendingTimelineDay: String?
+    var pendingLearningDay: String?
+    /// Siri「问问布布时光」带来的问题，由 RootTabView 打开布布问答。
+    var pendingAsk: String?
 
     /// 解析 deep link。识别不了的 URL 安全忽略（不跳转、不崩）。
     func handle(_ url: URL) {
@@ -25,6 +30,15 @@ final class BubuRouter {
         if route == .online, let rawID = url.pathComponents.dropFirst().first,
            rawID.range(of: "^[a-f0-9]{24}$", options: .regularExpression) != nil {
             pendingOnlineID = rawID
+        }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let day = query.first { $0.name == "date" }?.value
+            .flatMap { $0.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil ? $0 : nil }
+        if route == .moment { pendingTimelineDay = day }
+        if route == .learning { pendingLearningDay = day }
+        if route == .ask, let question = query.first(where: { $0.name == "q" })?.value?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty {
+            pendingAsk = String(question.prefix(200))
         }
         if route == .moment {
             if let rawID = url.pathComponents.dropFirst().first,
@@ -43,6 +57,7 @@ enum BubuRoute: String {
     case record     // 记一笔 → 首页并拉起快速记录
     case online     // 今日精选 → 在线时光详情
     case learning   // 每日学习
+    case ask        // 布布问答（Siri）→ 时光并打开问答
 
     static let scheme = "bubu"
 
@@ -55,7 +70,7 @@ enum BubuRoute: String {
     var tabIndex: Int {
         switch self {
         case .identity, .record: return 0
-        case .moment, .online: return 1
+        case .moment, .online, .ask: return 1
         case .growth: return 2
         case .learning: return RootTabView.learningTab
         }

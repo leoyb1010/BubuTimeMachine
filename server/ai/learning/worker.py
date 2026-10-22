@@ -9,7 +9,10 @@ from datetime import datetime
 import fcntl
 import logging
 import mimetypes
+import os
 from pathlib import Path
+import re
+import shutil
 import time
 from zoneinfo import ZoneInfo
 
@@ -17,6 +20,9 @@ from .processing import MediaProcessor, ProcessingUnavailable
 from .store import Conflict, Missing, digest
 
 log = logging.getLogger('bubu.learning.worker')
+HEARTBEAT = 'worker-heartbeat'
+BACKUP = 'learning-backup'
+BACKUP_KEEP = 7
 
 class LearningWorker:
     def __init__(self, store, bridge, processor, *, family, child, pocketbase=None, subject=None, features=None):
@@ -28,6 +34,14 @@ class LearningWorker:
         self.captioned_at = 0.0
         self.features = features or {}
         self.step_at = {}
+        self.beat_at = 0.0
+
+    def heartbeat(self, force=False):
+        """Loop progress for /health/deep and the status page; at most one write per 30 s."""
+        if not force and time.monotonic()-self.beat_at<30:return
+        self.beat_at=time.monotonic()
+        try:self.store.set_cursor(HEARTBEAT,{'at':time.time()})
+        except Exception as exc:log.warning('heartbeat write failed error=%s',type(exc).__name__)
 
     @contextmanager
     def lock(self):
@@ -140,7 +154,7 @@ class LearningWorker:
             # A reviewer corrected the evidence during this model call. Keep
             # the newer revision; its own transaction already queues composition.
             self.store.finish_job(job,success=True)
-        except Exception:
+        except Exception as exc:
             # Avoid logging model replies, local media paths or credentials.
             if job['kind']=='analyze':
                 try:
@@ -150,7 +164,8 @@ class LearningWorker:
                 except Conflict:
                     self.store.finish_job(job,success=True);return True
             self.store.finish_job(job,success=False,error='learning_processing_failed')
-            log.warning('learning job failed kind=%s attempt=%d',job['kind'],job['attempts'])
+            log.warning('learning job failed kind=%s attempt=%d error=%s',job['kind'],job['attempts'],
+                        type(exc).__name__)
         return True
 
     def caption_new_timeline_items(self):
@@ -159,11 +174,27 @@ class LearningWorker:
         self.captioned_at=time.monotonic()
         from .timeline_captions import TimelineCaptions
         try:
-            captions=TimelineCaptions(self.store)
-            todo=captions.pending(self.family,self.bridge.subject_snapshot(self.subject)['items'])
-            if todo:captions.rewrite(self.bridge,self.family,todo)
-        except Exception:
-            log.warning('timeline caption batch failed')
+            report=TimelineCaptions(self.store).run(self.bridge,self.family,self.bridge.subject_snapshot(self.subject)['items'])
+            if report['failed'] or report['given_up']:
+                log.warning('timeline captions failed=%d given_up=%d changed=%d',report['failed'],report['given_up'],report['changed'])
+        except Exception as exc:
+            log.warning('timeline caption step failed error=%s',type(exc).__name__)
+
+    def backup(self, root, today):
+        """Daily copy of the learning state into root/<day>; unchanged files are hard links to the previous day."""
+        from .backup import backup
+        root=Path(root);root.mkdir(parents=True,exist_ok=True,mode=0o700)
+        days=sorted(d for d in root.iterdir() if d.is_dir() and not d.is_symlink() and re.fullmatch(r'\d{4}-\d{2}-\d{2}',d.name)
+                    and (d/'.bubu-learning-backup').is_file())
+        target=root/today
+        previous=[d for d in days if d.name<today]
+        if not target.exists() and previous:
+            shutil.copytree(previous[-1],target,copy_function=os.link)
+        result=backup(self.store.root,target)
+        for old in sorted(set(days+[target]))[:-BACKUP_KEEP]:
+            shutil.rmtree(old)
+        self.store.set_cursor(BACKUP,{'at':time.time(),'day':today,'assets':result['assets']})
+        return result
 
     def _due(self, name, every, now):
         if now-self.step_at.get(name,-1e18)<every:return False
@@ -179,21 +210,28 @@ class LearningWorker:
         if 'firsts' in features and done.get('firsts')!=today and self._due('firsts',3600,now):
             try:
                 features['firsts'].compute();done['firsts']=today;self.store.set_cursor(cursor,done)
-            except Exception:log.warning('firsts recompute failed')
+            except Exception as exc:log.warning('firsts recompute failed error=%s',type(exc).__name__)
         if 'monthly' in features and self._due('monthly',3600,now):
             try:
                 if features['monthly'].generate_due(datetime.fromisoformat(today).date()):return
-            except Exception:log.warning('monthly report failed')
+            except Exception as exc:log.warning('monthly report failed error=%s',type(exc).__name__)
+        backup_root=os.environ.get('LEARNING_BACKUP_DIR','').strip()
+        if backup_root and done.get('backup')!=today and self._due('backup',3600,now):
+            try:
+                self.backup(backup_root,today);done['backup']=today;self.store.set_cursor(cursor,done)
+            except Exception as exc:log.warning('learning backup failed error=%s',type(exc).__name__)
         if 'voices' in features and self._due('voices',1200,now):
             try:
                 if done.get('voices')!=today:
                     features['voices'].sync_candidates();done['voices']=today;self.store.set_cursor(cursor,done)
-                features['voices'].process(1)
-            except Exception:log.warning('voice archive step failed')
+                # The queue is empty here: work through the backlog a few clips at a time.
+                features['voices'].process(4)
+            except Exception as exc:log.warning('voice archive step failed error=%s',type(exc).__name__)
 
     def run(self,once=False):
         with self.lock():
             while True:
+                self.heartbeat()
                 self.caption_new_timeline_items()
                 drained=False
                 for _ in range(10):
@@ -201,12 +239,14 @@ class LearningWorker:
                     if not self.process_one():
                         drained=True;break
                 # Lesson jobs always go first; feature steps only run on an empty queue.
-                if drained:self.periodic()
+                self.heartbeat()
+                if drained:self.periodic();self.heartbeat()
                 if once:return
                 time.sleep(5)
 
 if __name__=='__main__':
     import argparse
     from .runtime import create_worker
+    logging.basicConfig(level=logging.WARNING,format='%(asctime)s %(levelname)s [%(name)s] %(message)s')
     parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true')
     args=parser.parse_args();create_worker().run(once=args.once)

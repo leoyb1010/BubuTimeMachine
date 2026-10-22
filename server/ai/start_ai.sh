@@ -30,4 +30,8 @@ PORT="${AI_PORT:-8000}"
 BIND="${BUBU_AI_BIND:-127.0.0.1}"
 echo "🚀 AI 服务启动： http://${BIND}:${PORT}  （健康检查 /health）"
 # 通过虚拟环境的 Python 模块启动，避免候选目录切换后 uvicorn 脚本里残留旧绝对 shebang。
+# 带时间戳的访问日志；旧发布目录里没有该文件时保持 uvicorn 默认格式。
+if [ -f uvicorn_log.json ]; then
+  exec ./.venv/bin/python -m uvicorn main:app --host "${BIND}" --port "${PORT}" --log-config uvicorn_log.json
+fi
 exec ./.venv/bin/python -m uvicorn main:app --host "${BIND}" --port "${PORT}"

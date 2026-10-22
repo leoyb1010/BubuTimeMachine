@@ -248,9 +248,14 @@ struct PossibleFirstsView: View {
         } message: {
             Text(model.actionError ?? "")
         }
-        .fullScreenCover(item: $ceremony) { item in
-            CeremonyAnimation(title: "🎉 \(item.title)", subtitle: item.subtitle) { ceremony = nil }
-                .presentationBackground(.clear)
+        .overlay {
+            if let item = ceremony {
+                FirstStampOverlay(title: item.title, subtitle: item.subtitle) {
+                    withAnimation(BubuMotion.gentle) { ceremony = nil }
+                }
+                .id(item.id)
+                .transition(.opacity)
+            }
         }
     }
 
@@ -413,5 +418,103 @@ struct PossibleFirstsView: View {
         } catch {
             model.actionError = "服务端已经确认，但本机里程碑没存进去。可以到里程碑页手动点亮「\(updated.displayTitle)」。"
         }
+    }
+}
+
+// MARK: - 「第一次」盖章
+
+/// 确认后盖一个「第一次」印章：约 0.9 秒的关键帧（1.6 → 0.9 → 1.0，带一点旋转）+ 一次彩纸。
+/// 减弱动态效果时印章直接出现、不放彩纸；音效与触感由调用方照常播放。
+private struct FirstStampOverlay: View {
+    let title: String
+    let subtitle: String?
+    let onDone: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var stamp = 0
+
+    private struct Frame {
+        var scale = 1.0
+        var rotation = 0.0
+        var opacity = 1.0
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28).ignoresSafeArea()
+                .onTapGesture(perform: onDone)
+            VStack(spacing: BubuTheme.Spacing.m) {
+                badge
+                    .keyframeAnimator(initialValue: Frame(), trigger: stamp) { content, frame in
+                        content
+                            .scaleEffect(frame.scale)
+                            .rotationEffect(.degrees(frame.rotation))
+                            .opacity(frame.opacity)
+                    } keyframes: { _ in
+                        KeyframeTrack(\.scale) {
+                            MoveKeyframe(1.6)
+                            CubicKeyframe(0.9, duration: 0.38)
+                            SpringKeyframe(1.0, duration: 0.52, spring: .bouncy)
+                        }
+                        KeyframeTrack(\.rotation) {
+                            MoveKeyframe(-14)
+                            CubicKeyframe(4, duration: 0.38)
+                            CubicKeyframe(0, duration: 0.52)
+                        }
+                        KeyframeTrack(\.opacity) {
+                            MoveKeyframe(0)
+                            LinearKeyframe(1, duration: 0.14)
+                        }
+                    }
+                    .overlay {
+                        if stamp > 0 && !reduceMotion {
+                            BubuBurst(count: 18, radius: 150)
+                        }
+                    }
+                if let subtitle {
+                    Text(subtitle)
+                        .font(BubuTheme.Font.body.weight(.semibold))
+                        .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(BubuTheme.Color.card, in: Capsule())
+                }
+            }
+            .padding(32)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(named: "关闭", onDone)
+        }
+        .task {
+            if !reduceMotion { stamp += 1 }
+            AccessibilityNotification.Announcement("已点亮第一次：\(title)").post()
+            try? await Task.sleep(for: .seconds(2.4))
+            guard !Task.isCancelled else { return }
+            onDone()
+        }
+    }
+
+    private var badge: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "star.fill")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(BubuTheme.Color.butter)
+                .accessibilityHidden(true)
+            Text("第一次")
+                .font(.system(.title2, design: .rounded).weight(.heavy))
+                .foregroundStyle(BubuTheme.Color.deepRose)
+            Text(title)
+                .font(BubuTheme.Font.headline)
+                .foregroundStyle(BubuTheme.Color.warmBrown)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(28)
+        .frame(width: 220, height: 220)
+        .background(BubuTheme.Color.cream, in: Circle())
+        .overlay(Circle().stroke(BubuTheme.Color.deepRose, lineWidth: 5).padding(6))
+        .overlay(Circle().stroke(BubuTheme.Color.deepRose.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [6, 5])).padding(16))
+        .shadow(color: BubuTheme.Color.deepRose.opacity(0.3), radius: 16, y: 8)
     }
 }

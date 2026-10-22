@@ -50,6 +50,7 @@ struct OnlineTimelineDetailPage: View {
     @State private var confirmNotBubu = false
     @State private var actionError: String?
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView {
@@ -60,6 +61,7 @@ struct OnlineTimelineDetailPage: View {
                     .background(BubuTheme.Color.softFill.opacity(0.5))
                     .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 info
+                TimelineSocialSection(client: client, itemID: item.id, active: isCurrent)
             }
             .padding(BubuTheme.Spacing.item)
             .bubuContentColumn(900)
@@ -87,7 +89,9 @@ struct OnlineTimelineDetailPage: View {
         if item.isVideo {
             ZStack {
                 if let player {
-                    VideoPlayer(player: player).accessibilityIdentifier("timeline.video")
+                    VideoPlayer(player: player)
+                        .accessibilityLabel(item.description.isEmpty ? "布布的视频" : "视频：\(item.description)")
+                        .accessibilityIdentifier("timeline.video")
                 } else if let videoError {
                     VStack(spacing: BubuTheme.Spacing.s) {
                         Image(systemName: "exclamationmark.triangle").font(BubuTheme.Font.headline)
@@ -95,7 +99,8 @@ struct OnlineTimelineDetailPage: View {
                         Button("重试") { Task { await prepareVideo() } }.buttonStyle(.bordered)
                     }.foregroundStyle(BubuTheme.Color.secondaryText).padding()
                 } else {
-                    LearningRemoteImage(path: item.largeUrl, client: client, label: "视频封面", contentMode: .fit)
+                    LearningRemoteImage(path: item.largeUrl, client: client,
+                                        label: item.description.isEmpty ? "视频封面" : "视频封面：\(item.description)", contentMode: .fit)
                     Button { Task { await prepareVideo(autoplay: true) } } label: {
                         Image(systemName: "play.circle.fill").font(.system(size: 64, design: .rounded))
                             .symbolRenderingMode(.palette).foregroundStyle(.white, BubuTheme.Color.primary)
@@ -112,8 +117,10 @@ struct OnlineTimelineDetailPage: View {
                 .scaleEffect(zoom)
                 .gesture(MagnifyGesture()
                     .onChanged { zoom = min(max($0.magnification, 1), 4) }
-                    .onEnded { _ in withAnimation(BubuMotion.gentle) { zoom = 1 } })
-                .onTapGesture(count: 2) { withAnimation(BubuMotion.gentle) { zoom = zoom > 1 ? 1 : 2 } }
+                    .onEnded { _ in withAnimation(reduceMotion ? nil : BubuMotion.gentle) { zoom = 1 } })
+                .onTapGesture(count: 2) { withAnimation(reduceMotion ? nil : BubuMotion.gentle) { zoom = zoom > 1 ? 1 : 2 } }
+                .accessibilityAddTraits(.isImage)
+                .accessibilityHint("双指捏合或轻点两下可以放大")
                 .accessibilityIdentifier("timeline.photo")
         }
     }
@@ -162,7 +169,10 @@ struct OnlineTimelineDetailPage: View {
                                         .foregroundStyle(BubuTheme.Color.deepRose)
                                     Text(segment.text).font(BubuTheme.Font.body).frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                            }.buttonStyle(BubuPressableStyle())
+                            }
+                            .buttonStyle(BubuPressableStyle())
+                            .accessibilityLabel("\(Self.timecode(segment.start))，\(segment.text)")
+                            .accessibilityHint("从这里播放视频")
                         }
                         if let hidden = item.transcriptHidden, hidden > 0 {
                             Text("另有 \(hidden) 段听不清（多半是童言童语或英文），先不显示。")
@@ -177,6 +187,7 @@ struct OnlineTimelineDetailPage: View {
                 Spacer(minLength: 8)
                 Button("不是布布？") { confirmNotBubu = true }
                     .font(BubuTheme.Font.caption.weight(.semibold)).tint(BubuTheme.Color.deepRose)
+                    .accessibilityHint("把这张从布布的时光里移出")
                     .accessibilityIdentifier("timeline.not-bubu")
             }
             if let actionError {

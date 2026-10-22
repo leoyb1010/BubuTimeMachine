@@ -7,21 +7,25 @@ import os
 // MARK: - 今日精选（小组件 / 手表共用）
 /// 主 App 拉服务端 `online-timeline/highlights`，把 ≤6 张缩略图（JPEG，最长边 600）和
 /// `picks.json` 写进 App Group `DailyPicks/`，再刷新小组件、推给手表。
-/// 契约见 docs/upgrade-2.25-contracts.md §8。失败一律保留旧精选，不清空。
+/// 契约见 docs/upgrade-2.25-contracts.md §8。同一天内失败保留旧精选；每条精选带上海日期，
+/// 过了那一天就不再展示（「那年今天」不能挂到别的日子上）。
+/// 只在用户同意第二大脑说明之后才拉取，每天最多成功刷新一次。
 @MainActor
 final class DailyPicksStore {
     static let shared = DailyPicksStore()
 
     nonisolated static let maxPicks = 6
     nonisolated static let maxPixel: CGFloat = 600
-    private static let throttle: TimeInterval = 30 * 60
+    /// 与 SecondBrainConsent 的 @AppStorage 同一个键。
+    nonisolated static let consentKey = SecondBrainConsentModifier.storageKey
     private static let lastRefreshKey = "bubu.dailyPicks.lastRefreshAt"
-    private static let lastDayKey = "bubu.dailyPicks.day"
+    // v2：2.26 起清单带日期；换键让升级当天也会重新拉一次。
+    private static let lastDayKey = "bubu.dailyPicks.day.v2"
 
     private let log = Logger(subsystem: "com.bubu.timemachine", category: "DailyPicks")
     private var running: Task<Void, Never>?
 
-    /// 唯一入口：打开时光 / 回到前台时调用。未配置家庭服务时什么都不做。
+    /// 唯一入口：打开时光 / 回到前台时调用。未配置家庭服务或未同意第二大脑说明时什么都不做。
     func refreshIfNeeded(env: AppEnvironment, force: Bool = false) {
         guard let client = BubuLearningClient(env: env) else {
             // Family service disconnected: second-brain photos must leave the widgets and Watch too.
@@ -33,14 +37,11 @@ final class DailyPicksStore {
             }
             return
         }
-        guard running == nil else { return }
-        let today = BubuLearningDates.dayString(.now)
         let defaults = UserDefaults.standard
-        if !force, defaults.string(forKey: Self.lastDayKey) == today,
-           let last = defaults.object(forKey: Self.lastRefreshKey) as? Date,
-           Date.now.timeIntervalSince(last) < Self.throttle {
-            return
-        }
+        guard running == nil, defaults.bool(forKey: Self.consentKey) else { return }
+        let today = BubuLearningDates.dayString(.now)
+        // 今天已经成功刷新过就不再下载；跨天（上海时间）后第一次回到前台再拉。
+        if !force, defaults.string(forKey: Self.lastDayKey) == today { return }
         running = Task { [weak self] in
             await self?.refresh(client: client, day: today)
             self?.running = nil
@@ -96,7 +97,8 @@ final class DailyPicksStore {
             let file = fileName(for: item.id)
             guard seen.insert(file).inserted else { continue }
             var jpeg: Data?
-            for path in [item.largeUrl, item.previewUrl].compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            // 预览图（服务端 thumb，约 480px）已经够 600px 的小组件用；大图只做兜底。
+            for path in [item.previewUrl, item.largeUrl].compactMap({ $0 }).filter({ !$0.isEmpty }) {
                 guard !Task.isCancelled else { return picks.count }
                 if let data = try? await client.mediaData(path), let small = downscaledJPEG(data) {
                     jpeg = small
@@ -107,7 +109,7 @@ final class DailyPicksStore {
             try jpeg.write(to: dir.appendingPathComponent(file), options: .atomic)
             let reason = response.reasonById?[item.id]
             picks.append(DailyPick(id: item.id, file: file, capturedAt: item.capturedAt,
-                                   reason: reason, description: item.description))
+                                   reason: reason, description: item.description, day: day))
         }
         // 服务端成功返回但一张都没下到（全部失败）时保留旧精选；服务端明确返回空则清空。
         if picks.isEmpty && !response.items.isEmpty { throw URLError(.cannotDecodeContentData) }
@@ -152,12 +154,21 @@ final class DailyPicksStore {
         return filePrefix + (safe.isEmpty ? WatchPhotoBundle.fingerprint([id]) : safe) + ".jpg"
     }
 
-    nonisolated static func load() -> [DailyPick] {
+    /// 今天（上海时间）的精选；过期或读不到时为空。
+    nonisolated static func load(now: Date = .now) -> [DailyPick] {
         guard let dir = directory,
               let data = try? Data(contentsOf: dir.appendingPathComponent(manifestName)) else { return [] }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return (try? decoder.decode([DailyPick].self, from: data)) ?? []
+        let picks = (try? decoder.decode([DailyPick].self, from: data)) ?? []
+        return isStale(pickDay: picks.first?.day, now: now) ? [] : picks
+    }
+
+    /// 精选只属于写入它的那一天（上海时间）。没有日期的旧清单一律视为过期，等下一次刷新。
+    /// 小组件 `DailyPicksReader.isStale` 用同样的规则（小组件不编译本文件）。
+    nonisolated static func isStale(pickDay: String?, now: Date) -> Bool {
+        guard let pickDay else { return true }
+        return pickDay != BubuLearningDates.dayString(now)
     }
 
     /// 只读精选目录里的 `pick-*.jpg`（已经是 ≤600px JPEG，直接发给手表）。
@@ -192,4 +203,6 @@ nonisolated struct DailyPick: Codable, Sendable, Hashable {
     let capturedAt: String?
     let reason: String?
     let description: String?
+    /// 精选所属的上海日期（yyyy-MM-dd）；2.26 之前写的清单没有。
+    var day: String? = nil
 }

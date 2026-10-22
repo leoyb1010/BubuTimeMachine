@@ -7,7 +7,8 @@ struct LearningPlayItem: Hashable, Identifiable {
 }
 
 /// 布布的互动页：先播放老师这道题的原声（不是开场介绍），点选后再听老师的答案。
-/// 不给孩子打分；只记录互动，供周/月复习挑选需要再玩一次的内容。
+/// 不给孩子打分数，只记录互动，供周/月复习挑选需要再玩一次的内容；
+/// 跟读（「跟我说」）的宽松分数只写进记录备注，界面上只出现星星和鼓励。
 struct LearningPlayView: View {
     let client: BubuLearningClient
     let childID: String?
@@ -77,9 +78,23 @@ struct LearningPlayView: View {
             listenButton(activity)
             if activity.isChoice {
                 choices(item)
+                // 选完后可以跟着说一遍正确答案（只庆祝，不另记一次互动）。
+                if answered, let target = Self.choiceTarget(activity) {
+                    SpeakPracticeCard(target: target, player: player, playModel: { playAnswer(activity) }) { _, _ in }
+                }
             } else if activity.kind == "speak" {
                 speak(item)
             } else {
+                if let target = SpeechPracticeScorer.practiceTarget(activity.prompt?.text) {
+                    // 儿歌：跟唱一句也算一起唱完了。
+                    SpeakPracticeCard(target: target, player: player, playModel: {
+                        player.play(clip: activity.prompt, activityKind: activity.kind, isAnswer: false, client: client)
+                    }) { score, passed in
+                        guard passed, !answered else { return }
+                        answered = true
+                        record(item, choice: nil, assistance: nil, note: "score:\(score)")
+                    }
+                }
                 participation(item, label: "一起唱完啦")
             }
             if answered { nextButton }
@@ -156,23 +171,59 @@ struct LearningPlayView: View {
     private func speak(_ item: LearningPlayItem) -> some View {
         VStack(spacing: BubuTheme.Spacing.m) {
             Text("轮到布布说一说啦").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+            if let target = Self.speakTarget(item.activity) {
+                // 端侧识别不支持该语言时卡片自己隐藏，下面家长代点的按钮照常可用。
+                SpeakPracticeCard(target: target, player: player, playModel: { playAnswer(item.activity) }) { score, passed in
+                    guard passed, !answered else { return }
+                    answered = true
+                    record(item, choice: nil, assistance: false, note: "score:\(score)")
+                }
+            }
             if answered {
                 Button {
                     player.play(clip: item.activity.answer, activityKind: item.activity.kind, isAnswer: true, client: client)
                 } label: { Label("听老师的示范", systemImage: "speaker.wave.2") }
                     .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
             } else {
-                HStack(spacing: BubuTheme.Spacing.m) {
-                    bigChoice("说出来啦", symbol: "face.smiling.fill", tint: BubuTheme.Color.primary) {
-                        answered = true; record(item, choice: nil, assistance: false)
-                    }
-                    bigChoice("要听提示", symbol: "lightbulb.fill", tint: BubuTheme.Color.butterSurface, foreground: BubuTheme.Color.warmBrown) {
-                        answered = true; record(item, choice: nil, assistance: true)
-                        player.play(clip: item.activity.answer, activityKind: item.activity.kind, isAnswer: true, client: client)
-                    }
+                // 大字号下两个大按钮并排放不下时改成上下排，文字不被截断。
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: BubuTheme.Spacing.m) { speakButtons(item) }
+                    VStack(spacing: BubuTheme.Spacing.m) { speakButtons(item) }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func speakButtons(_ item: LearningPlayItem) -> some View {
+        bigChoice("说出来啦", symbol: "face.smiling.fill", tint: BubuTheme.Color.deepRose) {
+            answered = true; record(item, choice: nil, assistance: false)
+        }
+        bigChoice("要听提示", symbol: "lightbulb.fill", tint: BubuTheme.Color.butterSurface, foreground: BubuTheme.Color.warmBrown) {
+            answered = true; record(item, choice: nil, assistance: true)
+            player.play(clip: item.activity.answer, activityKind: item.activity.kind, isAnswer: true, client: client)
+        }
+    }
+
+    private func playAnswer(_ activity: LearningActivityDTO) {
+        if activity.answer?.audioUrl != nil {
+            player.play(clip: activity.answer, activityKind: activity.kind, isAnswer: true, client: client)
+        } else {
+            player.play(clip: activity.prompt, activityKind: activity.kind, isAnswer: false, client: client)
+        }
+    }
+
+    /// 跟老师说：优先老师的示范答案，其次知识点、题目原声。
+    static func speakTarget(_ activity: LearningActivityDTO) -> String? {
+        SpeechPracticeScorer.practiceTarget(activity.answer?.text)
+            ?? SpeechPracticeScorer.practiceTarget(activity.concept)
+            ?? SpeechPracticeScorer.practiceTarget(activity.prompt?.text)
+    }
+
+    /// 找一找答对后跟着说：正确选项的名字（颜色块也有名字）。
+    static func choiceTarget(_ activity: LearningActivityDTO) -> String? {
+        guard let correct = activity.choices.first(where: { $0.id == activity.correctChoice }) else { return nil }
+        return SpeechPracticeScorer.practiceTarget(correct.label)
     }
 
     private func participation(_ item: LearningPlayItem, label: String) -> some View {
@@ -191,14 +242,19 @@ struct LearningPlayView: View {
             VStack(spacing: 8) {
                 Image(systemName: symbol).font(.system(size: 40, weight: .semibold, design: .rounded))
                     .symbolEffect(.bounce, value: answered)
+                    .accessibilityHidden(true)
                 Text(title).font(BubuTheme.Font.headline)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(foreground)
+            .padding(.horizontal, 10).padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: 128)
             .background(tint, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             .shadow(color: BubuTheme.Color.deepRose.opacity(0.12), radius: 8, y: 4)
         }
         .buttonStyle(BubuPressableStyle(scale: 0.95))
+        .accessibilityLabel(title)
     }
 
     private var nextButton: some View {
@@ -246,11 +302,11 @@ struct LearningPlayView: View {
         }
     }
 
-    private func record(_ item: LearningPlayItem, choice: String?, assistance: Bool?) {
+    private func record(_ item: LearningPlayItem, choice: String?, assistance: Bool?, note: String? = nil) {
         guard let childID else { return }
-        let body = LearningAttemptBody(id: UUID().uuidString, childId: childID, packId: item.packID,
-                                       activityId: item.activity.id, kind: item.activity.kind,
-                                       choice: choice, assistance: assistance)
+        let body = LearningAttemptUpload(id: UUID().uuidString, childId: childID, packId: item.packID,
+                                         activityId: item.activity.id, kind: item.activity.kind,
+                                         choice: choice, assistance: assistance, note: note)
         Task { await LearningAttemptOutbox.shared.submit(body, client: client) }
     }
 }
@@ -293,7 +349,10 @@ struct ChoiceTile: View {
             }
         }
         .opacity(dimmed ? 0.55 : 1)
-        .accessibilityElement(children: .combine)
+        // 图片的说明和文字是同一个名字，合并朗读一次即可。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(choice.label)
+        .accessibilityValue(highlighted ? "正确答案" : dimmed ? "再看看别的" : "")
         .accessibilityAddTraits(highlighted ? .isSelected : [])
     }
 }
@@ -374,10 +433,23 @@ struct LearningReviewView: View {
 
 // MARK: - 互动记录发件箱
 
+/// 上传的互动记录：在 `LearningAttemptBody` 基础上多一个 `note`（跟读分数 `score:85`）。
+/// 字段都可选解码，旧版本落盘的待上传记录照样能读出来；nil 字段不会编码进请求。
+nonisolated struct LearningAttemptUpload: Codable, Sendable, Hashable {
+    let id: String
+    let childId: String
+    let packId: String
+    let activityId: String
+    let kind: String
+    var choice: String?
+    var assistance: Bool?
+    var note: String?
+}
+
 /// 先落盘再上传；同一 UUID 重试由服务端幂等去重。按服务+账号隔离，不依赖网页存储。
 actor LearningAttemptOutbox {
     static let shared = LearningAttemptOutbox()
-    private nonisolated struct Pending: Codable { let scope: String; let body: LearningAttemptBody }
+    private nonisolated struct Pending: Codable { let scope: String; let body: LearningAttemptUpload }
     private nonisolated struct Saved: Decodable, Sendable { let id: String? }
 
     private var file: URL? {
@@ -396,7 +468,7 @@ actor LearningAttemptOutbox {
         try? JSONEncoder().encode(values).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
-    func submit(_ body: LearningAttemptBody, client: BubuLearningClient) async {
+    func submit(_ body: LearningAttemptUpload, client: BubuLearningClient) async {
         write(read() + [Pending(scope: client.scope, body: body)])
         await flush(client: client)
     }

@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CryptoKit
+import ImageIO
 import UIKit
 
 // MARK: - DTOs
@@ -238,32 +239,44 @@ nonisolated struct LearningUploadFile: Sendable, Hashable {
     let mimeType: String
 }
 
+/// Family dates are Shanghai calendar days on the server; every key, range and label here uses that zone.
 nonisolated enum BubuLearningDates {
-    static func parseISO(_ value: String) -> Date? {
+    static let timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar
+    }()
+    // ISO8601DateFormatter is thread-safe for parsing but not marked Sendable.
+    nonisolated(unsafe) private static let isoFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) { return date }
+        return formatter
+    }()
+    nonisolated(unsafe) private static let isoPlain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
-    }
-
-    static func dayString(_ date: Date) -> String {
+        return formatter
+    }()
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.calendar = calendar
+        formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    static func parseISO(_ value: String) -> Date? {
+        isoFractional.date(from: value) ?? isoPlain.date(from: value)
     }
 
-    static func day(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: value)
-    }
+    static func dayString(_ date: Date) -> String { dayFormatter.string(from: date) }
+
+    static func day(_ value: String) -> Date? { dayFormatter.date(from: value) }
+
+    /// "2026-10" for a Shanghai calendar day.
+    static func monthKey(_ date: Date) -> String { String(dayString(date).prefix(7)) }
 }
 
 // MARK: - Client
@@ -277,19 +290,30 @@ nonisolated struct BubuLearningClient: Sendable {
     private let token: @Sendable () async throws -> String
     private let session: URLSession
 
-    /// One ephemeral session for the whole app; clients are cheap values rebuilt with views.
+    private let mediaSession: URLSession
+
+    /// One ephemeral session for JSON calls; clients are cheap values rebuilt with views.
     static let sharedSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpMaximumConnectionsPerHost = 6
+        configuration.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: configuration)
+    }()
+
+    /// Images and clips get their own connections so a scrolling grid never starves JSON calls.
+    static let mediaSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = 4
         return URLSession(configuration: configuration)
     }()
 
     init(baseURL: URL, scope: String, token: @escaping @Sendable () async throws -> String,
-         session: URLSession = BubuLearningClient.sharedSession) {
+         session: URLSession = BubuLearningClient.sharedSession,
+         mediaSession: URLSession = BubuLearningClient.mediaSession) {
         routes = LearningServiceRoutes(baseURL: baseURL)
         self.scope = scope
         self.token = token
         self.session = session
+        self.mediaSession = mediaSession
     }
 
     @MainActor
@@ -343,6 +367,7 @@ nonisolated struct BubuLearningClient: Sendable {
         case 409: throw BubuLearningClientError.conflict
         case 413: throw BubuLearningClientError.message("文件太大了，单个文件请小于 256 MB。")
         case 422: throw BubuLearningClientError.message(Self.detail(data) ?? "内容没有通过检查，请核对后重试。")
+        case 503: throw BubuLearningClientError.unavailable(Self.detail(data))
         default: throw LearningServiceError.server(http.statusCode)
         }
     }
@@ -381,6 +406,8 @@ nonisolated struct BubuLearningClient: Sendable {
         }
         let (data, response) = try await session.data(for: request, delegate: LearningRedirectBlocker())
         try check(response, data: data)
+        // 204 No Content (e.g. DELETE) carries no body.
+        if data.isEmpty, let empty = LearningEmptyResponse() as? T { return empty }
         do { return try Self.decoder.decode(T.self, from: data) } catch { throw LearningServiceError.invalidResponse }
     }
 
@@ -389,12 +416,30 @@ nonisolated struct BubuLearningClient: Sendable {
     func mediaData(_ path: String, cache: Bool = false) async throws -> Data {
         let file = cache ? LearningMediaCache.file(scope: scope, path: path) : nil
         if let file, let data = try? Data(contentsOf: file) { return data }
+        try await LearningMediaGate.shared.acquire()
+        defer { Task { await LearningMediaGate.shared.release() } }
         let request = try await authorized(url(path), timeout: 60)
-        let (data, response) = try await session.data(for: request, delegate: LearningRedirectBlocker())
-        try check(response, data: nil)
+        let (data, response) = try await mediaSession.data(for: request, delegate: LearningRedirectBlocker())
+        try check(response, data: data)
         guard data.count <= 64 * 1_048_576 else { throw LearningServiceError.invalidResponse }
         if let file { try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
         return data
+    }
+
+    /// Items by id, fetched in chunks of 60 (the server's cap), in the order given.
+    @concurrent
+    func items(ids: [String]) async throws -> [OnlineTimelineItem] {
+        var found: [String: OnlineTimelineItem] = [:]
+        var start = 0
+        while start < ids.count {
+            let chunk = ids[start..<min(start + 60, ids.count)]
+            start += 60
+            let page = try await get("api/online-timeline/items", query: [URLQueryItem(name: "ids", value: chunk.joined(separator: ","))],
+                                     as: OnlineTimelineItems.self)
+            for item in page.items { found[item.id] = item }
+        }
+        var seen = Set<String>()
+        return ids.compactMap { id in seen.insert(id).inserted ? found[id] : nil }
     }
 
     /// Streams a protected original (video) with Range requests; the header stays on this asset only.
@@ -460,19 +505,119 @@ nonisolated struct BubuLearningClient: Sendable {
 nonisolated enum BubuLearningClientError: LocalizedError, Equatable {
     case conflict
     case message(String)
+    /// 503: the server is up but can't read the library right now; carries its `detail`.
+    case unavailable(String?)
     var errorDescription: String? {
         switch self {
         case .conflict: "内容刚刚更新过，请刷新后重新核对。"
         case .message(let text): text
+        case .unavailable(let detail): detail ?? LearningErrorKind.serviceUnavailableText
         }
     }
 }
 
+/// What went wrong, in the terms a parent can act on.
+nonisolated enum LearningErrorKind: Equatable, Sendable {
+    case cancelled
+    /// The phone itself has no network.
+    case offline
+    /// Network is fine but the home server doesn't answer (timeout, refused, proxy 502/504).
+    case serverUnreachable
+    case unauthorized
+    /// 503 with the server's own explanation.
+    case serviceUnavailable(String?)
+    case other
+
+    static let offlineText = "手机现在没有网络，连上网络后再试。"
+    static let serverUnreachableText = "家里的服务器没有回应，可能需要在 Mac mini 上处理一下，请稍后重试。"
+    static let unauthorizedText = "家里服务器的登录过期了，请到 设置 → 家庭服务 重新连接。"
+    static let serviceUnavailableText = "家里的服务器暂时读不到素材库，请稍后重试。"
+
+    init(_ error: Error) {
+        if isCancellation(error) { self = .cancelled; return }
+        if let error = error as? URLError {
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+                self = .offline
+            case .timedOut, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                self = .serverUnreachable
+            default:
+                self = .other
+            }
+            return
+        }
+        switch error {
+        case BubuLearningClientError.unavailable(let detail): self = .serviceUnavailable(detail)
+        case LearningServiceError.unauthorized: self = .unauthorized
+        case LearningServiceError.server(let code) where code == 502 || code == 504: self = .serverUnreachable
+        case APIError.unauthorized, APIError.forbidden, APIError.notConfigured: self = .unauthorized
+        case APIError.network: self = .serverUnreachable
+        default: self = .other
+        }
+    }
+}
+
+/// Both Swift task cancellation and a cancelled URLSession task mean "nobody is waiting" — never show an error.
+nonisolated func isCancellation(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    if let error = error as? URLError, error.code == .cancelled { return true }
+    return false
+}
+
+nonisolated struct LearningEmptyResponse: Decodable, Sendable {}
+
 nonisolated func learningErrorText(_ error: Error, fallback: String = "暂时连接不到家庭服务，请检查网络后重试。") -> String {
+    switch LearningErrorKind(error) {
+    case .offline: return LearningErrorKind.offlineText
+    case .serverUnreachable: return LearningErrorKind.serverUnreachableText
+    case .unauthorized: return LearningErrorKind.unauthorizedText
+    case .serviceUnavailable(let detail): return detail ?? LearningErrorKind.serviceUnavailableText
+    case .cancelled: return fallback
+    case .other: break
+    }
     if let error = error as? BubuLearningClientError { return error.errorDescription ?? fallback }
     if let error = error as? LearningServiceError { return error.errorDescription ?? fallback }
-    if error is APIError { return LearningServiceError.unauthorized.errorDescription ?? fallback }
+    if error is APIError { return LearningErrorKind.unauthorizedText }
     return fallback
+}
+
+/// Caps concurrent image/clip downloads; waiting callers that get cancelled (cell scrolled away) leave the queue.
+actor LearningMediaGate {
+    static let shared = LearningMediaGate(limit: 6)
+    private let limit: Int
+    private var running = 0
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
+
+    init(limit: Int) { self.limit = limit }
+
+    func acquire() async throws {
+        try Task.checkCancellation()
+        if running < limit { running += 1; return }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                enqueue(id, continuation)
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+
+    private func enqueue(_ id: UUID, _ continuation: CheckedContinuation<Void, Error>) {
+        // Cancelled before we got here: the onCancel hop would find nothing to remove.
+        if Task.isCancelled { continuation.resume(throwing: CancellationError()); return }
+        waiters.append((id, continuation))
+    }
+
+    func release() {
+        if waiters.isEmpty { running = max(0, running - 1); return }
+        waiters.removeFirst().continuation.resume()
+    }
+
+    private func cancel(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
 }
 
 /// Endpoints are canonical; refusing redirects keeps the bearer on this origin and route.
@@ -497,14 +642,44 @@ nonisolated enum LearningMediaCache {
     }
 }
 
-/// Decoded images shared across the timeline grid and detail pages.
+/// Decoded (already downsampled) images shared across the timeline grid and detail pages, bounded by bytes.
 nonisolated final class LearningImageMemory: @unchecked Sendable {
     static let shared = LearningImageMemory()
     private let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 600
+        cache.totalCostLimit = 100 * 1_048_576
         return cache
     }()
     func image(_ key: String) -> UIImage? { cache.object(forKey: key as NSString) }
-    func store(_ image: UIImage, for key: String) { cache.setObject(image, forKey: key as NSString) }
+    func store(_ image: UIImage, for key: String) {
+        cache.setObject(image, forKey: key as NSString, cost: Self.cost(of: image))
+    }
+
+    static func cost(of image: UIImage) -> Int {
+        if let cgImage = image.cgImage { return cgImage.bytesPerRow * cgImage.height }
+        return Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+    }
+}
+
+/// Decode at (about) the displayed pixel size instead of the full image.
+nonisolated enum LearningImageDecoder {
+    /// Pixel buckets keep the cache small and let one decode serve similar-sized cells.
+    static let buckets: [Int] = [256, 512, 1024, 2048]
+
+    static func bucket(forPixels pixels: CGFloat) -> Int {
+        buckets.first { CGFloat($0) >= pixels } ?? buckets[buckets.count - 1]
+    }
+
+    static func downsample(_ data: Data, maxPixel: Int) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
+    }
 }

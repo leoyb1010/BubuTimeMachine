@@ -59,6 +59,8 @@ struct SettingsView: View {
                 group("数据与备份", footer: "记录先存在这台手机上，再同步给家人。断网时一切照常，联网自动补传。") {
                     row("同步与备份", icon: "arrow.triangle.2.circlepath",
                         tint: BubuTheme.Color.info) { SyncCenterView() }
+                    row("家里服务器状态", icon: "server.rack",
+                        tint: BubuTheme.Color.secondaryText) { ServerStatusView() }
                     row("做一本年册", icon: "book.closed.fill",
                         tint: env.theme.theme.primary) { YearbookView() }
                     row("导出开放阅读档案", icon: "square.and.arrow.up.on.square.fill",

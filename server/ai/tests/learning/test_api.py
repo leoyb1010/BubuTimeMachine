@@ -320,3 +320,73 @@ def test_family_feature_routes_scope_reviewer_and_errors(setup):
     assert client.post(root+'recognition/f1',headers=BEARER,json={'decision':'yes'}).status_code==403
     assert client.post(root+'firsts/f1/confirm',headers=BEARER,json={}).status_code==403
     assert client.get(root+'firsts',headers=BEARER).status_code==200
+
+def test_226_routes_contract_reviewer_and_csrf(setup):
+    client,state,service=setup
+    class Feature:
+        def __init__(self,name):self.name=name
+        def __getattr__(self,method):
+            def call(scope,*args):
+                service.calls.append((self.name,method,args,scope.user_id))
+                if args and args[0]=='missing':raise Missing('secret path')
+                if method=='delete_comment':return None
+                return {'feature':self.name,'method':method}
+            return call
+    root='/learning/api/'
+    assert client.get(root+'status',headers=BEARER).status_code==503
+    for name in ('status','ask','words','places','social','recognition'):
+        setattr(service,name,Feature(name))
+    fid='a'*24
+    for path,expected in [('status',('status','status',())),('words',('words','words',())),
+                          ('places',('places','places',())),
+                          ('events?start=2025-01-01&end=2025-12-31',('places','events',('2025-01-01','2025-12-31'))),
+                          ('events',('places','events',(None,None))),
+                          ('recognition/history?limit=7',('recognition','history',(7,))),
+                          ('social/recent?limit=5',('social','recent',(5,))),
+                          ('online-timeline/%s/social'%fid,('social','social',(fid,)))]:
+        response=client.get(root+path,headers=BEARER)
+        assert response.status_code==200,path
+        assert service.calls[-1][:3]==expected,path
+    assert client.post(root+'ask',headers=BEARER,json={'question':'她第一次去海边是什么时候？'}).status_code==200
+    assert service.calls[-1][:3]==('ask','ask',('她第一次去海边是什么时候？',))
+    for bad in ({'question':''},{'question':'x'*201},{'q':'x'}):
+        assert client.post(root+'ask',headers=BEARER,json=bad).status_code==422
+    body={'decisions':[{'id':fid,'decision':'yes'},{'id':'b'*24,'decision':'no'}]}
+    assert client.post(root+'recognition/batch',headers=BEARER,json=body).status_code==200
+    assert service.calls[-1][:3]==('recognition','batch',([{'id':fid,'decision':'yes'},{'id':'b'*24,'decision':'no'}],))
+    assert client.post(root+'recognition/batch',headers=BEARER,json={'decisions':[{'id':'x','decision':'yes'}]}).status_code==422
+    assert client.post(root+'recognition/batch',headers=BEARER,json={'decisions':[{'id':fid,'decision':'yes'}]*51}).status_code==422
+    assert client.post(root+'recognition/'+fid,headers=BEARER,json={'decision':'undo'}).status_code==200
+    assert service.calls[-1][:3]==('recognition','decide',(fid,'undo'))
+    # Family members who cannot review may still comment and heart; batch decisions stay reviewer-only.
+    state['user']='grandma'
+    assert client.post(root+'recognition/batch',headers=BEARER,json=body).status_code==403
+    response=client.post(root+'online-timeline/%s/comments'%fid,headers=BEARER,json={'text':'好可爱'})
+    assert response.status_code==200 and service.calls[-1]==('social','comment',(fid,'好可爱'),'grandma')
+    assert client.post(root+'online-timeline/%s/comments'%fid,headers=BEARER,json={'text':'x'*301}).status_code==422
+    assert client.post(root+'online-timeline/%s/heart'%fid,headers=BEARER,json={'on':True}).status_code==200
+    assert service.calls[-1][:3]==('social','heart',(fid,True))
+    assert client.post(root+'online-timeline/%s/heart'%fid,headers=BEARER,json={'on':'yes'}).status_code==422
+    response=client.delete(root+'online-timeline/%s/comments/c1'%fid,headers=BEARER)
+    assert response.status_code==204 and service.calls[-1][:3]==('social','delete_comment',(fid,'c1'))
+    assert client.delete(root+'online-timeline/missing/comments/c1',headers=BEARER).status_code==404
+    # Cookie sessions need the CSRF header for these writes too.
+    client.get('/learning',headers=BEARER)
+    assert client.post(root+'online-timeline/%s/comments'%fid,json={'text':'hi'}).status_code==403
+    assert client.post(root+'online-timeline/%s/comments'%fid,headers=CSRF,json={'text':'hi'}).status_code==200
+
+def test_brain_routes_return_503_when_library_slots_are_exhausted(setup,monkeypatch):
+    import threading
+    from learning import api
+    client,_,service=setup
+    class Feature:
+        def __getattr__(self,method):
+            return lambda scope,*args:{'items':[]}
+    service.places=Feature();service.status=Feature()
+    slots=threading.BoundedSemaphore(1);slots.acquire()
+    monkeypatch.setattr(api,'BRAIN_SLOTS',slots)
+    response=client.get('/learning/api/places',headers=BEARER)
+    assert response.status_code==503 and response.json()['detail']=='家里的服务器暂时读不到素材库，请稍后重试。'
+    assert client.get('/learning/api/status',headers=BEARER).status_code==200  # status never waits for the library
+    slots.release()
+    assert client.get('/learning/api/places',headers=BEARER).status_code==200

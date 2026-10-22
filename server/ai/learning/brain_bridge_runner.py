@@ -94,8 +94,15 @@ def main() -> int:
                 raise ValueError()
         print(output)
         return 0
-    except Exception:
-        print('{"ok":false,"error":"brain_unavailable"}')
+    except Exception as exc:
+        # Only a category leaves this process: never exception text or provider replies.
+        if type(exc).__name__ in {"ModelBlocked", "ModelTruncated", "ModelRequestError"}:
+            error = "blocked"
+        elif isinstance(exc, TimeoutError) or "timed out" in str(exc).lower():
+            error = "timeout"
+        else:
+            error = "unavailable"
+        print(json.dumps({"ok": False, "error": error}))
         return 1
 
 

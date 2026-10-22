@@ -51,17 +51,24 @@ def create_features():
     from .monthly import Monthly
     from .voices import Voices
     from .recognition import Recognition
+    from .ask import Ask
+    from .words import Words
+    from .places import Places
+    from .social import Social
+    from .status import Status
     born=os.environ.get("LEARNING_SUBJECT_BIRTH_DATE","").strip() or None
     gateway=SemanticGateway(bridge.root/'data/gateway-private.json',
                             os.environ.get('LEARNING_GATEWAY_URL','').strip() or 'http://127.0.0.1:8878')
     online=OnlineTimeline(bridge,processor,store,family,child,subject,born=born,semantic=gateway)
     firsts=Firsts(online)
+    voices=Voices(online,bridge,processor)
     return {'online_timeline':online,'memories':Memories(online),'firsts':firsts,
-            'monthly':Monthly(online,bridge,firsts),'voices':Voices(online,bridge,processor),
-            'recognition':Recognition(bridge,online)}
+            'monthly':Monthly(online,bridge,firsts),'voices':voices,
+            'recognition':Recognition(bridge,online),'ask':Ask(online,bridge),'words':Words(online,voices),
+            'places':Places(online),'social':Social(online),'status':Status(online)}
 
 
-FEATURES=('online_timeline','memories','firsts','monthly','voices','recognition')
+FEATURES=('online_timeline','memories','firsts','monthly','voices','recognition','ask','words','places','social','status')
 
 
 @lru_cache(maxsize=1)
@@ -78,6 +85,9 @@ def get_service():
 def create_worker():
     from .worker import LearningWorker
     store,bridge,processor,pocketbase,timeline,family,child=components()
+    features=create_features()
+    # The worker has no request deadline: let it wait for slow library reads.
+    if 'online_timeline' in features:features['online_timeline'].wait=600
     return LearningWorker(store,bridge,processor,family=family,child=child,pocketbase=pocketbase,
                           subject=os.environ.get("LEARNING_SUBJECT_ID","").strip() or None,
-                          features=create_features())
+                          features=features)

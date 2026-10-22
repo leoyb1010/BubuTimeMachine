@@ -38,6 +38,7 @@ CJK = re.compile(r'[\u3400-\u9fff]')
 # Common ASR hallucinations on silence/music (zh-only local speech model).
 JUNK_PHRASES = ('字幕由', '请不吝点赞', '订阅转发', '打赏支持', '明镜与点点', '谢谢观看', '感谢观看')
 HIGHLIGHT_REASONS = ('那年今天', '最近精选')
+UNAVAILABLE = '家里的服务器暂时读不到素材库，请稍后重试。'
 
 
 def plausible_segment(text, start, end):
@@ -140,7 +141,7 @@ class SemanticGateway:
 
 
 class OnlineTimeline:
-    def __init__(self, bridge, processor, store, family, child, subject, *, ttl=30, born=None, semantic=None):
+    def __init__(self, bridge, processor, store, family, child, subject, *, ttl=30, born=None, semantic=None, wait=3.0):
         self.bridge, self.processor, self.store = bridge, processor, store
         self.semantic = semantic
         self.family, self.child, self.subject, self.ttl = family, child, subject, ttl
@@ -148,9 +149,20 @@ class OnlineTimeline:
         # captured before she was born belongs in her timeline.
         self.born = valid_day(born) if born else None
         self.captions = TimelineCaptions(store)
-        self.lock = threading.RLock()
+        # The library lives on an external disk that can stall indefinitely (macOS
+        # privacy prompts, sleep). Only the refresher thread ever reads it; requests
+        # wait at most `wait` seconds and otherwise use the last good snapshot.
+        self.lock = threading.Lock()
+        self.ready = threading.Condition(self.lock)
+        self.wake = threading.Event()
+        self.refresher = None
+        self.wait = wait
         self.cached = None
         self.cached_at = 0.0
+        self.built_at = None
+        self.generation = 0
+        self.built_generation = self.failed_generation = -1
+        self.error = None
         self.aspects = {}
 
     def authorize(self, scope):
@@ -158,79 +170,137 @@ class OnlineTimeline:
             raise Missing('素材不存在')
         scope.require_child(self.child)
 
-    def snapshot(self):
-        with self.lock:
-            if self.cached and time.monotonic() - self.cached_at < self.ttl:
-                return self.cached
+    def _start(self):
+        if self.refresher is None or not self.refresher.is_alive():
+            self.refresher = threading.Thread(target=self._refresh_loop, name='online-timeline-refresh', daemon=True)
+            self.refresher.start()
+
+    def _refresh_loop(self):
+        while True:
+            self.wake.wait()
+            self.wake.clear()
+            with self.lock:
+                generation = self.generation
             try:
-                value = self.bridge.subject_snapshot(self.subject)
-            except BrainUnavailable:
-                raise HTTPException(503, '第二大脑素材库暂时不可用，请稍后重试。') from None
-            if value.get('complete') is not True:
-                raise HTTPException(503, '第二大脑素材库尚未就绪。')
-            decided = decisions(self.store, self.family)
-            source = [i for i in value['items'] if decided.get(i['file_id']) != 'no']
-            present = {i['file_id'] for i in source}
-            extra = [fid for fid, choice in decided.items() if choice == 'yes' and fid not in present]
-            if extra:
-                try:
-                    for item in self.bridge.items_by_ids(extra, self.subject):
-                        source.append({**item, 'provenance': 'family_confirmed', 'confidence': None})
-                except BrainUnavailable:
-                    log.warning('family confirmed items unavailable')
-            labels = value.get('people_labels') or {}
-            items = []
-            family_words = self.captions.overlays(self.family, source)
-            for item in source:
-                if item.get('media_type') not in {'photo', 'video'}:
-                    continue
-                analysis = item.get('analysis') or {}
-                # Show parsed library material, never unprocessed inbox files.
-                if not any(analysis.get(k) for k in ('description', 'ocr', 'tags', 'segments')):
-                    continue
-                stamp = self.stamp(item.get('captured_at'))
-                day = datetime.fromisoformat(stamp).astimezone(LOCAL).date().isoformat() if stamp else None
-                if self.born and (not day or day < self.born):
-                    continue
-                segments, hidden = [], 0
-                for segment in analysis.get('segments') or []:
-                    try:
-                        clean = {'id': str(segment['id']), 'start': float(segment['start']),
-                                 'end': float(segment['end']), 'text': str(segment['text'])}
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if plausible_segment(clean['text'], clean['start'], clean['end']):
-                        segments.append(clean)
-                    else:
-                        hidden += 1
-                original = str(analysis.get('description') or '')
-                description = family_words.get(item['file_id'], original)
-                people = [p for p in item.get('people') or [] if isinstance(p, str)]
-                tags = [t for t in analysis.get('tags') or [] if isinstance(t, str)]
-                place = str(item.get('place') or '')
-                text = ' '.join([original, description, str(analysis.get('ocr') or ''), ' '.join(tags),
-                                 str(item.get('event') or ''), place, ' '.join(people),
-                                 ' '.join(labels.get(p, '') for p in people),
-                                 ' '.join(s['text'] for s in segments)]).casefold()
-                items.append({'item': item, 'stamp': stamp, 'day': day, 'text': text,
-                              'description': description, 'adjusted': description != original,
-                              'segments': segments, 'hidden': hidden, 'people': people, 'place': place,
-                              'event': str(item.get('event') or ''), 'tags': tags,
-                              'confirmed': decided.get(item['file_id']) == 'yes'})
-            items.sort(key=lambda row: (row['stamp'] or '', row['item']['file_id']), reverse=True)
-            # Only what the feed shows defines a page snapshot; still-unparsed
-            # library files must not reset a parent's scroll position.
-            snapshot_id = digest([(row['item']['file_id'], row['item'].get('source_revision', ''), row['confirmed'])
-                                  for row in items])
-            self.cached = {'snapshot_id': snapshot_id, 'rows': items, 'labels': labels,
-                           'by_id': {row['item']['file_id']: row['item'] for row in items},
-                           'rows_by_id': {row['item']['file_id']: row for row in items}}
-            self.cached_at = time.monotonic()
+                value, error = self._build(), None
+            except Exception as exc:
+                value, error = None, exc
+                log.warning('online timeline refresh failed error=%s', type(exc).__name__)
+            with self.ready:
+                if value is not None:
+                    self.cached, self.cached_at, self.built_at = value, time.monotonic(), time.time()
+                    self.built_generation = generation
+                else:
+                    self.failed_generation = generation
+                self.error = error
+                self.ready.notify_all()
+
+    def snapshot(self):
+        deadline = time.monotonic() + self.wait
+        with self.ready:
+            self._start()
+            if self.cached is None and self.built_generation >= self.generation:
+                self.generation += 1
+            current = self.cached is not None and self.built_generation >= self.generation
+            if current and time.monotonic() - self.cached_at < self.ttl:
+                return self.cached
+            self.wake.set()
+            if current:
+                return self.cached  # stale by age only: serve it while the refresher runs
+            wanted = self.generation
+            while self.built_generation < wanted and self.failed_generation < wanted:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self.ready.wait(left)
+            if self.cached is not None:
+                return self.cached  # fresh, or the last good one when the library is stuck
+        raise HTTPException(503, UNAVAILABLE)
+
+    def peek(self):
+        """The last good snapshot without waiting (None before the first one); refreshes in the background."""
+        with self.lock:
+            self._start()
+            if self.cached is None or time.monotonic() - self.cached_at >= self.ttl or self.built_generation < self.generation:
+                self.wake.set()
             return self.cached
+
+    def snapshot_age(self):
+        return None if self.built_at is None else max(0, int(time.time() - self.built_at))
+
+    def _build(self):
+        value = self.bridge.subject_snapshot(self.subject)
+        if value.get('complete') is not True:
+            raise BrainUnavailable('第二大脑素材库尚未就绪。')
+        decided = decisions(self.store, self.family)
+        source = [i for i in value['items'] if decided.get(i['file_id']) != 'no']
+        present = {i['file_id'] for i in source}
+        extra = [fid for fid, choice in decided.items() if choice == 'yes' and fid not in present]
+        if extra:
+            try:
+                for item in self.bridge.items_by_ids(extra, self.subject):
+                    source.append({**item, 'provenance': 'family_confirmed', 'confidence': None})
+            except BrainUnavailable as exc:
+                log.warning('family confirmed items unavailable error=%s', type(exc).__name__)
+        labels = value.get('people_labels') or {}
+        items = []
+        family_words = self.captions.overlays(self.family, source)
+        for item in source:
+            if item.get('media_type') not in {'photo', 'video'}:
+                continue
+            analysis = item.get('analysis') or {}
+            # Show parsed library material, never unprocessed inbox files.
+            if not any(analysis.get(k) for k in ('description', 'ocr', 'tags', 'segments')):
+                continue
+            stamp = self.stamp(item.get('captured_at'))
+            day = datetime.fromisoformat(stamp).astimezone(LOCAL).date().isoformat() if stamp else None
+            if self.born and (not day or day < self.born):
+                continue
+            segments, hidden = [], 0
+            for segment in analysis.get('segments') or []:
+                try:
+                    clean = {'id': str(segment['id']), 'start': float(segment['start']),
+                             'end': float(segment['end']), 'text': str(segment['text'])}
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if plausible_segment(clean['text'], clean['start'], clean['end']):
+                    segments.append(clean)
+                else:
+                    hidden += 1
+            original = str(analysis.get('description') or '')
+            description = family_words.get(item['file_id'], original)
+            people = [p for p in item.get('people') or [] if isinstance(p, str)]
+            tags = [t for t in analysis.get('tags') or [] if isinstance(t, str)]
+            place = str(item.get('place') or '')
+            text = ' '.join([original, description, str(analysis.get('ocr') or ''), ' '.join(tags),
+                             str(item.get('event') or ''), place, ' '.join(people),
+                             ' '.join(labels.get(p, '') for p in people),
+                             ' '.join(s['text'] for s in segments)]).casefold()
+            items.append({'item': item, 'stamp': stamp, 'day': day, 'text': text,
+                          'description': description, 'adjusted': description != original,
+                          'segments': segments, 'hidden': hidden, 'people': people, 'place': place,
+                          'event': str(item.get('event') or ''), 'tags': tags,
+                          'confirmed': decided.get(item['file_id']) == 'yes'})
+        items.sort(key=lambda row: (row['stamp'] or '', row['item']['file_id']), reverse=True)
+        # Only what the feed shows defines a page snapshot; still-unparsed
+        # library files must not reset a parent's scroll position.
+        snapshot_id = digest([(row['item']['file_id'], row['item'].get('source_revision', ''), row['confirmed'])
+                              for row in items])
+        events = []
+        if hasattr(self.bridge, 'auto_events'):
+            try:
+                events = self.bridge.auto_events()
+            except Exception as exc:
+                log.warning('auto events unavailable error=%s', type(exc).__name__)
+                events = (self.cached or {}).get('events', [])
+        return {'snapshot_id': snapshot_id, 'rows': items, 'labels': labels, 'events': events,
+                'by_id': {row['item']['file_id']: row['item'] for row in items},
+                'rows_by_id': {row['item']['file_id']: row for row in items}}
 
     def invalidate(self):
         with self.lock:
-            self.cached = None
+            self.generation += 1
+            self.wake.set()
 
     @staticmethod
     def stamp(value):
@@ -414,21 +484,22 @@ class OnlineTimeline:
         item = self.snapshot()['by_id'].get(fid)
         if not item:
             raise Missing('素材已不在当前专属库中')
-        path = Path(item['local_path'])
-        if not path.is_file():
-            raise Missing('原件暂时不可用')
         if size == 'original':
+            path = Path(item['local_path'])
+            if not path.is_file():
+                raise Missing('原件暂时不可用')
             return path, mimetypes.guess_type(item['name'])[0] or 'application/octet-stream'
         return self.render_preview(item, size)
 
     def render_preview(self, item, size='thumb'):
-        path = Path(item['local_path'])
-        if not path.is_file():
-            raise Missing('原件暂时不可用')
+        # A cached preview needs no trip to the original on the external disk.
         directory = self.store.root / 'online-previews'
         directory.mkdir(mode=0o700, exist_ok=True)
         target = directory / ('%s-%s.jpg' % (item['content_hash'], size))
         if not target.is_file():
+            path = Path(item['local_path'])
+            if not path.is_file():
+                raise Missing('原件暂时不可用')
             self._render(path, item['media_type'], PREVIEW_SIZES[size], directory, target)
         return target, 'image/jpeg'
 

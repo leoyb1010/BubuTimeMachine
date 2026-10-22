@@ -172,6 +172,97 @@ struct BubuAgeIntent: AppIntent {
     }
 }
 
+// MARK: 打开 App 到指定页面（Siri：去年今天 / 今天学了什么 / 问问布布时光）
+
+/// 意图只负责拼出 App 内已有的 `bubu://` 深链，再交给系统打开；页内定位由 BubuRouter 解析。
+nonisolated enum BubuIntentLinks {
+    static let scheme = "bubu"
+
+    /// 与课程/时光一致：按上海时区取「哪一天」。
+    static var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        return calendar
+    }
+
+    static func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    /// 去年的今天（2 月 29 日落到 2 月 28 日）。
+    static func sameDayLastYear(from now: Date = .now) -> Date {
+        calendar.date(byAdding: .year, value: -1, to: now) ?? now.addingTimeInterval(-365 * 86_400)
+    }
+
+    /// 时光 → 指定日期：`bubu://moment?date=yyyy-MM-dd`。
+    static func timeline(on date: Date) -> URL {
+        url(host: "moment", query: [URLQueryItem(name: "date", value: dayString(date))])
+    }
+
+    /// 每日学习 → 指定日期：`bubu://learning?date=yyyy-MM-dd`。
+    static func learning(on date: Date) -> URL {
+        url(host: "learning", query: [URLQueryItem(name: "date", value: dayString(date))])
+    }
+
+    /// 布布问答：`bubu://ask?q=…`（问题最多 200 字，与服务端一致）。
+    static func ask(_ question: String) -> URL {
+        let trimmed = String(question.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        return url(host: "ask", query: trimmed.isEmpty ? [] : [URLQueryItem(name: "q", value: trimmed)])
+    }
+
+    private static func url(host: String, query: [URLQueryItem]) -> URL {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        components.queryItems = query.isEmpty ? nil : query
+        // "+" 在查询里会被当成空格，显式编码。
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        return components.url ?? URL(string: "\(scheme)://\(host)")!
+    }
+}
+
+/// 「看看布布去年今天」→ 打开时光，定位到去年的这一天。
+struct OpenLastYearTodayIntent: AppIntent {
+    static let title: LocalizedStringResource = "看看布布去年今天"
+    static let description = IntentDescription("打开布布时光机，看看去年的今天布布在做什么。")
+
+    func perform() async throws -> some IntentResult & OpensIntent {
+        .result(opensIntent: OpenURLIntent(BubuIntentLinks.timeline(on: BubuIntentLinks.sameDayLastYear())))
+    }
+}
+
+/// 「布布今天学了什么」→ 打开每日学习的今天。
+struct OpenTodayLearningIntent: AppIntent {
+    static let title: LocalizedStringResource = "布布今天学了什么"
+    static let description = IntentDescription("打开每日学习，看看布布今天的课程。")
+
+    func perform() async throws -> some IntentResult & OpensIntent {
+        .result(opensIntent: OpenURLIntent(BubuIntentLinks.learning(on: .now)))
+    }
+}
+
+/// 「问问布布时光」→ 带着问题打开布布问答。
+struct AskBubuTimeIntent: AppIntent {
+    static let title: LocalizedStringResource = "问问布布时光"
+    static let description = IntentDescription("向布布的时光提一个问题，比如“她第一次去海边是什么时候”。")
+
+    @Parameter(title: "想问什么", requestValueDialog: "想问问布布时光什么？")
+    var question: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("问问布布时光：\(\.$question)")
+    }
+
+    func perform() async throws -> some IntentResult & OpensIntent {
+        .result(opensIntent: OpenURLIntent(BubuIntentLinks.ask(question)))
+    }
+}
+
 // MARK: 预置快捷短语
 
 /// 免用户手动配快捷指令：装上即可在 Siri/快捷指令里用这些短语。
@@ -207,6 +298,33 @@ struct BubuAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "健康打卡",
             systemImageName: "cross.case.fill"
+        )
+        AppShortcut(
+            intent: OpenLastYearTodayIntent(),
+            phrases: [
+                "\(.applicationName)看看布布去年今天",
+                "用\(.applicationName)看看去年今天"
+            ],
+            shortTitle: "去年今天",
+            systemImageName: "calendar.badge.clock"
+        )
+        AppShortcut(
+            intent: OpenTodayLearningIntent(),
+            phrases: [
+                "\(.applicationName)布布今天学了什么",
+                "打开\(.applicationName)今天的学习"
+            ],
+            shortTitle: "今天学了什么",
+            systemImageName: "graduationcap.fill"
+        )
+        AppShortcut(
+            intent: AskBubuTimeIntent(),
+            phrases: [
+                "\(.applicationName)问问布布时光",
+                "用\(.applicationName)问问布布时光"
+            ],
+            shortTitle: "问问布布时光",
+            systemImageName: "bubble.left.and.text.bubble.right.fill"
         )
         AppShortcut(
             intent: OpenRecordIntent(),

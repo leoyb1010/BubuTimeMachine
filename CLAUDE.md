@@ -68,7 +68,8 @@ GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMa
 - 截图含真实 PII（布布真名、生日、照片），**对外分享前必须高斯模糊脱敏**。
   注：ChildProfile **没有身份证字段**，身份卡上的 `No.BUBU…` 是装饰性假号（2026-09-04 审计更正）
 - 数据外发（同步/AI）必须用户显式开启，默认全离线；App 内的人脸/图片分析一律端侧（如成长脸延时）。
-  例外且已如实告知：时光/学习读取家里第二大脑的内容，第二大脑用云端 Gemini 做画面描述、人物归类和课程解析；
+  例外且已如实告知：时光/学习读取家里第二大脑的内容，第二大脑用云端 Gemini 做画面描述、人物归类、课程解析和布布问答；
+  「去过的地方」把地名交给 Apple 地图地理编码；
   首次使用时由 `secondBrainConsent` 说明，改动这部分行为必须同步更新那段说明文案
 - **改任何 @Model 之前先跑 `BubuTimeMachineTests/StoreMigrationTests.swift`**：
   并同时运行 `HistoricalSchemaBridgeTests`、`StoreUpgradeBackupTests`、`SyncCheckpointTests`。

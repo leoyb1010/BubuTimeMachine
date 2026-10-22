@@ -26,6 +26,13 @@ if ! curl --noproxy "*" -fsS --max-time 8 "$AI_URL/health" >/dev/null; then
   failures+=("AI health failed: $AI_URL/health")
 fi
 
+# /health 只说明进程活着；深度探针由 AI 进程自己（launchd 身份）带超时去读外接盘上的学习库和第二大脑，
+# 能发现 macOS 授权弹窗卡住读盘、学习后台停摆这类“活着但不干活”的情况。
+deep="$(curl --noproxy "*" -fsS --max-time 12 "$AI_URL/health/deep" 2>/dev/null || true)"
+if [[ "$deep" != *'"ok":true'* && "$deep" != *'"ok": true'* ]]; then
+  failures+=("AI deep health failed（读不到外接盘素材库或学习后台停了，mini 上可能有系统弹窗）: ${deep:0:200}")
+fi
+
 # 原片 storage 通常是指向外接盘的软链接：盘掉了 PocketBase /api/health 仍 200、文件全 404，
 # 必须单独检查链接目标存在并对该卷做剩余空间检查。
 storage_path="$DATA_PATH/storage"

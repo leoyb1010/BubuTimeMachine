@@ -58,8 +58,9 @@ nonisolated enum OnlineTimelineRange: Hashable, Sendable {
             return "\(start.formatted(.dateTime.year().month().day().locale(zh))) – \(end.formatted(.dateTime.month().day().locale(zh)))"
         }
     }
+    /// Day strings in Asia/Shanghai, matching the server's day keys.
     func bounds(now: Date = .now) -> (String?, String?) {
-        let calendar = Calendar(identifier: .gregorian)
+        let calendar = BubuLearningDates.calendar
         switch self {
         case .all: return (nil, nil)
         case .last7: return (BubuLearningDates.dayString(calendar.date(byAdding: .day, value: -6, to: now)!), nil)
@@ -83,46 +84,16 @@ private struct OnlineTimelineQuery: Hashable {
     var isDefault: Bool { self == OnlineTimelineQuery() }
 }
 
-/// One cell of the merged stream.
-private enum TimelineElement: Identifiable {
-    case online(OnlineTimelineItem)
-    case family(Entry)
-
-    var id: String {
-        switch self {
-        case .online(let item): "o-" + item.id
-        case .family(let entry): "f-" + entry.id.uuidString
-        }
-    }
-    var date: Date {
-        switch self {
-        case .online(let item): item.capturedDate ?? .distantPast
-        case .family(let entry): entry.happenedAt
-        }
-    }
-    var aspect: Double {
-        switch self {
-        case .online(let item): item.layoutAspect
-        case .family(let entry): entry.coverMedia == nil ? 1.25 : 1
-        }
-    }
-    var monthKey: String {
-        let components = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(identifier: "Asia/Shanghai")!, from: date)
-        return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
-    }
-}
-
-private struct TimelineRow: Identifiable {
-    let id: String
-    let cells: [(element: TimelineElement, width: CGFloat)]
-    let height: CGFloat
-}
-
-private struct TimelineMonthSection: Identifiable {
-    let id: String
-    let title: String
-    let subtitle: String
-    let rows: [TimelineRow]
+/// Everything the stream layout depends on; the layout is rebuilt only when this changes.
+private struct OnlineTimelineLayoutInputs: Equatable {
+    var items: [OnlineTimelineItem]
+    var entries: [Entry]
+    var events: [OnlineTimelineEvent]
+    var query: OnlineTimelineQuery
+    var source: OnlineTimelineSource
+    var hasMore: Bool
+    var width: CGFloat
+    var regular: Bool
 }
 
 struct OnlineTimelineBrowser: View {
@@ -145,7 +116,15 @@ struct OnlineTimelineBrowser: View {
     @State private var hasMore = false
     @State private var loading = false
     @State private var offline = false
+    /// Shown above cached content when the failure isn't "no network" (e.g. server down).
+    @State private var cacheNotice: String?
     @State private var errorText: String?
+    @State private var errorKind = LearningErrorKind.other
+    @State private var events: [OnlineTimelineEvent] = []
+    @State private var selectedEvent: OnlineTimelineEvent?
+    @State private var layout = OnlineTimelineLayout()
+    @State private var layoutBuilt = false
+    @State private var toast: BubuToastState?
     @State private var snapshot = ""
     @State private var generation = 0
     @State private var selected: OnlineTimelineItem?
@@ -167,14 +146,19 @@ struct OnlineTimelineBrowser: View {
             BubuThemedBackground().ignoresSafeArea()
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
-                        // Measure the row width inside all paddings so justified rows never overflow.
-                        Color.clear.frame(height: 0)
-                            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-                        header.id("timeline.top")
-                        if client != nil { sourcePicker }
-                        if source != .family { filterBar }
-                        if offline { offlineBanner }
+                    // Spacing 0: every photo row is a direct lazy child; rows add their own 4pt gap.
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
+                            // Measure the row width inside all paddings so justified rows never overflow.
+                            Color.clear.frame(height: 0)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+                            header
+                            if client != nil { sourcePicker }
+                            if source != .family { filterBar }
+                            if offline { offlineBanner }
+                            if let cacheNotice { noticeBanner(cacheNotice) }
+                        }
+                        .id("timeline.top")
                         content
                     }
                     .padding(.horizontal, BubuTheme.Spacing.item)
@@ -197,12 +181,25 @@ struct OnlineTimelineBrowser: View {
         }
         .task(id: query) { await reload() }
         .task { await loadPeople() }
+        .task(id: showsEvents ? query.range : nil) { await loadEvents() }
         .task(id: router.pendingOnlineID) { await openPendingOnlineItem() }
+        .task(id: router.pendingTimelineDay) {
+            guard let day = router.pendingTimelineDay else { return }
+            router.pendingTimelineDay = nil
+            query.anchorMonth = String(day.prefix(7))
+        }
+        .onChange(of: layoutInputs, initial: true) { _, inputs in
+            layout = buildLayout(inputs)
+            layoutBuilt = true
+        }
         .navigationDestination(item: $selected) { item in
             OnlineTimelineDetailPager(client: client!, items: items, initial: item,
                                       loadMore: { await loadNextPage() }, hasMore: hasMore,
                                       onNotBubu: { id in removeItem(id) })
                 .navigationTransition(.zoom(sourceID: "o-" + item.id, in: zoom))
+        }
+        .navigationDestination(item: $selectedEvent) { event in
+            OnlineTimelineEventView(event: event, client: client!)
         }
         .navigationDestination(item: $selectedEntry) { entry in
             TimelineEntryDestination(entryID: entry.id)
@@ -213,6 +210,7 @@ struct OnlineTimelineBrowser: View {
                 Menu {
                     NavigationLink { FamilyFeedView() } label: { Label("家人动态", systemImage: "bubble.left.and.text.bubble.right") }
                     if client != nil {
+                        NavigationLink { AskBubuView() } label: { Label("布布问答", systemImage: "questionmark.bubble") }
                         NavigationLink { RecognitionView() } label: { Label("认一认", systemImage: "person.crop.square.badge.camera") }
                         NavigationLink { MonthlyReportView() } label: { Label("每月成长小报", systemImage: "calendar.badge.plus") }
                     }
@@ -221,6 +219,7 @@ struct OnlineTimelineBrowser: View {
             }
         }
         .sheet(isPresented: $customRange) { customRangeSheet }
+        .bubuToast($toast)
     }
 
     // MARK: Header & controls
@@ -331,68 +330,99 @@ struct OnlineTimelineBrowser: View {
             .accessibilityIdentifier("timeline.offline")
     }
 
+    private func noticeBanner(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.icloud")
+            .font(BubuTheme.Font.caption)
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(BubuTheme.Color.peachSurface, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.sm, style: .continuous))
+            .transition(.opacity)
+            .accessibilityIdentifier("timeline.cache-notice")
+    }
+
     // MARK: Content
 
     @ViewBuilder
     private var content: some View {
-        let sections = self.sections
         if client == nil && entries.isEmpty {
-            notConnected
-        } else if sections.isEmpty && loading {
-            skeleton
-        } else if sections.isEmpty, let errorText {
-            VStack(spacing: BubuTheme.Spacing.m) {
-                BubuEmptyIllustration(assetName: "BubuEmptyTimeline", fallbackExpression: .bye, size: 120)
-                Text(errorText).font(BubuTheme.Font.body).multilineTextAlignment(.center)
-                Button("重新加载") { Task { await reload() } }.buttonStyle(.borderedProminent).tint(BubuTheme.Color.primary)
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 50)
-        } else if sections.isEmpty {
-            VStack(spacing: BubuTheme.Spacing.m) {
-                BubuEmptyIllustration(assetName: "BubuEmptyTimeline", size: 120)
-                Text(source == .family ? "还没有家人记录，点「记录此刻」留下第一条吧" : "没有找到符合条件的时光，换个说法试试")
-                    .font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 40)
-        } else {
-            if !query.text.isEmpty || query.person != nil || query.range != .all || query.kind != .all {
-                Text("找到 \(source == .family ? sections.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.cells.count } } : total) 份")
-                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                    .accessibilityIdentifier("timeline.online.total")
-            }
-            ForEach(sections) { section in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(section.title).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
-                        Text(section.subtitle).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, BubuTheme.Spacing.s)
-                    .id("month-" + section.id)
-                    ForEach(section.rows) { row in
-                        HStack(spacing: 4) {
-                            ForEach(row.cells, id: \.element.id) { cell in
-                                cellView(cell.element)
-                                    .frame(width: cell.width, height: row.height)
-                            }
+            notConnected.padding(.top, BubuTheme.Spacing.m)
+        } else if !layoutBuilt || (layout.isEmpty && loading) {
+            skeleton.padding(.top, BubuTheme.Spacing.m)
+        } else if layout.isEmpty, let errorText {
+            BubuStateView(BubuStateKind(errorKind), message: errorText) {
+                VStack(spacing: BubuTheme.Spacing.s) {
+                    BubuStateRetryButton(title: "重新加载") { Task { await reload() } }
+                    if BubuStateKind(errorKind) == .serverDown {
+                        NavigationLink { ServerStatusView() } label: {
+                            Text("看看家里服务器的状态").font(BubuTheme.Font.caption.weight(.semibold))
+                                .foregroundStyle(BubuTheme.Color.deepRose)
                         }
+                        .accessibilityIdentifier("timeline.server-status")
                     }
                 }
+            }
+            .padding(.top, BubuTheme.Spacing.m)
+        } else if layout.isEmpty {
+            BubuStateView(.empty, message: source == .family ? "还没有家人记录，点「记录此刻」留下第一条吧" : "没有找到符合条件的时光，换个说法试试")
+                .padding(.top, BubuTheme.Spacing.m)
+        } else {
+            if !query.text.isEmpty || query.person != nil || query.range != .all || query.kind != .all {
+                Text("找到 \(source == .family ? layout.elementCount : total) 份")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    .padding(.top, BubuTheme.Spacing.m)
+                    .accessibilityIdentifier("timeline.online.total")
+            }
+            ForEach(layout.rows) { row in
+                rowView(row)
+                    .onAppear {
+                        // Page when the reader actually nears the bottom, not when a month is built.
+                        if source != .family, row.index >= layout.rows.count - 6 { Task { await loadNextPage() } }
+                    }
             }
             footer
         }
     }
 
     @ViewBuilder
-    private func cellView(_ element: TimelineElement) -> some View {
+    private func rowView(_ row: OnlineTimelineDisplayRow) -> some View {
+        switch row.content {
+        case .header(let key, let title, let subtitle):
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
+                Text(subtitle).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, BubuTheme.Spacing.l)
+            .padding(.bottom, 4)
+            .id("month-" + key)
+        case .cells(let cells):
+            HStack(spacing: OnlineTimelineLayoutBuilder.spacing) {
+                ForEach(cells.cells, id: \.element.id) { cell in
+                    cellView(cell.element)
+                        .frame(width: cell.width, height: cells.height)
+                }
+            }
+            .padding(.bottom, OnlineTimelineLayoutBuilder.spacing)
+        case .event(let event):
+            if let client {
+                Button { selectedEvent = event } label: { OnlineTimelineEventCard(event: event, client: client) }
+                    .buttonStyle(BubuPressableStyle())
+                    .padding(.vertical, BubuTheme.Spacing.s)
+                    .accessibilityIdentifier("timeline.event")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cellView(_ element: OnlineTimelineElement) -> some View {
         switch element {
-        case .online(let item):
+        case .online(let item, _, _):
             Button { selected = item } label: { OnlineTimelineCell(item: item, client: client!) }
                 .buttonStyle(BubuPressableStyle())
                 .matchedTransitionSource(id: element.id, in: zoom)
                 .accessibilityIdentifier("timeline.item")
-                .onAppear { if item.id == items.last?.id { Task { await loadNextPage() } } }
-        case .family(let entry):
+        case .family(let entry, _):
             Button { selectedEntry = entry } label: { FamilyRecordCell(entry: entry) }
                 .buttonStyle(BubuPressableStyle())
                 .matchedTransitionSource(id: element.id, in: zoom)
@@ -408,6 +438,7 @@ struct OnlineTimelineBrowser: View {
             Button("加载失败，点这里重试") { Task { await loadNextPage() } }
                 .font(BubuTheme.Font.caption).frame(maxWidth: .infinity).padding()
                 .accessibilityHint(errorText)
+                .accessibilityIdentifier("timeline.retry-page")
         } else if source == .family || !hasMore {
             Text("已经到最早的时光啦").font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 .frame(maxWidth: .infinity).padding()
@@ -429,17 +460,17 @@ struct OnlineTimelineBrowser: View {
     }
 
     private var notConnected: some View {
-        VStack(spacing: BubuTheme.Spacing.m) {
-            BubuEmptyIllustration(assetName: "BubuEmptyTimeline", size: 140)
-            Text("连接家庭服务后，这里会出现第二大脑整理的布布专属照片和视频；家人记下的时光也会合在一起。")
-                .font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
+        BubuStateView(.empty, title: "还没连接家里的服务器",
+                      message: "连接家庭服务后，这里会出现第二大脑整理的布布专属照片和视频；家人记下的时光也会合在一起。") {
             NavigationLink { SettingsView() } label: {
-                Label("去设置连接", systemImage: "gearshape").font(BubuTheme.Font.body.weight(.semibold))
+                Label("去设置连接", systemImage: "gearshape")
+                    .font(BubuTheme.Font.body.weight(.semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 22).padding(.vertical, 11)
+                    .background(BubuTheme.Color.primary, in: Capsule())
             }
-            .buttonStyle(.borderedProminent).tint(BubuTheme.Color.primary)
+            .buttonStyle(BubuPressableStyle())
             .accessibilityIdentifier("timeline.open-settings")
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 40)
     }
 
     // MARK: Scrubber (month jump)
@@ -515,7 +546,17 @@ struct OnlineTimelineBrowser: View {
 
     // MARK: Merging & layout
 
-    private var filteredEntries: [Entry] {
+    /// Event cards only belong in the plain browsing stream, never under a search or filter.
+    private var showsEvents: Bool {
+        client != nil && source != .family && query.text.isEmpty && query.person == nil && query.kind == .all
+    }
+
+    private var layoutInputs: OnlineTimelineLayoutInputs {
+        OnlineTimelineLayoutInputs(items: items, entries: entries, events: showsEvents ? events : [], query: query,
+                                   source: source, hasMore: hasMore, width: width.rounded(), regular: sizeClass == .regular)
+    }
+
+    private func filteredEntries(_ entries: [Entry], query: OnlineTimelineQuery) -> [Entry] {
         let text = query.text.lowercased()
         let (start, end) = query.range.bounds()
         return entries.filter { entry in
@@ -535,88 +576,42 @@ struct OnlineTimelineBrowser: View {
         }
     }
 
-    private var elements: [TimelineElement] {
-        switch source {
+    private func elements(_ inputs: OnlineTimelineLayoutInputs) -> [OnlineTimelineElement] {
+        let query = inputs.query
+        let newestFirst = query.newestFirst
+        func ordered(_ list: [OnlineTimelineElement]) -> [OnlineTimelineElement] {
+            list.sorted { newestFirst ? $0.date > $1.date : $0.date < $1.date }
+        }
+        switch inputs.source {
         case .brain:
             // Search returns relevance first; the grid groups by month, so show it in date order.
-            let list = items.map(TimelineElement.online)
-            return query.text.isEmpty ? list : list.sorted { query.newestFirst ? $0.date > $1.date : $0.date < $1.date }
+            let list = inputs.items.map(OnlineTimelineElement.init)
+            return query.text.isEmpty ? list : ordered(list)
         case .family:
-            return query.newestFirst ? filteredEntries.map(TimelineElement.family) : filteredEntries.reversed().map(TimelineElement.family)
+            let family = filteredEntries(inputs.entries, query: query)
+            return (newestFirst ? family : family.reversed()).map(OnlineTimelineElement.init)
         case .merged:
-            guard query.person == nil else { return items.map(TimelineElement.online) }
+            let online = inputs.items.map(OnlineTimelineElement.init)
+            guard query.person == nil else { return online }
             // Only merge family records inside the time span already loaded, so paging stays in order.
-            let loaded = items.compactMap(\.capturedDate)
-            let boundary = hasMore ? (query.newestFirst ? loaded.min() : loaded.max()) : nil
-            let family = filteredEntries.filter { entry in
+            let loaded = online.compactMap { $0.onlineItem?.capturedAt == nil ? nil : $0.date }
+            let boundary = inputs.hasMore ? (newestFirst ? loaded.min() : loaded.max()) : nil
+            let family = filteredEntries(inputs.entries, query: query).filter { entry in
                 guard let boundary else { return true }
-                return query.newestFirst ? entry.happenedAt >= boundary : entry.happenedAt <= boundary
+                return newestFirst ? entry.happenedAt >= boundary : entry.happenedAt <= boundary
             }
-            let merged = items.map(TimelineElement.online) + family.map(TimelineElement.family)
-            return merged.sorted { query.newestFirst ? $0.date > $1.date : $0.date < $1.date }
+            return ordered(online + family.map(OnlineTimelineElement.init))
         }
     }
 
-    private var sections: [TimelineMonthSection] {
-        let target: CGFloat = BubuAdaptive.value(sizeClass, compact: 118, regular: 176)
-        var order: [String] = []
-        var grouped: [String: [TimelineElement]] = [:]
-        for element in elements {
-            let key = element.monthKey
-            if grouped[key] == nil { order.append(key) }
-            grouped[key, default: []].append(element)
-        }
-        return order.map { key in
-            let group = grouped[key] ?? []
-            let photos = group.filter { if case .online(let i) = $0 { return !i.isVideo } else { return false } }.count
-            let videos = group.filter { if case .online(let i) = $0 { return i.isVideo } else { return false } }.count
-            let family = group.count - photos - videos
-            // "深圳市 · 潜龙 · 曼海宁" → "曼海宁": the month header stays one line.
-            var places: [String] = []
-            for case .online(let item) in group {
-                if let place = item.place?.components(separatedBy: " · ").last?.trimmingCharacters(in: .whitespaces),
-                   !place.isEmpty, !places.contains(place) { places.append(place) }
-                if places.count == 2 { break }
-            }
-            var parts: [String] = []
-            if photos > 0 { parts.append("照片 \(photos)") }
-            if videos > 0 { parts.append("视频 \(videos)") }
-            if family > 0 { parts.append("家人记录 \(family)") }
-            if !places.isEmpty { parts.append(places.joined(separator: "、")) }
-            return TimelineMonthSection(id: key, title: Self.monthTitle(key), subtitle: parts.joined(separator: " · "),
-                                        rows: Self.justify(group, width: max(width, 200), target: target, prefix: key))
-        }
+    private func buildLayout(_ inputs: OnlineTimelineLayoutInputs) -> OnlineTimelineLayout {
+        OnlineTimelineLayoutBuilder.build(elements: elements(inputs), events: inputs.events,
+                                          newestFirst: inputs.query.newestFirst, hasMore: inputs.hasMore,
+                                          width: inputs.width,
+                                          target: inputs.regular ? 176 : 118)
     }
 
-    /// Justified rows (flickr/justified-layout idea): equal height per row, widths follow the photo's shape.
-    private static func justify(_ elements: [TimelineElement], width: CGFloat, target: CGFloat, prefix: String) -> [TimelineRow] {
-        let spacing: CGFloat = 4
-        var rows: [TimelineRow] = []
-        var pending: [TimelineElement] = []
-        var aspectSum = 0.0
-        func flush(last: Bool) {
-            guard !pending.isEmpty else { return }
-            let usable = width - spacing * CGFloat(pending.count - 1)
-            var height = usable / CGFloat(aspectSum)
-            if last { height = min(height, target * 1.15) }
-            let cells = pending.map { ($0, CGFloat($0.aspect) * height) }
-            rows.append(TimelineRow(id: prefix + "-" + String(rows.count) + "-" + pending[0].id, cells: cells, height: height))
-            pending = []; aspectSum = 0
-        }
-        for element in elements {
-            pending.append(element)
-            aspectSum += element.aspect
-            let height = (width - spacing * CGFloat(pending.count - 1)) / CGFloat(aspectSum)
-            if height <= target { flush(last: false) }
-        }
-        flush(last: true)
-        return rows
-    }
-
-    static func monthTitle(_ key: String) -> String {
-        let parts = key.split(separator: "-")
-        return parts.count == 2 ? "\(parts[0])年\(Int(parts[1]) ?? 0)月" : "未知日期"
-    }
+    static func monthTitle(_ key: String) -> String { OnlineTimelineLayoutBuilder.monthTitle(key) }
 
     // MARK: Helpers
 
@@ -648,6 +643,7 @@ struct OnlineTimelineBrowser: View {
                 DatePicker("结束", selection: $customEnd, in: ...Date.now, displayedComponents: .date)
             }
             .environment(\.locale, Locale(identifier: "zh_CN"))
+            .environment(\.timeZone, BubuLearningDates.timeZone)
             .navigationTitle("选择日期范围")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -675,8 +671,20 @@ struct OnlineTimelineBrowser: View {
     }
 
     private func removeItem(_ id: String) {
-        withAnimation(BubuMotion.gentle) { items.removeAll { $0.id == id } }
         selected = nil
+        guard let removed = items.first(where: { $0.id == id }) else { return }
+        withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { items.removeAll { $0.id == id } }
+        total = max(0, total - 1)
+        if removed.isVideo { counts.videos = max(0, counts.videos - 1) } else { counts.photos = max(0, counts.photos - 1) }
+        if let date = removed.capturedDate, let index = months.firstIndex(where: { $0.month == BubuLearningDates.monthKey(date) }) {
+            months[index] = OnlineTimelineMonthCount(month: months[index].month, count: max(0, months[index].count - 1))
+        }
+        // Keep the offline copy honest too: the current view and the default view are the ones reopened.
+        if let client {
+            for key in Set([cacheKey(query), cacheKey(OnlineTimelineQuery())]) {
+                OnlineTimelineFeedCache.remove(id, isVideo: removed.isVideo, scope: client.scope, key: key)
+            }
+        }
     }
 
     // MARK: Data
@@ -686,14 +694,47 @@ struct OnlineTimelineBrowser: View {
         people = (try? await client.get("api/online-timeline/people", as: OnlineTimelinePeople.self))?.items ?? []
     }
 
+    /// Widget / Watch picks deep link. The id is cleared only after the request finishes:
+    /// clearing it first changed the task id and cancelled this very request on cold start.
     private func openPendingOnlineItem() async {
         guard let client, let id = router.pendingOnlineID else { return }
-        router.pendingOnlineID = nil
-        if let found = items.first(where: { $0.id == id }) { selected = found; return }
-        if let item = try? await client.get("api/online-timeline/items", query: [URLQueryItem(name: "ids", value: id)],
-                                            as: OnlineTimelineItems.self).items.first {
+        if let found = items.first(where: { $0.id == id }) {
+            router.pendingOnlineID = nil
+            selected = found
+            return
+        }
+        do {
+            let item = try await client.items(ids: [id]).first
+            guard router.pendingOnlineID == id else { return }   // a newer link took over
+            router.pendingOnlineID = nil
+            guard let item else {
+                toast = BubuToastState(message: "这张已经不在布布的时光里了", systemImage: "photo.badge.exclamationmark")
+                return
+            }
             if !items.contains(where: { $0.id == item.id }) { items.insert(item, at: 0) }
             selected = item
+        } catch where isCancellation(error) {
+            // Left pending: the task runs again when the view comes back.
+        } catch {
+            guard router.pendingOnlineID == id else { return }
+            router.pendingOnlineID = nil
+            toast = BubuToastState(message: learningErrorText(error, fallback: "这张照片暂时打不开，请稍后再试。"),
+                                   systemImage: "exclamationmark.icloud", duration: 3.5)
+        }
+    }
+
+    private func loadEvents() async {
+        guard let client, showsEvents else { events = []; return }
+        let (start, end) = query.range.bounds()
+        var parameters: [URLQueryItem] = []
+        if let start { parameters.append(URLQueryItem(name: "start", value: start)) }
+        if let end { parameters.append(URLQueryItem(name: "end", value: end)) }
+        do {
+            events = try await client.get("api/events", query: parameters, as: OnlineTimelineEvents.self).items
+        } catch where isCancellation(error) {
+        } catch {
+            // Older servers (404) or offline: the stream simply has no story cards.
+            events = []
         }
     }
 
@@ -711,7 +752,7 @@ struct OnlineTimelineBrowser: View {
     private func parameters(_ request: OnlineTimelineQuery, page next: Int) -> [URLQueryItem] {
         var (start, end) = request.range.bounds()
         if let anchor = request.anchorMonth, let date = BubuLearningDates.day(anchor + "-01"),
-           let last = Calendar(identifier: .gregorian).date(byAdding: DateComponents(month: 1, day: -1), to: date) {
+           let last = BubuLearningDates.calendar.date(byAdding: DateComponents(month: 1, day: -1), to: date) {
             let anchorEnd = BubuLearningDates.dayString(last)
             end = end.map { min($0, anchorEnd) } ?? anchorEnd
         }
@@ -733,7 +774,7 @@ struct OnlineTimelineBrowser: View {
         loading = true
         defer { if request == query && started == generation { loading = false } }
         let parameters = parameters(request, page: next)
-        let cacheKey = parameters.filter { $0.name != "page" }.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
+        let cacheKey = cacheKey(request)
         do {
             let result = try await client.get("api/online-timeline", query: parameters, as: OnlineTimelinePage.self)
             guard request == query, started == generation, !Task.isCancelled else { return }
@@ -742,21 +783,33 @@ struct OnlineTimelineBrowser: View {
                 return
             }
             apply(result, replacing: replacing)
-            withAnimation(BubuMotion.quick) { offline = false }
+            withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) { offline = false; cacheNotice = nil }
             if replacing { OnlineTimelineFeedCache.save(result, scope: client.scope, key: cacheKey) }
-        } catch is CancellationError {
+        } catch where isCancellation(error) {
         } catch {
             guard request == query, started == generation else { return }
+            let kind = LearningErrorKind(error)
+            let text = learningErrorText(error, fallback: "暂时读取不到第二大脑的素材，请稍后重试。")
             if replacing, let cached = OnlineTimelineFeedCache.load(scope: client.scope, key: cacheKey) {
                 apply(cached, replacing: true)
                 hasMore = false
-                withAnimation(BubuMotion.quick) { offline = true }
+                // "离线中" only when the phone really has no network; otherwise say what happened.
+                withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) {
+                    offline = kind == .offline
+                    cacheNotice = kind == .offline ? nil : "先显示上次加载的内容。" + text
+                }
                 errorText = nil
                 return
             }
             if replacing { items = []; total = 0 }
-            errorText = learningErrorText(error, fallback: "暂时读取不到第二大脑的素材，请稍后重试。")
+            errorKind = kind
+            errorText = text
         }
+    }
+
+    /// Offline-cache key: the first page's parameters for this query.
+    private func cacheKey(_ request: OnlineTimelineQuery) -> String {
+        parameters(request, page: 1).filter { $0.name != "page" }.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
     }
 
     private func apply(_ result: OnlineTimelinePage, replacing: Bool) {
@@ -789,6 +842,17 @@ nonisolated enum OnlineTimelineFeedCache {
               let data = try? Data(contentsOf: file) else { return nil }
         return try? JSONDecoder().decode(OnlineTimelinePage.self, from: data)
     }
+
+    /// Drops one item (marked "not Bubu") from a cached page so offline viewing doesn't bring it back.
+    static func remove(_ id: String, isVideo: Bool, scope: String, key: String) {
+        guard let page = load(scope: scope, key: key), page.items.contains(where: { $0.id == id }) else { return }
+        let updated = OnlineTimelinePage(items: page.items.filter { $0.id != id }, total: max(0, page.total - 1),
+                                         page: page.page, hasMore: page.hasMore,
+                                         photos: max(0, page.photos - (isVideo ? 0 : 1)),
+                                         videos: max(0, page.videos - (isVideo ? 1 : 0)),
+                                         snapshotId: page.snapshotId, months: page.months)
+        save(updated, scope: scope, key: key)
+    }
 }
 
 private struct OnlineTimelineCell: View {
@@ -804,11 +868,7 @@ private struct OnlineTimelineCell: View {
             .background(BubuTheme.Color.softFill)
             .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.xs, style: .continuous))
             .overlay(alignment: .bottomLeading) {
-                if item.isVideo {
-                    Image(systemName: "play.fill")
-                        .font(BubuTheme.Font.caption.weight(.bold)).foregroundStyle(.white)
-                        .padding(6).background(BubuTheme.Color.warmBrown.opacity(0.55), in: Circle()).padding(6)
-                }
+                if item.isVideo { OnlineVideoBadge() }
             }
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)

@@ -22,6 +22,8 @@ def _sha256(path: Path) -> str:
 def _copy_verified(original: Path, final: Path, expected_hash: str) -> None:
     """An interruption or mutation must never truncate the previous good backup."""
     if final.is_symlink():raise ValueError('备份目标文件不能是软链接')
+    # Unchanged evidence stays as is (it may be a hard link shared with an older daily copy).
+    if final.is_file() and _sha256(final)==expected_hash:return
     final.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     fd,name=tempfile.mkstemp(prefix='.copy-',suffix='.tmp',dir=final.parent)
     os.close(fd);staging=Path(name)

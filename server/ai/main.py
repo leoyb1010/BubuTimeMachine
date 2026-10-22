@@ -649,14 +649,7 @@ def _sound_ring_call(action):
 
 # ---------- 路由 ----------
 
-@app.get("/health")
-def health(
-    request: Request,
-    x_api_key: Optional[str] = Header(default=None),
-    authorization: Optional[str] = Header(default=None),
-):
-    # 连通性检查无需鉴权；服务 key 或 App 登录态有效时才返回服务详情。
-    client_host = request.client.host if request.client else "unknown"
+def _health_detail(x_api_key: Optional[str], authorization: Optional[str], client_host: str) -> dict:
     if _authorized_principal(
         x_api_key, authorization, "preauth:" + client_host
     ) is not None:
@@ -667,6 +660,48 @@ def health(
                 "auth": True, "parse_stats": stats,
                 "semantic_search": {"enabled": _semantic_enabled(), "indexed": semantic_count}}
     return {"ok": True, "auth": False}
+
+
+@app.get("/health")
+async def health(
+    request: Request,
+    x_api_key: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    # 连通性检查无需鉴权，且在事件循环里直接返回：请求线程池被占满时它仍然能答。
+    # 服务 key 或 App 登录态有效时才返回服务详情（在独立线程里校验，最多等 10 秒）。
+    if not x_api_key and not authorization:
+        return {"ok": True, "auth": False}
+    client_host = request.client.host if request.client else "unknown"
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_health_detail, x_api_key, authorization, client_host), 10)
+    except asyncio.TimeoutError:
+        return {"ok": True, "auth": False}
+
+
+_FORWARDED_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "cf-connecting-ip", "cf-ray")
+
+
+def _learning_snapshot_age() -> Optional[int]:
+    if not get_learning_service.cache_info().currsize:
+        return None
+    online = getattr(get_learning_service(), "online_timeline", None)
+    return online.snapshot_age() if online is not None else None
+
+
+@app.get("/health/deep", include_in_schema=False)
+async def health_deep(request: Request):
+    """仅本机回环：经隧道/反代转发的请求一律 404。探测在子进程里带超时进行。"""
+    host = request.client.host if request.client else ""
+    if host not in {"127.0.0.1", "::1"} or any(h in request.headers for h in _FORWARDED_HEADERS):
+        raise HTTPException(status_code=404, detail="Not Found")
+    from learning.status import deep_health
+    try:
+        age = _learning_snapshot_age()
+    except Exception:
+        age = None
+    return await asyncio.to_thread(deep_health, age)
 
 
 # ---------- 已确认素材 · 隔离暂存与原子提交 ----------

@@ -28,6 +28,7 @@ class FamilyScope:
     family_id: str
     children: list[dict]
     can_review: bool
+    display_name: str = ''  # family role from PocketBase (妈妈/姥姥…), for comments
 
     def require_child(self, child_id: str | None) -> str:
         """Resolve an omitted child or reject any child outside the fresh scope."""
@@ -119,8 +120,10 @@ class PocketBaseAuthenticator:
             if not children:
                 raise HTTPException(503, '学习孩子配置暂不可用，请联系管理员核对。')
         reviewer_name = 'LEARNING_REVIEWER_USER_IDS' if 'LEARNING_REVIEWER_USER_IDS' in os.environ else 'INTAKE_ALLOWED_PB_USER_IDS'
+        role = record.get('role')
+        role = role.strip()[:20] if isinstance(role, str) else ''
         return FamilyScope(user_id=user_id, family_id=family, children=children,
-                           can_review=user_id in _members(reviewer_name))
+                           can_review=user_id in _members(reviewer_name), display_name=role)
 
     @staticmethod
     def _check_response(response: httpx.Response) -> None:

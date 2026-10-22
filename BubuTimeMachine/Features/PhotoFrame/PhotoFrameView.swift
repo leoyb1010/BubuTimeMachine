@@ -6,6 +6,8 @@ import Combine
 // MARK: - 相框模式（家里的第二块屏）
 /// 把 iPad / 旧手机变成布布的数字相框：精选照片全屏轮播，缓慢的 Ken Burns 推拉 + 交叉淡入，
 /// 「那年今日」的照片优先浮现，角落是名字、年龄与实时时钟。轻点唤出控制条。
+/// 连着家庭服务器时可切到「第二大脑今日精选」（`online-timeline/highlights`）。
+/// 减弱动态效果：不推拉、不淡入，直接切换，并且每张停留更久。
 struct PhotoFrameView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
@@ -15,7 +17,11 @@ struct PhotoFrameView: View {
 
     @State private var slides: [FrameSlide] = []
     @State private var index = 0
-    @State private var images: [UUID: UIImage] = [:]
+    @State private var images: [String: UIImage] = [:]
+    /// 第二大脑今日精选；nil 表示还没加载。
+    @State private var brainSlides: [FrameSlide]?
+    @AppStorage("bubu.photoFrame.source") private var sourceRaw = FrameSource.local.rawValue
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var paused = false
     @State private var showControls = false
     @State private var now = Date.now
@@ -24,7 +30,12 @@ struct PhotoFrameView: View {
 
     /// 每张停留秒数：设置可调（原来硬编码 8 秒，挂墙当相框时有人嫌快有人嫌慢）。
     @AppStorage("bubu.photoFrame.dwell") private var dwellSetting: Double = 8
-    private var dwell: TimeInterval { min(max(dwellSetting, 3), 60) }
+    private var dwell: TimeInterval {
+        let base = min(max(dwellSetting, 3), 60)
+        return reduceMotion ? max(base * 2, 20) : base
+    }
+    private var client: BubuLearningClient? { BubuLearningClient(env: env) }
+    private var usesBrain: Bool { sourceRaw == FrameSource.brain.rawValue && client != nil }
     private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var childName: String { profiles.first?.name ?? env.config.childName }
@@ -49,7 +60,8 @@ struct PhotoFrameView: View {
         .contentShape(Rectangle())
         .onTapGesture { toggleControls() }
         // 跨天（那年今日过期）或新照片同步进来都重建播放列表（R4 P2-33）
-        .task(id: RebuildKey(day: Calendar.current.startOfDay(for: now), count: entries.count)) {
+        .task(id: RebuildKey(day: Calendar.current.startOfDay(for: now), count: entries.count, source: sourceRaw)) {
+            if usesBrain { await loadBrainSlides() }
             buildSlides()
         }
         // 索引或暂停态变化都重排：驱动自动轮播 + 预取
@@ -70,15 +82,16 @@ struct PhotoFrameView: View {
     private var photoLayer: some View {
         ZStack {
             if let current, let img = images[current.id] {
-                KenBurnsImage(image: img, seed: current.id.bubuStableSeed, animating: !paused)
+                KenBurnsImage(image: img, seed: current.seed, animating: !paused)
                     .id(current.id)
-                    .transition(.opacity)
+                    .transition(reduceMotion ? .identity : .opacity)
             } else {
                 ProgressView().tint(.white)
             }
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 1.1), value: current?.id)
+        // 缓慢交叉淡入；减弱动态效果时硬切。
+        .animation(reduceMotion ? nil : .easeInOut(duration: 1.6), value: current?.id)
     }
 
     private var gradientScrim: some View {
@@ -128,7 +141,7 @@ struct PhotoFrameView: View {
                         .font(BubuTheme.Font.scaled(34, weight: .heavy))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
-                    Text(childName + "的相册")
+                    Text(usesBrain ? "第二大脑今日精选" : childName + "的相册")
                         .font(BubuTheme.Font.scaled(13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.85))
                         .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
@@ -143,7 +156,23 @@ struct PhotoFrameView: View {
     private var controlBar: some View {
         VStack {
             HStack {
-                circleButton("xmark") { dismiss() }
+                circleButton("xmark", label: "关闭相框") { dismiss() }
+                if client != nil {
+                    Button {
+                        sourceRaw = usesBrain ? FrameSource.local.rawValue : FrameSource.brain.rawValue
+                        index = 0
+                        bumpControls()
+                    } label: {
+                        Label(usesBrain ? "今日精选" : "本机相册", systemImage: usesBrain ? "sparkles" : "iphone")
+                            .font(BubuTheme.Font.scaled(15, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16).frame(height: 52)
+                            .background(.ultraThinMaterial, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("照片来源：\(usesBrain ? "第二大脑今日精选" : "本机相册")")
+                    .accessibilityHint("轻点切换")
+                }
                 Spacer()
                 Text("\(index + 1) / \(slides.count)")
                     .font(BubuTheme.Font.scaled(14, weight: .bold))
@@ -153,9 +182,9 @@ struct PhotoFrameView: View {
             }
             Spacer()
             HStack(spacing: 28) {
-                circleButton("backward.fill") { advance(-1); bumpControls() }
-                circleButton(paused ? "play.fill" : "pause.fill") { paused.toggle(); bumpControls() }
-                circleButton("forward.fill") { advance(1); bumpControls() }
+                circleButton("backward.fill", label: "上一张") { advance(-1); bumpControls() }
+                circleButton(paused ? "play.fill" : "pause.fill", label: paused ? "继续播放" : "暂停") { paused.toggle(); bumpControls() }
+                circleButton("forward.fill", label: "下一张") { advance(1); bumpControls() }
             }
             .padding(.bottom, 24)
         }
@@ -163,7 +192,7 @@ struct PhotoFrameView: View {
         .transition(.opacity)
     }
 
-    private func circleButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+    private func circleButton(_ icon: String, label: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(BubuTheme.Font.scaled(20, weight: .bold))
@@ -172,6 +201,7 @@ struct PhotoFrameView: View {
                 .background(.ultraThinMaterial, in: Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     private var emptyState: some View {
@@ -213,13 +243,48 @@ struct PhotoFrameView: View {
 
     private func advance(_ delta: Int) {
         guard !slides.isEmpty else { return }
-        withAnimation(.easeInOut(duration: 1.1)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 1.6)) {
             index = (index + delta + slides.count) % slides.count
         }
     }
 
+    /// 第二大脑今日精选；拿不到时回落到本机相册。
+    private func loadBrainSlides() async {
+        guard let client else { brainSlides = nil; return }
+        do {
+            let list = try await client.get("api/online-timeline/highlights", as: FrameHighlightList.self)
+            let birthday = profiles.first?.birthday
+            brainSlides = list.items.compactMap { item in
+                let path = item.largeUrl ?? item.previewUrl
+                guard let path, !path.isEmpty else { return nil }
+                let date = item.capturedAt.flatMap(BubuLearningDates.parseISO)
+                    ?? item.localDay.flatMap(BubuLearningDates.day)
+                let caption = (item.description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return FrameSlide(
+                    id: "brain-" + item.id, media: nil, remotePath: path,
+                    caption: String((caption.isEmpty ? "布布的一天" : caption).prefix(40)),
+                    dateText: date.map(BubuDateFormat.yearMonthDay) ?? "",
+                    ageText: pair(birthday, date).map { AgeCalculator.ageDescription(birthday: $0.0, at: $0.1) } ?? "",
+                    isOnThisDay: false, seed: Int(item.id.bubuStableHash & 0x7FFF_FFFF_FFFF_FFFF))
+            }
+        } catch is CancellationError {
+        } catch {
+            brainSlides = []
+        }
+    }
+
+    private func pair(_ a: Date?, _ b: Date?) -> (Date, Date)? {
+        guard let a, let b else { return nil }
+        return (a, b)
+    }
+
     /// 组织播放列表：那年今日（按年份新→旧）优先，其余精选/近照打散，营造惊喜。
     private func buildSlides() {
+        if usesBrain, let brain = brainSlides, !brain.isEmpty {
+            slides = brain
+            if index >= slides.count { index = 0 }
+            return
+        }
         let cal = Calendar.current
         let today = cal.dateComponents([.month, .day], from: .now)
         let birthday = profiles.first?.birthday
@@ -238,10 +303,10 @@ struct PhotoFrameView: View {
                 : (entry.title?.isEmpty == false ? entry.title! : "布布的一天")
             let age = birthday.map { AgeCalculator.ageDescription(birthday: $0, at: entry.happenedAt) } ?? ""
             let slide = FrameSlide(
-                id: photo.id, media: photo,
+                id: photo.id.uuidString, media: photo, remotePath: nil,
                 caption: String(caption.prefix(40)),
                 dateText: BubuDateFormat.yearMonthDay(entry.happenedAt),
-                ageText: age, isOnThisDay: isOnThisDay)
+                ageText: age, isOnThisDay: isOnThisDay, seed: photo.id.bubuStableSeed)
             if isOnThisDay { onThisDay.append(slide) } else { rest.append(slide) }
         }
         onThisDay.sort { $0.dateText > $1.dateText }        // 年份新→旧
@@ -258,9 +323,14 @@ struct PhotoFrameView: View {
             guard slides.indices.contains(i) else { return }
             let s = slides[i]
             if images[s.id] == nil {
-                let img = await env.thumbnails.image(
-                    mediaId: s.media.id, thumbnailFileName: s.media.thumbnailFileName,
-                    localFileName: s.media.localFileName, isPhoto: true, size: .wall)
+                var img: UIImage?
+                if let media = s.media {
+                    img = await env.thumbnails.image(
+                        mediaId: media.id, thumbnailFileName: media.thumbnailFileName,
+                        localFileName: media.localFileName, isPhoto: true, size: .wall)
+                } else if let path = s.remotePath, let client, let data = try? await client.mediaData(path, cache: true) {
+                    img = await Self.decode(data)
+                }
                 if let img { images[s.id] = img }
             }
         }
@@ -270,18 +340,40 @@ struct PhotoFrameView: View {
             .filter { slides.indices.contains($0) }.map { slides[$0].id })
         images = images.filter { keep.contains($0.key) }
     }
+
+    @concurrent
+    private static func decode(_ data: Data) async -> UIImage? {
+        guard let image = UIImage(data: data) else { return nil }
+        return await image.byPreparingForDisplay() ?? image
+    }
 }
 
 // MARK: - 数据 & 组件
 
+private enum FrameSource: String { case local, brain }
+
 private struct FrameSlide: Identifiable {
-    let id: UUID
-    let media: Media
+    let id: String
+    let media: Media?
+    /// 第二大脑素材的预览地址（需要带凭证读取）。
+    let remotePath: String?
     let caption: String
     let dateText: String
     let ageText: String
     let isOnThisDay: Bool
+    let seed: Int
 }
+
+/// `online-timeline/highlights` 里相框用到的字段。
+private nonisolated struct FrameHighlight: Decodable, Sendable {
+    let id: String
+    let description: String?
+    let capturedAt: String?
+    let localDay: String?
+    let previewUrl: String?
+    let largeUrl: String?
+}
+private nonisolated struct FrameHighlightList: Decodable, Sendable { let items: [FrameHighlight] }
 
 private struct TickKey: Equatable {
     let index: Int
@@ -292,6 +384,7 @@ private struct TickKey: Equatable {
 private struct RebuildKey: Equatable {
     let day: Date
     let count: Int
+    let source: String
 }
 
 /// 缓慢推拉 + 平移的 Ken Burns 效果，方向由 seed 决定（同一帧稳定，不随父级每秒重绘跳动）。

@@ -40,18 +40,22 @@ CONCEPTS = (
 CHILD_TOKENS = ("布布", "袁晨希", "女婴", "婴儿", "幼童", "幼儿", "女童", "小女孩", "女孩", "宝宝", "她", "孩子")
 TITLES = {key: title for key, title, _, _ in CONCEPTS}
 STATUSES = {"candidate", "confirmed", "dismissed"}
+# A type the family dismissed this often only proposes clauses naming her explicitly, listed last.
+DISMISS_LIMIT = 3
+NAMES = ("布布", "袁晨希")
 
 
-def matches(row, words, excluded) -> bool:
+def matches(row, words, excluded, strict=False) -> bool:
     """A concept word in a description clause that also names her; tags/events only when there is no description."""
     item = row["item"]
     texts = [str((item.get("analysis") or {}).get("description") or ""), row["description"]]
+    tokens = NAMES if strict else CHILD_TOKENS
     for text in texts:
         for clause in re.split(r"[，,。；;！!？?\n]", text):
             if any(w in clause for w in words) and not any(x in clause for x in excluded) \
-                    and any(t in clause for t in CHILD_TOKENS):
+                    and any(t in clause for t in tokens):
                 return True
-    if any(texts):
+    if any(texts) or strict:
         return False
     labels = " ".join(row.get("tags") or []) + " " + (row.get("event") or "")
     return any(w in labels for w in words) and not any(x in labels for x in excluded)
@@ -75,12 +79,14 @@ class Firsts:
         stored = self._rows()
         confirmed = {r["concept"] for r in stored if r["status"] == "confirmed"}
         dismissed = {(r["concept"], r["item_id"]) for r in stored if r["status"] == "dismissed"}
+        weak = self._weak(stored)
         found = {}
         for key, _, words, excluded in CONCEPTS:
             if key in confirmed:
                 continue
             for row in rows:
-                if row["day"] and (key, row["item"]["file_id"]) not in dismissed and matches(row, words, excluded):
+                if row["day"] and (key, row["item"]["file_id"]) not in dismissed \
+                        and matches(row, words, excluded, strict=key in weak):
                     found[key] = row
                     break
         now = time.time()
@@ -94,12 +100,21 @@ class Firsts:
             db.execute("COMMIT")
         return {"candidates": len(found), "confirmed": len(confirmed)}
 
+    @staticmethod
+    def _weak(stored):
+        counts = {}
+        for r in stored:
+            if r["status"] == "dismissed":
+                counts[r["concept"]] = counts.get(r["concept"], 0) + 1
+        return {k for k, n in counts.items() if n >= DISMISS_LIMIT}
+
     def _public(self, row, by_id):
         item = by_id.get(row["item_id"])
         if item is None:
             return None
         public = self.timeline.public(item)
-        return {"id": row["id"], "concept": row["concept"], "title": TITLES.get(row["concept"], row["concept"]),
+        return {"id": row["id"], "concept": row["concept"], "kind": row["concept"],
+                "title": TITLES.get(row["concept"], row["concept"]),
                 "date": row["day"], "item_id": row["item_id"], "preview_url": public["preview_url"],
                 "description": public["description"], "status": row["status"]}
 
@@ -108,7 +123,10 @@ class Firsts:
         if status not in {"candidate", "confirmed", "all"}:
             raise ValueError("状态无效")
         by_id = self.timeline.snapshot()["rows_by_id"]
-        rows = [r for r in self._rows() if r["status"] != "dismissed" and (status == "all" or r["status"] == status)]
+        stored = self._rows()
+        weak = self._weak(stored)
+        rows = [r for r in stored if r["status"] != "dismissed" and (status == "all" or r["status"] == status)]
+        rows.sort(key=lambda r: r["status"] == "candidate" and r["concept"] in weak)  # stable: keeps day order
         return {"items": [p for p in (self._public(r, by_id) for r in rows) if p]}
 
     def confirmed_in_month(self, month):
@@ -130,7 +148,7 @@ class Firsts:
         if status == "dismissed":
             self.compute()  # propose this concept's next occurrence right away
         return self._public(row, self.timeline.snapshot()["rows_by_id"]) or {
-            "id": row["id"], "concept": row["concept"], "title": TITLES.get(row["concept"], row["concept"]),
+            "id": row["id"], "concept": row["concept"], "kind": row["concept"], "title": TITLES.get(row["concept"], row["concept"]),
             "date": row["day"], "item_id": row["item_id"], "preview_url": None, "description": "", "status": status}
 
     def confirm(self, scope, fid):

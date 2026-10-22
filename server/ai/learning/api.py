@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import threading
@@ -22,6 +23,10 @@ from .models import Segment
 from .store import Conflict, Missing
 
 MAX_JSON_BYTES = 256 * 1024
+BRAIN_UNAVAILABLE = '家里的服务器暂时读不到素材库，请稍后重试。'
+# Routes that may touch the external library disk share a few of the 40 request
+# threads; when those are all busy (or stuck) the rest of the service stays up.
+BRAIN_SLOTS = threading.BoundedSemaphore(8)
 COURSE_UPLOAD_PATH = '/learning/api/courses'
 MAX_COURSE_FILE_BYTES = 256 * 1024 * 1024
 MAX_COURSE_UPLOAD_BYTES = 8 * MAX_COURSE_FILE_BYTES
@@ -65,7 +70,28 @@ class Segments(Input):
 
 
 class Decision(Input):
+    decision: Literal['yes', 'no', 'undo']
+
+
+class BatchDecision(Input):
+    id: str = Field(pattern=r'^[a-f0-9]{24}$')
     decision: Literal['yes', 'no']
+
+
+class RecognitionBatch(Input):
+    decisions: list[BatchDecision] = Field(min_length=1, max_length=50)
+
+
+class Question(Input):
+    question: str = Field(min_length=1, max_length=200)
+
+
+class Comment(Input):
+    text: str = Field(min_length=1, max_length=300)
+
+
+class Heart(Input):
+    on: bool
 
 
 class Attempt(Input):
@@ -128,26 +154,40 @@ def _call(service_factory, method: str, *args):
         raise HTTPException(422, '请求内容无效，请检查后重试。') from None
 
 
+@contextmanager
+def _brain_slot():
+    if not BRAIN_SLOTS.acquire(timeout=2):
+        raise HTTPException(503, BRAIN_UNAVAILABLE)
+    try:
+        yield
+    finally:
+        BRAIN_SLOTS.release()
+
+
 def _timeline(service_factory, method: str, scope, *args):
     timeline = getattr(service_factory(), 'online_timeline', None)
     if timeline is None:
         raise HTTPException(503, '布布专属素材库尚未启用。')
     try:
-        return getattr(timeline, method)(scope, *args)
+        with _brain_slot():
+            return getattr(timeline, method)(scope, *args)
     except Missing:
         raise HTTPException(404, '素材已不在布布专属库中。') from None
     except ValueError:
         raise HTTPException(422, '筛选条件无效，请检查后重试。') from None
 
 
-def _feature(service_factory, name: str, method: str, scope, *args):
+def _feature(service_factory, name: str, method: str, scope, *args, brain: bool = True):
     """Family features built on the online timeline; 503 until a person is configured."""
     from .brain_bridge import BrainUnavailable
     feature = getattr(service_factory(), name, None)
     if feature is None:
         raise HTTPException(503, '布布专属素材库尚未启用。')
     try:
-        return getattr(feature, method)(scope, *args)
+        if not brain:
+            return getattr(feature, method)(scope, *args)
+        with _brain_slot():
+            return getattr(feature, method)(scope, *args)
     except Missing:
         raise HTTPException(404, '内容不存在或已移除。') from None
     except Conflict:
@@ -155,7 +195,7 @@ def _feature(service_factory, name: str, method: str, scope, *args):
     except ValueError:
         raise HTTPException(422, '请求内容无效，请检查后重试。') from None
     except BrainUnavailable:
-        raise HTTPException(503, '第二大脑素材库暂时不可用，请稍后重试。') from None
+        raise HTTPException(503, BRAIN_UNAVAILABLE) from None
 
 
 def _today() -> str:
@@ -380,10 +420,65 @@ def install_learning(app: FastAPI, service_factory: Callable) -> None:
     def recognition_preview(fid: str, scope: FamilyScope = Depends(_scope)):
         return _file(_feature(service_factory, 'recognition', 'preview', scope, fid))
 
+    @router.post('/recognition/batch')
+    def recognition_batch(request: Request, scope: FamilyScope = Depends(_scope)):
+        scope.require_review(); body = _input(request, RecognitionBatch)
+        return _feature(service_factory, 'recognition', 'batch', scope, [d.model_dump() for d in body.decisions])
+
+    @router.get('/recognition/history')
+    def recognition_history(limit: int = Query(50, ge=1, le=200), scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'recognition', 'history', scope, limit)
+
     @router.post('/recognition/{fid}')
     def recognition_decide(fid: str, request: Request, scope: FamilyScope = Depends(_scope)):
         scope.require_review(); body = _input(request, Decision)
         return _feature(service_factory, 'recognition', 'decide', scope, fid, body.decision)
+
+    @router.get('/status')
+    def status(scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'status', 'status', scope, brain=False)
+
+    @router.post('/ask')
+    def ask(request: Request, scope: FamilyScope = Depends(_scope)):
+        body = _input(request, Question)
+        return _feature(service_factory, 'ask', 'ask', scope, body.question)
+
+    @router.get('/words')
+    def words(scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'words', 'words', scope)
+
+    @router.get('/places')
+    def places(scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'places', 'places', scope)
+
+    @router.get('/events')
+    def events(start: str | None = Query(None, max_length=10), end: str | None = Query(None, max_length=10),
+               scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'places', 'events', scope, start, end)
+
+    @router.get('/social/recent')
+    def social_recent(limit: int = Query(20, ge=1, le=100), scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'social', 'recent', scope, limit)
+
+    @router.get('/online-timeline/{fid}/social')
+    def item_social(fid: str, scope: FamilyScope = Depends(_scope)):
+        return _feature(service_factory, 'social', 'social', scope, fid)
+
+    @router.post('/online-timeline/{fid}/comments')
+    def add_comment(fid: str, request: Request, scope: FamilyScope = Depends(_scope)):
+        # Any family member may comment, not only reviewers; CSRF is enforced by _scope.
+        body = _input(request, Comment)
+        return _feature(service_factory, 'social', 'comment', scope, fid, body.text)
+
+    @router.delete('/online-timeline/{fid}/comments/{cid}', status_code=204)
+    def delete_comment(fid: str, cid: str, scope: FamilyScope = Depends(_scope)):
+        _feature(service_factory, 'social', 'delete_comment', scope, fid, cid)
+        return Response(status_code=204)
+
+    @router.post('/online-timeline/{fid}/heart')
+    def heart(fid: str, request: Request, scope: FamilyScope = Depends(_scope)):
+        body = _input(request, Heart)
+        return _feature(service_factory, 'social', 'heart', scope, fid, body.on)
 
     @router.get('/online-timeline/{fid}/preview')
     def online_preview(fid: str, size: Literal['thumb', 'large'] = 'thumb', scope: FamilyScope = Depends(_scope)):

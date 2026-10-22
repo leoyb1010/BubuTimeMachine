@@ -108,8 +108,8 @@ class Voices:
                                                   SCHEMA, effort="low")
                 heard = re.sub(r"\s+", " ", str(reply.get("heard") or "")).strip()[:200]
                 state = "ready" if reply.get("child_speaks") is True and heard else "rejected"
-            except Exception:
-                log.warning("voice clip failed")
+            except Exception as exc:
+                log.warning("voice clip failed error=%s", type(exc).__name__)
                 state = "pending" if row["attempts"] + 1 < 3 else "failed"
             if state != "ready":
                 (self.directory / (row["id"] + ".m4a")).unlink(missing_ok=True)

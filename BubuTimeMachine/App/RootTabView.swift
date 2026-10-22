@@ -101,6 +101,12 @@ struct RootTabView: View {
             .onChange(of: router.pendingTab) { _, _ in consumePendingRoute() }
             .onChange(of: router.pendingQuickCapture) { _, _ in consumePendingRoute() }
             .onChange(of: router.pendingEntryID) { _, _ in openPendingTimelineEntryIfReady() }
+            .sheet(item: Binding(get: { router.pendingAsk.map(PendingAsk.init) }, set: { _ in router.pendingAsk = nil })) { ask in
+                NavigationStack {
+                    AskBubuView(initialQuestion: ask.question)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { router.pendingAsk = nil } } }
+                }
+            }
             .onChange(of: selection) { _, tab in
                 if tab == 1 { openPendingTimelineEntryIfReady() }
             }
@@ -302,4 +308,9 @@ private struct BubuRecordAccessory: View {
         .accessibilityIdentifier("root.record")
         .accessibilityLabel("记录此刻")
     }
+}
+
+private struct PendingAsk: Identifiable {
+    let question: String
+    var id: String { question }
 }

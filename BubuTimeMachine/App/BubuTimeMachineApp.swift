@@ -147,7 +147,7 @@ struct BubuTimeMachineApp: App {
                     WatchConnectivityManager.shared.retryPendingVoiceImports()   // 重试上次导入失败的手表语音（W-P1-3）
                     env.refreshWidgetSnapshot(context: modelContainer.mainContext)
                     pushWatchSnapshot()
-                    DailyPicksStore.shared.refreshIfNeeded(env: env)   // 手表/小组件的每日精选（自带 30 分钟节流）
+                    DailyPicksStore.shared.refreshIfNeeded(env: env)   // 手表/小组件的每日精选（需已同意第二大脑说明，每天成功刷新一次）
                 }
         }
         .modelContainer(modelContainer)

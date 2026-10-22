@@ -7,6 +7,7 @@ photo to the online timeline (provenance family_confirmed); 'no' removes it.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 import threading
 import time
@@ -96,13 +97,58 @@ class Recognition:
     def decide(self, scope, fid, decision):
         self.timeline.authorize(scope)
         scope.require_review()
-        if decision not in {"yes", "no"}:
+        if decision not in {"yes", "no", "undo"}:
             raise ValueError("决定无效")
+        if decision == "undo":
+            # Back to the second brain's own judgement; an unknown id is simply a no-op.
+            if not isinstance(fid, str) or not re.fullmatch(r"[a-f0-9]{24}", fid):
+                raise Missing("素材不存在")
+            with self.store.db() as db:
+                db.execute("DELETE FROM recognition_decisions WHERE family_id=? AND file_id=?", (self.family, fid))
+            self.timeline.invalidate()
+            return {"id": fid, "decision": "undo"}
         if self._item(fid) is None:
             raise Missing("素材不存在")
-        with self.store.db() as db:
-            db.execute("INSERT INTO recognition_decisions VALUES(?,?,?,?,?) ON CONFLICT(family_id,file_id) DO UPDATE SET "
-                       "decision=excluded.decision,decided_by=excluded.decided_by,decided_at=excluded.decided_at",
-                       (self.family, fid, decision, scope.user_id, time.time()))
-        self.timeline.invalidate()
+        self._save([(fid, decision)], scope.user_id)
         return {"id": fid, "decision": decision}
+
+    def _save(self, pairs, user):
+        now = time.time()
+        with self.store.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for fid, decision in pairs:
+                db.execute("INSERT INTO recognition_decisions VALUES(?,?,?,?,?) ON CONFLICT(family_id,file_id) DO UPDATE SET "
+                           "decision=excluded.decision,decided_by=excluded.decided_by,decided_at=excluded.decided_at",
+                           (self.family, fid, decision, user, now))
+            db.execute("COMMIT")
+        self.timeline.invalidate()
+
+    def batch(self, scope, decisions_):
+        """Up to 50 yes/no answers at once; ids the family can no longer see are skipped."""
+        self.timeline.authorize(scope)
+        scope.require_review()
+        if not isinstance(decisions_, list) or not 1 <= len(decisions_) <= 50:
+            raise ValueError("一次最多50条")
+        pairs = {}
+        for entry in decisions_:
+            fid, decision = entry.get("id"), entry.get("decision")
+            if decision not in {"yes", "no"}:
+                raise ValueError("决定无效")
+            pairs[fid] = decision
+        known = {i["file_id"] for i in self._candidates()} | set(self.timeline.snapshot()["by_id"]) | set(decisions(self.store, self.family))
+        pairs = [(fid, d) for fid, d in pairs.items() if isinstance(fid, str) and fid in known]
+        if pairs:
+            self._save(pairs, scope.user_id)
+        return {"applied": len(pairs)}
+
+    def history(self, scope, limit=50):
+        self.timeline.authorize(scope)
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("数量无效")
+        _ensure(self.store)
+        with self.store.db() as db:
+            rows = db.execute("SELECT file_id,decision,decided_at FROM recognition_decisions WHERE family_id=? "
+                              "ORDER BY decided_at DESC,file_id LIMIT ?", (self.family, limit)).fetchall()
+        return {"items": [{"id": r["file_id"], "decision": r["decision"],
+                           "decided_at": datetime.fromtimestamp(r["decided_at"], timezone.utc).isoformat(),
+                           "preview_url": "/learning/api/recognition/%s/preview" % r["file_id"]} for r in rows]}

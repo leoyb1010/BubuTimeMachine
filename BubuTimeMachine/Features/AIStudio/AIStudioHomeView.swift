@@ -46,6 +46,18 @@ struct AIStudioHomeView: View {
                                    subtitle: "每月 1 号自动出刊", tint: BubuTheme.Color.mint) {
                         MonthlyReportView()
                     }
+                    capabilityTile(icon: "text.bubble.fill", title: "布布问答",
+                                   subtitle: "问问家里的相册", tint: BubuTheme.Color.pink) {
+                        AskBubuView()
+                    }
+                    capabilityTile(icon: "birthday.cake.fill", title: "生日影片",
+                                   subtitle: "一年的瞬间拼成短片", tint: BubuTheme.Color.butter) {
+                        BirthdayFilmView()
+                    }
+                    capabilityTile(icon: "map.fill", title: "去过的地方",
+                                   subtitle: "照片里的小地图", tint: BubuTheme.Color.sky) {
+                        PlacesMapView()
+                    }
                 }
 
                 section("声音", subtitle: "听见布布慢慢长大") {
@@ -61,6 +73,10 @@ struct AIStudioHomeView: View {
                     capabilityTile(icon: "quote.bubble.fill", title: "布布的声音",
                                    subtitle: "视频里她自己说的话", tint: BubuTheme.Color.pink) {
                         BubuVoicesView()
+                    }
+                    capabilityTile(icon: "character.bubble.fill", title: "语言成长线",
+                                   subtitle: "会说的词一月月变多", tint: BubuTheme.Color.peach) {
+                        WordsGrowthView()
                     }
                 }
 

@@ -480,8 +480,8 @@ struct FaceTimelapsePlayer: View {
             let index = min(Int(pos), frames.count - 1)
             let nextIndex = (index + 1) % frames.count
             let fraction = pos - Double(index)
-            // 每帧前 55% 静止，后 45% 平滑淡入下一帧。
-            let t = smoothstep((fraction - 0.55) / 0.45)
+            // 每帧前 55% 静止，后 45% 平滑淡入下一帧；减弱动态效果时直接切换，不做淡入。
+            let t = reduceMotion ? (fraction >= 0.999 ? 1 : 0) : smoothstep((fraction - 0.55) / 0.45)
             let shown = t > 0.5 ? frames[nextIndex] : frames[index]
             VStack(spacing: BubuTheme.Spacing.m) {
                 ZStack(alignment: .bottomLeading) {
@@ -531,15 +531,31 @@ struct FaceTimelapsePlayer: View {
                         get: { min(pos, Double(frames.count - 1)) },
                         set: { value in
                             playing = false
-                            anchorPosition = value
+                            // 减弱动态效果时拖动吸附到整月，画面一张张硬切。
+                            anchorPosition = reduceMotion ? value.rounded() : value
                         }
                     ), in: 0...Double(max(frames.count - 1, 1)))
                     .tint(BubuTheme.Color.primary)
                     .accessibilityLabel("月龄")
                     .accessibilityValue(shown.label)
                 }
+                if reduceMotion && !playing {
+                    Text("已开启“减弱动态效果”，拖动滑块一个月一个月地看")
+                        .font(BubuTheme.Font.caption)
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
+        // 减弱动态效果：不自动播放，改为手动拖动；中途打开该设置也立即停下。
+        .onAppear { if reduceMotion { pause() } }
+        .onChange(of: reduceMotion) { _, reduce in if reduce { pause() } }
+    }
+
+    private func pause() {
+        guard playing else { return }
+        anchorPosition = position(at: .now).rounded(.down)
+        playing = false
     }
 
     private func smoothstep(_ x: Double) -> Double {

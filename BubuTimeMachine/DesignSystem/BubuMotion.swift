@@ -130,3 +130,56 @@ extension View {
         modifier(BubuTabContentTransition(isActive: isActive))
     }
 }
+
+// MARK: - 减少动态效果
+/// 新代码统一走这里，而不是各处判断 reduceMotion。
+extension BubuMotion {
+    /// 给 withAnimation / .animation 用：减少动态效果开启时返回 nil（直接到位）。
+    static func allowed(_ animation: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+
+    /// 插入/移除过渡：减少动态效果开启时只淡入淡出，不位移。
+    static func entering(edge: Edge = .bottom, reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: edge))
+    }
+}
+
+/// 轻轻左右摇摆（如生日蛋糕），循环呼吸节奏；减少动态效果开启时完全静止。
+private struct BubuBreathingWiggle: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let degrees: Double
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content
+                .phaseAnimator([0.0, 1.0]) { view, phase in view.rotationEffect(.degrees(phase * degrees * 2 - degrees)) }
+                    animation: { _ in BubuMotion.breathe }
+        }
+    }
+}
+
+/// 横向轮播卡片滚出时的缩小 + 变淡；减少动态效果开启时只变淡。
+private struct BubuCarouselTransition: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let shrink = reduceMotion ? 0 : 0.06
+        content.scrollTransition(.interactive, axis: .horizontal) { view, phase in
+            view.scaleEffect(1 - abs(phase.value) * shrink).opacity(1 - abs(phase.value) * 0.25)
+        }
+    }
+}
+
+extension View {
+    func bubuBreathingWiggle(degrees: Double = 4) -> some View {
+        modifier(BubuBreathingWiggle(degrees: degrees))
+    }
+
+    func bubuCarouselTransition() -> some View {
+        modifier(BubuCarouselTransition())
+    }
+}

@@ -48,6 +48,18 @@ class BrainSnapshotChanged(BrainUnavailable):
     """Restart this pagination pass; deduplicate by source_instance_id, not offset."""
 
 
+class BrainBlocked(BrainUnavailable):
+    """The model refused this particular request (safety filter, length, rejected input)."""
+
+
+class BrainTimeout(BrainUnavailable):
+    """The model call ran past its deadline."""
+
+
+# The library's model gateway caps one call at 180 s; leave headroom for process start-up.
+MODEL_TIMEOUT = 210
+
+
 def _encoded(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -558,15 +570,27 @@ class BrainBridge:
             "analyzed_at": row["at"] if row else None, "warnings": warnings,
         }
 
-    def complete_json(self, system: str, user: str | list[dict], schema: dict, *, effort: str = "high") -> dict:
+    def complete_json(self, system: str, user: str | list[dict], schema: dict, *, effort: str = "high",
+                      timeout: float = MODEL_TIMEOUT) -> dict:
         """Explicit model operation; domain validation remains with its caller."""
         if effort not in {"low", "medium", "high"}:
             raise ValueError("推理强度无效")
         payload = _encoded({**validate_request(system, user, schema), "effort": effort})
         command = [self.python_executable, "-I", "-B", str(Path(__file__).with_name("brain_bridge_runner.py")), str(self.root)]
         try:
-            result = subprocess.run(command, input=payload, text=True, capture_output=True, timeout=480, check=False)
-            if result.returncode != 0 or len(result.stdout.encode()) > 1_000_000:
+            result = subprocess.run(command, input=payload, text=True, capture_output=True,
+                                    timeout=min(float(timeout), MODEL_TIMEOUT), check=False)
+            if len(result.stdout.encode()) > 1_000_000:
+                raise BrainUnavailable("第二大脑 Gemini 暂不可用。")
+            if result.returncode != 0:
+                try:
+                    error = json.loads(result.stdout).get("error")
+                except (ValueError, AttributeError):
+                    error = None
+                if error == "blocked":
+                    raise BrainBlocked("第二大脑 Gemini 拒绝了这次请求。")
+                if error == "timeout":
+                    raise BrainTimeout("第二大脑 Gemini 响应超时。")
                 raise BrainUnavailable("第二大脑 Gemini 暂不可用。")
             response = json.loads(result.stdout)
             if response.get("ok") is not True or not isinstance(response.get("result"), dict):
@@ -575,8 +599,26 @@ class BrainBridge:
             return response["result"]
         except BrainUnavailable:
             raise
+        except subprocess.TimeoutExpired as exc:
+            raise BrainTimeout("第二大脑 Gemini 响应超时。") from exc
         except (OSError, subprocess.SubprocessError, ValueError, AttributeError, TypeError) as exc:
             raise BrainUnavailable("第二大脑 Gemini 暂不可用。") from exc
+
+    def auto_events(self) -> list[dict]:
+        """The library's own automatic event albums (read-only); members are filtered by the caller."""
+        with self._database() as connection:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='media_albums'").fetchone():
+                return []
+            albums = {str(row["id"]): {"id": str(row["id"]), "title": str(row["name"] or ""), "story": str(row["story"] or ""),
+                                       "day": row["day"], "place": str(row["place"] or ""), "cover_id": row["cover_id"],
+                                       "file_ids": []}
+                      for row in connection.execute("SELECT id,name,story,day,place,cover_id FROM media_albums "
+                                                    "WHERE kind='auto_event'")}
+            for row in connection.execute("SELECT album_id,file_id FROM album_items ORDER BY album_id,position"):
+                album = albums.get(str(row["album_id"]))
+                if album is not None and isinstance(row["file_id"], str):
+                    album["file_ids"].append(row["file_id"])
+            return list(albums.values())
 
 
 def _received_iso(value) -> str | None:

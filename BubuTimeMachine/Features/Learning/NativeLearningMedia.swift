@@ -12,6 +12,7 @@ nonisolated enum NativeLearningPlaybackPolicy {
 }
 
 /// Authenticated media is loaded through the client, never through an unauthenticated AsyncImage URL.
+/// Decoded at the displayed pixel size (bucketed) so a grid of thumbnails stays small in memory.
 struct LearningRemoteImage: View {
     let path: String
     let client: BubuLearningClient
@@ -19,21 +20,26 @@ struct LearningRemoteImage: View {
     var contentMode: ContentMode = .fit
     var diskCache = false
     var maxHeight: CGFloat? = nil
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
+    @State private var imagePath = ""
     @State private var failed = false
     @State private var retry = 0
+    /// Longest side in pixels; 0 until the first layout.
+    @State private var bucket = 0
 
-    private var key: String { client.scope + "|" + path }
+    private var key: String { client.scope + "|" + path + "|" + String(bucket) }
 
     var body: some View {
         ZStack {
-            if let image = image ?? LearningImageMemory.shared.image(key) {
+            if let image = cached ?? (imagePath == path ? image : nil) {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
                     .accessibilityLabel(label)
             } else if failed {
                 VStack(spacing: BubuTheme.Spacing.s) {
                     Image(systemName: "photo.badge.exclamationmark").font(.title3)
                     Button("重新加载") { retry += 1 }.font(BubuTheme.Font.caption).buttonStyle(.bordered)
+                        .accessibilityIdentifier("remote-image.retry")
                 }
                 .foregroundStyle(BubuTheme.Color.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,23 +48,39 @@ struct LearningRemoteImage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: maxHeight)
+        .onGeometryChange(for: CGFloat.self) { max($0.size.width, $0.size.height) } action: { side in
+            guard side > 0 else { return }
+            // Only grow: a smaller layout reuses the sharper image already decoded.
+            let wanted = LearningImageDecoder.bucket(forPixels: side * displayScale)
+            if wanted > bucket { bucket = wanted }
+        }
         .task(id: "\(key)|\(retry)") {
-            guard LearningImageMemory.shared.image(key) == nil || retry > 0 else { return }
+            guard bucket > 0, cached == nil || retry > 0 else { return }
             failed = false
             do {
                 let data = try await client.mediaData(path, cache: diskCache)
                 try Task.checkCancellation()
-                guard let decoded = await Self.decode(data) else { failed = true; return }
+                guard let decoded = await Self.decode(data, maxPixel: bucket) else { failed = true; return }
                 LearningImageMemory.shared.store(decoded, for: key)
                 image = decoded
-            } catch is CancellationError {} catch { failed = true }
+                imagePath = path
+            } catch where isCancellation(error) {
+            } catch { failed = true }
         }
     }
 
+    /// Any already-decoded copy at this size or sharper.
+    private var cached: UIImage? {
+        guard bucket > 0 else { return nil }
+        for size in LearningImageDecoder.buckets where size >= bucket {
+            if let hit = LearningImageMemory.shared.image(client.scope + "|" + path + "|" + String(size)) { return hit }
+        }
+        return nil
+    }
+
     @concurrent
-    private static func decode(_ data: Data) async -> UIImage? {
-        guard let image = UIImage(data: data) else { return nil }
-        return await image.byPreparingForDisplay() ?? image
+    private static func decode(_ data: Data, maxPixel: Int) async -> UIImage? {
+        LearningImageDecoder.downsample(data, maxPixel: maxPixel)
     }
 }
 
@@ -148,7 +170,7 @@ final class NativeLearningAudioPlayer {
                 if let temporary { try? FileManager.default.removeItem(at: temporary) }
                 guard self.generation == attempt else { return }
                 self.stop()
-                if !(error is CancellationError) {
+                if !isCancellation(error) {
                     self.errorText = "原声暂时无法播放，请检查连接后重试。"
                 }
             }
