@@ -19,11 +19,13 @@ from .store import Conflict, Missing, digest
 log = logging.getLogger('bubu.learning.worker')
 
 class LearningWorker:
-    def __init__(self, store, bridge, processor, *, family, child, pocketbase=None):
+    def __init__(self, store, bridge, processor, *, family, child, pocketbase=None, subject=None):
         if not family or not child: raise ValueError('学习任务须配置家庭和孩子')
         self.store, self.bridge, self.processor = store, bridge, processor
         self.family, self.child = family, child
         self.pocketbase = pocketbase
+        self.subject = subject
+        self.captioned_at = 0.0
 
     @contextmanager
     def lock(self):
@@ -149,9 +151,22 @@ class LearningWorker:
             log.warning('learning job failed kind=%s attempt=%d',job['kind'],job['attempts'])
         return True
 
+    def caption_new_timeline_items(self):
+        """Keep newly added Bubu photos in family wording; one small batch per 10 minutes."""
+        if not self.subject or time.monotonic()-self.captioned_at<600:return
+        self.captioned_at=time.monotonic()
+        from .timeline_captions import TimelineCaptions
+        try:
+            captions=TimelineCaptions(self.store)
+            todo=captions.pending(self.family,self.bridge.subject_snapshot(self.subject)['items'])
+            if todo:captions.rewrite(self.bridge,self.family,todo)
+        except Exception:
+            log.warning('timeline caption batch failed')
+
     def run(self,once=False):
         with self.lock():
             while True:
+                self.caption_new_timeline_items()
                 for _ in range(10):
                     self.process_media_requests()
                     if not self.process_one():break

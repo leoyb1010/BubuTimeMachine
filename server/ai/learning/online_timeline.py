@@ -19,6 +19,7 @@ from fastapi import HTTPException
 
 from .brain_bridge import BrainUnavailable
 from .store import Missing, digest, valid_day
+from .timeline_captions import TimelineCaptions
 
 LOCAL = ZoneInfo('Asia/Shanghai')
 PREVIEW_SIZES = {'thumb': 480, 'large': 1600}
@@ -30,6 +31,7 @@ class OnlineTimeline:
     def __init__(self, bridge, processor, store, family, child, subject, *, ttl=30):
         self.bridge, self.processor, self.store = bridge, processor, store
         self.family, self.child, self.subject, self.ttl = family, child, subject, ttl
+        self.captions = TimelineCaptions(store)
         self.lock = threading.RLock()
         self.cached = None
         self.cached_at = 0.0
@@ -50,6 +52,7 @@ class OnlineTimeline:
             if value.get('complete') is not True:
                 raise HTTPException(503, '第二大脑素材库尚未就绪。')
             items = []
+            family_words = self.captions.overlays(self.family, value['items'])
             for item in value['items']:
                 if item.get('media_type') not in {'photo', 'video'}:
                     continue
@@ -59,10 +62,13 @@ class OnlineTimeline:
                     continue
                 stamp = self.stamp(item.get('captured_at'))
                 day = datetime.fromisoformat(stamp).astimezone(LOCAL).date().isoformat() if stamp else None
-                text = ' '.join([str(analysis.get('description') or ''), str(analysis.get('ocr') or ''),
+                original = str(analysis.get('description') or '')
+                description = family_words.get(item['file_id'], original)
+                text = ' '.join([original, description, str(analysis.get('ocr') or ''),
                                  ' '.join(t for t in analysis.get('tags') or [] if isinstance(t, str)),
                                  ' '.join(str(s.get('text') or '') for s in analysis.get('segments') or [])]).casefold()
-                items.append({'item': item, 'stamp': stamp, 'day': day, 'text': text})
+                items.append({'item': item, 'stamp': stamp, 'day': day, 'text': text,
+                              'description': description, 'adjusted': description != original})
             items.sort(key=lambda row: (row['stamp'] or '', row['item']['file_id']), reverse=True)
             # Only what the feed shows defines a page snapshot; still-unparsed
             # library files must not reset a parent's scroll position.
@@ -96,7 +102,8 @@ class OnlineTimeline:
             except (KeyError, TypeError, ValueError):
                 continue
         return {'id': fid, 'content_hash': sha, 'kind': item['media_type'], 'captured_at': row['stamp'],
-                'local_day': row['day'], 'description': str(analysis.get('description') or ''),
+                'local_day': row['day'], 'description': row.get('description', str(analysis.get('description') or '')),
+                'description_adjusted': bool(row.get('adjusted')),
                 'ocr': str(analysis.get('ocr') or ''),
                 'tags': [t for t in analysis.get('tags') or [] if isinstance(t, str)],
                 'segments': segments, 'label_provenance': provenance,

@@ -223,7 +223,11 @@ def test_complete_json_uses_isolated_runner_and_never_leaks_failure_output(libra
     command, kwargs = calls[0]
     assert command[:3] == ["/test/python", "-I", "-B"]
     assert kwargs["timeout"] > 180
-    assert json.loads(kwargs["input"]) == {"system": "trusted instruction", "user": "source material", "schema": schema}
+    assert json.loads(kwargs["input"]) == {"system": "trusted instruction", "user": "source material", "schema": schema, "effort": "high"}
+    bridge.complete_json("t", "u", schema, effort="low")
+    assert json.loads(calls[-1][1]["input"])["effort"] == "low"
+    with pytest.raises(ValueError):
+        bridge.complete_json("t", "u", schema, effort="max")
     monkeypatch.setattr(brain_bridge.subprocess, "run", lambda *a, **k:
                         subprocess.CompletedProcess(a[0], 1, "PRIVATE RESPONSE", "SECRET TOKEN"))
     with pytest.raises(BrainUnavailable) as caught:

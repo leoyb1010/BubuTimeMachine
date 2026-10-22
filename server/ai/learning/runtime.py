@@ -54,4 +54,5 @@ def get_service():
 def create_worker():
     from .worker import LearningWorker
     store,bridge,processor,pocketbase,timeline,family,child=components()
-    return LearningWorker(store,bridge,processor,family=family,child=child,pocketbase=pocketbase)
+    return LearningWorker(store,bridge,processor,family=family,child=child,pocketbase=pocketbase,
+                          subject=os.environ.get("LEARNING_SUBJECT_ID","").strip() or None)

@@ -457,9 +457,11 @@ class BrainBridge:
             "analyzed_at": row["at"] if row else None, "warnings": warnings,
         }
 
-    def complete_json(self, system: str, user: str | list[dict], schema: dict) -> dict:
+    def complete_json(self, system: str, user: str | list[dict], schema: dict, *, effort: str = "high") -> dict:
         """Explicit model operation; domain validation remains with its caller."""
-        payload = _encoded(validate_request(system, user, schema))
+        if effort not in {"low", "medium", "high"}:
+            raise ValueError("推理强度无效")
+        payload = _encoded({**validate_request(system, user, schema), "effort": effort})
         command = [self.python_executable, "-I", "-B", str(Path(__file__).with_name("brain_bridge_runner.py")), str(self.root)]
         try:
             result = subprocess.run(command, input=payload, text=True, capture_output=True, timeout=480, check=False)

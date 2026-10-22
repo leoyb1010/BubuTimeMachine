@@ -71,6 +71,9 @@ def main() -> int:
         if len(raw.encode()) > MAX_REQUEST_BYTES:
             raise ValueError()
         request = json.loads(raw)
+        effort = request.get("effort", "high")
+        if effort not in {"low", "medium", "high"}:
+            raise ValueError()
         request = validate_request(request["system"], request["user"], request["schema"])
         sys.path.insert(0, str(root / "app"))
         # Keep any library diagnostics off the JSON channel. Failure responses
@@ -81,7 +84,7 @@ def main() -> int:
             brain.PURPOSE.name = "bubu_learning"
             value = brain.chat(
                 [{"role": "system", "content": request["system"]}, {"role": "user", "content": request["user"]}],
-                json_mode=True, effort="high", schema=request["schema"],
+                json_mode=True, effort=effort, schema=request["schema"],
             )
             result = json.loads(value)
             if not isinstance(result, dict):

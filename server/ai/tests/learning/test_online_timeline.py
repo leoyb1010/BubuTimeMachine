@@ -117,3 +117,16 @@ def test_library_failure_is_503_not_an_empty_timeline(timeline):
     with pytest.raises(HTTPException) as error:
         service.feed(scope())
     assert error.value.status_code == 503
+
+
+def test_family_wording_replaces_description_but_search_keeps_both(timeline):
+    service, _, _ = timeline
+    fid = "%024x" % 3
+    with service.store.db() as db:
+        from learning.store import digest
+        db.execute("INSERT INTO timeline_captions VALUES(?,?,?,?,?,?)", (fid, "family-a", digest("画画"), "布布（袁晨希）在画画", 1, 0))
+    service.cached = None
+    row = next(i for i in service.feed(scope())["items"] if i["id"] == fid)
+    assert row["description"] == "布布（袁晨希）在画画" and row["description_adjusted"] is True
+    assert [i["id"] for i in service.feed(scope(), query="袁晨希")["items"]] == [fid]
+    assert fid in [i["id"] for i in service.feed(scope(), query="画画")["items"]]
