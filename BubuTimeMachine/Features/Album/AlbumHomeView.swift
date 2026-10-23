@@ -5,6 +5,7 @@ import SwiftData
 /// 首页「张照片」入口的落地页：自动整理的系统相册（全部/最近/小视频/有地点/按月份/按月龄）。
 struct AlbumHomeView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.bubuLayout) private var layout
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
     @Query private var profiles: [ChildProfile]
@@ -166,7 +167,10 @@ struct AlbumHomeView: View {
             Text(title)
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 12) {
+            // 窄屏 2 列；宽屏按宽度取偶数列，书本折痕时正中留出折痕（页面左右各 16pt 内边距）。
+            LazyVGrid(columns: layout.bubuFoldGrid(compactColumns: 2, minItemWidth: 220, spacing: 10,
+                                                   availableWidth: max(0, layout.safeRect.width - 32)),
+                      spacing: 12) {
                 ForEach(albums) { album in
                     NavigationLink {
                         AlbumDetailView(title: album.title, items: album.items)

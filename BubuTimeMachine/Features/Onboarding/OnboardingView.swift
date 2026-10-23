@@ -7,6 +7,7 @@ import SwiftData
 struct OnboardingView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
+    @Environment(\.bubuLayout) private var layout
 
     @Query private var existingProfiles: [ChildProfile]
     @Query private var existingMembers: [FamilyMember]
@@ -25,24 +26,77 @@ struct OnboardingView: View {
         ZStack {
             backgroundGradient.ignoresSafeArea()
 
-            VStack {
-                progressDots
-                Spacer()
-                Group {
-                    switch step {
-                    case 0: welcomeStep
-                    case 1: birthdayStep
-                    default: memberStep
-                    }
+            // 必须可滚动：Duo 外屏横拿只有 466pt 高，原来的定高 VStack 会把名字输入框和日期选择挤出屏幕；
+            // 键盘弹出时 ScrollView 也会自动让出键盘高度。内容不满一屏时用 minHeight 保持原来的上下居中。
+            GeometryReader { proxy in
+                ScrollView {
+                    stepLayout
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, isSideBySide ? 16 : 28)
+                        .frame(maxWidth: isSideBySide ? 820 : 560)
+                        .frame(maxWidth: .infinity, minHeight: proxy.size.height)
                 }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)))
-                Spacer()
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollDismissesKeyboard(.interactively)
+            }
+        }
+    }
+
+    /// 矮屏（横拿）或书本折痕：插画在左、表单在右；其余上下排。用 AnyLayout 切换，
+    /// 开合 / 旋转时输入框不重建、不丢焦点。
+    private var isSideBySide: Bool { layout.isShort || layout.foldAxis == .vertical }
+
+    private var stepLayout: some View {
+        // 书本折痕时两栏中间留出折痕宽度（内容居中，折痕在正中）。
+        let gap = layout.foldAxis == .vertical ? (layout.fold?.width ?? 0) + 32 : 32
+        let stack = isSideBySide
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: gap))
+            : AnyLayout(VStackLayout(spacing: 22))
+        return stack {
+            VStack(spacing: 0) {
+                progressDots
+                if !isSideBySide { Spacer(minLength: 24) }
+                art
+                    .padding(.top, isSideBySide ? 20 : 0)
+            }
+            .frame(maxWidth: isSideBySide ? .infinity : nil)
+            VStack(spacing: 0) {
+                form
+                if isSideBySide { Color.clear.frame(height: 20) } else { Spacer(minLength: 24) }
                 primaryButton
             }
-            .padding(28)
+            .frame(maxWidth: isSideBySide ? .infinity : nil)
         }
+    }
+
+    /// 每一步的「插画 + 标题」部分。
+    @ViewBuilder
+    private var art: some View {
+        Group {
+            switch step {
+            case 0: welcomeArt
+            case 1: birthdayArt
+            default: memberArt
+            }
+        }
+        .transition(.asymmetric(
+            insertion: .move(edge: .trailing).combined(with: .opacity),
+            removal: .move(edge: .leading).combined(with: .opacity)))
+    }
+
+    /// 每一步的「输入 / 操作」部分。
+    @ViewBuilder
+    private var form: some View {
+        Group {
+            switch step {
+            case 0: welcomeForm
+            case 1: birthdayForm
+            default: memberForm
+            }
+        }
+        .transition(.asymmetric(
+            insertion: .move(edge: .trailing).combined(with: .opacity),
+            removal: .move(edge: .leading).combined(with: .opacity)))
     }
 
     private var backgroundGradient: some View {
@@ -63,46 +117,57 @@ struct OnboardingView: View {
     }
 
     // MARK: Steps
+    // 每一步拆成「插画 + 标题」(art) 和「输入 / 操作」(form) 两块：竖屏上下接着排，横拿左右分开。
 
-    private var welcomeStep: some View {
-        VStack(spacing: 24) {
+    private var welcomeArt: some View {
+        VStack(spacing: isSideBySide ? 16 : 24) {
             Image("BubuLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 112, height: 112)
+                .frame(width: layout.bubuHeight(112, short: 84), height: layout.bubuHeight(112, short: 84))
                 .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 .shadow(color: theme.primary.opacity(0.3), radius: 16, y: 8)
             VStack(spacing: 12) {
                 Text("欢迎来到布布时光机")
                     .font(BubuTheme.Font.scaled(30, weight: .bold))
                     .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .multilineTextAlignment(.center)
                 Text("为布布留住每一个值得记住的此刻，\n陪她长大，等她某天亲手翻开。")
                     .font(BubuTheme.Font.body)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
             }
-            // 第二台设备：家里已经在用了 → 跳过建档，登录后同步回全家的布布
-            Button {
-                joinExisting = true
-                withAnimation(.smooth) { step = 2 }
-            } label: {
-                Text("家里已经在用了？我是来加入的 →")
-                    .font(BubuTheme.Font.caption.weight(.semibold))
-                    .foregroundStyle(theme.textAccent)
-            }
-            .buttonStyle(.plain)
         }
     }
 
-    private var birthdayStep: some View {
+    private var welcomeForm: some View {
+        // 第二台设备：家里已经在用了 → 跳过建档，登录后同步回全家的布布
+        Button {
+            joinExisting = true
+            withAnimation(.smooth) { step = 2 }
+        } label: {
+            Text("家里已经在用了？我是来加入的 →")
+                .font(BubuTheme.Font.caption.weight(.semibold))
+                .foregroundStyle(theme.textAccent)
+                .multilineTextAlignment(.center)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var birthdayArt: some View {
         VStack(spacing: 22) {
             Text("👶")
-                .font(BubuTheme.Font.scaled(64))
+                .font(BubuTheme.Font.scaled(isSideBySide ? 52 : 64))
             Text("布布是哪天来到世界的？")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
+                .multilineTextAlignment(.center)
+        }
+    }
 
+    private var birthdayForm: some View {
+        VStack(spacing: 22) {
             VStack(spacing: 16) {
                 HStack {
                     Text("名字").font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText)
@@ -111,6 +176,7 @@ struct OnboardingView: View {
                         .multilineTextAlignment(.trailing)
                         .font(BubuTheme.Font.headline)
                         .foregroundStyle(BubuTheme.Color.warmBrown)
+                        .submitLabel(.done)
                 }
                 Divider()
                 DatePicker("生日", selection: $birthday, in: ...Date.now, displayedComponents: .date)
@@ -125,17 +191,22 @@ struct OnboardingView: View {
             Text("现在的布布：\(AgeCalculator.ageDescription(birthday: birthday, at: .now))")
                 .font(BubuTheme.Font.headline)
                 .foregroundStyle(theme.textAccent)
+                .multilineTextAlignment(.center)
         }
     }
 
-    private var memberStep: some View {
+    private var memberArt: some View {
         VStack(spacing: 22) {
             Text(selectedRelation.defaultEmoji)
-                .font(BubuTheme.Font.scaled(64))
+                .font(BubuTheme.Font.scaled(isSideBySide ? 52 : 64))
             Text("你是布布的……")
                 .font(BubuTheme.Font.title)
                 .foregroundStyle(BubuTheme.Color.warmBrown)
+        }
+    }
 
+    private var memberForm: some View {
+        VStack(spacing: 22) {
             // 关系选择
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                 ForEach(Relation.allCases, id: \.self) { rel in
@@ -163,6 +234,7 @@ struct OnboardingView: View {
             TextField("也可以填你的名字（选填）", text: $memberName)
                 .multilineTextAlignment(.center)
                 .font(BubuTheme.Font.body)
+                .submitLabel(.done)
                 .padding()
                 .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.small, style: .continuous))
 

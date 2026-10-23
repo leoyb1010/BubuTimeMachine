@@ -15,6 +15,7 @@ struct BubuConstellationView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var bubuLayout
     /// 容器实际宽度（宽屏下星盘高度按它取比例）。由外层 onGeometryChange 写入。
     @State private var containerWidth: CGFloat = 360
 
@@ -98,6 +99,8 @@ struct BubuConstellationView: View {
         // 宽屏放宽上限——原来死锁 320pt 而宽度随容器涨到 1000pt+，星星被摊平成一条横线，
         // 「星座」的视觉完全丢失。宽屏按 0.5 的宽高比走，星盘才立得起来。
         let base = max(260, min(320, 230 + CGFloat(shown.count) * 4))
+        // 矮屏（Duo 合上横拿 / iPhone 横拿）：星盘收到 220pt，下面的提示和筛选还看得见。
+        if bubuLayout.isShort { return 220 }
         guard BubuAdaptive.isWide(sizeClass) else { return base }
         return max(base, min(560, containerWidth * 0.5))
     }

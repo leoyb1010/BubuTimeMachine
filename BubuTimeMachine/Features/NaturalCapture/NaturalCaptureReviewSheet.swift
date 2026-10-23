@@ -102,17 +102,18 @@ struct NaturalCaptureReviewSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    // 取消只关确认页，原文保留在输入框里；旁白和 UI 测试仍念「取消」。
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(unconfirmedCount == 0 ? "保存" : "保存 \(savableItems.count) 条") {
+                    Button(unconfirmedCount == 0 ? "保存" : "保存 \(savableItems.count) 条", systemImage: "checkmark", role: .confirm) {
                         if unconfirmedCount > 0 {
                             showUnconfirmedAlert = true
                         } else {
                             saveAll()
                         }
                     }
-                    .fontWeight(.bold)
                     .disabled(savableItems.isEmpty || didSave || savableItems.contains(where: \.hasInvalidNumericFields))
                 }
             }

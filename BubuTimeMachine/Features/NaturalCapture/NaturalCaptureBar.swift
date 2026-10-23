@@ -119,6 +119,7 @@ struct NaturalCaptureBar: View {
             NaturalCaptureReviewSheet(result: payload.result, originalText: payload.originalText) {
                 text = ""
             }
+            .bubuLayoutRoot() // Duo：弹窗布局根
         }
         // 离开页面（切 Tab/返回）时若仍在录音，静默收尾，不留悬挂的音频会话
         .onDisappear {
@@ -274,24 +275,37 @@ private struct ReviewPayload: Identifiable {
 // MARK: - 悬浮入口弹层
 struct NaturalCapturePanel: View {
     @Environment(\.dismiss) private var dismiss
+    /// 输入卡实际高度（含错误提示 / 慢提示、多行输入）；弹窗高度贴合它，不再固定 230pt。
+    @State private var barHeight: CGFloat?
+    /// 导航栏占的高度（弹窗顶部到内容）。
+    @State private var chromeTop: CGFloat = 0
+
+    private static let contentPadding: CGFloat = 16
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 14) {
                 NaturalCaptureBar()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
                 Spacer(minLength: 0)
             }
-            .padding()
-            .background(BubuThemedBackground().ignoresSafeArea())
+            .padding(Self.contentPadding)
+            .background {
+                BubuThemedBackground()
+                    .ignoresSafeArea()
+                    .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { chromeTop = $0 }
+            }
             .navigationTitle("一句话智能记录")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("关闭")
                 }
             }
         }
-        .presentationDetents([.height(230), .medium])
+        .captureFittedDetents(barHeight.map { $0 + Self.contentPadding * 2 + chromeTop }, fallback: 230,
+                              extra: [.medium])
         .presentationDragIndicator(.visible)
     }
 }

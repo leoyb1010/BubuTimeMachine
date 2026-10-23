@@ -11,8 +11,18 @@ struct AlbumDetailView: View {
     /// 分批渲染：大相册（上千张）首屏只挂 90 个缩略图，滚到底自动追加。
     @State private var visibleCount = 90
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
 
     private var galleryMedia: [Media] { items.map(\.media) }
+
+    /// 自适应列数：固定 3 列在 iPad 上每张缩略图会涨到 336pt 见方（照片墙变"三张巨图"）。
+    /// 用 adaptive 让 iPhone 保持 3 列、iPad 自然排到 6-8 列；书本折痕时换成偶数列 + 正中对齐折痕的间距，
+    /// 不让一张照片骑在折痕上（网格左右各 8pt 内边距）。
+    private var gridColumns: [GridItem] {
+        guard layout.foldAxis == .vertical else { return [GridItem(.adaptive(minimum: 108), spacing: 4)] }
+        return layout.bubuFoldGrid(compactColumns: 3, minItemWidth: 108, spacing: 4, margin: 8,
+                                   availableWidth: max(0, layout.safeRect.width - 16))
+    }
 
     /// 每批追加数量：宽屏列数多、一屏装得下更多，步长同步放大。
     private var pageStep: Int { BubuAdaptive.value(sizeClass, compact: 90, regular: 180) }
@@ -29,9 +39,7 @@ struct AlbumDetailView: View {
                 .padding(.top, 80)
             } else {
                 let visible = Array(items.prefix(visibleCount))
-                // 自适应列数：固定 3 列在 iPad 上每张缩略图会涨到 336pt 见方（照片墙变"三张巨图"）。
-                // 用 adaptive 让 iPhone 保持 3 列、iPad 自然排到 6-8 列。
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 4)], spacing: 4) {
+                LazyVGrid(columns: gridColumns, spacing: 4) {
                     ForEach(Array(visible.enumerated()), id: \.element.id) { index, item in
                         Button {
                             viewerRoute = MediaViewerRoute(initialMediaID: item.media.id)
@@ -58,7 +66,7 @@ struct AlbumDetailView: View {
                 if visibleCount < items.count {
                     // 再加载一屏时用骨架占位而不是转圈：格子形状是已知的，
                     // 骨架能让网格保持连续、不在滚动中忽然塌一块。
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 4)], spacing: 4) {
+                    LazyVGrid(columns: gridColumns, spacing: 4) {
                         ForEach(0..<6, id: \.self) { _ in
                             BubuSkeletonBlock(cornerRadius: BubuTheme.Radius.xs)
                                 .aspectRatio(1, contentMode: .fit)

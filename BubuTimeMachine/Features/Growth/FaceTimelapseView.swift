@@ -358,9 +358,8 @@ struct FaceTimelapseView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { confirmReset = true } label: { Image(systemName: "arrow.clockwise") }
+                Button { confirmReset = true } label: { Label("重新挑选", systemImage: "arrow.clockwise") }
                     .disabled(model.phase == .working)
-                    .accessibilityLabel("重新挑选")
             }
         }
         .alert("重新挑一遍？", isPresented: $confirmReset) {
@@ -461,6 +460,7 @@ struct FaceTimelapseView: View {
 struct FaceTimelapsePlayer: View {
     let frames: [FaceTimelapseFrame]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.bubuLayout) private var layout
     @State private var playing = true
     @State private var anchorDate = Date.now
     @State private var anchorPosition = 0.0
@@ -501,6 +501,8 @@ struct FaceTimelapsePlayer: View {
                         .animation(BubuMotion.quick, value: shown.month)
                 }
                 .aspectRatio(1, contentMode: .fit)
+                // 矮屏限宽（= 限高）：方图不超过一屏，播放条留在同一屏里。
+                .frame(maxWidth: layout.isShort ? 280 : .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 .bubuCardShadow()
                 .accessibilityElement(children: .ignore)

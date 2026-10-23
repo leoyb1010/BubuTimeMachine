@@ -30,10 +30,16 @@ struct LearningPlayView: View {
     @State private var celebration = 0
     @State private var greeted = false
     @State private var player = NativeLearningAudioPlayer()
+    /// 答题块的实际尺寸：决定选项列数、选项卡紧凑与否、合上横拿时题目和选项是否左右并排。
+    @State private var answerPaneSize: CGSize = .zero
+    @State private var hingeStatus: BubuHingeStatus?
+    @State private var hingeNudge = 0
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private static let nextAnchor = "learning.play.next-anchor"
 
     private var current: LearningPlayItem? { items.indices.contains(index) ? items[index] : nil }
 
@@ -42,24 +48,40 @@ struct LearningPlayView: View {
             ZStack {
                 BubuThemedBackground().ignoresSafeArea()
                 if let current {
-                    ScrollView {
-                        activityView(current)
-                            .padding(BubuTheme.Spacing.l)
-                            .bubuContentColumn(820)
+                    LearningPlayLayoutReader { layout in
+                        stage(current, short: layout.isShort)
                     }
                     .id(current.id)
                 } else {
-                    finished
+                    ScrollView {
+                        finished.frame(maxWidth: .infinity)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .defaultScrollAnchor(.center, for: .alignment)
                 }
+            }
+            // 小路放在内容顶部（不占工具栏正中），工具栏竖排到侧边时也一直看得见。
+            .safeAreaInset(edge: .top, spacing: 0) {
+                progressTrail
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, BubuTheme.Spacing.s)
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("结束") { player.stop(); dismiss() }.accessibilityIdentifier("learning.play.close")
+                    Button(role: .close) { player.stop(); dismiss() }
+                        .accessibilityLabel("结束")
+                        .accessibilityIdentifier("learning.play.close")
                 }
-                ToolbarItem(placement: .principal) { progressTrail }
             }
+        }
+        .bubuLayoutRoot()
+        // 铰链只配一个小动画：放到桌上半折时「再听一次」的小耳朵跳一下；布局只看尺寸和折痕。
+        .bubuOnHingeChange { status, _ in
+            guard status != hingeStatus else { return }
+            hingeStatus = status
+            if status == .partiallyOpen, !reduceMotion { hingeNudge += 1 }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { player.stop() } }
         .onDisappear { player.stop() }
@@ -75,12 +97,122 @@ struct LearningPlayView: View {
         }
     }
 
-    // MARK: Activity
+    // MARK: Stage
+
+    /// 页面根不滚动，用系统分栏放「题图块」和「答题块」，滚动只发生在块内部。
+    /// 分栏规则（ArrangementView）：主块在前（横向时左、纵向时上），副块在后；合上横拿时系统只显示主块。
+    /// - 一般情况：主块 = 题目 + 再听一次 + 题图，副块 = 选项 / 跟读 + 下一个 → 横拿左图右按钮，竖拿上图下按钮，
+    ///   桌面半折上半屏题图、下半屏大按钮，书本半折各占一侧。
+    /// - 矮屏（合上横拿 / 普通 iPhone 横拿）：主块 = 题目 + 再听一次 + 选项（系统只显示它时也能完整答题），
+    ///   副块只放题图。
+    /// 只有一个 ArrangementView、在块里分支：旋转进出矮屏时分栏容器不重建。
+    private func stage(_ item: LearningPlayItem, short: Bool) -> some View {
+        BubuArrangement(axes: [.horizontal, .vertical], style: .split) {
+            if short { answerPane(item, withHeader: true) } else { promptPane(item) }
+        } secondary: {
+            if short { mediaPane(item.activity) } else { answerPane(item, withHeader: false) }
+        }
+    }
+
+    /// 题目 + 题图：题图按这一块的剩余高度取最大的一档，都放不下时在块内滚动。
+    private func promptPane(_ item: LearningPlayItem) -> some View {
+        ViewThatFits(in: .vertical) {
+            promptStack(item, mediaHeight: 300)
+            promptStack(item, mediaHeight: 220)
+            promptStack(item, mediaHeight: 150)
+            ScrollView { promptStack(item, mediaHeight: 120) }
+                .scrollBounceBehavior(.basedOnSize)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func promptStack(_ item: LearningPlayItem, mediaHeight: CGFloat) -> some View {
+        VStack(spacing: BubuTheme.Spacing.m) {
+            header(item.activity, includesLyrics: false)
+            promptMedia(item.activity, height: mediaHeight, showsLyrics: true)
+        }
+        .padding(BubuTheme.Spacing.l)
+        .frame(maxWidth: 640)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 矮屏的副块：只放题图（或唱歌的舞台），铺满这一块。
+    @ViewBuilder
+    private func mediaPane(_ activity: LearningActivityDTO) -> some View {
+        Group {
+            if activity.kind == "music" {
+                ScrollView {
+                    promptMedia(activity, height: 180, showsLyrics: false)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .defaultScrollAnchor(.center, for: .alignment)
+            } else if LearningLessonFlow.showsPromptImage(activity), let image = activity.prompt?.imageUrl {
+                LearningRemoteImage(path: image, client: client, label: "上课时的画面")
+                    .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            } else {
+                BubuMascotBadge(size: 120, expression: .happy)
+                    .bubuBreathingWiggle(degrees: player.playingLine ? 3 : 1)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(BubuTheme.Spacing.l)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     @ViewBuilder
-    private func activityView(_ item: LearningPlayItem) -> some View {
-        let activity = item.activity
-        VStack(spacing: BubuTheme.Spacing.l) {
+    private func promptMedia(_ activity: LearningActivityDTO, height: CGFloat, showsLyrics: Bool) -> some View {
+        if activity.kind == "music" {
+            SingAlongStage(lyrics: showsLyrics ? activity.prompt?.text : nil, image: activity.prompt?.imageUrl,
+                           client: client, singing: player.playingPrompt && player.isPlaying,
+                           progress: player.progress, imageHeight: height)
+        } else if LearningLessonFlow.showsPromptImage(activity), let image = activity.prompt?.imageUrl {
+            LearningRemoteImage(path: image, client: client, label: "上课时的画面", maxHeight: height)
+                .frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        }
+    }
+
+    /// 答题块：选项 / 跟读 / 一起唱 + 下一个（矮屏时连题目和再听一次一起）。内容多时块内滚动，答完自动滚到「下一个」。
+    private func answerPane(_ item: LearningPlayItem, withHeader: Bool) -> some View {
+        let padding = BubuTheme.Spacing.l
+        // 合上横拿只显示主块时宽度够：题目在左、选项在右，主要按钮不用滚动。
+        let sideBySide = withHeader && answerPaneSize.width >= 560
+        let contentWidth = max(0, min(answerPaneSize.width, sideBySide ? 900 : 640) - padding * 2)
+        let choiceWidth = sideBySide ? (contentWidth - padding) / 2 : contentWidth
+        let arrangement = sideBySide
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: padding))
+            : AnyLayout(VStackLayout(spacing: padding))
+        return ScrollViewReader { proxy in
+            ScrollView {
+                arrangement {
+                    if withHeader { header(item.activity, includesLyrics: true) }
+                    answers(item, choiceWidth: choiceWidth)
+                }
+                .padding(padding)
+                .frame(maxWidth: sideBySide ? 900 : 640)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .defaultScrollAnchor(.center, for: .alignment)
+            .onChange(of: answered) { _, done in
+                guard done else { return }
+                // 等「下一个」出现在布局里再滚过去。
+                Task { @MainActor in
+                    withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) {
+                        proxy.scrollTo(Self.nextAnchor, anchor: .bottom)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { answerPaneSize = $0 }
+    }
+
+    // MARK: Activity
+
+    /// 题型标签、题目、（没有声音时家长念的）题目文字、再听一次。
+    private func header(_ activity: LearningActivityDTO, includesLyrics: Bool) -> some View {
+        VStack(spacing: BubuTheme.Spacing.m) {
             if index == 0, let greeting, !greeting.text.isEmpty {
                 MascotBubble(text: greeting.text, expression: .happy, speaking: player.playingLine)
             }
@@ -91,23 +223,28 @@ struct LearningPlayView: View {
             Text(activity.title).font(BubuTheme.Font.hugeTitle).foregroundStyle(BubuTheme.Color.warmBrown)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            // 没有声音时题目文字就是家长念给布布听的那句。
-            if let text = activity.prompt?.text, !text.isEmpty, activity.kind != "music" {
+            // 没有声音时题目文字就是家长念给布布听的那句；儿歌的歌词平时在唱歌舞台上，舞台不显示时放这里。
+            if let text = activity.prompt?.text, !text.isEmpty, activity.kind != "music" || includesLyrics {
                 Text(text).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if activity.kind == "music" {
-                SingAlongStage(lyrics: activity.prompt?.text, image: activity.prompt?.imageUrl, client: client,
-                               singing: player.playingPrompt && player.isPlaying, progress: player.progress)
-            } else if LearningLessonFlow.showsPromptImage(activity), let image = activity.prompt?.imageUrl {
-                LearningRemoteImage(path: image, client: client, label: "上课时的画面", maxHeight: 280)
-                    .frame(height: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
-            }
             listenButton(activity)
+            if let error = player.errorText {
+                Label(error, systemImage: "speaker.slash")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func answers(_ item: LearningPlayItem, choiceWidth: CGFloat) -> some View {
+        let activity = item.activity
+        VStack(spacing: BubuTheme.Spacing.l) {
             if activity.isChoice {
-                choices(item)
+                choices(item, width: choiceWidth)
                 // 选完后可以跟着说一遍正确答案（只庆祝，不另记一次互动）。
                 if answered, let target = Self.choiceTarget(activity) {
                     SpeakPracticeCard(target: target, player: player, playModel: { playAnswer(activity) }) { _, _ in }
@@ -128,12 +265,7 @@ struct LearningPlayView: View {
                 }
                 participation(item, label: "一起唱完啦")
             }
-            if answered { nextButton }
-            if let error = player.errorText {
-                Label(error, systemImage: "speaker.slash")
-                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
-                    .multilineTextAlignment(.center)
-            }
+            if answered { nextButton.id(Self.nextAnchor) }
         }
         .frame(maxWidth: .infinity)
     }
@@ -150,6 +282,7 @@ struct LearningPlayView: View {
                 Image(systemName: speaking ? "speaker.wave.3.fill" : "ear.fill")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .symbolEffect(.variableColor.iterative, isActive: speaking && !reduceMotion)
+                    .symbolEffect(.bounce, value: hingeNudge)
                     .accessibilityHidden(true)
                 Text(title).font(BubuTheme.Font.title)
                     .fixedSize(horizontal: false, vertical: true)
@@ -167,12 +300,14 @@ struct LearningPlayView: View {
         .accessibilityIdentifier("learning.play.listen")
     }
 
-    private func choices(_ item: LearningPlayItem) -> some View {
+    private func choices(_ item: LearningPlayItem, width: CGFloat) -> some View {
         let activity = item.activity
-        let columns = LearningLessonFlow.choiceColumns(count: activity.choices.count,
-                                                       accessibilitySize: dynamicTypeSize.isAccessibilitySize)
+        // 偶数列（2 或 4）：三个选项是 2+1，单独那张靠前排，不会正好落在中间（折痕）上。
+        let columns = LearningLessonFlow.evenChoiceColumns(count: activity.choices.count, width: width,
+                                                           accessibilitySize: dynamicTypeSize.isAccessibilitySize)
+        // 答题块矮（合上横拿、竖拿一半、桌面半折）时用紧凑选项卡，两行也放得下。
+        let compact = answerPaneSize.height < 480
         return VStack(spacing: BubuTheme.Spacing.m) {
-            // Column count follows the choices so two or three cards stay centred on iPad too.
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(maximum: 280), spacing: 14), count: columns),
                       spacing: 14) {
                 ForEach(activity.choices) { choice in
@@ -180,7 +315,8 @@ struct LearningPlayView: View {
                     Button { tap(choice, in: item) } label: {
                         ChoiceTile(choice: choice, client: client,
                                    highlighted: revealed,
-                                   dimmed: wrongIDs.contains(choice.id) && !revealed)
+                                   dimmed: wrongIDs.contains(choice.id) && !revealed,
+                                   compact: compact)
                             .overlay {
                                 if revealed && outcome == .correct && !reduceMotion {
                                     BubuBurst(count: 14, radius: 90).id(celebration).allowsHitTesting(false)
@@ -464,6 +600,14 @@ struct LearningPlayView: View {
     }
 }
 
+/// 读取答题页布局根（`.bubuLayoutRoot()`）下发的尺寸。
+private struct LearningPlayLayoutReader<Content: View>: View {
+    @Environment(\.bubuLayout) private var layout
+    @ViewBuilder let content: (BubuLayout) -> Content
+
+    var body: some View { content(layout) }
+}
+
 /// 布布（星星姐姐）说话的气泡：开场白、结束语。
 private struct MascotBubble: View {
     let text: String
@@ -504,14 +648,16 @@ private struct SingAlongStage: View {
     let client: BubuLearningClient
     let singing: Bool
     let progress: Double
+    /// 画面高度随所在那一块的可用高度变化。
+    var imageHeight: CGFloat = 220
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: BubuTheme.Spacing.m) {
             ZStack {
                 if let image {
-                    LearningRemoteImage(path: image, client: client, label: "唱歌时的画面", maxHeight: 240)
-                        .frame(height: 220)
+                    LearningRemoteImage(path: image, client: client, label: "唱歌时的画面", maxHeight: imageHeight)
+                        .frame(height: imageHeight)
                         .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                         .opacity(0.9)
                 }
@@ -521,7 +667,7 @@ private struct SingAlongStage: View {
                         .bubuBreathingWiggle(degrees: singing ? 4 : 1)
                     note("music.quarternote.3", delay: 1)
                 }
-                .padding(.top, image == nil ? 0 : 140)
+                .padding(.top, image == nil ? 0 : max(imageHeight - 80, 0))
             }
             if let lyrics, !lyrics.isEmpty {
                 Text(lyrics).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)

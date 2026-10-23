@@ -24,6 +24,14 @@ struct CapsuleHomeView: View {
     private var locked: [TimeCapsule] { capsules.filter { !canOpen($0, at: currentDate) } }
     private var openable: [TimeCapsule] { capsules.filter { canOpen($0, at: currentDate) } }
 
+    /// 恢复码（很少用，竖排栏放不下时先收进溢出菜单）。
+    @ToolbarContentBuilder
+    private var recoveryItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { showRecovery = true } label: { Label("恢复码", systemImage: "key.horizontal") }
+        }
+    }
+
     var body: some View {
         ZStack {
             background.ignoresSafeArea()
@@ -60,22 +68,16 @@ struct CapsuleHomeView: View {
         } message: { Text(deleteError ?? "原信尚未清理，请稍后重试。") }
         .navigationTitle("时间胶囊")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { showRecovery = true } label: { Image(systemName: "key.horizontal.fill") }
-                    .accessibilityLabel("恢复码")
-                    .bubuGlassButton()
-            }
+            recoveryItem.bubuVisibilityPriority(.low)
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showCompose = true } label: { Image(systemName: "square.and.pencil") }
-                    .accessibilityLabel("写时间胶囊")
-                    .bubuGlassButton()
+                Button { showCompose = true } label: { Label("写时间胶囊", systemImage: "square.and.pencil") }
             }
         }
-        .sheet(isPresented: $showCompose) { CapsuleComposeView() }
-        .sheet(isPresented: $showRecovery) { CapsuleRecoveryView() }
-        .sheet(item: $editing) { capsule in CapsuleComposeView(editing: capsule) }
+        .sheet(isPresented: $showCompose) { CapsuleComposeView().bubuLayoutRoot() }
+        .sheet(isPresented: $showRecovery) { CapsuleRecoveryView().bubuLayoutRoot() }
+        .sheet(item: $editing) { capsule in CapsuleComposeView(editing: capsule).bubuLayoutRoot() }
         .fullScreenCover(item: $unlocking) { capsule in
-            CapsuleUnlockView(capsule: capsule)
+            CapsuleUnlockView(capsule: capsule).bubuLayoutRoot()
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { date in
             currentDate = date

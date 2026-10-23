@@ -49,16 +49,17 @@ struct WeeklyReportView: View {
         .navigationTitle("布布周报")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }
-        .sheet(item: $sourceDetail) { source in sourceSheet(source) }
+        .sheet(item: $sourceDetail) { source in sourceSheet(source).bubuLayoutRoot() }
         .sheet(isPresented: $showAdvancedSettings) {
             NavigationStack {
                 AdvancedSettingsView()
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showAdvancedSettings = false }
+                            Button("完成", systemImage: "checkmark", role: .confirm) { showAdvancedSettings = false }
                         }
                     }
             }
+            .bubuLayoutRoot()
         }
         .alert("收进档案？", isPresented: $confirmArchive) {
             Button("收进档案") { archive() }
@@ -296,7 +297,7 @@ struct WeeklyReportView: View {
             .background(BubuTheme.Color.background.ignoresSafeArea())
             .navigationTitle("周报出处")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { sourceDetail = nil } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成", systemImage: "checkmark", role: .confirm) { sourceDetail = nil } } }
         }
     }
 

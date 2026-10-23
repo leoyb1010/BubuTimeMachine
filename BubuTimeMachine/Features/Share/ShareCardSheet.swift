@@ -31,24 +31,34 @@ struct ShareCardSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    previewArea
-                    layoutPicker
-                    ageToggle
-                    shareButton
+                // 矮屏（横拿）：预览在左、选项在右，免得预览独占一屏；其余上下排。
+                ShareCardLayoutReader { bubuLayout in
+                    let stack = bubuLayout.isShort
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                        : AnyLayout(VStackLayout(spacing: 16))
+                    stack {
+                        previewArea(bubuLayout)
+                        VStack(spacing: 16) {
+                            layoutPicker
+                            ageToggle
+                            shareButton
+                        }
+                    }
                 }
                 .padding()
-                .bubuContentColumn()
+                .bubuColumn()
             }
             .background(BubuTheme.Color.background.ignoresSafeArea())
             .navigationTitle("分享这一刻")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
                 }
             }
         }
+        .bubuLayoutRoot()   // 弹窗布局根：预览高度按这张 sheet 自己的尺寸算
         .task {
             thenEntry = Self.findThenEntry(for: entry, context: context)
             photo = firstPhoto(of: entry)
@@ -68,7 +78,7 @@ struct ShareCardSheet: View {
 
     // MARK: 预览
 
-    private var previewArea: some View {
+    private func previewArea(_ bubuLayout: BubuLayout) -> some View {
         ZStack {
             if let preview {
                 Image(uiImage: preview)
@@ -79,12 +89,12 @@ struct ShareCardSheet: View {
             } else {
                 RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
                     .fill(BubuTheme.Color.softFill)
-                    .frame(height: 300)
+                    .frame(height: bubuLayout.bubuHeight(300, short: 220))
                     .overlay { ProgressView() }
             }
         }
         .animation(BubuMotion.quick, value: preview)
-        .frame(maxHeight: 420)
+        .frame(maxHeight: bubuLayout.bubuHeight(420, short: 300))
     }
 
     private var layoutPicker: some View {
@@ -211,6 +221,14 @@ struct ShareCardSheet: View {
                 && candidate.media.contains { $0.type == .photo }
         }
     }
+}
+
+/// 读弹窗自己的布局根（sheet 本体读到的是呈现方的布局，所以要隔一层子视图）。
+private struct ShareCardLayoutReader<Content: View>: View {
+    @Environment(\.bubuLayout) private var layout
+    @ViewBuilder let content: (BubuLayout) -> Content
+
+    var body: some View { content(layout) }
 }
 
 /// sheet(item:) 需要 Identifiable 包装。

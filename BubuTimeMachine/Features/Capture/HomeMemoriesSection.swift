@@ -57,11 +57,20 @@ struct HomeMemoriesSection: View {
     let childName: String
     let localOnThisDay: [Entry]
     let zoomNS: Namespace.ID
+    /// 轮播向哪一侧延伸到内容安全区边缘（抵消首页 16pt 页边距）：通栏时两侧都延伸；
+    /// 矮屏放在右栏时只延伸右侧，不压到左边的大图。轮播在这条边上裁切，不会画到竖排栏下面。
+    var bleedEdges: Edge.Set = .horizontal
 
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
     @State private var opened: MemoryCardDTO?
+    /// 轮播最左侧那张卡。卡片尺寸随开合 / 旋转变化时按它复位，不停在半张卡上。
+    @State private var scrolledID: String?
+
+    /// 首页内容列的左右页边距（CaptureHomeView 的 `.padding(.horizontal, 16)`）。
+    private static let pageMargin: CGFloat = 16
 
     /// 父视图据此决定是否给本区留位置（没内容时不占 VStack 间距）。
     static func hasContent(model: HomeTodayModel, client: BubuLearningClient?, birthday: Date?, localOnThisDay: [Entry]) -> Bool {
@@ -69,8 +78,10 @@ struct HomeMemoriesSection: View {
             || (client != nil && (model.isLoading || !model.memories.isEmpty))
     }
 
+    /// 矮屏（横拿）与左边「今天」大图（200pt 图 + 一句话入口）同高；宽屏放大一档。
     private var cardSize: CGSize {
-        BubuAdaptive.isWide(sizeClass) ? CGSize(width: 280, height: 340) : CGSize(width: 240, height: 300)
+        if layout.isShort { return CGSize(width: 176, height: 220) }
+        return BubuAdaptive.isWide(sizeClass) ? CGSize(width: 280, height: 340) : CGSize(width: 240, height: 300)
     }
 
     var body: some View {
@@ -94,9 +105,10 @@ struct HomeMemoriesSection: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: BubuTheme.Spacing.m) {
                         if model.memories.isEmpty && model.isLoading && client != nil {
-                            ForEach(0..<2, id: \.self) { _ in
+                            ForEach(0..<2, id: \.self) { index in
                                 BubuSkeletonBlock(cornerRadius: BubuTheme.Radius.card, height: cardSize.height)
                                     .frame(width: cardSize.width)
+                                    .id("skeleton-\(index)")
                             }
                         }
                         if let client {
@@ -107,6 +119,7 @@ struct HomeMemoriesSection: View {
                                 .buttonStyle(BubuPressableStyle())
                                 .bubuCarouselTransition()
                                 .accessibilityIdentifier("home.memory")
+                                .id("memory-" + memory.id)
                             }
                         }
                         ForEach(localOnThisDay) { entry in
@@ -116,12 +129,19 @@ struct HomeMemoriesSection: View {
                             .buttonStyle(BubuPressableStyle())
                             .matchedTransitionSource(id: entry.id, in: zoomNS)
                             .bubuCarouselTransition()
+                            .id("local-" + entry.id.uuidString)
                         }
                     }
                     .scrollTargetLayout()
                 }
+                // 首张卡仍和上方内容左对齐，滑动时卡片延伸到内容安全区边缘。
+                .contentMargins(bleedEdges, Self.pageMargin, for: .scrollContent)
                 .scrollTargetBehavior(.viewAligned)
+                .scrollPosition(id: $scrolledID, anchor: .leading)
+                // 只在左右裁切（竖排栏 / 安全区之外不再露出卡片），上下保留卡片阴影。
                 .scrollClipDisabled()
+                .mask { Rectangle().padding(.vertical, -BubuTheme.Spacing.section) }
+                .padding(bleedEdges, -Self.pageMargin)
                 .transition(BubuMotion.entering(reduceMotion: reduceMotion))
             }
         }

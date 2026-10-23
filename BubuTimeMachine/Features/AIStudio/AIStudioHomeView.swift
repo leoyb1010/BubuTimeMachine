@@ -5,10 +5,14 @@ import SwiftUI
 /// - 第一屏：一个「布布问答」主卡 + 新鲜出炉（生日影片 / 成长小报 / 语言成长线 / 去过的地方 / 认一认）。
 /// - 同名功能合并：问答只剩一个「布布问答」（连上家里服务时问全家相册，否则问本机记录）；
 ///   两支影片、三种报告各自写清楚是什么，不再让人猜。
-/// - 每个分区按行铺满：iPhone 两列、iPad 三到四列，末行自动拉宽，不留空格子。
+/// - 每个分区按行铺满：列数按可用宽度取（窄屏两列，宽屏 / 横拿偶数列），末行自动拉宽，不留空格子；
+///   书本半折时改成对齐折痕的网格（末行不拉宽，格子不跨折痕）。
 struct AIStudioHomeView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
     @Environment(AppEnvironment.self) private var env
+    /// 分区内容的实际宽度（内容列 + 内边距之后），用来算列数。
+    @State private var gridWidth: CGFloat?
 
     var body: some View {
         ScrollView {
@@ -67,6 +71,7 @@ struct AIStudioHomeView: View {
 
                 Spacer(minLength: 30)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
             .padding()
             .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
         }
@@ -163,20 +168,26 @@ struct AIStudioHomeView: View {
         }
     }
 
-    /// 按行铺满：iPhone 两列；iPad 4 的倍数或不多于 4 个时一行 4 个，否则一行 3 个。
-    /// 末行不足时每格拉宽，所以永远没有孤零零的空格子。
+    /// 列数按宽度取（bubuFoldGrid：窄屏 2 列，宽屏 / 横拿 / 半折按最小格宽取偶数列）。
+    /// 没有折痕时按行铺满、末行不足时每格拉宽，永远没有孤零零的空格子；
+    /// 书本半折时用对齐折痕的网格（正中间距 = 折痕），格子不跨折痕。
+    @ViewBuilder
     private func tileRows(_ tiles: [StudioTile]) -> some View {
-        let perRow: Int = {
-            guard sizeClass == .regular else { return 2 }
-            return (tiles.count <= 4 || tiles.count % 4 == 0) ? min(4, tiles.count) : 3
-        }()
-        let rows = stride(from: 0, to: tiles.count, by: perRow).map {
-            Array(tiles[$0..<min($0 + perRow, tiles.count)])
-        }
-        return VStack(spacing: 10) {
-            ForEach(rows.indices, id: \.self) { index in
-                HStack(spacing: 10) {
-                    ForEach(rows[index]) { tile in tileView(tile) }
+        let columns = layout.bubuFoldGrid(compactColumns: 2, minItemWidth: 130, spacing: 10, availableWidth: gridWidth)
+        if layout.foldAxis == .vertical {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(tiles) { tile in tileView(tile) }
+            }
+        } else {
+            let perRow = max(1, min(columns.count, tiles.count))
+            let rows = stride(from: 0, to: tiles.count, by: perRow).map {
+                Array(tiles[$0..<min($0 + perRow, tiles.count)])
+            }
+            VStack(spacing: 10) {
+                ForEach(rows.indices, id: \.self) { index in
+                    HStack(spacing: 10) {
+                        ForEach(rows[index]) { tile in tileView(tile) }
+                    }
                 }
             }
         }

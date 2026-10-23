@@ -50,7 +50,7 @@ struct WidgetWallpaperView: View {
                 }
             }
             .padding()
-            .bubuContentColumn()
+            .bubuColumn()
         }
         .navigationTitle("桌面壁纸")
         .navigationBarTitleDisplayMode(.inline)

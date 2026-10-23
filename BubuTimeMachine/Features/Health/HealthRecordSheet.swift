@@ -62,11 +62,11 @@ struct HealthRecordSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .fontWeight(.bold)
+                    Button("保存", systemImage: "checkmark", role: .confirm) { save() }
                         .disabled(!draft.canSave(kind: kind))
                 }
             }

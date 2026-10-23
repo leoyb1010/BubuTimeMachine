@@ -36,7 +36,7 @@ struct VoiceArchiveView: View {
                         Spacer(minLength: 40)
                     }
                     .padding()
-                    .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
+                    .bubuColumn()   // 宽屏收进居中内容列（书本折痕时放在折痕一侧），窄屏原样
                 }
             }
         }
@@ -50,12 +50,12 @@ struct VoiceArchiveView: View {
                     Button { recordKind = .familyVoice; showRecorder = true } label: {
                         Label("家人对她说", systemImage: "heart.text.square")
                     }
-                } label: { Image(systemName: "mic.badge.plus") }
+                } label: { Label("录一段", systemImage: "mic.badge.plus") }
                 .accessibilityLabel("录一段声音")
             }
         }
         .sheet(isPresented: $showRecorder) {
-            VoiceMemoRecorderSheet(kind: recordKind)
+            VoiceMemoRecorderSheet(kind: recordKind).bubuLayoutRoot()
         }
     }
 
@@ -111,7 +111,7 @@ struct VoiceArchiveView: View {
         VStack(spacing: 18) {
             BubuEmptyIllustration(assetName: "BubuVoiceArchiveEmpty", fallbackExpression: .music)
             Text("还没有声音").font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
-            Text("点右上角，录下布布此刻的声音。").font(BubuTheme.Font.body)
+            Text("点「录一段」，录下布布此刻的声音。").font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
         }
         .padding(40)
@@ -138,45 +138,52 @@ struct VoiceMemoRecorderSheet: View {
         NavigationStack {
             ZStack {
                 BubuTheme.Color.background.ignoresSafeArea()
-                VStack(spacing: 24) {
-                    Text(kind == .childVoice ? "录下布布的声音" : "对布布说点什么")
-                        .font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
+                // 可滚动：矮屏横拿 + 长转写文字时不被挤出屏幕
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Text(kind == .childVoice ? "录下布布的声音" : "对布布说点什么")
+                            .font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
 
-                    if let p = pending {
-                        VoicePlayerBubble(fileName: p.fileName, duration: p.duration,
-                                          waveform: p.waveform, mediaStore: env.mediaStore, tint: theme)
-                        if env.config.isAIConfigured {
-                            Button {
-                                Task { await runTranscribe(p.fileName) }
-                            } label: {
-                                HStack {
-                                    if transcribing { ProgressView() }
-                                    else { Image(systemName: "text.bubble") }
-                                    Text(transcribing ? "转写中…" : "转成文字")
+                        if let p = pending {
+                            VoicePlayerBubble(fileName: p.fileName, duration: p.duration,
+                                              waveform: p.waveform, mediaStore: env.mediaStore, tint: theme)
+                            if env.config.isAIConfigured {
+                                Button {
+                                    Task { await runTranscribe(p.fileName) }
+                                } label: {
+                                    HStack {
+                                        if transcribing { ProgressView() }
+                                        else { Image(systemName: "text.bubble") }
+                                        Text(transcribing ? "转写中…" : "转成文字")
+                                    }
+                                    .font(BubuTheme.Font.body).foregroundStyle(theme)
                                 }
-                                .font(BubuTheme.Font.body).foregroundStyle(theme)
+                                .disabled(transcribing)
                             }
-                            .disabled(transcribing)
-                        }
-                        if let t = transcript {
-                            Text(t).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
-                                .padding().background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs))
-                        }
-                    } else {
-                        VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in
-                            pending = (fileName, duration, waveform)
+                            if let t = transcript {
+                                Text(t).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
+                                    .padding().background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.xs))
+                            }
+                        } else {
+                            VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in
+                                pending = (fileName, duration, waveform)
+                            }
                         }
                     }
-                    Spacer()
+                    .padding()
                 }
-                .padding()
+                .scrollBounceBehavior(.basedOnSize)
             }
             .navigationTitle("成长之声")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("收好") { save() }.fontWeight(.bold).disabled(pending == nil)
+                    Button("收好", systemImage: "checkmark", role: .confirm) { save() }
+                        .disabled(pending == nil)
                 }
             }
         }

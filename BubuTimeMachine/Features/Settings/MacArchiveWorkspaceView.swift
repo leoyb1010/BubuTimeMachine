@@ -221,8 +221,9 @@ struct MacArchiveWorkspaceView: View {
         .onChange(of: filter) { _, _ in selectedIDs.removeAll() }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(selectedIDs.count == visibleEntries.count && !visibleEntries.isEmpty
-                       ? "取消全选" : "全选当前") {
+                let allSelected = selectedIDs.count == visibleEntries.count && !visibleEntries.isEmpty
+                Button(allSelected ? "取消全选" : "全选当前",
+                       systemImage: allSelected ? "circle.dashed" : "checkmark.circle") {
                     if selectedIDs.count == visibleEntries.count {
                         selectedIDs.removeAll()
                     } else {

@@ -109,4 +109,11 @@ nonisolated enum LearningLessonFlow {
     static func choiceColumns(count: Int, accessibilitySize: Bool) -> Int {
         max(1, min(count, accessibilitySize ? 2 : 3))
     }
+
+    /// 答题页选项的列数：只用偶数列（2 或 4），三个选项排成 2+1，避免单独一张正好落在正中（书本折痕）上。
+    /// 答题块够宽（≥ 600pt，如桌面半折的下半屏、iPad）且不是大字号时一行 4 个。
+    static func evenChoiceColumns(count: Int, width: CGFloat, accessibilitySize: Bool) -> Int {
+        guard count > 1 else { return 1 }
+        return count >= 3 && !accessibilitySize && width >= 600 ? 4 : 2
+    }
 }

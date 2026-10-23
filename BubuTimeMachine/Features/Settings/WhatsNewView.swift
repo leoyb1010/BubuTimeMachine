@@ -127,6 +127,7 @@ struct WhatsNewSheet: View {
             content
                 .toolbar(.hidden, for: .navigationBar)
         }
+        .bubuLayoutRoot()   // 弹窗布局根
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(false)
@@ -228,7 +229,7 @@ struct WhatsNewListView: View {
                 }
             }
             .padding()
-            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
+            .bubuColumn()   // 宽屏收进居中内容列（书本折痕时放在折痕一侧），窄屏原样
         }
         .background(BubuTheme.Color.cream.ignoresSafeArea())
         .navigationTitle("更新记录")

@@ -549,13 +549,15 @@ struct CourseUploadSheet: View {
             .navigationTitle("上传课程")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(uploading) }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }.accessibilityLabel("取消").disabled(uploading)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     if uploading { ProgressView() } else if resume != nil {
-                        Button("继续上传") { Task { await upload() } }
+                        Button("继续上传", systemImage: "arrow.up.circle", role: .confirm) { Task { await upload() } }
                             .accessibilityIdentifier("learning.upload.resume")
                     } else {
-                        Button("上传") { Task { await upload() } }.disabled(!canSubmit)
+                        Button("上传", systemImage: "arrow.up.circle", role: .confirm) { Task { await upload() } }.disabled(!canSubmit)
                             .accessibilityIdentifier("learning.upload.submit")
                     }
                 }
@@ -584,6 +586,7 @@ struct CourseUploadSheet: View {
                 if case .success(let urls) = result { Task { await importFiles(urls) } }
             }
         }
+        .bubuLayoutRoot()
     }
 
     private func importPicked(_ items: [PhotosPickerItem]) async {
@@ -880,7 +883,9 @@ final class LearningUploadKeepAlive {
     private static weak var current: LearningUploadKeepAlive?
 
     private var task: UIBackgroundTaskIdentifier = .invalid
+    #if !targetEnvironment(macCatalyst)
     private var continued: BGContinuedProcessingTask?
+    #endif
     private var fraction: Double = 0
     private let previousIdleDisabled: Bool
     private var ended = false
@@ -898,16 +903,20 @@ final class LearningUploadKeepAlive {
     /// 整体进度 0...1，同步给系统的继续处理任务。
     func report(_ value: Double) {
         fraction = min(max(value, 0), 1)
+        #if !targetEnvironment(macCatalyst)
         continued?.progress.completedUnitCount = Int64((fraction * 100).rounded())
+        #endif
     }
 
     func end(success: Bool = true) {
         guard !ended else { return }
         ended = true
         UIApplication.shared.isIdleTimerDisabled = previousIdleDisabled
+        #if !targetEnvironment(macCatalyst)
         if success { continued?.progress.completedUnitCount = 100 }
         continued?.setTaskCompleted(success: success)
         continued = nil
+        #endif
         endBackgroundTask()
     }
 
@@ -923,6 +932,8 @@ final class LearningUploadKeepAlive {
     }
 
     private static func submitContinuedProcessing() {
+        // Mac Catalyst 没有 BGContinuedProcessingTask，只用普通后台时间兜底。
+        #if !targetEnvironment(macCatalyst)
         // 未在 Info.plist 声明时注册会直接抛异常，所以先确认再注册。
         guard permitted else { return }
         if !registered {
@@ -940,8 +951,10 @@ final class LearningUploadKeepAlive {
         } catch {
             log.error("继续处理任务提交失败：\(error.localizedDescription, privacy: .public)")
         }
+        #endif
     }
 
+    #if !targetEnvironment(macCatalyst)
     private static func attach(_ task: BGTask) {
         guard let continued = task as? BGContinuedProcessingTask, let current, !current.ended else {
             task.setTaskCompleted(success: true)
@@ -954,6 +967,7 @@ final class LearningUploadKeepAlive {
         continued.expirationHandler = { expiring.setTaskCompleted(success: false) }
         current.continued = continued
     }
+    #endif
 }
 
 /// Photos hands over a temporary movie file; copy it before the handler returns.

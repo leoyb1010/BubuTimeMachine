@@ -99,7 +99,7 @@ struct FamilyFeedView: View {
                 if filteredRows.isEmpty { emptyState }
             }
             .padding()
-            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
+            .bubuColumn()   // 宽屏收进居中内容列（书本折痕时放在折痕一侧），窄屏原样
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .navigationTitle("家庭动态")

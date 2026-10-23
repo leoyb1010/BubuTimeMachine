@@ -38,6 +38,7 @@ final class AskBubuSession {
 struct AskBubuView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.bubuLayout) private var layout
     @State private var session = AskBubuSession.shared
     @State private var draft = ""
     @State private var asking = false
@@ -107,23 +108,26 @@ struct AskBubuView: View {
 
     private func inputBar(client: BubuLearningClient) -> some View {
         VStack(spacing: BubuTheme.Spacing.s) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: BubuTheme.Spacing.s) {
-                    ForEach(Self.examples, id: \.self) { example in
-                        // Asking an example leaves whatever the parent was typing untouched.
-                        Button { Task { await ask(example, client: client, clearsDraft: false) } } label: {
-                            Text(example).font(BubuTheme.Font.caption)
-                                .foregroundStyle(BubuTheme.Color.deepRose)
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(BubuTheme.Color.pinkSurface, in: Capsule())
+            // 矮屏（Duo 合上横拿）键盘弹起后只剩一小条：打字时先收起示例问题，把高度留给对话。
+            if !(layout.isShort && focused) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: BubuTheme.Spacing.s) {
+                        ForEach(Self.examples, id: \.self) { example in
+                            // Asking an example leaves whatever the parent was typing untouched.
+                            Button { Task { await ask(example, client: client, clearsDraft: false) } } label: {
+                                Text(example).font(BubuTheme.Font.caption)
+                                    .foregroundStyle(BubuTheme.Color.deepRose)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(BubuTheme.Color.pinkSurface, in: Capsule())
+                            }
+                            .buttonStyle(BubuPressableStyle())
+                            .disabled(asking)
+                            .accessibilityHint("用这个例子提问")
                         }
-                        .buttonStyle(BubuPressableStyle())
-                        .disabled(asking)
-                        .accessibilityHint("用这个例子提问")
                     }
                 }
+                .contentMargins(.horizontal, BubuTheme.Spacing.item, for: .scrollContent)
             }
-            .contentMargins(.horizontal, BubuTheme.Spacing.item, for: .scrollContent)
             HStack(spacing: BubuTheme.Spacing.s) {
                 // Single-line so Return sends (a vertical-axis field turns Return into a newline).
                 TextField("问一个关于布布的问题…", text: $draft)
@@ -147,8 +151,10 @@ struct AskBubuView: View {
             }
             .padding(.horizontal, BubuTheme.Spacing.item)
         }
+        .bubuContentColumn(820)   // 与对话列同宽；底色仍铺满整条
         .padding(.vertical, BubuTheme.Spacing.s)
         .background(.ultraThinMaterial)
+        .animation(reduceMotion ? nil : BubuMotion.quick, value: focused)
     }
 
     private var canSend: Bool { !asking && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }

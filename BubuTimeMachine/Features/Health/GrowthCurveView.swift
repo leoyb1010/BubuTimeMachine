@@ -5,6 +5,7 @@ import Charts
 // MARK: - 成长曲线（WHO 百分位 + 布布实测点）
 struct GrowthCurveView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppEnvironment.self) private var env
     @Query private var profiles: [ChildProfile]
@@ -56,7 +57,7 @@ struct GrowthCurveView: View {
         .navigationTitle("成长曲线")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showGrowthRecorder) {
-            HealthRecordSheet(kind: .checkup, growthOnly: true)
+            HealthRecordSheet(kind: .checkup, growthOnly: true).bubuLayoutRoot()
         }
         .task(id: "\(metric.rawValue)|\(axisRaw)") { await replayReveal() }
     }
@@ -233,8 +234,9 @@ struct GrowthCurveView: View {
                     }
                 }
             }
-            // 宽屏放高：横屏 1300pt 宽 × 280pt 高会把曲线压成一条，趋势读不出来
-            .frame(height: BubuAdaptive.value(sizeClass, compact: 290, regular: 420))
+            // 宽屏放高：横屏 1300pt 宽 × 280pt 高会把曲线压成一条，趋势读不出来；
+            // 矮屏（Duo 合上横拿 466pt 高）收矮，图例和切换不被挤出一屏。
+            .frame(height: layout.bubuHeight(BubuAdaptive.value(sizeClass, compact: 290, regular: 420), short: 230))
             legend
         }
         .padding()

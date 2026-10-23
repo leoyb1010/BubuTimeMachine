@@ -9,6 +9,7 @@ struct BirthdayFilmView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.bubuLayout) private var layout
 
     private struct Moment: Identifiable, Hashable {
         let plan: FilmMomentPlan
@@ -186,11 +187,19 @@ struct BirthdayFilmView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// 竖版预览的最高高度：常规 560；矮屏 / 横拿不超过安全区高度减一点边距（至少 240），一屏看全。
+    private var filmMaxHeight: CGFloat {
+        guard layout.size.height > 0 else { return 560 }
+        return min(560, max(240, layout.safeRect.height - 24))
+    }
+
     private func result(_ url: URL) -> some View {
         VStack(spacing: BubuTheme.Spacing.m) {
             VideoPlayer(player: player)
                 .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                .frame(maxHeight: 560)
+                // 用宽度封顶来限高（滚动容器里高度提案为 nil，maxHeight 管不住 fit）：
+                // 常规最高 560pt；矮屏按可用高度撑满一屏，竖版片子不会高出屏幕。
+                .frame(maxWidth: filmMaxHeight * 9.0 / 16.0)
                 .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
                 .accessibilityLabel("生日影片预览")
             ShareLink(item: url, preview: SharePreview("布布的又一年", image: Image(systemName: "film"))) {

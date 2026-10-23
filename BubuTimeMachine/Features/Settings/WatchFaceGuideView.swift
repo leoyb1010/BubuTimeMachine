@@ -23,7 +23,7 @@ struct WatchFaceGuideView: View {
                 tip
             }
             .padding()
-            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
+            .bubuColumn()   // 宽屏收进居中内容列（书本折痕时放在折痕一侧），窄屏原样
         }
         .navigationTitle("布布上表盘")
         .navigationBarTitleDisplayMode(.inline)

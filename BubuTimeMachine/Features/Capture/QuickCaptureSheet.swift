@@ -100,15 +100,17 @@ struct QuickCaptureSheet: View {
                           secondaryButton: .cancel(Text("先不用")))
                 }
             }
-            .sheet(isPresented: $showCamera) {
+            // 相机、录像、作品扫描全屏打开：取景器不再挤在半高弹窗里，开合 / 旋转时也不跟着弹窗变形。
+            .fullScreenCover(isPresented: $showCamera) {
                 CameraCaptureView { image in
                     model.addCameraPhoto(image)
                 } onCancel: {
                     showCamera = false
                 }
                 .ignoresSafeArea()
+                .bubuLayoutRoot() // Duo：弹窗布局根
             }
-            .sheet(isPresented: $showArtworkScanner) {
+            .fullScreenCover(isPresented: $showArtworkScanner) {
                 ArtworkScannerView { pages, text in
                     model.addScannedArtwork(pages: pages, recognizedText: text)
                     showArtworkScanner = false
@@ -117,17 +119,20 @@ struct QuickCaptureSheet: View {
                     showArtworkScanner = false
                 }
                 .ignoresSafeArea()
+                .bubuLayoutRoot() // Duo：弹窗布局根
             }
-            .sheet(isPresented: $showVideoCamera) {
+            .fullScreenCover(isPresented: $showVideoCamera) {
                 VideoCaptureView { url in
                     model.addCameraVideo(url: url)
                 } onCancel: {
                     showVideoCamera = false
                 }
                 .ignoresSafeArea()
+                .bubuLayoutRoot() // Duo：弹窗布局根
             }
             .sheet(isPresented: $showNaturalCapture) {
                 NaturalCapturePanel()
+                    .bubuLayoutRoot() // Duo：弹窗布局根
             }
             .sheet(item: $mediaSourceSheet) { source in
                 CaptureMediaSourceSheet(
@@ -139,8 +144,8 @@ struct QuickCaptureSheet: View {
                         Task { await requestCamera(video: source == .video) }
                     }
                 )
-                .presentationDetents([.height(300)])
                 .presentationDragIndicator(.visible)
+                .bubuLayoutRoot() // Duo：弹窗布局根
             }
             .navigationTitle("记录此刻")
             .navigationBarTitleDisplayMode(.inline)
@@ -169,24 +174,26 @@ struct QuickCaptureSheet: View {
             .interactiveDismissDisabled(model.canSave || model.isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("不记了") {
+                    // 系统关闭按钮（图标 + 标题，竖排时也能进侧栏）；旁白和 UI 测试仍念「不记了」。
+                    Button(role: .close) {
                         if model.canSave { discardConfirm = true }
                         else { model.showQuickCapture = false }
                     }
                     .disabled(model.isSaving)
-                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .accessibilityLabel("不记了")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task {
-                            let ok = await model.savePickedItems(into: modelContext)
-                            if ok { env.syncEngine.syncNow() }
+                    if model.isSaving {
+                        ProgressView()
+                    } else {
+                        Button("保存", systemImage: "checkmark", role: .confirm) {
+                            Task {
+                                let ok = await model.savePickedItems(into: modelContext)
+                                if ok { env.syncEngine.syncNow() }
+                            }
                         }
-                    } label: {
-                        if model.isSaving { ProgressView() }
-                        else { Text("保存").font(BubuTheme.Font.headline.weight(.bold)) }
+                        .disabled(!model.canSave)
                     }
-                    .disabled(!model.canSave || model.isSaving)
                 }
             }
         }
@@ -607,6 +614,8 @@ private struct CaptureMediaSourceSheet: View {
     let requestingCamera: Bool
     let onCamera: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// 内容实际高度（含内边距）；弹窗高度按它定，不再固定 300pt。
+    @State private var contentHeight: CGFloat?
 
     var body: some View {
         let pickerTitle = source.pickerTitle
@@ -637,11 +646,23 @@ private struct CaptureMediaSourceSheet: View {
             }
             .buttonStyle(BubuPressableStyle(scale: 0.98))
             .disabled(requestingCamera)
-
-            Spacer(minLength: 0)
         }
         .padding(20)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(BubuTheme.Color.background.ignoresSafeArea())
+        .captureFittedDetents(contentHeight, fallback: 300)
+        // regular 宽度（iPad / Duo 内屏）的表单弹窗：宽度照旧，高度贴合内容。
+        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
+    }
+}
+
+extension View {
+    /// 弹窗高度贴合内容：iPhone 底部弹窗用测出的内容高度做 detent（不含底部安全区，系统自动加），
+    /// 矮屏 / 大字号时不被固定高度裁切，内容少时也不留大片空白。`extra` 为额外可拖到的档位。
+    func captureFittedDetents(_ height: CGFloat?, fallback: CGFloat,
+                              extra: Set<PresentationDetent> = []) -> some View {
+        presentationDetents(extra.union([.height((height ?? fallback).rounded(.up))]))
     }
 }
 

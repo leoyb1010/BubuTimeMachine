@@ -1,9 +1,31 @@
 import SwiftUI
 import AVKit
 
+/// The photo pager over the shared stream: reads `feed`, so new pages and removals show up as they land.
+struct OnlineTimelineFeedDetail: View {
+    let client: BubuLearningClient
+    let feed: OnlineTimelineFeed
+    let initial: OnlineTimelineItem
+    var onCurrentChange: (String) -> Void = { _ in }
+
+    var body: some View {
+        OnlineTimelineDetailPager(client: client, items: feed.items, initial: initial,
+                                  loadMore: { await feed.loadMore() }, hasMore: feed.hasMore,
+                                  onNotBubu: { id in feed.remove(id) }, onCurrentChange: onCurrentChange)
+    }
+}
+
+/// Where the pager sits (global coordinates) and its safe-area insets.
+private nonisolated struct OnlineDetailPagerGeometry: Equatable, Sendable {
+    var frame: CGRect = .zero
+    var insets = EdgeInsets()
+}
+
 /// Full-screen, swipe-through view of the loaded timeline items; loads the next page near the end.
 /// Photos fill the screen on black with real pinch / double-tap zoom and pan; one tap hides the chrome;
 /// the analysis and family comments open in a sheet so nothing scrolls against the pager.
+/// Under a vertical fold (iPhone Duo half open like a book) a photo is never split: it fills the pane before the
+/// fold and its analysis and comments sit in the pane after it.
 struct OnlineTimelineDetailPager: View {
     let client: BubuLearningClient
     let items: [OnlineTimelineItem]
@@ -13,10 +35,15 @@ struct OnlineTimelineDetailPager: View {
     var onNotBubu: (String) -> Void
     /// Called with the id of the page in front whenever it changes, so the zoom-back lands on the photo being viewed.
     var onCurrentChange: (String) -> Void
+    /// Shown in the pane after a book fold, beside the stream, instead of pushed full screen: no navigation bar of
+    /// its own (a small bar over the photo instead), and a new `initial` (another photo tapped) turns to that page.
+    var embedded = false
+    /// Embedded only: the bar's close button, which clears the stream's selection.
+    var onClose: () -> Void = {}
     @State private var state: OnlineDetailPagerState
     @State private var prefetches: [String: Task<Void, Never>] = [:]
-    /// Longest side of the full-screen page in points, for prefetching at the size the page will decode.
-    @State private var pageSide: CGFloat = 0
+    @State private var geometry = OnlineDetailPagerGeometry()
+    @Environment(\.bubuLayout) private var screen
     @Environment(AppEnvironment.self) private var env
     @Environment(\.locale) private var locale
     @Environment(\.displayScale) private var displayScale
@@ -25,7 +52,8 @@ struct OnlineTimelineDetailPager: View {
 
     init(client: BubuLearningClient, items: [OnlineTimelineItem], initial: OnlineTimelineItem,
          loadMore: @escaping () async -> Void, hasMore: Bool, onNotBubu: @escaping (String) -> Void = { _ in },
-         onCurrentChange: @escaping (String) -> Void = { _ in }) {
+         onCurrentChange: @escaping (String) -> Void = { _ in }, embedded: Bool = false,
+         onClose: @escaping () -> Void = {}) {
         self.client = client
         self.items = items
         self.initial = initial
@@ -33,10 +61,57 @@ struct OnlineTimelineDetailPager: View {
         self.hasMore = hasMore
         self.onNotBubu = onNotBubu
         self.onCurrentChange = onCurrentChange
+        self.embedded = embedded
+        self.onClose = onClose
         _state = State(initialValue: OnlineDetailPagerState(current: initial.id))
     }
 
     var body: some View {
+        if embedded {
+            pager
+                .overlay(alignment: .topTrailing) { if state.chromeVisible { paneBar.transition(.opacity) } }
+                .animation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion), value: state.chromeVisible)
+                .onChange(of: initial.id) { _, id in if state.current != id { state.current = id } }
+        } else {
+            pager
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    // Under a fold the analysis is already on screen beside the photo.
+                    if state.split == nil {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button { state.infoID = state.current } label: { Label("解析与评论", systemImage: "info.circle") }
+                                .accessibilityIdentifier("timeline.detail.info")
+                        }
+                    }
+                }
+                .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarVisibility(state.chromeVisible ? .visible : .hidden, for: .navigationBar)
+                .toolbar(.hidden, for: .tabBar)
+                .statusBarHidden(!state.chromeVisible)
+                .animation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion), value: state.chromeVisible)
+        }
+    }
+
+    /// The pane's own bar (it sits under the stream's navigation bar, so it has none): analysis and comments, close.
+    private var paneBar: some View {
+        HStack(spacing: BubuTheme.Spacing.s) {
+            // Under a fold inside the pane the analysis is already on screen beside the photo.
+            if state.split == nil {
+                Button("解析与评论", systemImage: "info.circle") { state.infoID = state.current }
+                    .accessibilityIdentifier("timeline.detail.info")
+            }
+            Button(role: .close) { onClose() }
+                .accessibilityLabel("关闭")
+                .accessibilityIdentifier("timeline.detail.close")
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.glass)
+        .padding(BubuTheme.Spacing.s)
+    }
+
+    private var pager: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             OnlineDetailPageController(items: items, state: state) { item in
@@ -47,25 +122,12 @@ struct OnlineTimelineDetailPager: View {
             }
             .ignoresSafeArea()
         }
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            let insets = proxy.safeAreaInsets
-            return max(proxy.size.width + insets.leading + insets.trailing, proxy.size.height + insets.top + insets.bottom)
-        } action: { pageSide = $0 }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { state.infoID = state.current } label: { Image(systemName: "info.circle") }
-                    .accessibilityLabel("解析与评论")
-                    .accessibilityIdentifier("timeline.detail.info")
-            }
-        }
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbarVisibility(state.chromeVisible ? .visible : .hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
-        .statusBarHidden(!state.chromeVisible)
-        .animation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion), value: state.chromeVisible)
+        .onGeometryChange(for: OnlineDetailPagerGeometry.self) { proxy in
+            OnlineDetailPagerGeometry(frame: proxy.frame(in: .global), insets: proxy.safeAreaInsets)
+        } action: { geometry = $0 }
+        // Pages are hosted outside this view's environment: what they lay out by goes through the shared state.
+        .onChange(of: foldSplit, initial: true) { _, split in state.split = split }
+        .bubuOnToolbarVerticalEdgeChange { edge in state.extendsUnderBar = edge != nil && !embedded }
         .task(id: "\(state.current)|\(pageSide > 0)") {
             prefetchNeighbours()
             if hasMore, let index = items.firstIndex(where: { $0.id == state.current }), index >= items.count - 3 {
@@ -75,13 +137,25 @@ struct OnlineTimelineDetailPager: View {
         .onChange(of: items.map(\.id)) { old, ids in
             guard !ids.contains(state.current) else { return }
             // The page in front was removed ("不是布布"): show its neighbour, or leave when nothing is left.
-            guard !ids.isEmpty else { dismiss(); return }
+            guard !ids.isEmpty else { if !embedded { dismiss() }; return }
             let index = old.firstIndex(of: state.current) ?? 0
             state.current = ids[min(index, ids.count - 1)]
         }
         .onChange(of: state.current) { _, id in onCurrentChange(id) }
         .onDisappear { prefetches.values.forEach { $0.cancel() } }
         .accessibilityIdentifier("timeline.detail")
+    }
+
+    /// Longest side of the full-screen page in points, for prefetching at the size the page will decode.
+    private var pageSide: CGFloat {
+        let size = geometry.frame.size, insets = geometry.insets
+        return max(size.width + insets.leading + insets.trailing, size.height + insets.top + insets.bottom)
+    }
+
+    /// A vertical fold crossing the page (safe-area coordinates, which is how pages lay out).
+    private var foldSplit: BubuLayout.ColumnSplit? {
+        let frame = screen.rootRect(fromGlobal: geometry.frame)
+        return screen.columnSplit(minX: frame.minX, width: frame.width, margin: 0, minPane: 200)
     }
 
     private var title: String {
@@ -120,7 +194,7 @@ private struct OnlineDetailPageHost: View {
     var body: some View {
         OnlineTimelineDetailPage(
             client: client, item: item, isCurrent: state.current == item.id,
-            chromeVisible: state.chromeVisible,
+            chromeVisible: state.chromeVisible, split: state.split, extendsUnderBar: state.extendsUnderBar,
             showInfo: Binding(get: { state.infoID == item.id },
                               set: { open in
                                   if open { state.infoID = item.id } else if state.infoID == item.id { state.infoID = nil }
@@ -135,6 +209,10 @@ struct OnlineTimelineDetailPage: View {
     let item: OnlineTimelineItem
     let isCurrent: Bool
     var chromeVisible = true
+    /// A vertical fold across the page: the photo goes before it, the analysis and comments after it.
+    var split: BubuLayout.ColumnSplit? = nil
+    /// Bars stand vertically at the side (iPhone Duo): the photo stays clear of them and extends under them.
+    var extendsUnderBar = false
     @Binding var showInfo: Bool
     var onToggleChrome: () -> Void = {}
     var onNotBubu: (String) -> Void = { _ in }
@@ -144,12 +222,23 @@ struct OnlineTimelineDetailPage: View {
     @State private var actionError: String?
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            media.ignoresSafeArea()
-            if chromeVisible && player == nil {
-                caption.transition(.opacity)
+        // One structure with or without a fold, so the photo keeps its zoom and image when the fold appears.
+        HStack(spacing: 0) {
+            ZStack(alignment: .bottom) {
+                media.ignoresSafeArea(edges: split != nil || extendsUnderBar ? .vertical : .all)
+                if split == nil && chromeVisible && player == nil {
+                    caption.transition(.opacity)
+                }
+            }
+            .frame(width: split?.leading)
+            if let split {
+                Color.clear.frame(width: split.gutter)
+                infoContent
+                    .background(BubuThemedBackground().ignoresSafeArea())
+                    .frame(width: split.trailing)
             }
         }
+        .onChange(of: split != nil) { _, folded in if folded { showInfo = false } }
         .onChange(of: isCurrent) { _, active in if !active { player?.pause() } }
         .onDisappear {
             guard let player else { return }
@@ -157,7 +246,7 @@ struct OnlineTimelineDetailPage: View {
             // Let music or podcasts in other apps resume after a video.
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        .sheet(isPresented: $showInfo) { infoSheet }
+        .sheet(isPresented: split == nil ? $showInfo : .constant(false)) { infoSheet }
     }
 
     @ViewBuilder
@@ -169,7 +258,8 @@ struct OnlineTimelineDetailPage: View {
                         .accessibilityLabel(item.description.isEmpty ? "布布的视频" : "视频：\(item.description)")
                         .accessibilityIdentifier("timeline.video")
                 } else {
-                    OnlineDetailPhoto(item: item, client: client, isActive: isCurrent, onSingleTap: onToggleChrome)
+                    OnlineDetailPhoto(item: item, client: client, isActive: isCurrent, onSingleTap: onToggleChrome,
+                                      extendsUnderBars: extendsUnderBar)
                         .accessibilityLabel(item.description.isEmpty ? "视频封面" : "视频封面：\(item.description)")
                     if let videoError {
                         VStack(spacing: BubuTheme.Spacing.s) {
@@ -194,7 +284,8 @@ struct OnlineTimelineDetailPage: View {
                 }
             }
         } else {
-            OnlineDetailPhoto(item: item, client: client, isActive: isCurrent, onSingleTap: onToggleChrome)
+            OnlineDetailPhoto(item: item, client: client, isActive: isCurrent, onSingleTap: onToggleChrome,
+                              extendsUnderBars: extendsUnderBar)
         }
     }
 
@@ -231,29 +322,37 @@ struct OnlineTimelineDetailPage: View {
         .accessibilityIdentifier("timeline.detail.caption")
     }
 
-    private var infoSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
-                    info
-                    TimelineSocialSection(client: client, itemID: item.id, active: showInfo)
-                }
-                .padding(BubuTheme.Spacing.item)
-                .bubuContentColumn(900)
+    /// Analysis, tags and family comments: in a sheet, or in the pane after a vertical fold.
+    private var infoContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: BubuTheme.Spacing.item) {
+                info
+                TimelineSocialSection(client: client, itemID: item.id, active: split == nil ? showInfo : isCurrent)
             }
-            .background(BubuThemedBackground().ignoresSafeArea())
-            .navigationTitle("解析与评论")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { showInfo = false } }
-            }
+            .padding(BubuTheme.Spacing.item)
+            .bubuContentColumn(900)
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
         .confirmationDialog("这张里没有布布？", isPresented: $confirmNotBubu, titleVisibility: .visible) {
             Button("不是布布，移出时光", role: .destructive) { Task { await markNotBubu() } }
             Button("取消", role: .cancel) {}
         } message: { Text("只会从布布的时光里移出，第二大脑的原片不受影响。") }
+    }
+
+    private var infoSheet: some View {
+        NavigationStack {
+            infoContent
+                .background(BubuThemedBackground().ignoresSafeArea())
+                .navigationTitle("解析与评论")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成", systemImage: "checkmark", role: .confirm) { showInfo = false }
+                    }
+                }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .bubuLayoutRoot()
     }
 
     private var info: some View {

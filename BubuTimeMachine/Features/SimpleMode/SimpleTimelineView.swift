@@ -6,6 +6,7 @@ import SwiftData
 struct SimpleTimelineView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.bubuLayout) private var layout
     @Query(filter: #Predicate<Entry> { !$0.isArchived },
            sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
@@ -21,7 +22,6 @@ struct SimpleTimelineView: View {
 
             ScrollView {
                 LazyVStack(spacing: 18) {
-                    Color.clear.frame(height: 68)   // 顶栏占位
                     if entries.isEmpty {
                         emptyState
                     } else {
@@ -31,10 +31,13 @@ struct SimpleTimelineView: View {
                     }
                     Color.clear.frame(height: 30)
                 }
+                .padding(.top, 8)
+                .bubuColumn(maxWidth: 620)   // 宽屏 / 书本折痕：收进一列，大图不横跨折痕
                 .padding(.horizontal, 18)
             }
-
-            topBar
+            // 顶栏用 safeAreaInset 而不是固定 68pt 占位：长辈字号开到 AX5 时顶栏会长高，
+            // 固定占位会让第一张卡片钻到顶栏下面。
+            .safeAreaInset(edge: .top, spacing: 0) { topBar }
         }
         .fullScreenCover(item: $viewer) { target in
             MediaGalleryViewer(mediaItems: target.media,
@@ -88,7 +91,7 @@ struct SimpleTimelineView: View {
             if let cover {
                 MediaThumbnail(media: cover, mediaStore: env.mediaStore,
                                cornerRadius: BubuTheme.Radius.md, size: .card)
-                    .frame(height: 240)
+                    .frame(height: layout.bubuHeight(240, short: 180))
                     .frame(maxWidth: .infinity)
                     .clipped()
             }

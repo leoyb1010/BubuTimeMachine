@@ -5,6 +5,7 @@ import SwiftData
 /// 切换全局主题配色，选择首页背景模式（主题背景 / 布布照片）。
 struct ThemeSettingsView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.bubuLayout) private var layout
     @Query private var profiles: [ChildProfile]
 
     private var manager: ThemeManager { env.theme }
@@ -23,7 +24,10 @@ struct ThemeSettingsView: View {
                     .font(BubuTheme.Font.headline)
                     .foregroundStyle(BubuTheme.Color.warmBrown)
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 2), spacing: 14) {
+                // 窄屏 2 列；宽屏按宽度取偶数列，书本折痕时正中留出折痕（页面左右各 16pt 内边距）。
+                LazyVGrid(columns: layout.bubuFoldGrid(compactColumns: 2, minItemWidth: 200, spacing: 14,
+                                                       availableWidth: max(0, layout.safeRect.width - 32)),
+                          spacing: 14) {
                     ForEach(BubuThemeDefinition.all) { theme in
                         themeCard(theme)
                     }

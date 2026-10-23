@@ -65,17 +65,18 @@ struct SoundRingView: View {
         .navigationTitle("声音年轮")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $jumpEntry) { EntryDetailView(entry: $0) }
-        .sheet(item: $sourceDetail) { source in sourceSheet(source) }
+        .sheet(item: $sourceDetail) { source in sourceSheet(source).bubuLayoutRoot() }
         .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]) }
         .sheet(isPresented: $showAdvancedSettings) {
             NavigationStack {
                 AdvancedSettingsView()
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showAdvancedSettings = false }
+                            Button("完成", systemImage: "checkmark", role: .confirm) { showAdvancedSettings = false }
                         }
                     }
             }
+            .bubuLayoutRoot()
         }
         .alert("开始制作声音年轮？", isPresented: $showRenderConfirmation) {
             Button("开始制作") { render() }
@@ -525,7 +526,7 @@ struct SoundRingView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { sourceDetail = nil }
+                    Button("完成", systemImage: "checkmark", role: .confirm) { sourceDetail = nil }
                 }
             }
         }

@@ -24,14 +24,12 @@ struct SchoolReportCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if recognizing { Label("DeepSeek 正在补齐原表…", systemImage: "sparkle.magnifyingglass").font(.caption) }
-            if BubuAdaptive.isWide(sizeClass) && !typeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: 12) {
-                    lifeColumn.frame(maxWidth: .infinity, alignment: .topLeading)
-                    observationsColumn.frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-            } else {
-                lifeColumn
-                observationsColumn
+            // 同一组面板在宽窄之间只换排列（AnyLayout），开合 / 旋转时面板里的状态不丢。
+            let sideBySide = BubuAdaptive.isWide(sizeClass) && !typeSize.isAccessibilitySize
+            (sideBySide ? AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 8))) {
+                lifeColumn.frame(maxWidth: .infinity, alignment: .topLeading)
+                observationsColumn.frame(maxWidth: .infinity, alignment: .topLeading)
             }
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 5) {

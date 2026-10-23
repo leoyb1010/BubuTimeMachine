@@ -69,6 +69,7 @@ struct VaccineView: View {
             VaccineQuickLogSheet(dose: target.dose,
                                  record: target.record,
                                  birthday: profile?.birthday)
+                .bubuLayoutRoot()
         }
     }
 

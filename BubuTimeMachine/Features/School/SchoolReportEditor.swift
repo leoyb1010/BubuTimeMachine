@@ -160,12 +160,17 @@ struct SchoolOriginalSheet: View {
                 }
             }
             .navigationTitle("亲子桥原表").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("看好了") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("看好了", systemImage: "checkmark", role: .confirm) { dismiss() }
+                }
+            }
             .task {
                 image = await env.thumbnails.image(mediaId: fileID, thumbnailFileName: nil,
                     localFileName: fileName, isPhoto: true, size: .detail)
                 loading = false
             }
         }
+        .bubuLayoutRoot()
     }
 }

@@ -155,11 +155,11 @@ struct SettingsView: View {
                 footer
             }
             .padding()
-            .bubuContentColumn(760)
+            .bubuColumn(maxWidth: 760)   // 宽屏居中；书本折痕时整列放在折痕一侧
         }
         .navigationTitle("设置")
         .background(BubuTheme.Color.background.ignoresSafeArea())
-        .fullScreenCover(isPresented: $showFrame) { PhotoFrameView() }
+        .fullScreenCover(isPresented: $showFrame) { PhotoFrameView().bubuLayoutRoot() }
         .task { await reconcileDailyReminder() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await reconcileDailyReminder() } }

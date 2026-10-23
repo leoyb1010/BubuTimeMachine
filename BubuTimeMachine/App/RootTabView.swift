@@ -15,6 +15,8 @@ struct RootTabView: View {
     /// 首页以外的 Tab 点「记录此刻」时，就地弹出记录面板，不再把人拽回首页。
     @State private var rootCapture: CaptureModel?
     @State private var captureToast: BubuToastState?
+    /// 「记录此刻」底部附件的窗口坐标；竖排 Tab 栏（Duo 外屏）时用来给内容补底部让位。
+    @State private var accessoryFrame: CGRect?
 
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
 
@@ -50,6 +52,8 @@ struct RootTabView: View {
             // 页面入口必须始终可直接选择；自动收缩会把当前 Tab 与记录附件
             // 合成紧凑底栏，跨页面/关闭记录后可能无法恢复完整导航。
             .tabBarMinimizeBehavior(.never)
+            // Duo 外屏/内屏横拿时底栏竖排在侧边：空间不够先保 5 个 Tab，页面按钮进溢出菜单。
+            .bubuToolbarVerticalCompression(.prefersTabBar)
             .tabViewSidebarHeader {
                 Label("布布时光机", systemImage: "book.pages.fill")
                     .font(BubuTheme.Font.headline)
@@ -80,7 +84,8 @@ struct RootTabView: View {
             .environment(\.locale, Locale(identifier: "zh_Hans_CN"))
             // 第一次连上家庭服务时，先说明第二大脑如何整理内容，再展示回忆、时光与学习。
             .secondBrainConsent(active: BubuLearningClient(env: env) != nil && !OnlineTimelineView.skipsConsentForUITest)
-            .ignoresSafeArea(.keyboard)
+            // 不再在根上 ignoresSafeArea(.keyboard)：那是旧自绘底栏的遗留，会让问答/详情的输入框被键盘盖住。
+            // 各页背景自己 ignoresSafeArea()，键盘出来时只有内容让位。
             .onAppear {
                 #if DEBUG
                 if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-uitest-tab"),
@@ -105,15 +110,21 @@ struct RootTabView: View {
             .sheet(item: Binding(get: { router.pendingAsk.map(PendingAsk.init) }, set: { _ in router.pendingAsk = nil })) { ask in
                 NavigationStack {
                     AskBubuView(initialQuestion: ask.question)
-                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { router.pendingAsk = nil } } }
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button(role: .close) { router.pendingAsk = nil }
+                                    .accessibilityLabel("关闭")
+                            }
+                        }
                 }
+                .bubuLayoutRoot() // Duo WS0：弹窗布局根
             }
             .onChange(of: selection) { _, tab in
                 if tab == 1 { openPendingTimelineEntryIfReady() }
             }
             .sheet(isPresented: Binding(get: { rootCapture?.showQuickCapture ?? false },
                                         set: { rootCapture?.showQuickCapture = $0 })) {
-                if let rootCapture { QuickCaptureSheet(model: rootCapture) }
+                if let rootCapture { QuickCaptureSheet(model: rootCapture).bubuLayoutRoot() } // Duo WS0：弹窗布局根
             }
             .onChange(of: rootCapture?.savedFlash) { _, flashed in
                 if flashed == true {
@@ -133,56 +144,89 @@ struct RootTabView: View {
     @ViewBuilder
     private var tabsWithRecordAccessory: some View {
         if #available(iOS 26.1, *) {
-            tabs.tabViewBottomAccessory(isEnabled: !isWide) {
-                BubuRecordAccessory { openQuickCapture() }
-            }
+            tabs.tabViewBottomAccessory(isEnabled: !isWide) { recordAccessory }
         } else if !isWide {
-            tabs.tabViewBottomAccessory {
-                BubuRecordAccessory { openQuickCapture() }
-            }
+            tabs.tabViewBottomAccessory { recordAccessory }
         } else {
             tabs
+        }
+    }
+
+    private var recordAccessory: some View {
+        BubuRecordAccessory(action: openQuickCapture) { frame in
+            if accessoryFrame != frame { accessoryFrame = frame }
         }
     }
 
     private var tabs: some View {
         TabView(selection: $selection) {
             Tab("首页", systemImage: "house.fill", value: 0) {
-                NavigationStack {
-                    CaptureHomeView(openTimeline: { selection = 1 },
-                                    quickCaptureTrigger: quickCaptureTrigger)
+                tabRoot {
+                    NavigationStack {
+                        CaptureHomeView(openTimeline: { selection = 1 },
+                                        quickCaptureTrigger: quickCaptureTrigger)
+                            // 首页隐藏了导航栏，宽屏入口仍是「今天」卡里的 home.record；首页以后露出导航栏时自动出现。
+                            .toolbar { recordToolbar }
+                    }
                 }
             }
 
             Tab("时光", systemImage: "clock.fill", value: 1) {
-                NavigationStack(path: $timelinePath) {
-                    OnlineTimelineView()
-                        .onAppear { openPendingTimelineEntryIfReady() }
-                        // 通知/小组件/搜索直达的家人记录仍可打开，但不再作为时光主列表。
-                        .navigationDestination(for: UUID.self) { TimelineEntryDestination(entryID: $0) }
+                // 内屏双栏（NavigationSplitView）暂缓：时光的三个详情 destination、缩放转场和翻页器
+                // 都挂在 OnlineTimelineBrowser 自己的 @State 上，换容器需要时光页先把选中项上提（见 WS1 报告）。
+                tabRoot {
+                    NavigationStack(path: $timelinePath) {
+                        OnlineTimelineView()
+                            .onAppear { openPendingTimelineEntryIfReady() }
+                            // 通知/小组件/搜索直达的家人记录仍可打开，但不再作为时光主列表。
+                            .navigationDestination(for: UUID.self) { TimelineEntryDestination(entryID: $0) }
+                            .toolbar { recordToolbar }
+                    }
                 }
             }
 
             Tab("学习", systemImage: "graduationcap.fill", value: Self.learningTab) {
-                NavigationStack { DailyLearningHomeView() }
+                tabRoot { NavigationStack { DailyLearningHomeView().toolbar { recordToolbar } } }
             }
 
             Tab("成长", systemImage: "chart.xyaxis.line", value: 2) {
-                NavigationStack { GrowthHomeView() }
+                tabRoot { NavigationStack { GrowthHomeView().toolbar { recordToolbar } } }
             }
 
             Tab("幼儿园", systemImage: "house.lodge.fill", value: 3) {
-                NavigationStack { MemoryJournalView() }
+                tabRoot { NavigationStack { MemoryJournalView().toolbar { recordToolbar } } }
             }
 
             #if targetEnvironment(macCatalyst)
             Tab("档案馆", systemImage: "archivebox.fill", value: 4) {
-                NavigationStack { MacArchiveWorkspaceView() }
+                tabRoot { NavigationStack { MacArchiveWorkspaceView().toolbar { recordToolbar } } }
             }
             #endif
         }
         .tint(env.theme.theme.tabTint)
         .accessibilityIdentifier("root.tabs")
+    }
+
+    /// 每个 Tab 的根：布局根 + 给「记录此刻」附件让位（只在系统没让开时补，见 RecordAccessoryClearance）。
+    private func tabRoot(@ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .bubuLayoutRoot() // Duo WS0：Tab 布局根
+            .modifier(RecordAccessoryClearance(accessoryFrame: isWide ? nil : accessoryFrame))
+    }
+
+    /// 宽屏（iPad、Duo 内屏）没有底部附件：侧栏收起后只剩 ⌘N，所以每个 Tab 根的工具栏都放一个「记录此刻」。
+    /// 窄屏由底部附件负责，这里不重复。标识与侧栏/附件的 root.record 区分开，避免 UI 测试命中多个。
+    @ToolbarContentBuilder
+    private var recordToolbar: some ToolbarContent {
+        if isWide {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: openQuickCapture) {
+                    Label(BubuTheme.Copy.recordNow, systemImage: "plus.circle.fill")
+                }
+                .accessibilityIdentifier("root.record.toolbar")
+            }
+            .bubuVisibilityPriority(.high)
+        }
     }
 
     private var keyboardShortcuts: some View {
@@ -274,6 +318,8 @@ private struct BubuRecordAccessory: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
     @Environment(AppEnvironment.self) private var env
     let action: () -> Void
+    /// 附件在窗口里的位置（消失时回 nil），供 RecordAccessoryClearance 计算让位。
+    let onFrameChange: (CGRect?) -> Void
 
     var body: some View {
         Button(action: action) {
@@ -307,6 +353,36 @@ private struct BubuRecordAccessory: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("root.record")
         .accessibilityLabel("记录此刻")
+        // 取整：附件形变动画里的亚像素抖动不触发根视图重绘；只有真正变了才回调（调用方再比一次）。
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global).integral } action: { onFrameChange($0) }
+        .onDisappear { onFrameChange(nil) }
+    }
+}
+
+/// 普通 iPhone 底栏在下方时，系统把附件算进内容安全区；Duo 外屏 / 横拿时 Tab 栏竖排到侧边，
+/// 附件横放在内容底部，基线截图里它直接盖住内容。这里量出「附件顶边」与「内容安全区底边」的重叠，
+/// 只补这段差：系统已经让开时重叠 ≤ 0，不重复留白；滚动内容仍可滑到附件底下，只是末尾能完整滚出来，
+/// 不滚动页面的底部按钮也不会被附件挡住。
+private struct RecordAccessoryClearance: ViewModifier {
+    let accessoryFrame: CGRect?
+    /// 内容安全区底边（窗口坐标），在补白之前量，避免补白改变测量值后来回抖。
+    @State private var safeBottom: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaPadding(.bottom, clearance)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom
+            } action: { safeBottom = $0 }
+    }
+
+    private var clearance: CGFloat {
+        guard let accessoryFrame, let safeBottom,
+              accessoryFrame.width > accessoryFrame.height * 2 else { return 0 }
+        let overlap = safeBottom - accessoryFrame.minY
+        // 只认「横条压在内容底部」：重叠不超过附件自身高度加一点底边距；坐标对不上时宁可不补。
+        guard overlap > 0, overlap <= accessoryFrame.height + 32 else { return 0 }
+        return overlap + BubuTheme.Spacing.s
     }
 }
 

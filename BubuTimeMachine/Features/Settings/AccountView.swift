@@ -43,14 +43,14 @@ struct AccountView: View {
                 }
             }
             .padding()
-            .bubuContentColumn()   // 宽屏收进居中内容列，窄屏原样
+            .bubuColumn()   // 宽屏收进居中内容列（书本折痕时放在折痕一侧），窄屏原样
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
         .overlay { if welcomeSync { welcomeOverlay } }
         .navigationTitle("账号与安全")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showChangePassword) { ChangePasswordSheet() }
-        .sheet(isPresented: $showRecovery) { CapsuleRecoveryView() }
+        .sheet(isPresented: $showChangePassword) { ChangePasswordSheet().bubuLayoutRoot() }
+        .sheet(isPresented: $showRecovery) { CapsuleRecoveryView().bubuLayoutRoot() }
         .confirmationDialog("要退出这个账号吗？", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) { performLogout() }
             Button("再想想", role: .cancel) {}
@@ -389,12 +389,19 @@ private struct ChangePasswordSheet: View {
             .navigationTitle("修改密码")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
+                }
+                // 提交中换成转圈；空闲时必须是「图标 + 标题」的角色按钮，才进得了竖排栏。
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await submit() } } label: {
-                        if busy { ProgressView() } else { Text("保存").fontWeight(.bold) }
+                    if busy {
+                        ProgressView()
+                            .accessibilityLabel("正在保存")
+                    } else {
+                        Button("保存", systemImage: "checkmark", role: .confirm) { Task { await submit() } }
+                            .disabled(oldPassword.isEmpty || newPassword.isEmpty)
                     }
-                    .disabled(busy || oldPassword.isEmpty || newPassword.isEmpty)
                 }
             }
         }

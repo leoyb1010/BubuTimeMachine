@@ -8,9 +8,13 @@ import Combine
 /// 「那年今日」的照片优先浮现，角落是名字、年龄与实时时钟。轻点唤出控制条。
 /// 连着家庭服务器时可切到「第二大脑今日精选」（`online-timeline/highlights`）。
 /// 减弱动态效果：不推拉、不淡入，直接切换，并且每张停留更久。
+/// iPhone Duo 半折（有激活折痕）时照片绝不被折痕劈开：桌面 / 帐篷（水平折痕）上半屏照片、下半屏日期与一句话；
+/// 书本（竖直折痕）一侧照片、一侧文字。没有折痕时保持原来的全屏铺图。
+/// 需要在呈现处加 `.bubuLayoutRoot()`（fullScreenCover 不继承 Tab 的布局根）。
 struct PhotoFrameView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.bubuLayout) private var layout
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
     private var entries: [Entry]
     @Query private var profiles: [ChildProfile]
@@ -47,6 +51,8 @@ struct PhotoFrameView: View {
 
             if slides.isEmpty {
                 emptyState
+            } else if let foldAxis = layout.foldAxis {
+                foldedLayout(foldAxis)
             } else {
                 photoLayer
                 gradientScrim
@@ -92,6 +98,76 @@ struct PhotoFrameView: View {
         .ignoresSafeArea()
         // 缓慢交叉淡入；减弱动态效果时硬切。
         .animation(reduceMotion ? nil : .easeInOut(duration: 1.6), value: current?.id)
+    }
+
+    // MARK: 半折布局（有激活折痕）
+
+    /// 不滚动的页面根部用 BubuArrangement 分两块：照片一块、文字一块，系统按折痕分到两侧。
+    /// 水平折痕（桌面 / 帐篷）→ 上下分（照片在上）；竖直折痕（书本）→ 左右分。
+    /// 控制条放进文字那一块，照片那一半保持干净，按钮也不会压在折痕上。
+    private func foldedLayout(_ foldAxis: Axis) -> some View {
+        BubuArrangement(axes: foldAxis == .horizontal ? .vertical : .horizontal, style: .split) {
+            foldedPhotoPane
+        } secondary: {
+            ZStack {
+                foldedCaptionPane
+                if showControls { controlBar }
+            }
+        }
+    }
+
+    private var foldedPhotoPane: some View {
+        ZStack {
+            Color.black
+            if let current, let img = images[current.id] {
+                KenBurnsImage(image: img, seed: current.seed, animating: !paused)
+                    .id(current.id)
+                    .transition(reduceMotion ? .identity : .opacity)
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .clipped()
+        .animation(reduceMotion ? nil : .easeInOut(duration: 1.6), value: current?.id)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(current?.caption ?? "照片")
+    }
+
+    /// 另一半：时钟、日期与年龄、一句话（单行），那年今日徽章。
+    private var foldedCaptionPane: some View {
+        VStack(spacing: 10) {
+            Text(BubuDateFormat.shortTime(now))
+                .font(BubuTheme.Font.scaled(44, weight: .heavy))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+            if let current {
+                if current.isOnThisDay {
+                    Label("那年今日", systemImage: "calendar.badge.clock")
+                        .font(BubuTheme.Font.scaled(13, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(BubuTheme.Color.warning.opacity(0.85), in: Capsule())
+                }
+                Text(current.dateText + (current.ageText.isEmpty ? "" : " · " + current.ageText))
+                    .font(BubuTheme.Font.scaled(17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(current.caption)
+                    .font(BubuTheme.Font.scaled(22, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Text(usesBrain ? "第二大脑今日精选" : childName + "的相册")
+                .font(BubuTheme.Font.scaled(13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: current?.id)
+        .accessibilityElement(children: .combine)
+        .allowsHitTesting(false)
     }
 
     private var gradientScrim: some View {

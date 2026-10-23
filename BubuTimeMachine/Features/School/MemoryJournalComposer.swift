@@ -137,23 +137,30 @@ struct MemoryJournalComposer: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(importing != nil ? "停止导入" : (transcription == nil ? "以后再说" : "停止识别")) {
-                        if let importing {
+                    if let importing {
+                        Button("停止导入", systemImage: "stop.circle") {
                             importing.cancel()
                             self.importing = nil
                             busy = false
                             reportItems = []; selected = []
                             message = "已停止等待，已导入的素材和填写内容保留，可以继续填写或收好。"
-                        } else if let transcription {
+                        }
+                    } else if let transcription {
+                        Button("停止识别", systemImage: "stop.circle") {
                             transcription.cancel()
                             self.transcription = nil
                             busy = false
                             message = "已停止等待识别，原声保留，可以直接收好。"
-                        } else if dirty { discard = true } else { closeComposer() }
-                    }.disabled(busy && transcription == nil && importing == nil)
+                        }
+                    } else {
+                        Button { if dirty { discard = true } else { closeComposer() } } label: {
+                            Label("以后再说", systemImage: "clock")
+                        }
+                        .disabled(busy)
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("收好") { save() }.fontWeight(.bold)
+                    Button("收好", systemImage: "tray.and.arrow.down", role: .confirm) { save() }
                         .disabled(!ownsDraft || !dirty || busy || unimportedVoice != nil || recorder.state == .recording)
                         .disabled(schoolReport?.confirmed == false && schoolReport?.automaticallyImported != true)
                         .accessibilityIdentifier("journal.save")
@@ -212,6 +219,7 @@ struct MemoryJournalComposer: View {
                 else if !saved && !discarded { persistDraft() }
             }
         }
+        .bubuLayoutRoot()
     }
 
     private var importControls: some View {

@@ -24,4 +24,36 @@ final class BubuAppDelegate: NSObject, UIApplicationDelegate {
         }
         return true
     }
+
+    // MARK: 方向（iPhone Duo WS0）
+    /// iPhone 已放开横屏（Info.plist）。这里保留一个整体回退开关（高级设置里可关）：
+    /// 关掉后 iPhone 锁回竖屏（横着拿的大屏 iPhone 也一样，不看 size class）；iPad / Mac 不受影响，
+    /// Duo 内屏本来也不听 App 的方向设置。不按设备尺寸识别 Duo（Apple 明确不建议）。
+    static let allowLandscapeKey = "bubu.layout.allowLandscape"
+
+    /// 是否允许 iPhone 横屏，默认 true。
+    static var allowsLandscape: Bool {
+        UserDefaults.standard.object(forKey: allowLandscapeKey) as? Bool ?? true
+    }
+
+    /// 修改回退开关并立即生效：所有窗口重新询问支持的方向；关掉时正横着的 iPhone 马上转回竖屏。
+    static func setAllowsLandscape(_ allowed: Bool) {
+        UserDefaults.standard.set(allowed, forKey: allowLandscapeKey)
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+            #if !targetEnvironment(macCatalyst)
+            if !allowed, UIDevice.current.userInterfaceIdiom == .phone {
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+            }
+            #endif
+        }
+    }
+
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
+        return Self.allowsLandscape ? .allButUpsideDown : .portrait
+    }
 }

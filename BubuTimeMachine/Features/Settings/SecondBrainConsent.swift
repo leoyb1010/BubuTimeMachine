@@ -52,6 +52,7 @@ private struct SecondBrainConsentSheet: View {
             .padding(BubuTheme.Spacing.l)
         }
         .background(BubuTheme.Color.background)
+        .bubuLayoutRoot()   // 弹窗布局根
         .presentationDetents([.large])
     }
 

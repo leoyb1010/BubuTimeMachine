@@ -371,6 +371,7 @@ private struct FirstStampOverlay: View {
     let onDone: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.bubuLayout) private var layout
     @State private var stamp = 0
 
     private struct Frame {
@@ -451,7 +452,7 @@ private struct FirstStampOverlay: View {
                 .minimumScaleFactor(0.8)
         }
         .padding(28)
-        .frame(width: 220, height: 220)
+        .frame(width: layout.bubuHeight(220, short: 180), height: layout.bubuHeight(220, short: 180))
         .background(BubuTheme.Color.cream, in: Circle())
         .overlay(Circle().stroke(BubuTheme.Color.deepRose, lineWidth: 5).padding(6))
         .overlay(Circle().stroke(BubuTheme.Color.deepRose.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [6, 5])).padding(16))

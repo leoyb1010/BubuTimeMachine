@@ -43,7 +43,7 @@ struct ServerStatusView: View {
                     .padding(.horizontal, 4)
             }
             .padding(BubuTheme.Spacing.item)
-            .bubuContentColumn()
+            .bubuColumn()
         }
         .background(BubuThemedBackground().ignoresSafeArea())
         .refreshable { await load(client) }

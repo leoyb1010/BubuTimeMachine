@@ -41,9 +41,12 @@ struct SchoolReportCorrection: View {
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("改一下亲子桥").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }.accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存修改") {
+                    // 图标+标题：外屏侧边竖栏只放图标项，纯文字项会被挤掉（Duo 外屏键盘弹起时只剩“取消”）。
+                    Button("保存修改", systemImage: "checkmark", role: .confirm) {
                         do {
                             try MemoryJournalWriter.updateReport(id: entry.id, date: date, report: report,
                                                                  container: context.container, editingBaseline: editingBaseline)
@@ -52,9 +55,11 @@ struct SchoolReportCorrection: View {
                             onSaved?(date)
                             dismiss()
                         } catch { message = "修改未保存，原记录还在：\(error.localizedDescription)" }
-                    }.fontWeight(.semibold).accessibilityIdentifier("school.correction-save")
+                    }.accessibilityIdentifier("school.correction-save")
                 }
+                .bubuVisibilityPriority(.high)
             }
         }
+        .bubuLayoutRoot()
     }
 }

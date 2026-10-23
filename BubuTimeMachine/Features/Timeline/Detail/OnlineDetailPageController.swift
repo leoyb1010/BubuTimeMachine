@@ -8,6 +8,10 @@ final class OnlineDetailPagerState {
     var current: String
     var chromeVisible = true
     var infoID: String?
+    /// A vertical fold across the pager (safe-area coordinates): photo before it, analysis after it.
+    var split: BubuLayout.ColumnSplit?
+    /// Bars stand vertically at the side (iPhone Duo): photos stay clear of them and extend under them.
+    var extendsUnderBar = false
 
     init(current: String) { self.current = current }
 }
@@ -122,6 +126,8 @@ struct OnlineDetailPhoto: View {
     let client: BubuLearningClient
     var isActive = true
     var onSingleTap: (() -> Void)? = nil
+    /// Mirror the picture under vertical side bars (backgroundExtensionEffect) instead of leaving them on black.
+    var extendsUnderBars = false
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var large: UIImage?
@@ -138,6 +144,15 @@ struct OnlineDetailPhoto: View {
         ZStack {
             if let shown {
                 ZoomableImageView(image: shown, onSingleTap: onSingleTap, crossfade: !reduceMotion, isActive: isActive)
+                    .background {
+                        // The UIKit zoom view can't be mirrored; a SwiftUI copy sits exactly behind it (same
+                        // aspect-fit frame) and carries the extension into the side bars' area.
+                        if extendsUnderBars {
+                            Image(uiImage: shown).resizable().scaledToFit()
+                                .bubuBackgroundExtension()
+                                .accessibilityHidden(true)
+                        }
+                    }
                     .accessibilityLabel(item.description.isEmpty ? "布布的照片" : item.description)
                     .accessibilityAddTraits(.isImage)
                     .accessibilityHint("双指捏合或轻点两下可以放大，放大后可以拖动")

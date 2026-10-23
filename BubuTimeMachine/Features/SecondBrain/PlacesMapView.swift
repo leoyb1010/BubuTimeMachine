@@ -50,6 +50,7 @@ final class PlaceGeocoder {
 struct PlacesMapView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.bubuLayout) private var layout
     @State private var places: [PlaceDTO] = []
     @State private var loading = true
     @State private var errorText: String?
@@ -130,7 +131,7 @@ struct PlacesMapView: View {
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .frame(height: 320)
+        .frame(height: layout.bubuHeight(320, short: 220))
         .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
         .onChange(of: selected) { _, value in if value != nil { BubuHaptics.selection() } }
         .accessibilityLabel("布布去过的地方地图")

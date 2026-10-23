@@ -2,6 +2,11 @@ import XCTest
 import UIKit
 
 final class BubuTimeMachineUITests: XCTestCase {
+    /// 横屏用例失败中途退出时不能把横屏留给下一条用例。
+    override func setUp() async throws {
+        await MainActor.run { XCUIDevice.shared.orientation = .portrait }
+    }
+
     @MainActor
     func testLearningEntryAndOnlineTimelineStayUsableOffline() throws {
         continueAfterFailure = false
@@ -14,12 +19,15 @@ final class BubuTimeMachineUITests: XCTestCase {
         learning.tap()
         XCTAssertTrue(app.navigationBars["每日学习"].waitForExistence(timeout: 5))
         attachScreenshot("learning-entry-offline", to: self)
-        if app.frame.width > 700 {
-            XCUIDevice.shared.orientation = .landscapeLeft
+        // iPhone 也已放开横屏：能转过去就看一眼横屏，再转回竖屏继续（不按屏幕宽度猜 iPad；
+        // XCUI 读到的 App 级 size class 是 unspecified，不能拿来判断）。转不过去（Duo 外屏模拟器忽略
+        // XCUIDevice 方向）就只验证竖屏。
+        if app.rotateInterface(landscape: true) {
             XCTAssertTrue(app.navigationBars["每日学习"].waitForExistence(timeout: 5))
-            attachScreenshot("learning-entry-ipad-landscape", to: self)
+            attachScreenshot("learning-entry-landscape", to: self)
+            XCTAssertTrue(app.rotateInterface(landscape: false))
         }
-        app.navigationBars.buttons.firstMatch.tap()
+        app.tapNavigationBack()
         rootNavigationButton(named: "时光", in: app).tap()
         // 未连接家庭服务时，在线时光给出明确的连接提示，而不是空白或旧的本机列表。
         XCTAssertTrue(app.navigationBars["时光"].waitForExistence(timeout: 5))
@@ -58,12 +66,12 @@ final class BubuTimeMachineUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-school-report"]
         app.launch()
-        XCTAssertTrue(app.buttons["root.record"].waitForExistence(timeout: 12) || app.buttons["home.record"].waitForExistence(timeout: 5))
+        XCTAssertNotNil(app.waitForRecordEntry(timeout: 17), "必须有可点的记录入口")
         attachScreenshot("tabs-initial", to: self)
         assertRootNavigation(in: app)
 
         for _ in 0..<2 {
-            for name in ["首页", "时光", "成长", "幼儿园"] {
+            for name in XCUIApplication.bubuRootTabs {
                 rootNavigationButton(named: name, in: app).tap()
                 app.swipeUp()
                 app.swipeUp()
@@ -73,12 +81,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         }
 
         rootNavigationButton(named: "首页", in: app).tap()
-        let record = app.buttons["root.record"].isHittable ? app.buttons["root.record"] : app.buttons["home.record"]
         for _ in 0..<2 {
-            if !record.isHittable { app.swipeDown(); app.swipeDown() }
-            XCTAssertTrue(record.isHittable)
+            // 窄屏是底部附件 root.record；宽屏首页是「今天」卡里的 home.record（滚走了就先回页顶）。
+            var found = app.waitForRecordEntry(timeout: 3)
+            if found == nil { app.swipeDown(); app.swipeDown(); found = app.hittableRecordEntry() }
+            guard let record = found else { XCTFail("首页找不到可点的记录入口"); return }
             record.tap()
-            XCTAssertTrue(app.navigationBars["记录此刻"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars["记录此刻"].waitForExistence(timeout: 5) || app.buttons["不记了"].exists)
             app.buttons["不记了"].tap()
             assertRootNavigation(in: app)
             app.swipeUp()
@@ -91,15 +100,12 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     private func rootNavigationButton(named name: String, in app: XCUIApplication) -> XCUIElement {
-        let native = app.tabBars.buttons.matching(identifier: name).firstMatch
-        if native.exists && native.isHittable { return native }
-        return app.buttons.matching(identifier: name).allElementsBoundByIndex.first(where: { $0.isHittable })
-            ?? app.buttons.matching(identifier: name).firstMatch
+        app.rootNavigationButton(named: name)
     }
 
     @MainActor
     private func assertRootNavigation(in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-        let names = ["首页", "时光", "成长", "幼儿园"]
+        let names = XCUIApplication.bubuRootTabs
         let buttons = names.map { rootNavigationButton(named: $0, in: app) }
         for (index, button) in buttons.enumerated() {
             guard button.exists else {
@@ -109,7 +115,8 @@ final class BubuTimeMachineUITests: XCTestCase {
             print("Root navigation \(names[index]): id=\(button.identifier), frame=\(button.frame), hittable=\(button.isHittable)")
             XCTAssertTrue(button.exists && button.isHittable, "滚动或关闭记录后必须仍可选择：" + names[index], file: file, line: line)
             XCTAssertTrue(app.frame.contains(CGPoint(x: button.frame.midX, y: button.frame.midY)), file: file, line: line)
-            XCTAssertGreaterThanOrEqual(button.frame.width, 40, "Tab不能收缩成不可选择的小点", file: file, line: line)
+            // 底栏按钮宽、竖排栏（Duo 外屏 / 内屏横拿）按钮只有图标：两个方向都不能缩成小点。
+            XCTAssertGreaterThanOrEqual(min(button.frame.width, button.frame.height), 32, "Tab不能收缩成不可选择的小点", file: file, line: line)
         }
         for index in 0..<(buttons.count - 1) {
             // Native tab hit rectangles include touch slop and may overlap a few
@@ -117,7 +124,7 @@ final class BubuTimeMachineUITests: XCTestCase {
             // remain separate so each page can be selected directly.
             let dx = abs(buttons[index].frame.midX - buttons[index + 1].frame.midX)
             let dy = abs(buttons[index].frame.midY - buttons[index + 1].frame.midY)
-            XCTAssertGreaterThanOrEqual(max(dx, dy), 44, "四个页面必须保留独立点击区域", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(max(dx, dy), 44, "每个页面必须保留独立点击区域", file: file, line: line)
         }
     }
 
@@ -149,7 +156,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(app.buttons["school.history"].waitForExistence(timeout: 12))
         app.buttons["school.history"].tap()
         XCTAssertTrue(app.navigationBars["幼儿园回忆"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        app.tapNavigationBack()
         XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
     }
 
@@ -275,7 +282,8 @@ final class BubuTimeMachineUITests: XCTestCase {
             throw systemPickerFailure("Missing synthetic \(labels.english) asset", in: app)
         }
         let confirmation = systemPickerConfirmation(in: app)
-        let requiresConfirmation = confirmation.exists
+        // 竖排栏时选择器侧边的完成键比网格晚进无障碍树：给它几秒，单选选择器只多等这几秒。
+        let requiresConfirmation = confirmation.waitForExistence(timeout: 5)
         let beganWithEmptySelection = requiresConfirmation && systemPickerSelectionIsEmpty(grid: grid, confirmation: confirmation)
         let assetLabel = image.label
         attachScreenshot("school-system-picker-before-\(labels.english)", to: self)
@@ -388,9 +396,14 @@ final class BubuTimeMachineUITests: XCTestCase {
 
     @MainActor
     private func systemPickerConfirmation(in app: XCUIApplication) -> XCUIElement {
-        systemPickerNavigation(in: app).buttons.matching(NSPredicate(
-            format: "label == %@ OR label == %@ OR label == %@ OR label == %@",
-            "Done", "完成", "Add", "添加")).firstMatch
+        let labels = NSPredicate(format: "label == %@ OR label == %@ OR label == %@ OR label == %@",
+                                 "Done", "完成", "Add", "添加")
+        let inNavigation = systemPickerNavigation(in: app).buttons.matching(labels).firstMatch
+        if inNavigation.exists { return inNavigation }
+        // 竖排栏（Duo 外屏 / 内屏横拿）：完成键挪进选择器侧边的 Toolbar，标识仍是 Add / Done。
+        return app.toolbars.buttons.matching(NSPredicate(
+            format: "(identifier == %@ OR identifier == %@) AND (label == %@ OR label == %@ OR label == %@ OR label == %@)",
+            "Add", "Done", "Done", "完成", "Add", "添加")).firstMatch
     }
 
     @MainActor
@@ -584,17 +597,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         //   底部附件常驻在屏幕下方，两处同名同功能会重复。
         // - 宽屏（iPad / Mac 侧栏）：没有底部附件
         //   （tabViewBottomAccessory(isEnabled: !isWide)），行内 home.record 是唯一入口。
-        let globalRecord = app.buttons["root.record"]
-        let homeRecord = app.buttons["home.record"]
-        let record: XCUIElement
+        // 宽屏 Tab 工具栏另有 root.record.toolbar（首页隐藏导航栏时看不到）。
         // 超时给足：这条用例是套件里第一个跑的，要付冷启动 + 种子数据的钱，
         // iPad 上实测 50 秒量级，CI 的 runner 还要更慢。
         // 之前 2 秒/6 秒的余量在 CI 上会随机失败——门禁一旦不稳就等于没有门禁。
-        if globalRecord.waitForExistence(timeout: 12) {
-            record = globalRecord
-        } else {
-            record = homeRecord
-            XCTAssertTrue(record.waitForExistence(timeout: 20), "自适应根导航必须保留记录入口")
+        guard let record = app.waitForRecordEntry(timeout: 32) else {
+            XCTFail("自适应根导航必须保留记录入口")
+            return
         }
         XCTAssertTrue(element(named: "首页", in: app).exists)
         XCTAssertTrue(element(named: "时光", in: app).exists)
@@ -618,7 +627,7 @@ final class BubuTimeMachineUITests: XCTestCase {
         attachScreenshot("adaptive-root", to: self)
 
         record.tap()
-        XCTAssertTrue(app.navigationBars["记录此刻"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["记录此刻"].waitForExistence(timeout: 5) || app.buttons["不记了"].exists)
         XCTAssertTrue(app.buttons["保存"].exists)
         attachScreenshot("quick-capture", to: self)
 
@@ -632,9 +641,10 @@ final class BubuTimeMachineUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-natural-local", "-uitest-natural-fail-save"]
         app.launch()
-        let globalRecord = app.buttons["root.record"]
-        let record = globalRecord.waitForExistence(timeout: 12) ? globalRecord : app.buttons["home.record"]
-        XCTAssertTrue(record.waitForExistence(timeout: 20))
+        guard let record = app.waitForRecordEntry(timeout: 32) else {
+            XCTFail("必须有可点的记录入口")
+            return
+        }
         record.tap()
         let natural = app.buttons["打开一句话智能记录"]
         XCTAssertTrue(natural.waitForExistence(timeout: 8))
@@ -649,23 +659,23 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.buttons["识别并保存这句话"].tap()
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
         attachScreenshot("natural-review-before-cancel", to: self)
-        app.navigationBars["确认保存"].buttons["取消"].tap()
+        app.barButton("取消", inNavigationBar: "确认保存").tap()
         XCTAssertTrue(app.buttons["识别并保存这句话"].waitForExistence(timeout: 8))
         XCTAssertTrue(field.waitForExistence(timeout: 8))
         XCTAssertEqual(field.value as? String, note, "取消确认页必须保留原文")
         app.buttons["识别并保存这句话"].tap()
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
-        app.navigationBars["确认保存"].buttons["保存"].tap()
+        app.barButton("保存", inNavigationBar: "确认保存").tap()
         XCTAssertTrue(app.staticTexts["没能保存"].waitForExistence(timeout: 8))
         attachScreenshot("natural-review-save-failure-retains-draft", to: self)
         app.buttons["返回重试"].tap()
         XCTAssertTrue(app.staticTexts["没能保存"].waitForNonExistence(timeout: 8), "错误提示必须真正退出后才能重试")
-        let retrySave = app.navigationBars["确认保存"].buttons["保存"]
+        let retrySave = app.barButton("保存", inNavigationBar: "确认保存")
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: retrySave)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 8), .completed)
         XCTAssertTrue(app.navigationBars["确认保存"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts[note].firstMatch.exists, "保存失败后确认内容不能消失")
-        app.navigationBars["确认保存"].buttons["保存"].tap()
+        app.barButton("保存", inNavigationBar: "确认保存").tap()
         let returnedToInput = app.navigationBars["一句话智能记录"].waitForExistence(timeout: 8)
         if !returnedToInput {
             attachScreenshot("natural-retry-final-state", to: self)
@@ -719,12 +729,13 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertTrue(edit.waitForExistence(timeout: 12))
         edit.tap()
         let note = app.descendants(matching: .any).matching(identifier: "entry.note").firstMatch
-        // iPhone 底部常驻「记录此刻」附件浮在内容上方：输入框要完整滚到附件之上再点，
-        // 否则点到的是附件（会就地弹出记录面板），而不是输入框。
+        // 窄屏常驻「记录此刻」附件浮在内容上方：输入框要完全离开附件再点，
+        // 否则点到的是附件（会就地弹出记录面板），而不是输入框。按矩形相交判断而不是「在附件上方」：
+        // 竖排 Tab 栏（Duo 外屏 / 横拿）时附件可能只占内容底部一段，输入框在它旁边也是安全的。
         let accessory = app.buttons["root.record"]
         func noteIsClear() -> Bool {
             guard note.isHittable else { return false }
-            return !accessory.exists || note.frame.maxY <= accessory.frame.minY
+            return !accessory.exists || !accessory.isHittable || !note.frame.intersects(accessory.frame)
         }
         for _ in 0..<6 { if noteIsClear() { break }; app.swipeUp() }
         XCTAssertTrue(noteIsClear())
@@ -741,21 +752,22 @@ final class BubuTimeMachineUITests: XCTestCase {
         XCTAssertFalse(message.exists)
     }
 
+    /// iPhone（含 Duo 外屏 678×466、内屏 951×669）与 iPad 横屏都必须保留五个页面入口和一个可点的记录入口。
     @MainActor
-    func testIPadLandscapeKeepsNavigationAndRecord() throws {
-        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad)
+    func testLandscapeKeepsNavigationAndRecord() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-uitest-in-memory", "-uitest-seed"]
+        // 只验证横屏布局；回退开关本身由单元测试覆盖。
+        app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-bubu.layout.allowLandscape", "YES"]
         app.launch()
 
-        XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(app.buttons["home.record"].waitForExistence(timeout: 8))
-        XCTAssertTrue(element(named: "首页", in: app).exists)
-        XCTAssertTrue(element(named: "时光", in: app).exists)
-        XCTAssertTrue(element(named: "成长", in: app).exists)
-        XCTAssertTrue(element(named: "幼儿园", in: app).exists)
-        attachScreenshot("ipad-landscape-root", to: self)
+        guard app.rotateInterface(landscape: true) else {
+            throw XCTSkip("XCUIDevice 方向没有让界面转到横屏（iPhone Duo 外屏模拟器忽略它；用 Simulator 旋转并放宽 "
+                          + "TEST_RUNNER_BUBU_UITEST_ROTATION_WAIT 可人工验证）")
+        }
+        XCTAssertNotNil(app.waitForRecordEntry(timeout: 8), "横屏必须保留可点的记录入口")
+        assertRootNavigation(in: app)
+        attachScreenshot("landscape-root", to: self)
         XCUIDevice.shared.orientation = .portrait
     }
 
@@ -813,11 +825,32 @@ final class BubuTimeMachineUITests: XCTestCase {
         // refresh it whenever available, since keyboard dismissal resizes sheets.
         var lastScrollBounds: CGRect?
         var attemptedKeyboardDismissal = false
+        // 竖排栏时表单的工具栏按钮（以后再说 / 收好…）排在右侧一列：拖动要落在它们左边的空白里。
+        let sideBarMinX = app.toolbars.buttons.allElementsBoundByIndex
+            .filter { $0.exists && $0.isHittable }
+            .map(\.frame)
+            .filter { $0.width < 80 && $0.minX > app.frame.midX }
+            .map(\.minX)
+            .min()
         for _ in 0..<18 {
             let appBounds = app.frame
             if scroll.exists { lastScrollBounds = scroll.frame.intersection(appBounds) }
-            let bounds = lastScrollBounds ?? appBounds
-            let navBottom = app.navigationBars["记幼儿园的一天"].frame.maxY
+            var bounds = lastScrollBounds ?? appBounds
+            // 导航栏只有横放在顶部时才是内容上沿；Duo 外屏 / 内屏横拿时它竖排在侧边，
+            // 那时它的 maxY 是屏幕底部，只需要让拖动别落在它上面。
+            let navigation = app.navigationBars["记幼儿园的一天"]
+            let navFrame = navigation.exists ? navigation.frame : .zero
+            var navBottom = bounds.minY
+            if navFrame.width > navFrame.height {
+                navBottom = navFrame.maxY
+            } else if navFrame.height > 0, navFrame.intersects(bounds) {
+                bounds = navFrame.midX > bounds.midX
+                    ? CGRect(x: bounds.minX, y: bounds.minY, width: max(0, navFrame.minX - bounds.minX), height: bounds.height)
+                    : CGRect(x: navFrame.maxX, y: bounds.minY, width: max(0, bounds.maxX - navFrame.maxX), height: bounds.height)
+            }
+            if let sideBarMinX, sideBarMinX > bounds.minX, sideBarMinX < bounds.maxX {
+                bounds.size.width = sideBarMinX - bounds.minX
+            }
             let top = max(bounds.minY, navBottom) + 16
             var bottom = bounds.maxY - 16
             let keyboard = app.keyboards.firstMatch

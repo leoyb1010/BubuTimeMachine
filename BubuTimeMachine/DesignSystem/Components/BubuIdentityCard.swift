@@ -6,7 +6,8 @@ import SwiftUI
 /// （生日倒计时、最新身高体重或星座）。轻点翻面看性别 / 血型 / 星座 / 出生地。
 /// - 只读本机已有数据：ChildProfile、GrowthMeasurement（统一走 GrowthMeasurementResolver）。
 /// - 字号最小 12pt；卡面用动态马卡龙柔面（深色压暗同色相 + 米白字），文字对比度两种模式都 ≥ 4.5:1。
-/// - 信息小签用流式布局，大字号时自动换行；翻面在 90° 侧立时换面，减少动态效果时直接切换。
+/// - 信息小签一行放不下就换成两行（不超出卡面）；背面在窄列（Duo 外屏、折痕一侧的侧栏、大字号）
+///   从 3 列改 2 列，不截断；翻面在 90° 侧立时换面，减少动态效果时直接切换。
 struct BubuIdentityCard: View {
     let profile: ChildProfile
     let theme: BubuThemeDefinition
@@ -17,6 +18,10 @@ struct BubuIdentityCard: View {
     /// 当前绕 Y 轴的角度：0 正对；翻面时先转到 90° 侧立、换面，再从 -90° 转回 0。
     @State private var turn: Double = 0
     @State private var avatar: UIImage?
+    /// 卡面内容宽度（左右内边距以内）；决定背面排 3 列还是 2 列。
+    @State private var contentWidth: CGFloat = 0
+    /// 背面 3 列至少需要的内容宽度，随字号放大。
+    @ScaledMetric(relativeTo: .body) private var threeColumnBackWidth: CGFloat = 290
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Query private var measurements: [GrowthMeasurement]
@@ -79,6 +84,7 @@ struct BubuIdentityCard: View {
             if isFlipped { back } else { front }
         }
         .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .contentShape(Self.shape)
@@ -158,15 +164,22 @@ struct BubuIdentityCard: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.numericText())
-                FlowLayout(spacing: 6) {
-                    chip(symbol: "gift.fill", text: birthdayChipText)
-                    if let growthText {
-                        chip(symbol: "ruler.fill", text: growthText)
-                    } else {
-                        chip(symbol: "sparkles", text: constellation)
-                    }
+                // 两枚小签一行放得下就并排，放不下竖排；每枚都按列宽收，不会被卡面裁掉。
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { frontChips }
+                    VStack(alignment: .leading, spacing: 6) { frontChips }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var frontChips: some View {
+        chip(symbol: "gift.fill", text: birthdayChipText)
+        if let growthText {
+            chip(symbol: "ruler.fill", text: growthText)
+        } else {
+            chip(symbol: "sparkles", text: constellation)
         }
     }
 
@@ -183,6 +196,7 @@ struct BubuIdentityCard: View {
                 .font(cardFont(13, weight: .semibold))
                 .foregroundStyle(BubuTheme.Color.warmBrown)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
@@ -197,25 +211,35 @@ struct BubuIdentityCard: View {
     // MARK: 背面
 
     private var back: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // 宽度够排 3 列 × 2 行；窄列（如折痕一侧的侧栏、大字号）改 2 列 × 3 行，值不被截断。
+        let columns = contentWidth == 0 || contentWidth >= threeColumnBackWidth ? 3 : 2
+        let facts = backFacts
+        let rows = stride(from: 0, to: facts.count, by: columns).map { Array(facts[$0..<min($0 + columns, facts.count)]) }
+        return VStack(alignment: .leading, spacing: 0) {
             Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 6) {
-                GridRow {
-                    fact("性别", profile.gender)
-                    fact("血型", profile.bloodType)
-                    fact("星座", constellation)
-                }
-                GridRow {
-                    fact("出生地", profile.birthPlace)
-                    fact("生日", profile.birthday.formatted(.dateTime.month().day()))
-                    if let highlight = backHighlight {
-                        fact(highlight.label, highlight.value)
-                    } else {
-                        fact("小名", nil)
+                ForEach(rows.indices, id: \.self) { row in
+                    GridRow {
+                        ForEach(rows[row], id: \.title) { item in
+                            fact(item.title, item.value)
+                        }
                     }
                 }
             }
             .padding(.trailing, 36)   // 给右上角翻面按钮留位
         }
+    }
+
+    /// 背面六格，按阅读顺序：性别、血型、星座、出生地、生日、幼儿园 / 小名。
+    private var backFacts: [(title: String, value: String?)] {
+        let highlight = backHighlight ?? (label: "小名", value: "")
+        return [
+            ("性别", profile.gender),
+            ("血型", profile.bloodType),
+            ("星座", constellation),
+            ("出生地", profile.birthPlace),
+            ("生日", profile.birthday.formatted(.dateTime.month().day())),
+            (highlight.label, highlight.value.isEmpty ? nil : highlight.value),
+        ]
     }
 
     private func fact(_ title: String, _ value: String?) -> some View {

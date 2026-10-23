@@ -15,7 +15,6 @@ struct SchoolJournalHome: View {
     @State private var composing = false
     @State private var calendarOpen = false
     @State private var scrollRevision = 0
-    @ScaledMetric(relativeTo: .title3) private var actionCircle: CGFloat = 40
 
     private var week: [Date] {
         let weekday = Calendar.current.component(.weekday, from: day)
@@ -26,17 +25,6 @@ struct SchoolJournalHome: View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center) {
-                    Text("幼儿园").font(BubuTheme.Font.title)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer()
-                    NavigationLink { SchoolJournalHistory() } label: {
-                        headerAction("历史", symbol: "clock.arrow.circlepath", filled: false)
-                    }.accessibilityIdentifier("school.history")
-                    Button { composing = true } label: {
-                        headerAction("记录", symbol: "plus", filled: true)
-                    }.accessibilityIdentifier("journal.primary")
-                }.buttonStyle(.plain)
                 // 日期与吉祥物一行；周历单独占满整行，日期格不小于 44pt。
                 HStack(alignment: .bottom, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -110,17 +98,29 @@ struct SchoolJournalHome: View {
             }
         }
         .tint(env.theme.theme.textAccent)
-        .toolbar(.hidden, for: .navigationBar)
+        // 系统导航栏：「历史」「记录」是带图标和标题的工具栏按钮，Duo 外屏 / 内屏横拿时随栏竖排到侧边。
+        .navigationTitle("幼儿园")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { SchoolJournalHistory() } label: {
+                    Label("历史", systemImage: "clock.arrow.circlepath")
+                }
+                .accessibilityIdentifier("school.history")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { composing = true } label: { Label("记录", systemImage: "plus") }
+                    .accessibilityIdentifier("journal.primary")
+            }
+            .bubuVisibilityPriority(.high)
+        }
         .sheet(isPresented: $composing) {
             MemoryJournalComposer(kind: .school, initialDate: day, onSaved: { value in selectDay(value) })
         }
         .sheet(isPresented: $calendarOpen) {
-            NavigationStack {
-                DatePicker("回看哪一天", selection: Binding(get: { day }, set: { value in selectDay(value) }), in: ...Date.now, displayedComponents: .date)
-                    .datePickerStyle(.graphical).padding()
-                    .navigationTitle("翻到这一天").navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("看这天") { calendarOpen = false } } }
-            }.presentationDetents([.medium, .large])
+            SchoolDatePickerSheet(selection: Binding(get: { day }, set: { value in selectDay(value) })) {
+                calendarOpen = false
+            }
         }
         .accessibilityIdentifier("school.home")
         .bubuSensoryFeedback(.selection, trigger: day)
@@ -159,16 +159,6 @@ struct SchoolJournalHome: View {
                ProcessInfo.processInfo.arguments.contains("-uitest-school-import") { composing = true }
             #endif
         }
-    }
-
-    private func headerAction(_ title: String, symbol: String, filled: Bool) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: symbol).font(.system(.title3).weight(.semibold))
-                .foregroundStyle(filled ? .white : SchoolPalette.ink)
-                .frame(width: actionCircle, height: actionCircle)
-                .background(filled ? SchoolPalette.coralInk : BubuTheme.Color.card, in: Circle())
-            Text(title).font(.system(.caption, design: .rounded).weight(.medium))
-        }.frame(minWidth: 48, minHeight: 48).contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -322,6 +312,35 @@ private struct SchoolDayEntries: View {
                 NavigationLink("这一天还有更多，去历史记录查看") { SchoolJournalHistory() }
             }
         }
+    }
+}
+
+/// 翻到某一天：弹窗高度跟着日历本身走（矮屏放不下时在弹窗里滚动），不再固定半屏。
+private struct SchoolDatePickerSheet: View {
+    let selection: Binding<Date>
+    let onDone: () -> Void
+    @State private var contentHeight: CGFloat = 380
+    @State private var barHeight: CGFloat = 56
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                DatePicker("回看哪一天", selection: selection, in: ...Date.now, displayedComponents: .date)
+                    .datePickerStyle(.graphical).padding()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { barHeight = $0 }
+            .navigationTitle("翻到这一天").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("看这天", systemImage: "calendar", role: .confirm) { onDone() }
+                }
+            }
+        }
+        .bubuLayoutRoot()
+        .presentationDetents([.height(contentHeight + barHeight)])
+        .presentationSizing(.fitted)
     }
 }
 

@@ -7,7 +7,7 @@ import UIKit
 /// 只保留三件事——拍一张 / 说一段 / 看布布，全部大字大按钮、零层级、零选择过载。
 /// 复用现有 CaptureModel / CameraCaptureView / VoiceRecorderBar / MediaGalleryViewer，不重造记录管线。
 struct SimpleModeView: View {
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(BubuRouter.self) private var router
@@ -23,6 +23,8 @@ struct SimpleModeView: View {
     /// 布布本人的头像。头部显示的是「布布」的名字，配的头像就必须是布布，
     /// 不能是当前登录家人的 emoji——那会让人以为这台手机上的身份是布布。
     @State private var childAvatar: UIImage?
+    /// 录音面板按内容定高（原来固定 .medium，矮屏横拿时半屏放不下、大屏又空一大块）。
+    @State private var voiceSheetHeight: CGFloat = 340
     @ScaledMetric(relativeTo: .title) private var avatarSize: CGFloat = 66
 
     /// 姥姥模式的所有文字都放到 AX5（App 在这里放开的最大档），不再停在全局的 AX2 上限。
@@ -50,24 +52,31 @@ struct SimpleModeView: View {
             // 直接溢出到按钮外面，整页糊成一片（真机 accessibility5 实测）。
             GeometryReader { proxy in
             ScrollView {
-                VStack(spacing: 22) {
+                VStack(spacing: layout.isShort ? 14 : 22) {
                     header
                     // 三个大按钮改用设计系统里的共享组件（原来是本页私有方法，与主设计系统双轨）。
-                    BubuBigActionButton(title: "拍一张", subtitle: "给\(childName)拍照片",
-                                        systemImage: "camera.fill",
-                                        fill: .rose) { openCamera() }
-                    BubuBigActionButton(title: "说一段", subtitle: "说句话给\(childName)",
-                                        systemImage: "mic.fill",
-                                        fill: .sky) { showVoice = true }
-                    BubuBigActionButton(title: "看\(childName)", subtitle: "翻翻最近的照片",
-                                        systemImage: "photo.stack.fill",
-                                        fill: .leaf) { showTimeline = true }
+                    // 矮屏（横拿，高 < 480）三个并排，否则上下叠；AnyLayout 切换不重建按钮。
+                    let buttons = layout.isShort
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 14))
+                        : AnyLayout(VStackLayout(spacing: 22))
+                    buttons {
+                        BubuBigActionButton(title: "拍一张", subtitle: "给\(childName)拍照片",
+                                            systemImage: "camera.fill",
+                                            fill: .rose) { openCamera() }
+                        BubuBigActionButton(title: "说一段", subtitle: "说句话给\(childName)",
+                                            systemImage: "mic.fill",
+                                            fill: .sky) { showVoice = true }
+                        BubuBigActionButton(title: "看\(childName)", subtitle: "翻翻最近的照片",
+                                            systemImage: "photo.stack.fill",
+                                            fill: .leaf) { showTimeline = true }
+                    }
                     exitButton
-                        .padding(.top, 6)
+                        .padding(.top, layout.isShort ? 0 : 6)
                 }
-                .bubuContentColumn(620)   // 长辈模式宽屏收口：按钮按比例放大而不是被拉长
+                // 长辈模式宽屏收口：按钮按比例放大而不是被拉长；矮屏并排时放宽，三个按钮才不挤。
+                .bubuColumn(maxWidth: layout.isShort ? 900 : 620)
                 .padding(.horizontal, 22)
-                .padding(.vertical, 18)
+                .padding(.vertical, layout.isShort ? 12 : 18)
                 // 常规字号下内容不满一屏，用 minHeight 把整组按钮垂直居中，观感与原来一致；
                 // 内容一旦超过一屏，minHeight 自动失效，ScrollView 接管。
                 .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .center)
@@ -96,7 +105,7 @@ struct SimpleModeView: View {
             .ignoresSafeArea()
         }
         .sheet(isPresented: $showVoice) { voiceSheet }
-        .fullScreenCover(isPresented: $showTimeline) { SimpleTimelineView() }
+        .fullScreenCover(isPresented: $showTimeline) { SimpleTimelineView().bubuLayoutRoot() }
     }
 
     // MARK: 顶部问候
@@ -197,29 +206,40 @@ struct SimpleModeView: View {
     }
 
     // MARK: 录音 sheet
+    /// 按内容定高：量出内容高度作为唯一档位；内容比屏幕高（AX5 字号 + 横拿）时系统把档位封顶，
+    /// 里面的 ScrollView 接管滚动。
     private var voiceSheet: some View {
-        VStack(spacing: 20) {
-            Text("说给\(childName)")
-                .font(BubuTheme.Font.scaled(28, weight: .black, cap: Self.elderCap))
-                .foregroundStyle(BubuTheme.Color.warmBrown)
-                .padding(.top, 28)
-            Text("点一下开始，说完再点一下")
-                .font(BubuTheme.Font.scaled(17, weight: .bold, cap: Self.elderCap))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-            VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in
-                showVoice = false
-                Task { await saveVoice(fileName: fileName, duration: duration, waveform: waveform) }
+        ScrollView {
+            VStack(spacing: 20) {
+                Text("说给\(childName)")
+                    .font(BubuTheme.Font.scaled(28, weight: .black, cap: Self.elderCap))
+                    .foregroundStyle(BubuTheme.Color.warmBrown)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 28)
+                Text("点一下开始，说完再点一下")
+                    .font(BubuTheme.Font.scaled(17, weight: .bold, cap: Self.elderCap))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .multilineTextAlignment(.center)
+                VoiceRecorderBar(mediaStore: env.mediaStore) { fileName, duration, waveform in
+                    showVoice = false
+                    Task { await saveVoice(fileName: fileName, duration: duration, waveform: waveform) }
+                }
+                .padding(.horizontal, 20)
+                Button("取消") { showVoice = false }
+                    .font(BubuTheme.Font.scaled(18, weight: .bold, cap: Self.elderCap))
+                    .foregroundStyle(BubuTheme.Color.secondaryText)
+                    .padding(.top, 8)
+                    .padding(.bottom, 28)
             }
-            .padding(.horizontal, 20)
-            Spacer()
-            Button("取消") { showVoice = false }
-                .font(BubuTheme.Font.scaled(18, weight: .bold, cap: Self.elderCap))
-                .foregroundStyle(BubuTheme.Color.secondaryText)
-                .padding(.bottom, 28)
+            .frame(maxWidth: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { voiceSheetHeight = $0 }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollBounceBehavior(.basedOnSize)
         .background(BubuTheme.Color.background.ignoresSafeArea())
-        .presentationDetents([.medium])
+        .presentationDetents([.height(voiceSheetHeight)])
+        // iPad / Mac：表单宽度、高度贴合内容
+        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
+        .bubuLayoutRoot()
     }
 
     // MARK: 保存确认 / 进行中浮层

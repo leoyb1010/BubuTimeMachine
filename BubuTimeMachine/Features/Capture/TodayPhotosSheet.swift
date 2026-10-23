@@ -96,7 +96,7 @@ struct TodayPhotosSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("稍后") { dismiss() }
+                    Button("稍后", systemImage: "clock") { dismiss() }
                 }
             }
             .safeAreaInset(edge: .bottom) {

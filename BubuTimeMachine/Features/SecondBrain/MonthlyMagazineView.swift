@@ -179,6 +179,12 @@ private struct MonthlyIssueReader: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var current: String
     @State private var route: TimelinePagerRoute?
+    /// 翻页容器的宽度。宽度一变（Duo 开合 / 转屏 / 分屏）就重建翻页 TabView，
+    /// 由 selection（按月份 id 追踪）重新对齐到当前这一期，不会停在半页。
+    @State private var pagerWidth: CGFloat?
+    @State private var pagerGeneration = 0
+    /// 每期已取到的照片：重建翻页时直接复用，不重新请求、不闪占位。
+    @State private var loadedItems: [String: [OnlineTimelineItem]] = [:]
 
     init(issues: [MonthlyReportDTO], initialMonth: String, client: BubuLearningClient) {
         self.issues = issues
@@ -194,13 +200,20 @@ private struct MonthlyIssueReader: View {
             BubuThemedBackground().ignoresSafeArea()
             TabView(selection: $current) {
                 ForEach(Array(issues.enumerated()), id: \.element.id) { offset, report in
-                    MonthlyIssuePage(report: report, number: offset + 1, client: client) { items, item in
+                    MonthlyIssuePage(report: report, number: offset + 1, client: client,
+                                     cached: loadedItems[report.month],
+                                     didLoad: { loadedItems[report.month] = $0 }) { items, item in
                         route = TimelinePagerRoute(items: items, initial: item)
                     }
                     .tag(report.month)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .id(pagerGeneration)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { width in
+            if let old = pagerWidth, old != width { pagerGeneration += 1 }
+            pagerWidth = width
         }
         .safeAreaInset(edge: .bottom) { pageBar }
         .navigationTitle("第 \(index + 1) 期")
@@ -247,9 +260,22 @@ private struct MonthlyIssuePage: View {
     let report: MonthlyReportDTO
     let number: Int
     let client: BubuLearningClient
+    let didLoad: ([OnlineTimelineItem]) -> Void
     let open: ([OnlineTimelineItem], OnlineTimelineItem) -> Void
-    @State private var items: [OnlineTimelineItem] = []
-    @State private var loaded = false
+    @State private var items: [OnlineTimelineItem]
+    @State private var loaded: Bool
+
+    init(report: MonthlyReportDTO, number: Int, client: BubuLearningClient, cached: [OnlineTimelineItem]?,
+         didLoad: @escaping ([OnlineTimelineItem]) -> Void,
+         open: @escaping ([OnlineTimelineItem], OnlineTimelineItem) -> Void) {
+        self.report = report
+        self.number = number
+        self.client = client
+        self.didLoad = didLoad
+        self.open = open
+        _items = State(initialValue: cached ?? [])
+        _loaded = State(initialValue: cached != nil)
+    }
 
     var body: some View {
         ScrollView {
@@ -316,7 +342,9 @@ private struct MonthlyIssuePage: View {
             guard !loaded else { return }
             defer { loaded = true }
             guard !report.highlightIds.isEmpty else { return }
-            items = (try? await client.timelineItems(ids: Array(report.highlightIds.prefix(12)))) ?? []
+            guard let fetched = try? await client.timelineItems(ids: Array(report.highlightIds.prefix(12))) else { return }
+            items = fetched
+            didLoad(fetched)
         }
     }
 

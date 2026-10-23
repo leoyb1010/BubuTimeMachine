@@ -3,7 +3,7 @@ import SwiftData
 
 // MARK: - 布布健康
 struct HealthHomeView: View {
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
     @Environment(AppEnvironment.self) private var env
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
@@ -16,6 +16,8 @@ struct HealthHomeView: View {
     /// 打卡/删除的轻提示。健康页原本是全 App 动效与触觉最薄的一域：
     /// 加一条、删一条、开始哄睡都只是数字默默变一下，做完没有任何回音。
     @State private var toast: BubuToastState?
+    /// 内容宽度（内边距内），快捷记录网格按它取列数。
+    @State private var quickActionsWidth: CGFloat?
 
     private var theme: Color { env.theme.theme.primary }
     private var todayRecords: [HealthRecord] { records.filter { Calendar.current.isDateInToday($0.recordedAt) } }
@@ -31,6 +33,7 @@ struct HealthHomeView: View {
                 recentSection
                 disclaimer
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { quickActionsWidth = $0 }
             .padding()
         }
         .background(BubuTheme.Color.background.ignoresSafeArea())
@@ -46,10 +49,10 @@ struct HealthHomeView: View {
         }
         .navigationTitle("布布健康")
         .sheet(item: $composingKind) { kind in
-            HealthRecordSheet(kind: kind)
+            HealthRecordSheet(kind: kind).bubuLayoutRoot()
         }
         .sheet(item: $editingRecord) { record in
-            HealthRecordSheet(kind: record.kind, record: record)
+            HealthRecordSheet(kind: record.kind, record: record).bubuLayoutRoot()
         }
         .alert("删除这条健康记录？", isPresented: Binding(
             get: { deletingRecord != nil },
@@ -216,8 +219,9 @@ struct HealthHomeView: View {
     }
 
     private var quickActions: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10),
-                                 count: BubuAdaptive.columns(sizeClass, compact: 2, regular: 4)), spacing: 10) {
+        // 列数按可用宽度（窄屏 2 列；宽屏 / 横拿 / 半折取偶数列，半折时正中间距对齐折痕）。
+        LazyVGrid(columns: layout.bubuFoldGrid(compactColumns: 2, minItemWidth: 130, spacing: 10,
+                                               availableWidth: quickActionsWidth), spacing: 10) {
             ForEach(HealthRecordKind.allCases) { kind in
                 Button { composingKind = kind } label: {
                     HStack(spacing: 10) {

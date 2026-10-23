@@ -5,19 +5,65 @@ import SwiftData
 /// 一条时光，两种来源：家里的相册（第二大脑）整理的布布专属照片/视频（在线、鉴权），
 /// 以及家人用「记录此刻」留下的记录（本机 SwiftData，离线可用）。
 /// 未连接家庭服务时只显示家人记录，并给出去设置的入口。
+///
+/// 宽屏双栏接口：`selection` 传入绑定后由外部持有「当前打开的是哪一张」（不传时自己用 @State）；
+/// `feed` 是详情翻页读的同一份已加载列表；`pushesDetail == false` 时时光不再自己 push 详情
+/// （交给外部的详情栏），整页功能（家人动态、问答、认一认、小报）改为弹窗，不会落进半宽的详情栏。
 struct OnlineTimelineView: View {
+    var selection: Binding<OnlineTimelineSelection?>? = nil
+    var feed: OnlineTimelineFeed? = nil
+    var pushesDetail = true
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
         Group {
             if let client = BubuLearningClient(env: env) {
-                OnlineTimelineBrowser(client: client).id(client.scope)
+                OnlineTimelineBrowser(client: client, externalSelection: selection, externalFeed: feed,
+                                      pushesDetail: pushesDetail)
+                    .id(client.scope)
             } else {
-                OnlineTimelineBrowser(client: nil)
+                OnlineTimelineBrowser(client: nil, externalSelection: selection, externalFeed: feed,
+                                      pushesDetail: pushesDetail)
             }
         }
         .navigationTitle("时光")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// What 时光 has open: one value for the whole stream, so a split view or a deep link can drive it.
+enum OnlineTimelineSelection: Hashable {
+    case item(OnlineTimelineItem)
+    case event(OnlineTimelineEvent)
+    /// A family record (`Entry.id`).
+    case entry(UUID)
+}
+
+/// The loaded stream as the photo detail reads it. The browser owns the list and keeps this in step;
+/// a detail column pages through the same photos, loads the next page and drops a photo marked
+/// "not Bubu" through it, without owning the stream.
+@Observable @MainActor
+final class OnlineTimelineFeed {
+    var items: [OnlineTimelineItem] = []
+    var hasMore = false
+    @ObservationIgnored var loadMore: () async -> Void = {}
+    @ObservationIgnored var remove: (String) -> Void = { _ in }
+}
+
+/// Full pages reached from the 更多 menu. They push in the stream's own stack, or open as sheets when a
+/// split view shows the detail, so they never land in a half-width detail column.
+enum OnlineTimelineMenuPage: String, Identifiable, Hashable {
+    case familyFeed, ask, recognition, monthly
+    var id: String { rawValue }
+
+    @ViewBuilder
+    var page: some View {
+        switch self {
+        case .familyFeed: FamilyFeedView()
+        case .ask: AskBubuView()
+        case .recognition: RecognitionView()
+        case .monthly: MonthlyReportView()
+        }
     }
 }
 
@@ -82,15 +128,31 @@ private struct OnlineTimelineLayoutKey: Equatable {
     var source: OnlineTimelineSource
     var hasMore: Bool
     var showsEvents: Bool
+    var geometry: OnlineTimelineGeometry
+
+    /// Same list, only cut differently (width, fold, row height): the top photo is kept on screen.
+    func onlyGeometryChanged(from old: OnlineTimelineLayoutKey?) -> Bool {
+        guard let old else { return false }
+        return old.query == query && old.source == source && old.geometry != geometry
+    }
+}
+
+/// What the row breaks depend on besides the content.
+nonisolated struct OnlineTimelineGeometry: Equatable, Sendable {
     var width: CGFloat
-    var regular: Bool
+    var target: CGFloat
+    var split: BubuLayout.ColumnSplit?
 }
 
 struct OnlineTimelineBrowser: View {
     let client: BubuLearningClient?
+    var externalSelection: Binding<OnlineTimelineSelection?>? = nil
+    var externalFeed: OnlineTimelineFeed? = nil
+    var pushesDetail = true
     @Environment(AppEnvironment.self) private var env
     @Environment(BubuRouter.self) private var router
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var screen
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
     @Query(filter: #Predicate<Entry> { !$0.isArchived }, sort: \Entry.happenedAt, order: .reverse)
@@ -133,13 +195,24 @@ struct OnlineTimelineBrowser: View {
     @State private var removedIDs: Set<String> = []
     /// New photos found when coming back while the reader is deep in the list.
     @State private var freshItems: [OnlineTimelineItem] = []
-    @State private var selected: OnlineTimelineItem?
-    @State private var selectedEntry: Entry?
-    @State private var selectedEvent: OnlineTimelineEvent?
+    /// Used when no selection binding is passed in.
+    @State private var ownSelection: OnlineTimelineSelection?
+    @State private var ownFeed = OnlineTimelineFeed()
+    @State private var menuPage: OnlineTimelineMenuPage?
     @State private var customRange = false
     @State private var customStart = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
     @State private var customEnd = Date.now
-    @State private var width: CGFloat = 360
+    /// Natural height of the date-range sheet's content and the bars around it, for a content-sized detent.
+    @State private var rangeSheetContent: CGFloat = 150
+    @State private var rangeSheetChrome: CGFloat = 90
+    @State private var column = OnlineTimelineColumn()
+    /// The browser's global frame (`screen.rootRect(fromGlobal:)` turns it into root coordinates): decides the detail pane.
+    @State private var browserFrame = CGRect.zero
+    /// Height of the chip row (and banners) at the top; the scrubber track starts below it.
+    @State private var controlsHeight: CGFloat = 44
+    /// Element (or month / event row) at the top of the screen, and the one a width rebuild scrolls back to.
+    @State private var topAnchor: String?
+    @State private var restoreAnchor: String?
     @State private var position = ScrollPosition(idType: String.self)
     @State private var currentMonth: String?
     @State private var nearTop = true
@@ -166,6 +239,22 @@ struct OnlineTimelineBrowser: View {
     }
 
     var body: some View {
+        // iPhone Duo half open like a book: the stream before the crease, the selected photo after it. Everywhere
+        // else a photo pushes full screen with the zoom transition. The stream is always the first child, so it
+        // keeps its state when the pane comes and goes; full pages from 更多 still push over both.
+        navigation(
+            HStack(spacing: 0) {
+                stream
+                if let pane = detailPane {
+                    Color.black.frame(width: pane.gap).ignoresSafeArea()
+                    detailPaneContent.frame(width: pane.width)
+                }
+            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { browserFrame = $0 }
+        )
+    }
+
+    private var stream: some View {
         ScrollView {
             // Spacing 0: every photo row is a direct lazy child; rows add their own 4pt gap.
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -173,6 +262,13 @@ struct OnlineTimelineBrowser: View {
                 content
             }
             .scrollTargetLayout()
+            // Rows are measured on the scroll container itself, not on the controls row: that row scrolls
+            // away and unloads, and a fold, unfold or rotation deep in the list must still re-cut the rows.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: OnlineTimelineColumn.self) { proxy in
+                let frame = proxy.frame(in: .global)
+                return OnlineTimelineColumn(minX: frame.minX.rounded(), width: frame.width.rounded())
+            } action: { column = $0 }
             .padding(.horizontal, BubuTheme.Spacing.item)
             .padding(.bottom, 32)
             .bubuContentColumn(1100)
@@ -189,76 +285,170 @@ struct OnlineTimelineBrowser: View {
         .overlay(alignment: .trailing) { if showsScrubber { scrubber } }
         .background { BubuThemedBackground().ignoresSafeArea() }
         .refreshable { await reload(useCache: false) }
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
-                    prompt: client == nil ? "找家人记下的话" : "搜画面、文字、视频里的话，如“荡秋千”")
-        .navigationSubtitle(Text(headerSubtitle))
-        .task(id: searchText) {
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text != query.text { query.text = text; query.anchor = nil }
-        }
-        .task(id: query) { await load() }
-        .task { await loadPeople() }
-        .task(id: showsEvents ? query.range : nil) { await loadEvents() }
-        .task(id: router.pendingOnlineID) { await openPendingOnlineItem() }
-        .task(id: router.pendingTimelineDay) {
-            // Handed to a task of its own: clearing the router here would cancel a running jump.
-            guard let day = router.pendingTimelineDay else { return }
-            deepLinkDay = day
-            router.pendingTimelineDay = nil
-        }
-        .task(id: deepLinkDay) {
-            guard let day = deepLinkDay else { return }
-            await jump(month: String(day.prefix(7)), day: day, resetOrder: true)
-            deepLinkDay = nil
-        }
-        .task(id: scrolling || scrubbing != nil) {
-            // The scrubber wakes while scrolling and fades 1.5s after the list rests.
-            if scrolling || scrubbing != nil {
-                if !scrubberAwake { withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) { scrubberAwake = true } }
-                return
+    }
+
+    /// Search, loading, navigation and presentation around the one- or two-pane content.
+    private func navigation(_ content: some View) -> some View {
+        content
+            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic),
+                        prompt: client == nil ? "找家人记下的话" : "搜画面、文字、视频里的话，如“荡秋千”")
+            .navigationSubtitle(Text(headerSubtitle))
+            .task(id: searchText) {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text != query.text { query.text = text; query.anchor = nil }
             }
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { scrubberAwake = false }
+            .task(id: query) { await load() }
+            .task { await loadPeople() }
+            .task(id: showsEvents ? query.range : nil) { await loadEvents() }
+            .task(id: router.pendingOnlineID) { await openPendingOnlineItem() }
+            .task(id: router.pendingTimelineDay) {
+                // Handed to a task of its own: clearing the router here would cancel a running jump.
+                guard let day = router.pendingTimelineDay else { return }
+                deepLinkDay = day
+                router.pendingTimelineDay = nil
+            }
+            .task(id: deepLinkDay) {
+                guard let day = deepLinkDay else { return }
+                await jump(month: String(day.prefix(7)), day: day, resetOrder: true)
+                deepLinkDay = nil
+            }
+            .task(id: scrolling || scrubbing != nil) {
+                // The scrubber wakes while scrolling and fades 1.5s after the list rests.
+                if scrolling || scrubbing != nil {
+                    if !scrubberAwake { withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) { scrubberAwake = true } }
+                    return
+                }
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
+                withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { scrubberAwake = false }
+            }
+            .onAppear { connectFeed() }
+            .onChange(of: itemsRevision) { _, _ in feed.items = items }
+            .onChange(of: hasMore) { _, more in feed.hasMore = more }
+            .onChange(of: entries, initial: true) { _, entries in
+                family = entries.map(OnlineTimelineFamilyRef.init)
+                entriesByID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                familyRevision += 1
+            }
+            .onChange(of: layoutKey, initial: true) { _, _ in scheduleLayout() }
+            .navigationDestination(item: pushedSelection) { selection in destination(selection) }
+            .navigationDestination(item: pushesDetail ? $menuPage : .constant(nil)) { page in page.page }
+            .sheet(item: pushesDetail ? .constant(nil) : $menuPage) { page in
+                NavigationStack {
+                    page.page.toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button(role: .close) { menuPage = nil }.accessibilityLabel("关闭") }
+                    }
+                }
+                .bubuLayoutRoot()
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        menuButton(.familyFeed, title: "家人动态", symbol: "bubble.left.and.text.bubble.right")
+                        if client != nil {
+                            menuButton(.ask, title: "布布问答", symbol: "questionmark.bubble")
+                            menuButton(.recognition, title: "认一认", symbol: "person.crop.square.badge.camera")
+                            menuButton(.monthly, title: "成长小报", symbol: "calendar.badge.plus")
+                        }
+                    } label: { Label("更多", systemImage: "ellipsis.circle") }
+                        .accessibilityIdentifier("timeline.menu")
+                }
+                .bubuVisibilityPriority(.high)
+            }
+            .sheet(isPresented: $customRange) { customRangeSheet }
+            .bubuToast($toast)
+    }
+
+    // MARK: Selection & feed
+
+    private var selection: Binding<OnlineTimelineSelection?> { externalSelection ?? $ownSelection }
+    private var feed: OnlineTimelineFeed { externalFeed ?? ownFeed }
+
+    /// The selection this stack pushes; nil when a detail column or the detail pane shows it instead.
+    /// Folding the phone shut (pane gone) pushes the photo that was open; opening it pops back to the pane.
+    private var pushedSelection: Binding<OnlineTimelineSelection?> {
+        let selection = selection, pushes = pushesDetail, paneShowsItems = detailPane != nil
+        func pushed(_ value: OnlineTimelineSelection?) -> OnlineTimelineSelection? {
+            guard pushes, let value else { return nil }
+            if paneShowsItems, case .item = value { return nil }
+            return value
         }
-        .onChange(of: entries, initial: true) { _, entries in
-            family = entries.map(OnlineTimelineFamilyRef.init)
-            entriesByID = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            familyRevision += 1
-        }
-        .onChange(of: layoutKey, initial: true) { _, _ in scheduleLayout() }
-        .navigationDestination(item: $selected) { item in
-            OnlineTimelineDetailPager(client: client!, items: items, initial: item,
+        return Binding(get: { pushed(selection.wrappedValue) },
+                       set: { value in
+                           if let value { selection.wrappedValue = value } else if pushed(selection.wrappedValue) != nil { selection.wrappedValue = nil }
+                       })
+    }
+
+    // MARK: Detail pane (book fold)
+
+    /// Width of the pane beside the stream and of the gap before it. Only while a vertical fold splits the browser
+    /// (iPhone Duo half open like a book): the stream takes the pane before the crease, the photo the one after it.
+    /// iPad, Mac and a flat inner screen keep the push to the full-screen photo (and its zoom transition).
+    private var detailPane: (width: CGFloat, gap: CGFloat)? {
+        guard pushesDetail, client != nil, screen.foldAxis == .vertical, browserFrame.width > 0 else { return nil }
+        let frame = screen.rootRect(fromGlobal: browserFrame)
+        guard let split = screen.columnSplit(minX: frame.minX, width: frame.width, margin: 0, minPane: 320) else { return nil }
+        return (split.trailing, split.gutter)
+    }
+
+    @ViewBuilder
+    private var detailPaneContent: some View {
+        if case .item(let item) = selection.wrappedValue, let client {
+            OnlineTimelineDetailPager(client: client, items: items, initial: item,
                                       loadMore: { await loadNextPage() }, hasMore: hasMore,
                                       onNotBubu: { id in removeItem(id) },
-                                      onCurrentChange: { id in followPager(opened: item.id, current: id) })
-                .navigationTransition(.zoom(sourceID: zoomFollow[item.id] ?? "o-" + item.id, in: zoom))
+                                      onCurrentChange: { id in followPane(id) }, embedded: true,
+                                      onClose: { selection.wrappedValue = nil })
+        } else {
+            BubuStateView(.empty, title: "挑一张看看", message: "点左边的照片，大图和家人的留言会出现在这里。")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { BubuThemedBackground().ignoresSafeArea() }
+                .accessibilityIdentifier("timeline.pane.empty")
         }
-        .navigationDestination(item: $selectedEvent) { event in
-            OnlineTimelineEventView(event: event, client: client!)
-                .navigationTransition(.zoom(sourceID: "e-" + event.id, in: zoom))
-        }
-        .navigationDestination(item: $selectedEntry) { entry in
-            TimelineEntryDestination(entryID: entry.id)
-                .navigationTransition(.zoom(sourceID: "f-" + entry.id.uuidString, in: zoom))
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    NavigationLink { FamilyFeedView() } label: { Label("家人动态", systemImage: "bubble.left.and.text.bubble.right") }
-                    if client != nil {
-                        NavigationLink { AskBubuView() } label: { Label("布布问答", systemImage: "questionmark.bubble") }
-                        NavigationLink { RecognitionView() } label: { Label("认一认", systemImage: "person.crop.square.badge.camera") }
-                        NavigationLink { MonthlyReportView() } label: { Label("成长小报", systemImage: "calendar.badge.plus") }
-                    }
-                } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityIdentifier("timeline.menu")
+    }
+
+    /// Swiping in the pane moves the selection along and keeps that photo's row on screen in the stream.
+    private func followPane(_ id: String) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        if selection.wrappedValue != .item(item) { selection.wrappedValue = .item(item) }
+        followPager(opened: id, current: id)
+    }
+
+    private func select(_ value: OnlineTimelineSelection) { selection.wrappedValue = value }
+
+    /// The detail column (or this stack) reads the loaded list, paging and removal through the feed.
+    private func connectFeed() {
+        let feed = feed
+        feed.items = items
+        feed.hasMore = hasMore
+        feed.loadMore = { await loadNextPage() }
+        feed.remove = { id in removeItem(id) }
+    }
+
+    @ViewBuilder
+    private func destination(_ selection: OnlineTimelineSelection) -> some View {
+        switch selection {
+        case .item(let item):
+            if let client {
+                OnlineTimelineFeedDetail(client: client, feed: feed, initial: item,
+                                         onCurrentChange: { id in followPager(opened: item.id, current: id) })
+                    .navigationTransition(.zoom(sourceID: zoomFollow[item.id] ?? "o-" + item.id, in: zoom))
             }
+        case .event(let event):
+            if let client {
+                OnlineTimelineEventView(event: event, client: client)
+                    .navigationTransition(.zoom(sourceID: "e-" + event.id, in: zoom))
+            }
+        case .entry(let id):
+            TimelineEntryDestination(entryID: id)
+                .navigationTransition(.zoom(sourceID: "f-" + id.uuidString, in: zoom))
         }
-        .sheet(isPresented: $customRange) { customRangeSheet }
-        .bubuToast($toast)
+    }
+
+    private func menuButton(_ page: OnlineTimelineMenuPage, title: String, symbol: String) -> some View {
+        Button { menuPage = page } label: { Label(title, systemImage: symbol) }
     }
 
     // MARK: Header & controls
@@ -281,9 +471,9 @@ struct OnlineTimelineBrowser: View {
             if let cacheNotice { noticeBanner(cacheNotice) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Measure the row width inside all paddings so justified rows never overflow.
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .padding(.top, BubuTheme.Spacing.xs)
+        // The scrubber starts below this, so its thumb never sits on a chip. Kept while the row is unloaded.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { controlsHeight = $0 }
     }
 
     private var filterRow: some View {
@@ -308,6 +498,10 @@ struct OnlineTimelineBrowser: View {
             }
             .padding(.vertical, 2)
         }
+        // Chips scroll out to the column's edges with the same 16pt margin at rest, so a chip that doesn't
+        // fit (narrow outer screen, side bar) peeks at the edge and scrolls fully into view, never cut mid-way.
+        .contentMargins(.horizontal, BubuTheme.Spacing.item, for: .scrollContent)
+        .padding(.horizontal, -BubuTheme.Spacing.item)
         .bubuSensoryFeedback(.selection, trigger: filterSignature)
     }
 
@@ -513,16 +707,16 @@ struct OnlineTimelineBrowser: View {
             .padding(.top, row.index == 0 ? BubuTheme.Spacing.s : BubuTheme.Spacing.l)
             .padding(.bottom, 4)
         case .cells(let cells):
-            HStack(spacing: OnlineTimelineLayoutBuilder.spacing) {
-                ForEach(cells.cells, id: \.element.id) { cell in
-                    cellView(cell.element)
-                        .frame(width: cell.width, height: cells.height)
-                }
+            // Under a vertical fold the row is two runs with the crease in the gap between them.
+            let split = min(cells.foldIndex ?? cells.cells.count, cells.cells.count)
+            HStack(spacing: split < cells.cells.count ? cells.foldGap : OnlineTimelineLayoutBuilder.spacing) {
+                cellRun(cells.cells[..<split], height: cells.height)
+                if split < cells.cells.count { cellRun(cells.cells[split...], height: cells.height) }
             }
             .padding(.bottom, OnlineTimelineLayoutBuilder.spacing)
         case .event(let event, let thumbs):
             if let client {
-                Button { selectedEvent = event } label: { OnlineTimelineEventCard(event: event, thumbs: thumbs, client: client) }
+                Button { select(.event(event)) } label: { OnlineTimelineEventCard(event: event, thumbs: thumbs, client: client) }
                     .buttonStyle(BubuPressableStyle())
                     .matchedTransitionSource(id: "e-" + event.id, in: zoom)
                     .padding(.vertical, BubuTheme.Spacing.s)
@@ -531,17 +725,25 @@ struct OnlineTimelineBrowser: View {
         }
     }
 
+    private func cellRun(_ cells: ArraySlice<(element: OnlineTimelineElement, width: CGFloat)>, height: CGFloat) -> some View {
+        HStack(spacing: OnlineTimelineLayoutBuilder.spacing) {
+            ForEach(cells, id: \.element.id) { cell in
+                cellView(cell.element).frame(width: cell.width, height: height)
+            }
+        }
+    }
+
     @ViewBuilder
     private func cellView(_ element: OnlineTimelineElement) -> some View {
         switch element {
         case .online(let item, _, _):
-            Button { selected = item } label: { OnlineTimelineCell(item: item, client: client!) }
+            Button { select(.item(item)) } label: { OnlineTimelineCell(item: item, client: client!) }
                 .buttonStyle(BubuPressableStyle())
                 .matchedTransitionSource(id: element.id, in: zoom)
                 .accessibilityIdentifier("timeline.item")
         case .family(let record):
             if let entry = entriesByID[record.id] {
-                Button { selectedEntry = entry } label: { FamilyRecordCell(entry: entry) }
+                Button { select(.entry(entry.id)) } label: { FamilyRecordCell(entry: entry) }
                     .buttonStyle(BubuPressableStyle())
                     .matchedTransitionSource(id: element.id, in: zoom)
                     .accessibilityIdentifier("timeline.family")
@@ -568,7 +770,7 @@ struct OnlineTimelineBrowser: View {
 
     /// Same row breaks as square photos in the real grid, so nothing reflows when content lands.
     private var skeleton: some View {
-        let rows = OnlineTimelineLayoutBuilder.placeholderRows(width: width.rounded(), target: rowTarget, rows: 5)
+        let rows = OnlineTimelineLayoutBuilder.placeholderRows(width: column.width, target: rowTarget, rows: 5)
         return VStack(alignment: .leading, spacing: OnlineTimelineLayoutBuilder.spacing) {
             BubuSkeletonBlock(cornerRadius: 10, height: 20).frame(width: 120)
                 .padding(.top, BubuTheme.Spacing.s).padding(.bottom, 4)
@@ -605,43 +807,65 @@ struct OnlineTimelineBrowser: View {
         source != .family && query.text.isEmpty && query.newestFirst && months.count >= 6 && !layout.isEmpty
     }
 
+    /// Shortest track worth showing; a short landscape screen with the chip row on top may not have it.
+    private static let minScrubberTrack: CGFloat = 160
+    /// Half the thumb's touch height: the thumb stays this far off a horizontal fold.
+    private static let thumbClearance: CGFloat = 22
+
     /// A thumb that follows the month on screen. Only a drag that starts on the thumb scrubs;
     /// swipes elsewhere on the edge scroll the list, and a tap never jumps.
+    /// The track starts below the chip row (the thumb never covers a chip) and skips a horizontal fold.
     private var scrubber: some View {
         GeometryReader { geometry in
-            let height = max(geometry.size.height - 2 * BubuTheme.Spacing.m, 120)
-            let scale = OnlineTimelineScrubberScale(months: months, height: height)
-            let shown = scrubbing ?? currentMonth ?? months.first?.month ?? ""
-            let awake = scrubberAwake || scrubbing != nil
-            let thumbY = scrubbing != nil ? scrubY : (scale.center(of: shown) ?? 0)
-            ZStack(alignment: .topTrailing) {
-                Capsule().fill(BubuTheme.Color.hairline)
-                    .frame(width: 2, height: height)
-                    .padding(.trailing, 8)
-                    .opacity(awake ? 1 : 0)
-                    .allowsHitTesting(false)
-                if awake {
-                    ForEach(scale.yearMarks, id: \.year) { mark in
-                        Text(mark.year)
-                            .font(.system(.caption2, design: .rounded).weight(.semibold))
-                            .foregroundStyle(BubuTheme.Color.secondaryText)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.regularMaterial, in: Capsule())
-                            .offset(x: -16, y: mark.offset - 8)
-                            .allowsHitTesting(false)
-                    }
-                    .transition(.opacity)
-                }
-                scrubberThumb(title: awake ? Self.monthTitle(shown) : nil, height: height, scale: scale)
-                    .offset(y: thumbY - 22)
+            let top = BubuTheme.Spacing.m + controlsHeight
+            let height = geometry.size.height - top - BubuTheme.Spacing.m
+            if height >= Self.minScrubberTrack {
+                scrubberTrack(height: height, scale: OnlineTimelineScrubberScale(
+                    months: months, height: height, skipping: foldBand(trackTop: screen.rootRect(fromGlobal: geometry.frame(in: .global)).minY + top)))
+                    .frame(width: geometry.size.width, height: height, alignment: .topTrailing)
+                    .coordinateSpace(.named(Self.scrubberSpace))
+                    .padding(.top, top)
+                    .animation(scrubbing == nil ? BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion) : nil, value: currentMonth)
             }
-            .frame(width: geometry.size.width, height: height, alignment: .topTrailing)
-            .coordinateSpace(.named(Self.scrubberSpace))
-            .padding(.vertical, BubuTheme.Spacing.m)
-            .animation(scrubbing == nil ? BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion) : nil, value: currentMonth)
         }
         .frame(width: 150)
         .bubuSensoryFeedback(.selection, trigger: scrubTick)
+    }
+
+    /// A horizontal fold in track coordinates.
+    private func foldBand(trackTop: CGFloat) -> ClosedRange<CGFloat>? {
+        guard screen.foldAxis == .horizontal, let fold = screen.fold else { return nil }
+        return (fold.minY - trackTop)...(fold.maxY - trackTop)
+    }
+
+    private func scrubberTrack(height: CGFloat, scale: OnlineTimelineScrubberScale) -> some View {
+        let shown = scrubbing ?? currentMonth ?? months.first?.month ?? ""
+        let awake = scrubberAwake || scrubbing != nil
+        let thumbY = scrubbing != nil ? scrubY : (scale.center(of: shown, clearance: Self.thumbClearance) ?? 0)
+        return ZStack(alignment: .topTrailing) {
+            ForEach(scale.trackSegments, id: \.lowerBound) { segment in
+                Capsule().fill(BubuTheme.Color.hairline)
+                    .frame(width: 2, height: segment.upperBound - segment.lowerBound)
+                    .padding(.trailing, 8)
+                    .offset(y: segment.lowerBound)
+                    .opacity(awake ? 1 : 0)
+                    .allowsHitTesting(false)
+            }
+            if awake {
+                ForEach(scale.yearMarks, id: \.year) { mark in
+                    Text(mark.year)
+                        .font(.system(.caption2, design: .rounded).weight(.semibold))
+                        .foregroundStyle(BubuTheme.Color.secondaryText)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.regularMaterial, in: Capsule())
+                        .offset(x: -16, y: mark.offset - 8)
+                        .allowsHitTesting(false)
+                }
+                .transition(.opacity)
+            }
+            scrubberThumb(title: awake ? Self.monthTitle(shown) : nil, height: height, scale: scale)
+                .offset(y: thumbY - Self.thumbClearance)
+        }
     }
 
     private func scrubberThumb(title: String?, height: CGFloat, scale: OnlineTimelineScrubberScale) -> some View {
@@ -685,8 +909,9 @@ struct OnlineTimelineBrowser: View {
 
     private func scrub(to y: CGFloat, height: CGFloat, scale: OnlineTimelineScrubberScale) {
         if scrubbing == nil { scrubStart = currentMonth ?? months.first?.month }
-        scrubY = min(max(y, 0), height)
-        let month = scale.month(at: scrubY)
+        let y = min(max(y, 0), height)
+        scrubY = scale.clear(y, clearance: Self.thumbClearance)
+        let month = scale.month(at: y)
         guard month != scrubbing else { return }
         if scrubbing != nil { scrubTick += 1 }   // one tick per month crossed, none on touch-down
         scrubbing = month
@@ -724,6 +949,11 @@ struct OnlineTimelineBrowser: View {
         let atTop = ids.contains("timeline.top") || (top?.index ?? 0) <= 1
         if atTop != nearTop { nearTop = atTop }
         if let top, let month = layout.monthOfRow[top.id], month != currentMonth { currentMonth = month }
+        // Only while the rows on screen were cut for the current width: during a pending re-cut the old rows
+        // reflow, and the anchor must stay the photo that was at the top before the width changed.
+        guard builtKey?.geometry == rowGeometry else { return }
+        let anchor = ids.contains("timeline.top") ? nil : top.flatMap { layout.anchorID(forRow: $0.id) }
+        if anchor != topAnchor { topAnchor = anchor }
     }
 
     // MARK: Jumping
@@ -840,28 +1070,54 @@ struct OnlineTimelineBrowser: View {
         client != nil && source != .family && query.text.isEmpty && query.person == nil && query.kind == .all
     }
 
-    private var rowTarget: CGFloat { sizeClass == .regular ? 176 : 118 }
+    /// Lower rows on a short screen (outer display in landscape) so more than two fit.
+    private var rowTarget: CGFloat {
+        let regular = sizeClass == .regular
+        return screen.isShort ? (regular ? 128 : 96) : (regular ? 176 : 118)
+    }
+
+    private var rowGeometry: OnlineTimelineGeometry {
+        // A vertical fold crossing the rows: each row breaks at it, with a 4pt margin either side of the crease.
+        let split = screen.columnSplit(minX: column.minX - screen.origin.x, width: column.width,
+                                       margin: OnlineTimelineLayoutBuilder.spacing, minPane: 120)
+        return OnlineTimelineGeometry(width: column.width, target: rowTarget, split: split)
+    }
 
     private var layoutKey: OnlineTimelineLayoutKey {
         OnlineTimelineLayoutKey(itemsRevision: itemsRevision, familyRevision: familyRevision, eventsRevision: eventsRevision,
                                 query: query, source: source, hasMore: hasMore, showsEvents: showsEvents,
-                                width: width.rounded(), regular: sizeClass == .regular)
+                                geometry: rowGeometry)
     }
 
     /// Builds on a background thread from value snapshots; a newer build cancels an older one.
+    /// A rebuild caused only by the width (fold, unfold, rotation) scrolls back, without animation,
+    /// to the row now holding the photo that was at the top.
     private func scheduleLayout() {
         let key = layoutKey
+        if key.onlyGeometryChanged(from: builtKey) {
+            if restoreAnchor == nil { restoreAnchor = topAnchor }
+        } else if let builtKey, builtKey.query != key.query || builtKey.source != key.source {
+            restoreAnchor = nil
+        }
         let items = items, family = family, events = showsEvents ? events : []
-        let query = query, source = source, hasMore = hasMore, width = key.width, target = rowTarget
+        let query = query, source = source, hasMore = hasMore, geometry = key.geometry
         layoutTask?.cancel()
         layoutTask = Task {
             let built = await Task.detached(priority: .userInitiated) {
                 OnlineTimelineLayoutBuilder.build(items: items, family: family, events: events, query: query,
-                                                  source: source, hasMore: hasMore, width: width, target: target)
+                                                  source: source, hasMore: hasMore, width: geometry.width,
+                                                  target: geometry.target, split: geometry.split)
             }.value
             guard !Task.isCancelled else { return }
             layout = built
             builtKey = key
+            guard let anchor = restoreAnchor else { return }
+            restoreAnchor = nil
+            if let row = built.rowID(holding: anchor) {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { position.scrollTo(id: row, anchor: .top) }
+            }
         }
     }
 
@@ -890,24 +1146,42 @@ struct OnlineTimelineBrowser: View {
         }
     }
 
+    /// Two date rows in a sheet sized to them (a fixed half-height sheet cut them off on a short screen).
     private var customRangeSheet: some View {
         NavigationStack {
-            Form {
+            VStack(spacing: 0) {
                 DatePicker("开始", selection: $customStart, displayedComponents: .date)
+                    .padding(.vertical, 10)
+                Divider()
                 DatePicker("结束", selection: $customEnd, in: ...Date.now, displayedComponents: .date)
+                    .padding(.vertical, 10)
             }
+            .font(BubuTheme.Font.body)
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+            .padding(.horizontal, BubuTheme.Spacing.item)
+            .background(BubuTheme.Color.card.opacity(0.92), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .padding(BubuTheme.Spacing.item)
             .environment(\.locale, Locale(identifier: "zh_CN"))
             .environment(\.timeZone, BubuLearningDates.timeZone)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rangeSheetContent = $0 }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // Navigation bar above, home indicator below: part of the sheet's height too.
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top + $0.safeAreaInsets.bottom } action: { rangeSheetChrome = $0 }
+            .background(BubuThemedBackground().ignoresSafeArea())
             .navigationTitle("选择日期范围")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { customRange = false } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { customRange = false }.accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { query.range = .custom(customStart, customEnd); customRange = false }
+                    Button("完成", systemImage: "checkmark", role: .confirm) { query.range = .custom(customStart, customEnd); customRange = false }
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(rangeSheetContent + rangeSheetChrome)])
+        .presentationSizing(.form.fitted(horizontal: false, vertical: true))
+        .bubuLayoutRoot()
     }
 
     private func chip(_ title: String, symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
@@ -926,7 +1200,8 @@ struct OnlineTimelineBrowser: View {
     }
 
     private func removeItem(_ id: String) {
-        selected = nil
+        // Full screen goes back to the stream; the pane turns to the neighbouring photo by itself.
+        if case .item = selection.wrappedValue, detailPane == nil { selection.wrappedValue = nil }
         removedIDs.insert(id)
         guard let removed = items.first(where: { $0.id == id }) else { return }
         withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { items.removeAll { $0.id == id } }
@@ -959,7 +1234,7 @@ struct OnlineTimelineBrowser: View {
         guard let client, let id = router.pendingOnlineID else { return }
         if let found = items.first(where: { $0.id == id }) {
             router.pendingOnlineID = nil
-            selected = found
+            select(.item(found))
             return
         }
         do {
@@ -971,7 +1246,7 @@ struct OnlineTimelineBrowser: View {
                 return
             }
             if !items.contains(where: { $0.id == item.id }) { items.insert(item, at: 0); itemsRevision += 1 }
-            selected = item
+            select(.item(item))
         } catch where isCancellation(error) {
             // Left pending: the task runs again when the view comes back.
         } catch {

@@ -56,7 +56,7 @@ final class LiveLearningJourneyUITests: XCTestCase {
         play.tap()
         sleep(6)
         shot("03-timeline-video-detail", app)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.tapNavigationBack()
 
         pickFilter("timeline.kind.all", label: "不限类型", in: app)
         let search = app.searchFields.firstMatch
@@ -173,7 +173,7 @@ final class LiveLearningJourneyUITests: XCTestCase {
         shot("18-play-finished", app)
         app.buttons["learning.play.done"].tap()
 
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.tapNavigationBack()
         let week = app.buttons["learning.review.week"]
         scrollUntilHittable(week, in: app)
         week.tap()
@@ -234,13 +234,13 @@ final class LiveLearningJourneyUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["brain.recognition"].waitForExistence(timeout: 20))
         sleep(4)
         shot("24-recognition", app)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.tapNavigationBack()
         app.buttons["timeline.menu"].tap()
         app.buttons["每月成长小报"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["brain.monthly"].waitForExistence(timeout: 20))
         sleep(5)
         shot("25-monthly", app)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.tapNavigationBack()
 
         // 首页回忆与生日倒计时
         let home = app.tabBars.buttons["首页"].firstMatch.exists ? app.tabBars.buttons["首页"].firstMatch : app.buttons["首页"].firstMatch

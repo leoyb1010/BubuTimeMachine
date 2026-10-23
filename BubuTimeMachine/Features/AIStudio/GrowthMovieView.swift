@@ -53,11 +53,13 @@ struct GrowthMovieView: View {
                 GrowthMoviePlayer(draft: draft, mediaStore: env.mediaStore, tint: theme) {
                     showPlayer = false
                 }
+                .bubuLayoutRoot()
             }
         }
         .fullScreenCover(isPresented: $showServerPlayer) {
             if let serverMovieURL {
                 ServerMoviePlayer(url: serverMovieURL, title: draftTitle) { showServerPlayer = false }
+                    .bubuLayoutRoot()
             }
         }
         .onDisappear { renderTask?.cancel() }

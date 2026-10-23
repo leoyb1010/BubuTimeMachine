@@ -57,12 +57,13 @@ struct CapsuleComposeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }.disabled(saving || showSealCeremony)
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
+                        .disabled(saving || showSealCeremony)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await save() } } label: {
-                        if saving { ProgressView() }
-                        else { Text("封存").font(BubuTheme.Font.headline.weight(.bold)) }
+                    Button(role: .confirm) { Task { await save() } } label: {
+                        if saving { ProgressView() } else { Label("封存", systemImage: "lock.fill") }
                     }
                     .disabled(!canSave || saving || showSealCeremony)
                 }

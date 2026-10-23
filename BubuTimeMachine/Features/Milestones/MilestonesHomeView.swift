@@ -47,6 +47,17 @@ struct MilestonesHomeView: View {
     }
     private var categoryOptions: [String] { ["全部"] + MilestoneTemplate.categories }
 
+    /// 添加里程碑（常用，竖排栏放不下时最后被收进溢出菜单）。
+    @ToolbarContentBuilder
+    private var addMilestoneItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { showCustom = true } label: { Label("自定义里程碑", systemImage: "star.bubble") }
+                Button { showPicker = true } label: { Label("管理预设清单", systemImage: "list.bullet") }
+            } label: { Label("添加里程碑", systemImage: "plus") }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: BubuTheme.Spacing.section) {
@@ -73,21 +84,15 @@ struct MilestonesHomeView: View {
                 Button {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isConstellation.toggle() }
                 } label: {
-                    Image(systemName: isConstellation ? "square.grid.2x2.fill" : "sparkles")
+                    Label("切换视图", systemImage: isConstellation ? "square.grid.2x2.fill" : "sparkles")
                 }
                 .accessibilityLabel(isConstellation ? "切换到奖章墙" : "切换到星盘视图")
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { showCustom = true } label: { Label("自定义里程碑", systemImage: "star.bubble") }
-                    Button { showPicker = true } label: { Label("管理预设清单", systemImage: "list.bullet") }
-                } label: { Image(systemName: "plus.circle.fill") }
-                .accessibilityLabel("添加里程碑")
-            }
+            addMilestoneItem.bubuVisibilityPriority(.high)
         }
-        .sheet(isPresented: $showPicker) { MilestonePickerSheet() }
-        .sheet(isPresented: $showCustom) { MilestoneEditSheet(milestone: nil) }
-        .sheet(item: $detailFor) { MilestoneEditSheet(milestone: $0) }
+        .sheet(isPresented: $showPicker) { MilestonePickerSheet().bubuLayoutRoot() }
+        .sheet(isPresented: $showCustom) { MilestoneEditSheet(milestone: nil).bubuLayoutRoot() }
+        .sheet(item: $detailFor) { MilestoneEditSheet(milestone: $0).bubuLayoutRoot() }
         .fullScreenCover(item: $ceremonyFor) { milestone in
             CeremonyAnimation(title: "🎉 \(milestone.title)",
                               subtitle: profile.map { AgeCalculator.ageDescription(birthday: $0.birthday, at: milestone.happenedAt ?? .now) }) {
@@ -97,6 +102,7 @@ struct MilestonesHomeView: View {
                 env.refreshWidgetSnapshot(context: context)
                 ceremonyFor = nil
             }
+            .bubuLayoutRoot()
         }
         // 仪式队列走全量数据层，不受搜索/分类过滤影响；initial:true 让别处点亮后进页也补播（P2a）
         .onChange(of: ceremonyFingerprint, initial: true) { _, _ in

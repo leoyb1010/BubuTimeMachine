@@ -210,6 +210,7 @@ struct BubuVoicesView: View {
 struct RecognitionView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.bubuLayout) private var layout
     @State private var queue: [RecognitionCandidateDTO] = []
     @State private var remaining = 0
     @State private var loading = true
@@ -239,74 +240,51 @@ struct RecognitionView: View {
     private static let swipe = Animation.spring(response: 0.4, dampingFraction: 0.75)
     private var motion: Animation? { reduceMotion ? nil : Self.swipe }
 
+    /// 矮屏 / 横拿 / 半折时卡片和按钮分到两块（BubuArrangement，不滚动页面的根部）；
+    /// 竖拿的窄屏保持原来的上下一列。
+    private var splitLayout: Bool {
+        layout.fold != nil || layout.isShort || layout.size.width > layout.size.height
+    }
+
+    /// 桌面姿态（水平折痕）上下分；书本折痕、矮屏、横拿左右分。
+    private var splitAxes: Axis.Set { layout.foldAxis == .horizontal ? .vertical : .horizontal }
+
     var body: some View {
         let client = BubuLearningClient(env: env)
         ZStack {
             BubuThemedBackground().ignoresSafeArea()
-            VStack(spacing: BubuTheme.Spacing.l) {
-                if let client {
-                    Picker("方式", selection: $batchMode) {
-                        Text("一张张认").tag(false)
-                        Text("批量").tag(true)
+            if let client {
+                if splitLayout {
+                    BubuArrangement(axes: splitAxes, style: .split) {
+                        stage(client)
+                            .frame(maxWidth: 600)
+                            .padding(BubuTheme.Spacing.l)
+                    } secondary: {
+                        splitControls(client)
+                            .frame(maxWidth: 440)
+                            .padding(BubuTheme.Spacing.l)
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("recognition.mode")
-                    if !queue.isEmpty || remaining > 0 { pendingHeader }
-                    if batchMode {
-                        Text("勾选几张一起确认，只影响布布的时光，不改第二大脑。")
-                            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
-                    } else {
-                        Text("右滑“是布布”，左滑“不是”。只影响布布的时光，不改第二大脑。")
-                            .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
-                    }
-                    if let errorText, !queue.isEmpty {
-                        SecondBrainErrorBanner(text: errorText) { self.errorText = nil }
-                    }
-                    if loading && queue.isEmpty {
-                        ProgressView().frame(maxHeight: .infinity)
-                    } else if queue.isEmpty {
-                        finished(client)
-                    } else if batchMode {
-                        batchGrid(client)
-                    } else if let top = queue.first {
-                        ZStack {
-                            ForEach(Array(queue.prefix(3).enumerated()).reversed(), id: \.element.id) { depth, candidate in
-                                card(candidate, client: client, depth: depth)
-                                    .zIndex(Double(3 - depth))
-                                    .transition(.asymmetric(insertion: reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity),
-                                                            removal: .opacity))
-                            }
-                        }
-                        .frame(maxHeight: .infinity)
-                        // The undo chip sits above the buttons so it never covers them.
-                        undoSlot(client)
-                        HStack(spacing: BubuTheme.Spacing.l) {
-                            decisionButton("不是", symbol: "xmark", tint: BubuTheme.Color.softFill, foreground: BubuTheme.Color.warmBrown) {
-                                Task { await decide(top, yes: false, client: client) }
-                            }
-                            .accessibilityIdentifier("recognition.no")
-                            decisionButton("是布布", symbol: "heart.fill", tint: BubuTheme.Color.actionFill, foreground: .white) {
-                                Task { await decide(top, yes: true, client: client) }
-                            }
-                            .accessibilityIdentifier("recognition.yes")
-                        }
-                        .disabled(deciding.contains(top.id))
-                    }
-                    if queue.isEmpty { undoSlot(client) }
                 } else {
-                    SecondBrainUnavailable(title: "认一认")
+                    VStack(spacing: BubuTheme.Spacing.l) {
+                        topControls
+                        stage(client)
+                        bottomControls(client, vertical: false)
+                    }
+                    .padding(BubuTheme.Spacing.l)
+                    .bubuContentColumn(640)
                 }
+            } else {
+                SecondBrainUnavailable(title: "认一认")
+                    .padding(BubuTheme.Spacing.l)
+                    .bubuContentColumn(640)
             }
-            .padding(BubuTheme.Spacing.l)
-            .bubuContentColumn(640)
         }
         .navigationTitle("认一认")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if client != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
-                        .accessibilityLabel("认过的照片")
+                    Button { showHistory = true } label: { Label("认过的照片", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("recognition.history")
                 }
             }
@@ -322,6 +300,93 @@ struct RecognitionView: View {
         }
         .onChange(of: batchMode) { _, _ in picked = []; BubuHaptics.selection() }
         .accessibilityIdentifier("brain.recognition")
+    }
+
+    // MARK: Layout pieces
+
+    /// 方式切换 + 待认数量 + 说明 + 错误提示。
+    @ViewBuilder
+    private var topControls: some View {
+        Picker("方式", selection: $batchMode) {
+            Text("一张张认").tag(false)
+            Text("批量").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("recognition.mode")
+        if !queue.isEmpty || remaining > 0 { pendingHeader }
+        if batchMode {
+            Text("勾选几张一起确认，只影响布布的时光，不改第二大脑。")
+                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
+        } else {
+            Text("右滑“是布布”，左滑“不是”。只影响布布的时光，不改第二大脑。")
+                .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText).multilineTextAlignment(.center)
+        }
+        if let errorText, !queue.isEmpty {
+            SecondBrainErrorBanner(text: errorText) { self.errorText = nil }
+        }
+    }
+
+    /// 主内容：卡片堆 / 批量网格 / 加载 / 认完。分栏时它独占一块。
+    @ViewBuilder
+    private func stage(_ client: BubuLearningClient) -> some View {
+        if loading && queue.isEmpty {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if queue.isEmpty {
+            finished(client)
+        } else if batchMode {
+            if splitLayout { batchScroll(client) } else { batchGrid(client) }
+        } else {
+            ZStack {
+                ForEach(Array(queue.prefix(3).enumerated()).reversed(), id: \.element.id) { depth, candidate in
+                    card(candidate, client: client, depth: depth)
+                        .zIndex(Double(3 - depth))
+                        .transition(.asymmetric(insertion: reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity),
+                                                removal: .opacity))
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    /// 卡片下方的撤销条 + 决定按钮（vertical = 分栏的窄列里按钮上下排、撑满宽度）。
+    @ViewBuilder
+    private func bottomControls(_ client: BubuLearningClient, vertical: Bool) -> some View {
+        if !batchMode, let top = queue.first {
+            // The undo chip sits above the buttons so it never covers them.
+            undoSlot(client)
+            let stack = vertical ? AnyLayout(VStackLayout(spacing: BubuTheme.Spacing.m))
+                                 : AnyLayout(HStackLayout(spacing: BubuTheme.Spacing.l))
+            stack {
+                decisionButton("不是", symbol: "xmark", tint: BubuTheme.Color.softFill, foreground: BubuTheme.Color.warmBrown,
+                               fill: vertical) {
+                    Task { await decide(top, yes: false, client: client) }
+                }
+                .accessibilityIdentifier("recognition.no")
+                decisionButton("是布布", symbol: "heart.fill", tint: BubuTheme.Color.actionFill, foreground: .white,
+                               fill: vertical) {
+                    Task { await decide(top, yes: true, client: client) }
+                }
+                .accessibilityIdentifier("recognition.yes")
+            }
+            .disabled(deciding.contains(top.id))
+        } else if !queue.isEmpty, batchMode, vertical {
+            batchSelectionBar
+            batchButtons(client, vertical: true)
+        }
+        if queue.isEmpty { undoSlot(client) }
+    }
+
+    /// 分栏时的副内容：说明在上、按钮贴底；放不下（大字号）时整列可滚动。
+    private func splitControls(_ client: BubuLearningClient) -> some View {
+        let column = VStack(spacing: BubuTheme.Spacing.l) {
+            topControls
+            Spacer(minLength: 0)
+            bottomControls(client, vertical: true)
+        }
+        return ViewThatFits(in: .vertical) {
+            column.frame(maxHeight: .infinity)
+            ScrollView { column }.scrollBounceBehavior(.basedOnSize)
+        }
     }
 
     /// The pending count, front and centre: how many photos wait overall, and this round's progress.
@@ -422,11 +487,13 @@ struct RecognitionView: View {
             .rotationEffect(.degrees(-12)).padding(20)
     }
 
-    private func decisionButton(_ title: String, symbol: String, tint: Color, foreground: Color, action: @escaping () -> Void) -> some View {
+    private func decisionButton(_ title: String, symbol: String, tint: Color, foreground: Color, fill: Bool = false,
+                                action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: symbol).font(BubuTheme.Font.headline)
                 .foregroundStyle(foreground)
                 .padding(.horizontal, 26).padding(.vertical, 14)
+                .frame(maxWidth: fill ? .infinity : nil)
                 .background(tint, in: Capsule())
         }
         .buttonStyle(BubuPressableStyle(scale: 0.93))
@@ -448,6 +515,13 @@ struct RecognitionView: View {
 
     private func batchGrid(_ client: BubuLearningClient) -> some View {
         VStack(spacing: BubuTheme.Spacing.m) {
+            batchSelectionBar
+            batchScroll(client)
+            batchButtons(client, vertical: false)
+        }
+    }
+
+    private var batchSelectionBar: some View {
             HStack {
                 Text("已选 \(picked.count) 张").font(BubuTheme.Font.caption.weight(.bold)).foregroundStyle(BubuTheme.Color.warmBrown)
                     .contentTransition(.numericText())
@@ -460,6 +534,9 @@ struct RecognitionView: View {
                 }
                 .font(BubuTheme.Font.caption.weight(.semibold)).tint(BubuTheme.Color.deepRose)
             }
+    }
+
+    private func batchScroll(_ client: BubuLearningClient) -> some View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 6)], spacing: 6) {
                     ForEach(queue) { candidate in
@@ -494,19 +571,25 @@ struct RecognitionView: View {
                     }
                 }
             }
-            HStack(spacing: BubuTheme.Spacing.m) {
-                decisionButton("都不是", symbol: "xmark", tint: BubuTheme.Color.softFill, foreground: BubuTheme.Color.warmBrown) {
-                    Task { await decideBatch(yes: false, client: client) }
-                }
-                .accessibilityIdentifier("recognition.batch.no")
-                decisionButton("都是布布", symbol: "heart.fill", tint: BubuTheme.Color.actionFill, foreground: .white) {
-                    Task { await decideBatch(yes: true, client: client) }
-                }
-                .accessibilityIdentifier("recognition.batch.yes")
+    }
+
+    private func batchButtons(_ client: BubuLearningClient, vertical: Bool) -> some View {
+        let stack = vertical ? AnyLayout(VStackLayout(spacing: BubuTheme.Spacing.m))
+                             : AnyLayout(HStackLayout(spacing: BubuTheme.Spacing.m))
+        return stack {
+            decisionButton("都不是", symbol: "xmark", tint: BubuTheme.Color.softFill, foreground: BubuTheme.Color.warmBrown,
+                           fill: vertical) {
+                Task { await decideBatch(yes: false, client: client) }
             }
-            .disabled(picked.isEmpty || batchBusy)
-            .opacity(picked.isEmpty ? 0.5 : 1)
+            .accessibilityIdentifier("recognition.batch.no")
+            decisionButton("都是布布", symbol: "heart.fill", tint: BubuTheme.Color.actionFill, foreground: .white,
+                           fill: vertical) {
+                Task { await decideBatch(yes: true, client: client) }
+            }
+            .accessibilityIdentifier("recognition.batch.yes")
         }
+        .disabled(picked.isEmpty || batchBusy)
+        .opacity(picked.isEmpty ? 0.5 : 1)
     }
 
     // MARK: Network

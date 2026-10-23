@@ -133,6 +133,7 @@ struct OnlineTimelineEventCard: View {
     var thumbs: [OnlineTimelineItem] = []
     let client: BubuLearningClient
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var screen
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -164,7 +165,7 @@ struct OnlineTimelineEventCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    private var stripHeight: CGFloat { BubuAdaptive.value(sizeClass, compact: 84, regular: 128) }
+    private var stripHeight: CGFloat { screen.bubuHeight(BubuAdaptive.value(sizeClass, compact: 84, regular: 128), short: 64) }
 
     @ViewBuilder
     private var strip: some View {

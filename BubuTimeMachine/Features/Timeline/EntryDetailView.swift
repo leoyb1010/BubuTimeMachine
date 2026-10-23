@@ -122,7 +122,7 @@ struct EntryDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(editing ? "完成" : "编辑") {
+                Button {
                     if editing {
                         markEntryDirty()
                         do {
@@ -144,40 +144,47 @@ struct EntryDetailView: View {
                         env.syncEngine.syncNow()
                     }
                     withAnimation(.smooth) { editing.toggle() }
+                } label: {
+                    // Icon + title so it can stand in the vertical side bar (iPhone Duo).
+                    Label(editing ? "完成" : "编辑", systemImage: editing ? "checkmark" : "pencil")
                 }
                 .fontWeight(.semibold)
                 .accessibilityIdentifier("entry.edit")
                 .disabled(appendMediaStatus != nil)
             }
+            .bubuVisibilityPriority(.high)
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     toggleStorybook()
                 } label: {
-                    Image(systemName: entry.inStorybook ? "book.fill" : "book")
-                        .foregroundStyle(entry.inStorybook ? BubuTheme.Color.deepRose : BubuTheme.Color.warmBrown)
+                    Label {
+                        Text(entry.inStorybook ? "移出绘本" : "收进绘本")
+                    } icon: {
+                        Image(systemName: entry.inStorybook ? "book.fill" : "book")
+                            .foregroundStyle(entry.inStorybook ? BubuTheme.Color.deepRose : BubuTheme.Color.warmBrown)
+                    }
                 }
-                .accessibilityLabel(entry.inStorybook ? "移出绘本" : "收进绘本")
                 .popoverTip(StorybookTip())
             }
+            .bubuVisibilityPriority(.low)
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showShareCard = true
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    Label("分享这一刻", systemImage: "square.and.arrow.up")
                 }
-                .accessibilityLabel("分享这一刻")
             }
+            .bubuVisibilityPriority(.low)
             ToolbarItem(placement: .topBarTrailing) {
                 Button(role: .destructive) {
                     showDeleteConfirm = true
                 } label: {
-                    Image(systemName: "trash")
+                    Label("删除记录", systemImage: "trash")
                 }
-                .accessibilityLabel("删除记录")
             }
         }
         .sheet(isPresented: $showShareCard) {
-            ShareCardSheet(entry: entry)
+            ShareCardSheet(entry: entry).bubuLayoutRoot()
         }
         .overlay(alignment: .top) {
             if let storybookToast {
@@ -203,7 +210,7 @@ struct EntryDetailView: View {
             }
         }
         .sheet(isPresented: $showCommentSheet) {
-            CommentComposeSheet(entry: entry)
+            CommentComposeSheet(entry: entry).bubuLayoutRoot()
         }
         .fullScreenCover(isPresented: Binding(
             get: { viewingMediaID != nil },
@@ -217,6 +224,7 @@ struct EntryDetailView: View {
                     viewingMediaID = nil
                     initialPlaybackSeconds = nil
                 }
+                .bubuLayoutRoot()
             }
         }
         .alert("删除这条记录？", isPresented: $showDeleteConfirm) {

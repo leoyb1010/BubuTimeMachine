@@ -10,6 +10,8 @@ struct AdvancedSettingsView: View {
     @State private var testResult: String?
     @State private var testingAI = false
     @State private var aiTestResult: String?
+    /// 与 BubuAppDelegate 同一个键、同一个默认值（true）。
+    @AppStorage(BubuAppDelegate.allowLandscapeKey) private var allowsLandscape = true
 
     var body: some View {
         @Bindable var config = env.config
@@ -98,6 +100,15 @@ struct AdvancedSettingsView: View {
                      ? "为保护家庭服务器登录态，AI 地址必须是内置可信地址、与家庭服务器同源的 HTTPS 地址，或 Debug 本机回环地址。"
                      : "各项 AI 授权分别控制：文字写作、亲子桥图片识别和照片搜索互不代开。App 复用家庭服务器登录态，不保存 DeepSeek 密钥。")
             }
+
+            // 横屏整体回退开关：只对 iPhone 有意义（iPad、宽窗口一直跟随系统方向）。
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                Section {
+                    Toggle("允许横屏（iPhone）", isOn: $allowsLandscape)
+                } footer: {
+                    Text("关掉后 iPhone 只竖着显示；iPad 和展开的大屏不受影响。")
+                }
+            }
         }
         .navigationTitle("高级 · 自托管")
         .navigationBarTitleDisplayMode(.inline)
@@ -108,6 +119,7 @@ struct AdvancedSettingsView: View {
         .onChange(of: env.config.aiEnabled) { _, _ in env.reloadAIService() }
         .onChange(of: env.config.semanticSearchEnabled) { _, _ in env.reloadAIService() }
         .onDisappear { env.reloadAIService() }
+        .onChange(of: allowsLandscape) { _, allowed in BubuAppDelegate.setAllowsLandscape(allowed) }
     }
 
     /// 分两段测：先只验服务器可达（不需要账号），再验账号。

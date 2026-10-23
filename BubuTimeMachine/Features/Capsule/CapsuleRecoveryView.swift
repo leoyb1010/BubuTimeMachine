@@ -56,7 +56,7 @@ struct CapsuleRecoveryView: View {
             .navigationTitle("胶囊恢复码")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("完成", systemImage: "checkmark", role: .confirm) { dismiss() } }
             }
             .onAppear { code = CapsuleRecovery.current() ?? "" }
             .sheet(item: $printCard) { url in ShareSheet(items: [url]) }

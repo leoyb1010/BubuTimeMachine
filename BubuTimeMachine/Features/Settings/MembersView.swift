@@ -42,10 +42,10 @@ struct MembersView: View {
         .navigationTitle("家庭成员")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingAdd) {
-            MemberEditSheet(member: nil)
+            MemberEditSheet(member: nil).bubuLayoutRoot()
         }
         .sheet(item: $editing) { member in
-            MemberEditSheet(member: member)
+            MemberEditSheet(member: member).bubuLayoutRoot()
         }
         .confirmationDialog("要删除这位家人吗？", isPresented: Binding(
             get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -201,9 +201,13 @@ struct MemberEditSheet: View {
             .navigationTitle(member == nil ? "添加成员" : "编辑成员")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                // 角色按钮（图标 + 标题）：进得了 Duo 外屏的竖排栏，文字只作无障碍名。
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }.fontWeight(.bold)
+                    Button("保存", systemImage: "checkmark", role: .confirm) { save() }
                 }
             }
             .onAppear(perform: load)

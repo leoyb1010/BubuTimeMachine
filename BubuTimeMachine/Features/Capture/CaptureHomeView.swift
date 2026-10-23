@@ -19,6 +19,7 @@ struct CaptureHomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openURL) private var openURL
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.bubuLayout) private var layout
     @Query private var profiles: [ChildProfile]
     @Query private var entries: [Entry]
     // 里程碑 / 成长实测 / 健康记录的 @Query 随四宫格一起撤走：
@@ -41,6 +42,8 @@ struct CaptureHomeView: View {
     /// 「最近时光」：和时光 Tab 默认流同一份数据。
     @State private var recent = HomeRecentModel()
     @State private var openedRecent: OnlineTimelineItem?
+    /// 内容列（左右页边距以内）在布局根坐标里的位置；首帧未测量时为 nil。
+    @State private var contentSpan: HomeContentSpan?
     @AppStorage(SecondBrainConsentModifier.storageKey) private var secondBrainConsented = false
 
     // 首页统计缓存：全表派生值只在数据指纹变化时重算一次，
@@ -86,49 +89,22 @@ struct CaptureHomeView: View {
                     greetingRow
                     if isBirthdayToday { birthdayBanner }   // 🎂 生日当天全 App 仪式（R4 C4）
                     schoolBanner               // 🎒 入园倒计时 / 上学头一个月（过后自动安静）
-                    if isWide {
-                        // iPad：左边今天的大图，右边身份条 + 入口 + 今日一问，横向把宽度用起来。
-                        HStack(alignment: .top, spacing: 16) {
-                            todayCard(client: client, photoHeight: 320)
-                                .frame(maxWidth: .infinity)
-                            VStack(spacing: 12) {
-                                identityCardTop
-                                VStack(spacing: 8) { shortcutTiles(horizontal: true) }
-                                if !entries.isEmpty { dailyQuestionStrip }
-                            }
-                            .frame(width: 340)
-                        }
-                    } else {
-                        identityCardTop        // ① 身份条（可翻面看性别/血型/出生地）
-                        todayCard(client: client, photoHeight: 260)   // ② 今天：精选大图 + 一句话记录
-                    }
-                    ssdCandidateCard           // 移动硬盘只生成候选，必须回手机确认
-                    uploadQueueCard            // 后台原片必须可见、可重试，不能假装已经收好
-                    todayPhotosCard            // 今天拍了照片时主动请你收进（零操作记录）
-                    // ③ 生日倒计时 + 今天的回忆（第二大脑 + 本机那年今天）；没内容时不占位
-                    if HomeMemoriesSection.hasContent(model: today, client: client,
-                                                      birthday: profile?.birthday,
-                                                      localOnThisDay: onThisDayEntries) {
-                        HomeMemoriesSection(model: today, client: client,
-                                            birthday: profile?.birthday,
-                                            childName: profile?.name ?? "布布",
-                                            localOnThisDay: onThisDayEntries,
-                                            zoomNS: zoomNS)
-                    }
-                    if !isWide {
-                        HStack(spacing: 10) { shortcutTiles(horizontal: false) }   // 布布说 / 相册 / 健康，三列等宽
-                    }
+                    // ① 身份条 ② 今天 ③ 待办卡 ④ 今天的回忆 ⑤ 入口 + 今日一问：同一个容器，按窄 / 宽 / 矮屏换摆法。
+                    homeHero(client: client)
                     if entries.isEmpty {
                         firstRecordEmptyState  // 空库：单焦点，只说「记第一笔」
-                    } else if !isWide {
-                        dailyQuestionStrip     // 今日一问（轻条）
                     }
-                    recentMomentsSection       // ④ 最近时光（与时光 Tab 同序的缩略图）
+                    recentMomentsSection       // ⑥ 最近时光（与时光 Tab 同序的缩略图）
                     SaveHealthStrip()
                     // 给底部悬浮玻璃 Tab 栏留出空间
                     // 宽屏走侧栏、没有悬浮底栏，不需要这块预留
                     Spacer(minLength: BubuAdaptive.value(sizeClass, compact: 150, regular: 40))
                 }
+                // 内容列的全局位置（用时换算成布局根坐标）：用来判断竖直折痕是否切过本列、最近时光排几列。
+                .onGeometryChange(for: HomeContentSpan.self) { proxy in
+                    let frame = proxy.frame(in: .global)
+                    return HomeContentSpan(minX: frame.minX, width: frame.width)
+                } action: { contentSpan = $0 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .bubuContentColumn(1080)
@@ -168,6 +144,7 @@ struct CaptureHomeView: View {
                     .sheet(isPresented: Binding(get: { model.showQuickCapture },
                                                 set: { model.showQuickCapture = $0 })) {
                         QuickCaptureSheet(model: model)
+                            .bubuLayoutRoot() // Duo：弹窗布局根
                     }
                 if model.savedFlash { savedToast }
             }
@@ -176,7 +153,10 @@ struct CaptureHomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         // 保存成功时的成功触觉，与「已经收好啦」贴纸同步，强化「完成感」。
         .bubuSensoryFeedback(.success, trigger: model?.savedFlash)
-        .toolbar(.hidden, for: .navigationBar)
+        // 栏会竖排（Duo 外屏 / 内屏横拿）或矮屏时用系统工具栏：齿轮和同步状态跟着进侧边竖排栏，
+        // 不再在内容顶部占一行；其余情况保留手绘问候行里的齿轮（iPhone 竖拿、iPad 一个像素不变）。
+        .toolbar(usesSystemBar ? .visible : .hidden, for: .navigationBar)
+        .toolbar { homeToolbar }
         .onAppear {
             if model == nil {
                 model = CaptureModel(mediaStore: env.mediaStore, analyzer: env.photoAnalyzer,
@@ -232,9 +212,11 @@ struct CaptureHomeView: View {
                 photoScanner.markQueued(outcome.queued)
                 refreshUploadQueueSummary()
             }
+            .bubuLayoutRoot() // Duo：弹窗布局根
         }
         .sheet(isPresented: $showSSDIntakeCandidates) {
             SSDIntakeCandidatesSheet(candidates: $ssdIntakeCandidates)
+                .bubuLayoutRoot() // Duo：弹窗布局根
         }
     }
 
@@ -350,6 +332,75 @@ struct CaptureHomeView: View {
     }
 
     private var isWide: Bool { BubuAdaptive.isWide(sizeClass) }
+
+    /// 栏可能竖排（竖排栏在哪侧已知）或矮屏：首页改用系统工具栏，齿轮 / 同步进栏。
+    private var usesSystemBar: Bool { layout.barEdge != nil || layout.isShort }
+
+    /// 窄屏一列 / 宽屏「大图 | 侧栏」/ 矮屏「大图 | 回忆」。矮屏但内容列太窄（< 480）时仍按一列排。
+    private var heroMode: HomeHeroLayout.Mode {
+        if layout.isShort, (contentSpan?.width ?? layout.safeRect.width) >= 480 { return .short }
+        return isWide ? .wide : .narrow
+    }
+
+    /// 竖直折痕切过内容列时的左右分栏（大图、侧栏各占一侧）；没有折痕 / 水平折痕时为 nil。
+    private var heroSplit: BubuLayout.ColumnSplit? {
+        contentSpan.flatMap { layout.columnSplit(minX: $0.minX - layout.origin.x, width: $0.width) }
+    }
+
+    @ToolbarContentBuilder
+    private var homeToolbar: some ToolbarContent {
+        if usesSystemBar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                HomeSyncStatusButton()
+                NavigationLink { SettingsView() } label: {
+                    Label("设置", systemImage: "gearshape")
+                }
+            }
+        }
+    }
+
+    /// 「今天」区：五块始终是 HomeHeroLayout 的直接子视图，换摆法时今日大图、身份条头像、
+    /// 回忆轮播（含滚动位置和已打开的回忆）、入口都不重建。
+    private func homeHero(client: BubuLearningClient?) -> some View {
+        let mode = heroMode
+        let showsMemories = HomeMemoriesSection.hasContent(model: today, client: client,
+                                                           birthday: profile?.birthday,
+                                                           localOnThisDay: onThisDayEntries)
+        // 入口在侧栏 / 右栏时竖排成行卡，通栏时横排三列等宽。
+        let sideIsColumn = mode == .wide || (mode == .short && !showsMemories)
+        let tilesLayout = sideIsColumn ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 10))
+        let heroLayout = HomeHeroLayout(mode: mode, split: heroSplit)
+        return heroLayout {
+            identityCardTop            // 身份条（可翻面看性别/血型/出生地）
+                .layoutValue(key: HomeHeroRoleKey.self, value: .identity)
+            todayCard(client: client,  // 今天：精选大图 + 一句话记录
+                      photoHeight: layout.bubuHeight(mode == .wide ? 320 : 260, short: 200))
+                .layoutValue(key: HomeHeroRoleKey.self, value: .today)
+            VStack(spacing: 12) {
+                ssdCandidateCard       // 移动硬盘只生成候选，必须回手机确认
+                uploadQueueCard        // 后台原片必须可见、可重试，不能假装已经收好
+                todayPhotosCard        // 今天拍了照片时主动请你收进（零操作记录）
+            }
+            .layoutValue(key: HomeHeroRoleKey.self, value: .todos)
+            // 生日倒计时 + 今天的回忆（第二大脑 + 本机那年今天）；没内容时不占位
+            if showsMemories {
+                HomeMemoriesSection(model: today, client: client,
+                                    birthday: profile?.birthday,
+                                    childName: profile?.name ?? "布布",
+                                    localOnThisDay: onThisDayEntries,
+                                    zoomNS: zoomNS,
+                                    bleedEdges: mode == .short ? .trailing : .horizontal)
+                    .layoutValue(key: HomeHeroRoleKey.self, value: .memories)
+            }
+            VStack(spacing: 12) {
+                tilesLayout {
+                    shortcutTiles(horizontal: sideIsColumn)   // 布布说 / 相册 / 健康
+                }
+                if !entries.isEmpty { dailyQuestionStrip }    // 今日一问（轻条）
+            }
+            .layoutValue(key: HomeHeroRoleKey.self, value: .side)
+        }
+    }
 
     /// 家庭服务（第二大脑）客户端；未配置时为 nil，首页只显示本机内容。
     private var learningClient: BubuLearningClient? { BubuLearningClient(env: env) }
@@ -816,17 +867,20 @@ struct CaptureHomeView: View {
             }
             Spacer()
             todayStatusPill
-            NavigationLink { SettingsView() } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(BubuTheme.Font.scaled(18, weight: .bold, cap: .extraExtraExtraLarge))
-                    .foregroundStyle(BubuTheme.Color.primaryInk)
-                    .frame(width: 42, height: 42)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.62), lineWidth: 1))
-                    .shadow(color: BubuTheme.Color.deepRose.opacity(0.18), radius: 10, y: 4)
+            // 用系统工具栏时齿轮已在栏里（竖排时在侧边），这里只留问候，避免出现两个「设置」。
+            if !usesSystemBar {
+                NavigationLink { SettingsView() } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(BubuTheme.Font.scaled(18, weight: .bold, cap: .extraExtraExtraLarge))
+                        .foregroundStyle(BubuTheme.Color.primaryInk)
+                        .frame(width: 42, height: 42)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.62), lineWidth: 1))
+                        .shadow(color: BubuTheme.Color.deepRose.opacity(0.18), radius: 10, y: 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("设置")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("设置")
         }
         .padding(.top, 2)
         // 顶部四个并列信息在无障碍超大字号会互相挤压；保留完整 VoiceOver 语义，
@@ -1164,14 +1218,18 @@ struct CaptureHomeView: View {
 
     // MARK: 最近时光（与时光 Tab 默认流同一份、同一顺序）
 
-    private var recentElements: [OnlineTimelineElement] {
+    private func recentElements(limit: Int) -> [OnlineTimelineElement] {
         HomeRecentModel.elements(items: recent.items, family: entries.map(OnlineTimelineFamilyRef.init),
-                                 connected: recentClient != nil, hasMore: recent.hasMore, limit: isWide ? 8 : 6)
+                                 connected: recentClient != nil, hasMore: recent.hasMore, limit: limit)
     }
 
     @ViewBuilder
     private var recentMomentsSection: some View {
-        let elements = recentElements
+        // 窄屏 3 列两行；宽屏 / 矮屏 / 有竖直折痕时偶数列（折痕正好落在中间那道缝里），
+        // 列多（≥6）一行、列少两行。顺序与时光一致（最新在前）。
+        let columns = layout.bubuFoldGrid(compactColumns: 3, minItemWidth: 90, spacing: 6,
+                                          availableWidth: contentSpan?.width)
+        let elements = recentElements(limit: columns.count * (columns.count >= 6 ? 1 : 2))
         if !elements.isEmpty {
             VStack(spacing: 10) {
                 HomeSectionHeader(title: "最近时光") {
@@ -1180,9 +1238,7 @@ struct CaptureHomeView: View {
                         .accessibilityLabel("查看全部时光")
                         .accessibilityIdentifier("home.recent.all")
                 }
-                // 窄屏 3 列两行，宽屏 8 列一行；顺序与时光一致（最新在前）。
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: isWide ? 8 : 3),
-                          spacing: 6) {
+                LazyVGrid(columns: columns, spacing: 6) {
                     ForEach(elements) { element in
                         recentTile(element)
                             .aspectRatio(1, contentMode: .fit)
@@ -1291,8 +1347,8 @@ private struct SSDIntakeCandidatesSheet: View {
             .navigationTitle("移动硬盘候选")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("完成") { dismiss() }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成", systemImage: "checkmark", role: .confirm) { dismiss() }
                 }
             }
             .onAppear {
@@ -1438,14 +1494,170 @@ private struct SaveHealthStrip: View {
         .bubuGlassSurface(cornerRadius: BubuTheme.Radius.small, tint: theme.primary)
     }
 
-    private var syncSummary: String {
-        switch env.syncEngine.connectionState {
-        case .offline:
-            return env.syncEngine.pendingCount == 0 ? "离线也可用，暂无待同步" : "离线可用，\(env.syncEngine.pendingCount) 项等服务器"
-        case .connecting:
-            return "正在连接家里的服务器…"
-        case .online:
-            return env.syncEngine.pendingCount == 0 ? "已和家里服务器同步" : "\(env.syncEngine.pendingCount) 项正在等待同步"
+    private var syncSummary: String { homeSyncSummary(env.syncEngine) }
+}
+
+/// 首页保存健康度与工具栏同步按钮共用的一句话状态。
+@MainActor
+private func homeSyncSummary(_ engine: SyncEngine) -> String {
+    switch engine.connectionState {
+    case .offline:
+        return engine.pendingCount == 0 ? "离线也可用，暂无待同步" : "离线可用，\(engine.pendingCount) 项等服务器"
+    case .connecting:
+        return "正在连接家里的服务器…"
+    case .online:
+        return engine.pendingCount == 0 ? "已和家里服务器同步" : "\(engine.pendingCount) 项正在等待同步"
+    }
+}
+
+// MARK: - 工具栏同步状态（栏竖排 / 矮屏时）
+/// 图标 + 标题，直达同步中心。单独成视图：只有它观察 syncEngine，同步进度不触发首页整页重算（U-P1-5）。
+private struct HomeSyncStatusButton: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        let engine = env.syncEngine
+        NavigationLink { SyncCenterView() } label: {
+            Label("同步", systemImage: symbol(engine))
         }
+        .accessibilityValue(engine.lastFailureReason ?? homeSyncSummary(engine))
+    }
+
+    private func symbol(_ engine: SyncEngine) -> String {
+        if engine.lastFailureReason != nil { return "exclamationmark.icloud" }
+        switch engine.connectionState {
+        case .offline:
+            // 默认离线优先：没有待同步就是「本机已收好」，不显示吓人的断云。
+            return engine.pendingCount == 0 ? "externaldrive.badge.checkmark" : "icloud.slash"
+        case .connecting:
+            return "arrow.triangle.2.circlepath.icloud"
+        case .online:
+            return engine.pendingCount == 0 ? "checkmark.icloud" : "arrow.triangle.2.circlepath.icloud"
+        }
+    }
+}
+
+// MARK: - 「今天」区排版（iPhone Duo）
+
+/// 内容列的水平位置（全局坐标）。
+nonisolated private struct HomeContentSpan: Equatable, Sendable {
+    var minX: CGFloat
+    var width: CGFloat
+}
+
+/// 「今天」区子视图的角色。
+nonisolated private enum HomeHeroRole: Sendable {
+    case identity, today, todos, memories, side
+}
+
+nonisolated private struct HomeHeroRoleKey: LayoutValueKey {
+    static let defaultValue: HomeHeroRole? = nil
+}
+
+/// 身份条、今天大图、待办卡、今天的回忆、入口（+今日一问）始终是这一个容器的直接子视图，
+/// 窄 / 宽 / 矮屏只换摆放位置（AnyLayout 原则的自定义版）：开合、旋转时大图、头像、回忆轮播、入口都不重建，
+/// 已推入的回忆详情 / 入口页面也不会被弹回。
+/// - narrow：一列，顺序同原 iPhone；竖直折痕切过本列时大图只占折痕前一侧。
+/// - wide：大图 | 身份条 + 入口 + 今日一问（侧栏 ≤ 340pt），待办、回忆通栏在下。
+/// - short（矮屏）：身份条通栏，大图 | 回忆左右排（没有回忆时右栏放入口），待办、入口在下。
+/// 两栏遇到竖直折痕时按 `BubuLayout.columnSplit` 分到折痕两侧，大图和侧栏都不跨折痕；其余是滚动内容，允许跨。
+private struct HomeHeroLayout: Layout {
+    enum Mode: Equatable { case narrow, wide, short }
+
+    var mode: Mode
+    var split: BubuLayout.ColumnSplit?
+    var spacing: CGFloat = 12
+    var columnSpacing: CGFloat = 16
+    var maxSideWidth: CGFloat = 340
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 375
+        return CGSize(width: width, height: arrange(width: width, subviews: subviews).height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = arrange(width: bounds.width, subviews: subviews).frames
+        for (subview, frame) in zip(subviews, frames) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                          anchor: .topLeading,
+                          proposal: ProposedViewSize(width: frame.width, height: frame.height))
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (frames: [CGRect], height: CGFloat) {
+        var frames = Array(repeating: CGRect.zero, count: subviews.count)
+        var bottom: CGFloat = 0
+        var started = false
+        // 只认和本列宽度对得上的分栏（旋转后首帧 contentSpan 可能还是旧值）。
+        let fold = split.flatMap { abs($0.leading + $0.gutter + $0.trailing - width) < 1 ? $0 : nil }
+
+        func index(_ role: HomeHeroRole) -> Int? {
+            subviews.firstIndex { $0[HomeHeroRoleKey.self] == role }
+        }
+
+        /// 一列从 top 往下排，零高度（没内容）的子视图不占间距；返回列底，什么都没放时返回 nil。
+        func column(_ roles: [HomeHeroRole], x: CGFloat, width: CGFloat, top: CGFloat) -> CGFloat? {
+            var cursor: CGFloat?
+            for role in roles {
+                guard let i = index(role) else { continue }
+                let height = subviews[i].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+                let y = cursor.map { $0 + spacing } ?? top
+                guard height > 0 else {
+                    frames[i] = CGRect(x: x, y: cursor ?? top, width: width, height: 0)
+                    continue
+                }
+                frames[i] = CGRect(x: x, y: y, width: width, height: height)
+                cursor = y + height
+            }
+            return cursor
+        }
+
+        func full(_ role: HomeHeroRole, width rowWidth: CGFloat? = nil) {
+            if let end = column([role], x: 0, width: rowWidth ?? width, top: started ? bottom + spacing : bottom) {
+                bottom = end
+                started = true
+            }
+        }
+
+        func row(leading: [HomeHeroRole], trailing: [HomeHeroRole], preferredTrailing: CGFloat) {
+            let widths: (leading: CGFloat, gap: CGFloat, trailing: CGFloat)
+            if let fold {
+                widths = (fold.leading, fold.gutter, fold.trailing)
+            } else {
+                let trailingWidth = min(preferredTrailing, max(0, (width - columnSpacing) / 2))
+                widths = (width - columnSpacing - trailingWidth, columnSpacing, trailingWidth)
+            }
+            let top = started ? bottom + spacing : bottom
+            let leadingEnd = column(leading, x: 0, width: widths.leading, top: top)
+            let trailingEnd = column(trailing, x: widths.leading + widths.gap, width: widths.trailing, top: top)
+            if leadingEnd != nil || trailingEnd != nil {
+                bottom = max(leadingEnd ?? top, trailingEnd ?? top)
+                started = true
+            }
+        }
+
+        switch mode {
+        case .narrow:
+            full(.identity)
+            full(.today, width: fold?.leading)
+            full(.todos)
+            full(.memories)
+            full(.side)
+        case .wide:
+            row(leading: [.today], trailing: [.identity, .side], preferredTrailing: maxSideWidth)
+            full(.todos)
+            full(.memories)
+        case .short:
+            full(.identity)
+            if index(.memories) != nil {
+                row(leading: [.today], trailing: [.memories], preferredTrailing: .infinity)
+                full(.todos)
+                full(.side)
+            } else {
+                row(leading: [.today], trailing: [.side], preferredTrailing: .infinity)
+                full(.todos)
+            }
+        }
+        return (frames, bottom)
     }
 }

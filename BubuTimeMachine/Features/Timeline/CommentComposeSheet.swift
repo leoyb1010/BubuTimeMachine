@@ -66,9 +66,11 @@ struct CommentComposeSheet: View {
                 Text(saveError ?? "")
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }.accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("添加") { save() }.fontWeight(.bold)
+                    Button("添加", systemImage: "plus", role: .confirm) { save() }.fontWeight(.bold)
                         .disabled(completed || (text.bubuTrimmed.isEmpty && voice == nil))
                 }
             }

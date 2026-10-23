@@ -679,24 +679,15 @@ struct RootView: View {
 /// iPad 开两个布布时 A 窗口点小组件深链、B 窗口也会跟着跳页。
 private struct SceneRoot: View {
     @State private var router = BubuRouter()
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         RootView()
-            .environment(router)
-            .onOpenURL { router.handle($0) }
-            .onChange(of: scenePhase) { _, phase in
-                // 回前台时消费控制中心/Action Button 置的「记一笔」标志
-                if phase == .active { consumePendingRecord() }
-            }
-            .onAppear { consumePendingRecord() }
-    }
-
-    @MainActor
-    private func consumePendingRecord() {
-        guard SharedDefaults.pendingRecord else { return }
-        SharedDefaults.pendingRecord = false
-        router.pendingQuickCapture = true
+            // Duo WS0：场景布局根（引导页、DEBUG 直达页也能读到 \.bubuLayout；Tab/弹窗内有更近的根覆盖）。
+            .bubuLayoutRoot()
+            // 多窗口：深链优先投给正在看的窗口，「记一笔」只由前台窗口认领（见 BubuRouter.swift）。
+            .bubuSceneRouting(router)
+            // 仅 DEBUG：-uitest-layout WxH / -uitest-fake-fold h|v（见 BubuAdaptiveLayout.swift）。
+            .bubuDebugLayoutFrame()
     }
 }
 

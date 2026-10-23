@@ -5,6 +5,7 @@ import SwiftData
 /// 找出有多位家人补充（Comment）的记录，把多视角"合成"成一段完整的故事。
 struct FamilyEnsembleView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.bubuLayout) private var layout
     @Query(filter: #Predicate<Entry> { !$0.isArchived },
            sort: \Entry.happenedAt, order: .reverse) private var entries: [Entry]
 
@@ -37,7 +38,7 @@ struct FamilyEnsembleView: View {
                     ContentUnavailableView("还没有合奏素材",
                         systemImage: "person.3",
                         description: Text("在某条记录的详情页里，让家人各自「补充」几句，就能在这里合成。"))
-                        .frame(height: 260)
+                        .frame(height: layout.bubuHeight(260, short: 200))
                 } else {
                     picker
                     if let entry = selected { ensembleArea(entry) }

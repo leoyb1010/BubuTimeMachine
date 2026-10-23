@@ -58,7 +58,7 @@ struct CourseDetailView: View {
                         }
                         .disabled(course?.state == "processing" || course?.state == "uploading")
                         Button("删除这节课", systemImage: "trash", role: .destructive) { confirmDelete = true }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    } label: { Label("更多", systemImage: "ellipsis.circle") }
                         .accessibilityIdentifier("learning.course.menu")
                 }
             }
@@ -417,6 +417,7 @@ private struct ActivityReviewCard: View {
     @Binding var checked: Bool
     let onRemove: () -> Void
     @State private var watching = false
+    @Environment(\.bubuLayout) private var layout
 
     var body: some View {
         VStack(alignment: .leading, spacing: BubuTheme.Spacing.m) {
@@ -431,8 +432,9 @@ private struct ActivityReviewCard: View {
                 Text(instruction).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.secondaryText)
             }
             if let image = activity.prompt?.imageUrl {
-                LearningRemoteImage(path: image, client: client, label: "老师提问时的画面", maxHeight: 220)
-                    .frame(height: 200)
+                LearningRemoteImage(path: image, client: client, label: "老师提问时的画面",
+                                    maxHeight: layout.bubuHeight(220, short: 150))
+                    .frame(height: layout.bubuHeight(200, short: 140))
                     .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.sm))
             }
             clipRow(title: "题目原声", clip: activity.prompt, isAnswer: false)
@@ -514,8 +516,13 @@ private struct LearningOriginalClipSheet: View {
             }
             .navigationTitle("原片 \(OnlineTimelineDetailPage.timecode(start))")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成", systemImage: "checkmark", role: .confirm) { dismiss() }
+                }
+            }
         }
+        .bubuLayoutRoot()
         .task { await prepare() }
         .onDisappear {
             if let boundary { player?.removeTimeObserver(boundary) }
@@ -586,10 +593,12 @@ private struct CourseNoteEditor: View {
             .navigationTitle("补充说明")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(saving) }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }.accessibilityLabel("取消").disabled(saving)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving { ProgressView() } else {
-                        Button("保存并重新生成") { Task { await save() } }
+                        Button("保存并重新生成", systemImage: "arrow.clockwise", role: .confirm) { Task { await save() } }
                             .disabled(LearningCourseNote.normalized(text) == nil)
                             .accessibilityIdentifier("learning.note.save")
                     }
@@ -597,6 +606,7 @@ private struct CourseNoteEditor: View {
             }
             .interactiveDismissDisabled(saving)
         }
+        .bubuLayoutRoot()
         .presentationDetents([.medium, .large])
     }
 

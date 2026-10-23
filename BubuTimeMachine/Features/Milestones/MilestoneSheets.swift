@@ -30,10 +30,12 @@ struct MilestonePickerSheet: View {
             .background(BubuTheme.Color.background)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("添加\(selected.isEmpty ? "" : " \(selected.count)")") { addSelected() }
-                        .fontWeight(.bold)
+                    Button("添加\(selected.isEmpty ? "" : " \(selected.count)")", systemImage: "plus", role: .confirm) { addSelected() }
                         .disabled(selected.isEmpty)
                 }
             }
@@ -244,9 +246,12 @@ struct MilestoneEditSheet: View {
             .background(BubuTheme.Color.background)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(role: .close) { dismiss() }
+                        .accessibilityLabel("取消")
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }.fontWeight(.bold).disabled(title.isEmpty)
+                    Button("保存", systemImage: "checkmark", role: .confirm) { save() }.disabled(title.isEmpty)
                 }
             }
             .onAppear(perform: load)

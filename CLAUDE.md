@@ -47,6 +47,8 @@ GUI 无法脚本点击，用启动参数直达页面（定义在 `App/BubuTimeMa
   时光是合成流：第二大脑在线素材 + 本机家人记录（`OnlineTimelineView`），未连接服务时只显示家人记录。
 - 联调参数：`-uitest-server-config`（读 BUBU_UITEST_* 环境变量指向本机回环测试服务）、`-uitest-skip-consent`；
   真实旅程测试在 `BubuTimeMachineUITests/LiveLearningJourneyUITests.swift`（无环境变量时自动跳过）。
+- `-uitest-layout WxH`（如 `466x678`）：场景根内容限制在 W×H（左上角）并按该尺寸覆盖 size class，在 iPad 模拟器上跑 Duo 尺寸矩阵（`BubuAdaptiveLayout.swift`）。
+- `-uitest-fake-fold h|v`：每个 `bubuLayoutRoot` 中间注入 24pt 激活折痕（v 书本 / h 桌面），画半透明红带，验证避折痕布局。
 - 直达页面：`-uitest-milestones` / `-uitest-story` / `-uitest-capsule` / `-uitest-growth` / `-uitest-growth-curve` / `-uitest-diary` / `-uitest-settings` / `-uitest-advanced-settings` / `-uitest-voice` / `-uitest-export` / `-uitest-timeline` / `-uitest-ai` / `-uitest-movie` / `-uitest-report` / `-uitest-weekly-report` / `-uitest-sound-ring` / `-uitest-capture` / `-uitest-simple`
 - 手表端：bundle id `com.bubu.timemachine.watchkitapp`，App Group `group.com.bubu.timemachine.watch`；可用 `xcrun simctl` 往手表模拟器 App Group 容器注入 plist 快照数据后截图验证（本地有专用模拟器 `BubuWatchSim`）
 
