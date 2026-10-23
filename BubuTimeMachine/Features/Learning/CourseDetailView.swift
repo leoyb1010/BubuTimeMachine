@@ -89,7 +89,7 @@ struct CourseDetailView: View {
             if let pack = course?.pack {
                 LearningPlayView(client: client, childID: childID,
                                  items: pack.payload.activities.map { LearningPlayItem(packID: pack.id, activity: $0) },
-                                 title: pack.title)
+                                 title: pack.title, greeting: pack.payload.greeting, closing: pack.payload.closing)
             }
         }
         .accessibilityIdentifier("learning.course.detail")

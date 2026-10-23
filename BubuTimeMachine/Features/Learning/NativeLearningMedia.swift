@@ -28,6 +28,7 @@ struct LearningRemoteImage: View {
     @State private var imagePath = ""
     @State private var failed = false
     @State private var retry = 0
+    @State private var autoRetried = false
     /// Longest side in pixels; 0 until the first layout.
     @State private var bucket = 0
 
@@ -72,7 +73,16 @@ struct LearningRemoteImage: View {
                 image = decoded
                 imagePath = path
             } catch where isCancellation(error) {
-            } catch { failed = true }
+            } catch {
+                // One quiet retry for a slow or dropped connection before showing the reload button.
+                if !autoRetried {
+                    autoRetried = true
+                    try? await Task.sleep(for: .seconds(1.5))
+                    if !Task.isCancelled { retry += 1 }
+                    return
+                }
+                failed = true
+            }
         }
     }
 
@@ -90,122 +100,195 @@ struct LearningRemoteImage: View {
     }
 }
 
-/// A single AVPlayer owns the current short original clip. No TTS or automatic answer playback.
+/// One thing to say during a lesson. Teacher clips still go through `NativeLearningPlaybackPolicy`;
+/// narrator lines (greeting, praise, …) and choice names are explicit server lines, so they are always allowed.
+/// A cue without audio is simply never created: its text is already on screen.
+nonisolated struct NativeLearningCue: Sendable, Hashable {
+    enum Kind: Sendable, Hashable { case prompt, answer, line, choice(String) }
+    let path: String
+    let kind: Kind
+
+    static func clip(_ clip: LearningClipDTO?, activityKind: String, isAnswer: Bool) -> NativeLearningCue? {
+        guard let clip,
+              NativeLearningPlaybackPolicy.permits(role: clip.role, activityKind: activityKind, isAnswer: isAnswer),
+              let path = clip.audioUrl, !path.isEmpty else { return nil }
+        return NativeLearningCue(path: path, kind: isAnswer ? .answer : .prompt)
+    }
+
+    static func line(_ line: LearningLineDTO?) -> NativeLearningCue? {
+        guard let path = line?.audioUrl, !path.isEmpty else { return nil }
+        return NativeLearningCue(path: path, kind: .line)
+    }
+
+    static func choice(_ choice: LearningChoiceDTO) -> NativeLearningCue? {
+        guard let path = choice.audioUrl, !path.isEmpty else { return nil }
+        return NativeLearningCue(path: path, kind: .choice(choice.id))
+    }
+}
+
+/// The single voice of a lesson: plays cues one after another through one AVPlayer.
+/// A new request always stops the previous one (and any other learning player), so sounds never overlap.
+/// Uses `.playback` — a lesson is something a parent starts on purpose, so it plays with the ring switch off.
 @Observable @MainActor
 final class NativeLearningAudioPlayer {
     private(set) var isLoading = false
     private(set) var isPlaying = false
-    private(set) var playingAnswer = false
+    /// What is speaking right now (nil when silent).
+    private(set) var current: NativeLearningCue.Kind?
     private(set) var progress = 0.0
     private(set) var errorText: String?
     private var player: AVPlayer?
     private var loadTask: Task<Void, Never>?
     private var timeObserver: Any?
-    private var endedObserver: NSObjectProtocol?
-    private var failedObserver: NSObjectProtocol?
+    private var itemObservers: [NSObjectProtocol] = []
+    private var interruptionObserver: NSObjectProtocol?
+    private var ending: CheckedContinuation<Bool, Never>?
     private var audioFile: URL?
+    private var sessionActive = false
     private var generation = UUID()
     private static weak var active: NativeLearningAudioPlayer?
 
+    var playingAnswer: Bool { current == .answer }
+    var playingPrompt: Bool { current == .prompt }
+    var playingLine: Bool { current == .line }
+    var playingChoiceID: String? {
+        if case .choice(let id) = current { return id }
+        return nil
+    }
+    var isBusy: Bool { isLoading || isPlaying }
+
+    /// One teacher clip; says so when the clip may not be played (parent review relies on this message).
     func play(clip: LearningClipDTO?, activityKind: String, isAnswer: Bool,
               client: BubuLearningClient) {
-        stop()
-        guard let clip,
-              NativeLearningPlaybackPolicy.permits(role: clip.role, activityKind: activityKind, isAnswer: isAnswer),
-              let path = clip.audioUrl, !path.isEmpty else {
+        guard let cue = NativeLearningCue.clip(clip, activityKind: activityKind, isAnswer: isAnswer) else {
+            stop()
             errorText = "这段原声还不能播放，请让家长核对素材。"
             return
         }
+        play([cue], client: client)
+    }
+
+    /// Plays the cues in order. A cue that fails to load is skipped so the lesson keeps going.
+    func play(_ cues: [NativeLearningCue?], client: BubuLearningClient) {
+        stop()
+        errorText = nil
+        let queue = cues.compactMap { $0 }
+        guard !queue.isEmpty else { return }
         if let other = Self.active, other !== self { other.stop() }
         Self.active = self
         let attempt = UUID()
         generation = attempt
-        playingAnswer = isAnswer
         isLoading = true
-        errorText = nil
         loadTask = Task { [weak self] in
-            guard let self else { return }
-            var temporary: URL?
-            do {
-                let data = try await client.mediaData(path)
-                try Task.checkCancellation()
-                guard self.generation == attempt else { return }
-                let file = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("bubu-learning-\(UUID().uuidString).m4a")
-                temporary = file
-                try data.write(to: file, options: [.atomic, .completeFileProtection])
-                let asset = AVURLAsset(url: file)
-                guard try await asset.load(.isPlayable) else { throw NativeLearningPlaybackError.unplayable }
-                try Task.checkCancellation()
-                guard self.generation == attempt else {
-                    try? FileManager.default.removeItem(at: file)
-                    return
-                }
-                let session = AVAudioSession.sharedInstance()
-                try session.setCategory(.playback, mode: .spokenAudio)
-                try session.setActive(true)
-                let item = AVPlayerItem(asset: asset)
-                let player = AVPlayer(playerItem: item)
-                self.audioFile = file
-                self.player = player
-                self.endedObserver = NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-                ) { [weak self] _ in Task { @MainActor in self?.finish(generation: attempt) } }
-                self.failedObserver = NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
-                ) { [weak self] _ in
-                    Task { @MainActor in
-                        guard self?.generation == attempt else { return }
-                        self?.stop()
-                        self?.errorText = "这段原声没有播放完成，请再试一次。"
-                    }
-                }
-                self.timeObserver = player.addPeriodicTimeObserver(
-                    forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main
-                ) { [weak self] time in
-                    Task { @MainActor in
-                        guard let self, self.generation == attempt else { return }
-                        let duration = self.player?.currentItem?.duration.seconds ?? 0
-                        self.progress = duration.isFinite && duration > 0 ? min(max(time.seconds / duration, 0), 1) : 0
-                    }
-                }
-                self.isLoading = false
-                self.isPlaying = true
-                player.play()
-            } catch {
-                if let temporary { try? FileManager.default.removeItem(at: temporary) }
-                guard self.generation == attempt else { return }
-                self.stop()
-                if !isCancellation(error) {
-                    self.errorText = "原声暂时无法播放，请检查连接后重试。"
+            var failed = false
+            for cue in queue {
+                guard let self, self.generation == attempt else { return }
+                do {
+                    try await self.playOne(cue, attempt: attempt, client: client)
+                } catch {
+                    guard self.generation == attempt, !isCancellation(error) else { return }
+                    failed = true
                 }
             }
+            guard let self, self.generation == attempt else { return }
+            self.stop()
+            if failed { self.errorText = "有一句声音没放出来，可以再点一次试试。" }
         }
     }
 
     func stop() {
         generation = UUID()
         loadTask?.cancel(); loadTask = nil
-        let hadPlayer = player != nil
-        player?.pause()
-        if let timeObserver { player?.removeTimeObserver(timeObserver) }
-        timeObserver = nil
-        if let endedObserver { NotificationCenter.default.removeObserver(endedObserver) }
-        if let failedObserver { NotificationCenter.default.removeObserver(failedObserver) }
-        endedObserver = nil; failedObserver = nil
-        player?.replaceCurrentItem(with: nil); player = nil
-        if let audioFile { try? FileManager.default.removeItem(at: audioFile) }
-        audioFile = nil
-        isPlaying = false; isLoading = false; progress = 0
-        if hadPlayer {
+        ending?.resume(returning: false); ending = nil
+        teardownCurrent()
+        isPlaying = false; isLoading = false; progress = 0; current = nil
+        if sessionActive {
+            sessionActive = false
+            if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+            interruptionObserver = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
         if Self.active === self { Self.active = nil }
     }
 
-    private func finish(generation: UUID) {
-        guard self.generation == generation else { return }
-        stop()
+    private func playOne(_ cue: NativeLearningCue, attempt: UUID, client: BubuLearningClient) async throws {
+        defer { if generation == attempt { teardownCurrent() } }
+        current = cue.kind
+        isLoading = true; isPlaying = false; progress = 0
+        // Lesson clips are small and replayed often ("再听一次"), so they use the scoped media cache.
+        let data = try await client.mediaData(cue.path, cache: true)
+        try Task.checkCancellation()
+        guard generation == attempt else { throw CancellationError() }
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bubu-learning-\(UUID().uuidString).m4a")
+        try data.write(to: file, options: [.atomic, .completeFileProtection])
+        audioFile = file
+        let asset = AVURLAsset(url: file)
+        guard try await asset.load(.isPlayable) else { throw NativeLearningPlaybackError.unplayable }
+        try Task.checkCancellation()
+        guard generation == attempt else { throw CancellationError() }
+        try activateSession()
+        let item = AVPlayerItem(asset: asset)
+        let player = AVPlayer(playerItem: item)
+        self.player = player
+        itemObservers = [
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.endCurrent(finished: true, attempt: attempt) }
+            },
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.endCurrent(finished: false, attempt: attempt) }
+            },
+        ]
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main
+        ) { [weak self] time in
+            Task { @MainActor in
+                guard let self, self.generation == attempt else { return }
+                let duration = self.player?.currentItem?.duration.seconds ?? 0
+                self.progress = duration.isFinite && duration > 0 ? min(max(time.seconds / duration, 0), 1) : 0
+            }
+        }
+        isLoading = false
+        isPlaying = true
+        let finished = await withCheckedContinuation { continuation in
+            ending = continuation
+            player.play()
+        }
+        guard generation == attempt else { throw CancellationError() }
+        if !finished { throw NativeLearningPlaybackError.unplayable }
+    }
+
+    private func activateSession() throws {
+        guard !sessionActive else { return }
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .spokenAudio)
+        try session.setActive(true)
+        sessionActive = true
+        // A phone call or Siri ends the lesson's sound instead of resuming mid-sentence later.
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: session, queue: .main
+        ) { [weak self] note in
+            let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
+            guard began else { return }
+            Task { @MainActor in self?.stop() }
+        }
+    }
+
+    private func endCurrent(finished: Bool, attempt: UUID) {
+        guard generation == attempt else { return }
+        ending?.resume(returning: finished)
+        ending = nil
+    }
+
+    private func teardownCurrent() {
+        player?.pause()
+        if let timeObserver { player?.removeTimeObserver(timeObserver) }
+        timeObserver = nil
+        itemObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        itemObservers = []
+        player?.replaceCurrentItem(with: nil); player = nil
+        if let audioFile { try? FileManager.default.removeItem(at: audioFile) }
+        audioFile = nil
     }
 }
 

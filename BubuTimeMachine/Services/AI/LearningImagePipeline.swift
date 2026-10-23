@@ -25,9 +25,10 @@ nonisolated enum LearningImagePipeline {
 
     /// Memory, then (optionally) disk, then network; decodes off the main actor and remembers the result.
     @concurrent
-    static func load(_ path: String, client: BubuLearningClient, bucket: Int, diskCache: Bool) async throws -> UIImage {
+    static func load(_ path: String, client: BubuLearningClient, bucket: Int, diskCache: Bool,
+                     background: Bool = false) async throws -> UIImage {
         if let hit = cached(scope: client.scope, path: path, atLeast: bucket) { return hit }
-        let data = try await client.mediaData(path, cache: diskCache)
+        let data = try await client.mediaData(path, cache: diskCache, background: background)
         try Task.checkCancellation()
         guard let image = LearningImageDecoder.downsample(data, maxPixel: bucket) else {
             throw LearningServiceError.invalidResponse
@@ -41,6 +42,6 @@ nonisolated enum LearningImagePipeline {
     @concurrent
     static func prefetch(_ path: String, client: BubuLearningClient, bucket: Int) async {
         guard !path.isEmpty, bucket > 0 else { return }
-        _ = try? await load(path, client: client, bucket: bucket, diskCache: true)
+        _ = try? await load(path, client: client, bucket: bucket, diskCache: true, background: true)
     }
 }

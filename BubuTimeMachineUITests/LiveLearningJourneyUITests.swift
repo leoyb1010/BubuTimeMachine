@@ -153,8 +153,13 @@ final class LiveLearningJourneyUITests: XCTestCase {
         shot("16-play-first", app)
         for step in 0..<8 {
             let choice = app.buttons["learning.play.choice"].firstMatch
-            if choice.waitForExistence(timeout: 3) { choice.tap() }
-            else {
+            if choice.waitForExistence(timeout: 3) {
+                // 2.29：选错会温柔提示再选一次，依次点选项直到出现「下一个」。
+                for option in app.buttons.matching(identifier: "learning.play.choice").allElementsBoundByIndex {
+                    if app.buttons["learning.play.next"].exists { break }
+                    if option.isHittable { option.tap(); sleep(1) }
+                }
+            } else {
                 for label in ["说出来啦", "一起唱完啦"] where app.buttons[label].exists { app.buttons[label].tap(); break }
             }
             sleep(2)

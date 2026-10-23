@@ -134,6 +134,10 @@ def ground_draft(draft: Draft, sources: dict) -> dict:
 # Prompts are spoken by our narrator voice (TTS); nothing claims to be the teacher.
 CHOICE_KINDS = {"listen_choice", "color_choice", "sort"}
 HAN = re.compile(r"[㐀-鿿]")
+# 2.29 play styles: presentation hints only; each one fits specific kinds.
+STYLE_KINDS = {"classic": {"listen_choice", "color_choice", "sort", "speak", "music"},
+               "call_response": {"speak"}, "find_it": {"listen_choice", "sort"},
+               "counting": {"listen_choice", "sort", "speak"}, "sing_along": {"music"}}
 
 
 class ContentChoice(StrictModel):
@@ -156,10 +160,21 @@ class ContentActivity(StrictModel):
     segment_ref: str | None = Field(default=None, max_length=100)
     choices: list[ContentChoice] = Field(default_factory=list, max_length=4)
     correct_choice: str | None = Field(default=None, max_length=60)
+    # 2.29 interactivity (optional): play style and narrator lines, all spoken by TTS.
+    style: Literal["classic", "call_response", "find_it", "counting", "sing_along"] | None = None
+    warmup_text: str | None = Field(default=None, max_length=80)
+    praise_text: str | None = Field(default=None, max_length=100)
+    retry_hint_text: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
     def consistent(self):
         ids = [c.id for c in self.choices]
+        if self.style and self.kind not in STYLE_KINDS[self.style]:
+            raise ValueError("玩法与题型不匹配")
+        if self.style == "find_it" and self.image_frame is None and not any(c.image_frame is not None for c in self.choices):
+            raise ValueError("找一找须配本课画面")
+        if self.kind == "music" and self.retry_hint_text:
+            raise ValueError("儿歌活动不需要再试提示")
         if len(ids) != len(set(ids)):
             raise ValueError("选项编号重复")
         if self.kind in CHOICE_KINDS:
@@ -184,6 +199,10 @@ class ContentActivity(StrictModel):
                 raise ValueError("跟说内容须是一句很短的话")
         if self.kind != "music" and self.segment_ref:
             raise ValueError("只有儿歌活动可以引用原片片段")
+        if self.kind in CHOICE_KINDS and self.retry_hint_text:
+            right = next(c for c in self.choices if c.id == self.correct_choice)
+            if normalize(right.label) in normalize(self.retry_hint_text):
+                raise ValueError("再试提示不能直接说出答案")
         return self
 
 
@@ -195,6 +214,8 @@ class ContentDraft(StrictModel):
     key_words: list[str] = Field(default_factory=list, max_length=12)
     activities: list[ContentActivity] = Field(default_factory=list, max_length=8)
     warnings: list[str] = Field(default_factory=list, max_length=10)
+    greeting: str = Field(default="", max_length=160)
+    closing: str = Field(default="", max_length=160)
 
 
 def prompt_role(kind: str) -> str:

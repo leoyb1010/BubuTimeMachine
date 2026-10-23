@@ -7,6 +7,8 @@ nonisolated struct MemoryCardDTO: Decodable, Sendable, Hashable, Identifiable {
     let subtitle: String
     let coverId: String?
     let coverUrl: String?
+    /// ~900px card cover (server 2.27+); falls back to the full-size cover.
+    var cardUrl: String? = nil
     let itemIds: [String]
     let count: Int
 
@@ -185,7 +187,7 @@ private struct MemoryCard: View {
     var body: some View {
         HomeMemoryCardFrame(chip: memory.chipLabel, symbol: memory.symbol,
                             title: memory.title, subtitle: memory.displaySubtitle, size: size) {
-            if let cover = memory.coverUrl {
+            if let cover = memory.cardUrl ?? memory.coverUrl {
                 LearningRemoteImage(path: cover, client: client, label: memory.title, contentMode: .fill, diskCache: true)
             } else {
                 BubuTheme.Color.pinkSurface

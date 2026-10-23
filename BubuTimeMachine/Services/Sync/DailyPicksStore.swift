@@ -164,7 +164,7 @@ final class DailyPicksStore {
     private nonisolated static func previewJPEG(for item: HighlightItem, client: BubuLearningClient) async -> Data? {
         for path in [item.previewUrl, item.largeUrl].compactMap({ $0 }).filter({ !$0.isEmpty }) {
             guard !Task.isCancelled else { return nil }
-            if let data = try? await client.mediaData(path), let small = downscaledJPEG(data) { return small }
+            if let data = try? await client.mediaData(path, background: true), let small = downscaledJPEG(data) { return small }
         }
         return nil
     }

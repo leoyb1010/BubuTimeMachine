@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LearningPlayItem: Hashable, Identifiable {
     let packID: String
@@ -6,21 +7,33 @@ struct LearningPlayItem: Hashable, Identifiable {
     var id: String { packID + "/" + activity.id }
 }
 
-/// 布布的互动页：先播放老师这道题的原声（不是开场介绍），点选后再听老师的答案。
-/// 不给孩子打分数，只记录互动，供周/月复习挑选需要再玩一次的内容；
+/// 布布的互动页（给两岁半的孩子：大、开心、可以犯错）。
+/// 开场白 → 每题自动播一次「暖场 + 题目」→ 点选项先听名字再判定（答对鼓励，答错温柔提示再选一次）→ 结束语。
+/// 所有声音都走同一个播放器，不会叠在一起；离开页面或切到后台立刻停。
+/// 不给孩子打分数，只记录第一次的选择，供周/月复习挑选需要再玩一次的内容；
 /// 跟读（「跟我说」）的宽松分数只写进记录备注，界面上只出现星星和鼓励。
 struct LearningPlayView: View {
     let client: BubuLearningClient
     let childID: String?
     let items: [LearningPlayItem]
     let title: String
+    /// 2.29 开场白 / 结束语（复习没有）。
+    var greeting: LearningLineDTO? = nil
+    var closing: LearningLineDTO? = nil
     @State private var index = 0
     @State private var chosen: String?
+    @State private var wrongIDs: Set<String> = []
+    @State private var outcome: LearningLessonFlow.ChoiceOutcome?
     @State private var answered = false
+    @State private var recorded = false
+    @State private var wiggle = 0
+    @State private var celebration = 0
+    @State private var greeted = false
     @State private var player = NativeLearningAudioPlayer()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var current: LearningPlayItem? { items.indices.contains(index) ? items[index] : nil }
 
@@ -45,17 +58,20 @@ struct LearningPlayView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("结束") { player.stop(); dismiss() }.accessibilityIdentifier("learning.play.close")
                 }
-                ToolbarItem(placement: .principal) { progressDots }
+                ToolbarItem(placement: .principal) { progressTrail }
             }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { player.stop() } }
         .onDisappear { player.stop() }
         .task(id: index) {
-            chosen = nil; answered = false
+            chosen = nil; wrongIDs = []; outcome = nil; answered = false; recorded = false
             guard let current else { return }
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            player.play(clip: current.activity.prompt, activityKind: current.activity.kind, isAnswer: false, client: client)
+            // 开场白只在第一题前说一次。
+            let opening = greeted ? nil : greeting
+            greeted = true
+            player.play(LearningLessonFlow.openingCues(for: current.activity, greeting: opening), client: client)
         }
     }
 
@@ -65,14 +81,27 @@ struct LearningPlayView: View {
     private func activityView(_ item: LearningPlayItem) -> some View {
         let activity = item.activity
         VStack(spacing: BubuTheme.Spacing.l) {
-            Text(activity.kindLabel).font(BubuTheme.Font.caption.weight(.bold))
+            if index == 0, let greeting, !greeting.text.isEmpty {
+                MascotBubble(text: greeting.text, expression: .happy, speaking: player.playingLine)
+            }
+            Text(LearningLessonFlow.label(activity)).font(BubuTheme.Font.caption.weight(.bold))
                 .padding(.horizontal, 12).padding(.vertical, 5)
                 .background(BubuTheme.Color.pinkSurface, in: Capsule())
                 .foregroundStyle(BubuTheme.Color.deepRose)
             Text(activity.title).font(BubuTheme.Font.hugeTitle).foregroundStyle(BubuTheme.Color.warmBrown)
                 .multilineTextAlignment(.center)
-            if let image = activity.prompt?.imageUrl, !activity.isChoice || activity.kind == "speak" {
-                LearningRemoteImage(path: image, client: client, label: "老师上课时的画面", maxHeight: 280)
+                .fixedSize(horizontal: false, vertical: true)
+            // 没有声音时题目文字就是家长念给布布听的那句。
+            if let text = activity.prompt?.text, !text.isEmpty, activity.kind != "music" {
+                Text(text).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if activity.kind == "music" {
+                SingAlongStage(lyrics: activity.prompt?.text, image: activity.prompt?.imageUrl, client: client,
+                               singing: player.playingPrompt && player.isPlaying, progress: player.progress)
+            } else if LearningLessonFlow.showsPromptImage(activity), let image = activity.prompt?.imageUrl {
+                LearningRemoteImage(path: image, client: client, label: "上课时的画面", maxHeight: 280)
                     .frame(height: 260)
                     .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
             }
@@ -89,8 +118,9 @@ struct LearningPlayView: View {
                 if let target = SpeechPracticeScorer.practiceTarget(activity.prompt?.text) {
                     // 儿歌：跟唱一句也算一起唱完了。
                     SpeakPracticeCard(target: target, player: player, playModel: {
-                        player.play(clip: activity.prompt, activityKind: activity.kind, isAnswer: false, client: client)
-                    }) { score, passed in
+                        player.play(LearningLessonFlow.replayCues(for: activity), client: client)
+                    }, chime: !Self.speakHasVoice(activity, passed: true)) { score, passed in
+                        feedbackAfterSpeaking(activity, passed: passed)
                         guard passed, !answered else { return }
                         answered = true
                         record(item, choice: nil, assistance: nil, note: "score:\(score)")
@@ -100,73 +130,154 @@ struct LearningPlayView: View {
             }
             if answered { nextButton }
             if let error = player.errorText {
-                Text(error).font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.danger)
+                Label(error, systemImage: "speaker.slash")
+                    .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
+                    .multilineTextAlignment(.center)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
+    /// 大大的「再听一次」：只重放题目（儿歌重放原片那一句）。
     private func listenButton(_ activity: LearningActivityDTO) -> some View {
-        Button {
-            player.play(clip: activity.prompt, activityKind: activity.kind, isAnswer: false, client: client)
+        let speaking = player.isPlaying && player.playingPrompt
+        let title = activity.kind == "music" ? "再听一遍" : "再听一次"
+        return Button {
+            BubuHaptics.tapLight()
+            player.play(LearningLessonFlow.replayCues(for: activity), client: client)
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: player.isPlaying && !player.playingAnswer ? "speaker.wave.3.fill" : "ear.fill")
-                    .font(.title).symbolEffect(.variableColor.iterative, isActive: player.isPlaying && !player.playingAnswer && !reduceMotion)
-                Text(activity.kind == "music" ? "听老师唱" : "再听老师说").font(BubuTheme.Font.headline)
+            HStack(spacing: 14) {
+                Image(systemName: speaking ? "speaker.wave.3.fill" : "ear.fill")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .symbolEffect(.variableColor.iterative, isActive: speaking && !reduceMotion)
+                    .accessibilityHidden(true)
+                Text(title).font(BubuTheme.Font.title)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 28).padding(.vertical, 16)
+            .padding(.horizontal, 32).padding(.vertical, 18)
+            .frame(maxWidth: 360, minHeight: 76)
             .background(BubuTheme.Gradient.primaryButton, in: Capsule())
             .shadow(color: BubuTheme.Color.primary.opacity(0.3), radius: 10, y: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubuPressableStyle(scale: 0.94))
+        .disabled(LearningLessonFlow.replayCues(for: activity).allSatisfy { $0 == nil })
+        .accessibilityLabel(title)
+        .accessibilityHint(activity.kind == "music" ? "再放一遍这句歌" : "再听一遍题目")
         .accessibilityIdentifier("learning.play.listen")
     }
 
     private func choices(_ item: LearningPlayItem) -> some View {
         let activity = item.activity
+        let columns = LearningLessonFlow.choiceColumns(count: activity.choices.count,
+                                                       accessibilitySize: dynamicTypeSize.isAccessibilitySize)
         return VStack(spacing: BubuTheme.Spacing.m) {
             // Column count follows the choices so two or three cards stay centred on iPad too.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(maximum: 280), spacing: 14),
-                                     count: max(1, min(activity.choices.count, 3))), spacing: 14) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(maximum: 280), spacing: 14), count: columns),
+                      spacing: 14) {
                 ForEach(activity.choices) { choice in
-                    Button {
-                        guard !answered else { return }
-                        withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) { chosen = choice.id; answered = true }
-                        if choice.id == activity.correctChoice { BubuHaptics.success() } else { BubuHaptics.warning() }
-                        record(item, choice: choice.id, assistance: nil)
-                        if let answer = activity.answer {
-                            player.play(clip: answer, activityKind: activity.kind, isAnswer: true, client: client)
-                        }
-                    } label: {
+                    let revealed = answered && choice.id == activity.correctChoice
+                    Button { tap(choice, in: item) } label: {
                         ChoiceTile(choice: choice, client: client,
-                                   highlighted: answered && choice.id == activity.correctChoice,
-                                   dimmed: answered && choice.id != activity.correctChoice && choice.id == chosen)
+                                   highlighted: revealed,
+                                   dimmed: wrongIDs.contains(choice.id) && !revealed)
                             .overlay {
-                                if answered && choice.id == activity.correctChoice && chosen == choice.id && !reduceMotion {
-                                    BubuBurst(count: 14, radius: 90).allowsHitTesting(false)
+                                if revealed && outcome == .correct && !reduceMotion {
+                                    BubuBurst(count: 14, radius: 90).id(celebration).allowsHitTesting(false)
                                 }
                             }
-                            // 选错轻轻摇一下；减弱动态效果时不摇，只靠选项变淡 + 正确答案高亮提示。
-                            .phaseAnimator([0.0, -6.0, 6.0, 0.0], trigger: answered && chosen == choice.id && choice.id != activity.correctChoice) { view, x in
+                            .scaleEffect(player.playingChoiceID == choice.id && !reduceMotion ? 1.04 : 1)
+                            .animation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion),
+                                       value: player.playingChoiceID == choice.id)
+                            // 没找对轻轻摇一下；减弱动态效果时不摇，只靠选项变淡 + 温柔提示。
+                            .phaseAnimator([0.0, -8.0, 8.0, -4.0, 0.0], trigger: chosen == choice.id ? wiggle : 0) { view, x in
                                 view.offset(x: reduceMotion ? 0 : x)
-                            } animation: { _ in .spring(duration: 0.12) }
+                            } animation: { _ in .spring(duration: 0.14) }
                     }
                     .buttonStyle(BubuPressableStyle(scale: 0.94))
+                    .accessibilityHint(answered ? "点一下听名字" : "点一下听名字，也就是选它")
                     .accessibilityIdentifier("learning.play.choice")
                 }
             }
-            if answered {
-                let right = chosen == activity.correctChoice
-                Label(right ? "找对啦！" : "没关系，听老师说答案", systemImage: right ? "star.fill" : "heart.fill")
-                    .font(BubuTheme.Font.headline)
-                    .foregroundStyle(right ? BubuTheme.Color.deepRose : BubuTheme.Color.warmBrown)
-                Button {
-                    player.play(clip: activity.answer, activityKind: activity.kind, isAnswer: true, client: client)
-                } label: { Label("听老师说答案", systemImage: "speaker.wave.2") }
-                    .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+            choiceFeedback(activity)
+        }
+    }
+
+    @ViewBuilder
+    private func choiceFeedback(_ activity: LearningActivityDTO) -> some View {
+        if let outcome {
+            let (text, symbol, line): (String, String, String?) = switch outcome {
+            case .correct: ("找对啦！", "star.fill", activity.praise?.text)
+            case .retry: ("再找找看～", "heart.fill", activity.retryHint?.text)
+            case .reveal: ("是这个哦！", "heart.fill", activity.answer?.text)
             }
+            VStack(spacing: 6) {
+                Label(text, systemImage: symbol)
+                    .font(BubuTheme.Font.title)
+                    .foregroundStyle(outcome == .correct ? BubuTheme.Color.deepRose : BubuTheme.Color.warmBrown)
+                if let line, !line.isEmpty {
+                    Text(line).font(BubuTheme.Font.body).foregroundStyle(BubuTheme.Color.warmBrown)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if answered, LearningLessonFlow.answerCue(activity) != nil {
+                    Button {
+                        player.play([LearningLessonFlow.answerCue(activity)], client: client)
+                    } label: { Label("听老师说答案", systemImage: "speaker.wave.2") }
+                        .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
+                }
+            }
+            .id(outcome == .retry ? "retry-\(wrongIDs.count)" : "done")
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.95)))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// 点选项：先听名字；还没答完时同时判定。答完后再点只听名字。
+    private func tap(_ choice: LearningChoiceDTO, in item: LearningPlayItem) {
+        let activity = item.activity
+        guard !answered, !wrongIDs.contains(choice.id) else {
+            BubuHaptics.selection()
+            player.play([NativeLearningCue.choice(choice)], client: client)
+            return
+        }
+        if !recorded {
+            recorded = true
+            record(item, choice: choice.id, assistance: nil)
+        }
+        let result = LearningLessonFlow.outcome(choiceID: choice.id, correctChoice: activity.correctChoice,
+                                                wrongTries: wrongIDs.count)
+        let cues = LearningLessonFlow.cues(for: result, choice: choice, activity: activity)
+        withAnimation(BubuMotion.allowed(BubuMotion.quick, reduceMotion: reduceMotion)) {
+            chosen = choice.id
+            outcome = result
+            switch result {
+            case .correct:
+                answered = true
+                celebration += 1
+            case .retry:
+                wrongIDs.insert(choice.id)
+            case .reveal:
+                wrongIDs.insert(choice.id)
+                answered = true
+            }
+        }
+        switch result {
+        case .correct:
+            BubuHaptics.success()
+            if !LearningLessonFlow.hasVoice(cues) { BubuSound.play(.milestone) }
+        case .retry, .reveal:
+            wiggle += 1
+            BubuHaptics.tapLight()
+        }
+        player.play(cues, client: client)
+        if UIAccessibility.isVoiceOverRunning {
+            let spoken = switch result {
+            case .correct: activity.praise?.text ?? "找对啦！"
+            case .retry: activity.retryHint?.text ?? "再找找看"
+            case .reveal: "是\(activity.choices.first { $0.id == activity.correctChoice }?.label ?? "这个")哦"
+            }
+            UIAccessibility.post(notification: .announcement, argument: spoken)
         }
     }
 
@@ -175,15 +286,21 @@ struct LearningPlayView: View {
             Text("轮到布布说一说啦").font(BubuTheme.Font.headline).foregroundStyle(BubuTheme.Color.warmBrown)
             if let target = Self.speakTarget(item.activity) {
                 // 端侧识别不支持该语言时卡片自己隐藏，下面家长代点的按钮照常可用。
-                SpeakPracticeCard(target: target, player: player, playModel: { playAnswer(item.activity) }) { score, passed in
+                SpeakPracticeCard(target: target, player: player, playModel: { playAnswer(item.activity) },
+                                  chime: !Self.speakHasVoice(item.activity, passed: true)) { score, passed in
+                    feedbackAfterSpeaking(item.activity, passed: passed)
                     guard passed, !answered else { return }
                     answered = true
                     record(item, choice: nil, assistance: false, note: "score:\(score)")
                 }
             }
             if answered {
+                if let praise = item.activity.praise?.text, !praise.isEmpty {
+                    Label(praise, systemImage: "star.fill").font(BubuTheme.Font.headline)
+                        .foregroundStyle(BubuTheme.Color.deepRose).multilineTextAlignment(.center)
+                }
                 Button {
-                    player.play(clip: item.activity.answer, activityKind: item.activity.kind, isAnswer: true, client: client)
+                    player.play([LearningLessonFlow.answerCue(item.activity)], client: client)
                 } label: { Label("听老师的示范", systemImage: "speaker.wave.2") }
                     .buttonStyle(.bordered).tint(BubuTheme.Color.deepRose)
             } else {
@@ -200,19 +317,24 @@ struct LearningPlayView: View {
     private func speakButtons(_ item: LearningPlayItem) -> some View {
         bigChoice("说出来啦", symbol: "face.smiling.fill", tint: BubuTheme.Color.actionFill) {
             answered = true; record(item, choice: nil, assistance: false)
+            player.play(LearningLessonFlow.speakCues(passed: true, activity: item.activity), client: client)
         }
         bigChoice("要听提示", symbol: "lightbulb.fill", tint: BubuTheme.Color.butterSurface, foreground: BubuTheme.Color.warmBrown) {
             answered = true; record(item, choice: nil, assistance: true)
-            player.play(clip: item.activity.answer, activityKind: item.activity.kind, isAnswer: true, client: client)
+            player.play([LearningLessonFlow.answerCue(item.activity)], client: client)
         }
     }
 
+    private func feedbackAfterSpeaking(_ activity: LearningActivityDTO, passed: Bool) {
+        player.play(LearningLessonFlow.speakCues(passed: passed, activity: activity), client: client)
+    }
+
+    private static func speakHasVoice(_ activity: LearningActivityDTO, passed: Bool) -> Bool {
+        LearningLessonFlow.hasVoice(LearningLessonFlow.speakCues(passed: passed, activity: activity))
+    }
+
     private func playAnswer(_ activity: LearningActivityDTO) {
-        if activity.answer?.audioUrl != nil {
-            player.play(clip: activity.answer, activityKind: activity.kind, isAnswer: true, client: client)
-        } else {
-            player.play(clip: activity.prompt, activityKind: activity.kind, isAnswer: false, client: client)
-        }
+        player.play([LearningLessonFlow.answerCue(activity) ?? LearningLessonFlow.promptCue(activity)], client: client)
     }
 
     /// 跟老师说：优先老师的示范答案，其次知识点、题目原声。
@@ -233,6 +355,8 @@ struct LearningPlayView: View {
             if !answered {
                 bigChoice(label, symbol: "music.note", tint: BubuTheme.Color.mintSurface, foreground: BubuTheme.Color.warmBrown) {
                     answered = true; record(item, choice: nil, assistance: nil)
+                    let cues = LearningLessonFlow.speakCues(passed: true, activity: item.activity)
+                    if LearningLessonFlow.hasVoice(cues) { player.play(cues, client: client) }
                 }
             }
         }
@@ -264,41 +388,70 @@ struct LearningPlayView: View {
             player.stop()
             withAnimation(BubuMotion.allowed(BubuMotion.gentle, reduceMotion: reduceMotion)) { index += 1 }
         } label: {
-            Text(index + 1 < items.count ? "下一个" : "完成").font(BubuTheme.Font.headline)
-                .frame(maxWidth: 320).padding(.vertical, 14)
+            Text(index + 1 < items.count ? "下一个" : "完成").font(BubuTheme.Font.title)
+                .frame(maxWidth: 320, minHeight: 60)
                 .foregroundStyle(BubuTheme.Color.deepRose)
                 .background(BubuTheme.Color.card, in: Capsule())
-                .overlay(Capsule().stroke(BubuTheme.Color.primary, lineWidth: 2))
+                .overlay(Capsule().stroke(BubuTheme.Color.primary, lineWidth: 3))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BubuPressableStyle(scale: 0.95))
         .accessibilityIdentifier("learning.play.next")
     }
 
-    private var progressDots: some View {
-        HStack(spacing: 5) {
+    /// 小路：走过的变成星星，正在玩的是小脚印，后面的是空圈。
+    private var progressTrail: some View {
+        HStack(spacing: 4) {
             ForEach(items.indices, id: \.self) { i in
-                Circle().fill(i <= index ? BubuTheme.Color.primary : BubuTheme.Color.hairline)
-                    .frame(width: 7, height: 7)
+                let mark = LearningLessonFlow.trailMark(i, current: index)
+                Image(systemName: mark == .done ? "star.fill" : mark == .current ? "shoeprints.fill" : "circle")
+                    .font(.system(size: mark == .current ? 15 : 11, weight: .bold))
+                    .foregroundStyle(mark == .upcoming ? BubuTheme.Color.hairline
+                                     : mark == .done ? BubuTheme.Color.butter : BubuTheme.Color.primary)
+                    .symbolEffect(.bounce, value: mark == .done && !reduceMotion)
             }
         }
-        .accessibilityLabel("第 \(min(index + 1, items.count)) 个，共 \(items.count) 个")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(index < items.count ? "第 \(index + 1) 个，共 \(items.count) 个" : "全部完成，共 \(items.count) 个")
     }
 
     private var finished: some View {
         VStack(spacing: BubuTheme.Spacing.l) {
-            BubuMascotBadge(size: 132, expression: .yeah)
-                .overlay { if !reduceMotion { BubuBurst(count: 22, radius: 150) } }
-                .bubuBreathingWiggle(degrees: 1)
+            Button {
+                player.play([NativeLearningCue.line(closing)], client: client)
+            } label: {
+                BubuMascotBadge(size: 132, expression: .yeah)
+                    .overlay { if !reduceMotion { BubuBurst(count: 22, radius: 150) } }
+                    .bubuBreathingWiggle(degrees: player.playingLine ? 3 : 1)
+            }
+            .buttonStyle(.plain)
+            .disabled(NativeLearningCue.line(closing) == nil)
+            .accessibilityLabel("布布")
+            .accessibilityHint(NativeLearningCue.line(closing) == nil ? "" : "再听一次结束语")
             Text("今天学完啦！").font(BubuTheme.Font.hugeTitle).foregroundStyle(BubuTheme.Color.warmBrown)
+            if let closing, !closing.text.isEmpty {
+                SpeechBubble(text: closing.text)
+            }
+            HStack(spacing: 6) {
+                ForEach(0..<min(items.count, 8), id: \.self) { _ in
+                    Image(systemName: "star.fill").foregroundStyle(BubuTheme.Color.butter)
+                }
+            }
+            .font(.title2)
+            .accessibilityHidden(true)
             Text("和老师一起玩了 \(items.count) 个小互动").font(BubuTheme.Font.body)
                 .foregroundStyle(BubuTheme.Color.secondaryText)
-            Button("回到课程") { dismiss() }.buttonStyle(.borderedProminent).tint(BubuTheme.Color.actionFill)
+            Button("回到课程") { player.stop(); dismiss() }.buttonStyle(.borderedProminent).tint(BubuTheme.Color.actionFill)
+                .font(BubuTheme.Font.headline)
                 .accessibilityIdentifier("learning.play.done")
         }
         .padding()
         .onAppear {
-            BubuSound.play(.milestone)
             BubuHaptics.success()
+            if let cue = NativeLearningCue.line(closing) {
+                player.play([cue], client: client)
+            } else {
+                BubuSound.play(.milestone)
+            }
         }
     }
 
@@ -308,6 +461,99 @@ struct LearningPlayView: View {
                                          activityId: item.activity.id, kind: item.activity.kind,
                                          choice: choice, assistance: assistance, note: note)
         Task { await LearningAttemptOutbox.shared.submit(body, client: client) }
+    }
+}
+
+/// 布布（星星姐姐）说话的气泡：开场白、结束语。
+private struct MascotBubble: View {
+    let text: String
+    let expression: BubuExpression
+    let speaking: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: BubuTheme.Spacing.m) {
+            BubuMascotBadge(size: 72, expression: expression)
+                .bubuBreathingWiggle(degrees: speaking ? 3 : 1)
+                .accessibilityHidden(true)
+            SpeechBubble(text: text)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SpeechBubble: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(BubuTheme.Font.headline)
+            .foregroundStyle(BubuTheme.Color.warmBrown)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(BubuTheme.Color.card, in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous)
+                .stroke(BubuTheme.Color.pinkSurface, lineWidth: 2))
+    }
+}
+
+/// 一起唱：放原片那一句时，布布跟着摇、音符跳起来，歌词大大地显示；进度条跟着走。
+private struct SingAlongStage: View {
+    let lyrics: String?
+    let image: String?
+    let client: BubuLearningClient
+    let singing: Bool
+    let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: BubuTheme.Spacing.m) {
+            ZStack {
+                if let image {
+                    LearningRemoteImage(path: image, client: client, label: "唱歌时的画面", maxHeight: 240)
+                        .frame(height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+                        .opacity(0.9)
+                }
+                HStack(alignment: .bottom, spacing: 18) {
+                    note("music.note", delay: 0)
+                    BubuMascotBadge(size: 96, expression: .music)
+                        .bubuBreathingWiggle(degrees: singing ? 4 : 1)
+                    note("music.quarternote.3", delay: 1)
+                }
+                .padding(.top, image == nil ? 0 : 140)
+            }
+            if let lyrics, !lyrics.isEmpty {
+                Text(lyrics).font(BubuTheme.Font.title).foregroundStyle(BubuTheme.Color.warmBrown)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("歌词：\(lyrics)")
+            }
+            ProgressView(value: singing ? progress : 0)
+                .tint(BubuTheme.Color.primary)
+                .frame(maxWidth: 280)
+                .opacity(singing ? 1 : 0.35)
+                .accessibilityHidden(true)
+        }
+        .padding(BubuTheme.Spacing.m)
+        .frame(maxWidth: .infinity)
+        .background(BubuTheme.Color.mintSurface.opacity(0.6), in: RoundedRectangle(cornerRadius: BubuTheme.Radius.card, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private func note(_ symbol: String, delay: Int) -> some View {
+        let image = Image(systemName: symbol)
+            .font(.system(size: 34, weight: .bold, design: .rounded))
+            .foregroundStyle(BubuTheme.Color.deepRose)
+            .accessibilityHidden(true)
+        if singing && !reduceMotion {
+            image.phaseAnimator(delay == 0 ? [0.0, -14.0] : [-14.0, 0.0]) { view, y in
+                view.offset(y: y)
+            } animation: { _ in .easeInOut(duration: 0.45) }
+        } else {
+            image.opacity(singing ? 1 : 0.5)
+        }
     }
 }
 

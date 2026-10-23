@@ -19,7 +19,7 @@ from fastapi import HTTPException
 
 from memory_query import PocketBaseMemoryStore, _pb_quote
 from . import fsrs
-from .models import Draft, Segment, ground_draft, label_colors, normalize, prompt_role
+from .models import STYLE_KINDS, Draft, Segment, ground_draft, label_colors, normalize, prompt_role
 from .processing import CONTENT_PIPELINE_VERSION, MediaProcessor, ProcessingUnavailable, clip_parameters
 from .store import COURSE_KINDS, Conflict, Missing, digest, valid_day
 
@@ -27,6 +27,7 @@ from .store import COURSE_KINDS, Conflict, Missing, digest, valid_day
 RESOURCE = re.compile(r"^[a-f0-9]{64}\.(?:jpg|m4a)$")
 HASH = re.compile(r"^[a-f0-9]{64}$")
 CHOICE_KINDS = {"listen_choice", "color_choice", "sort"}
+LINE_KEYS = ("warmup", "praise", "retry_hint")  # 2.29 per-activity narrator lines
 CURRENT_PACKS = {"draft", "published", "no_lesson"}
 UPLOAD_MIMES = {"image/jpeg", "image/png", "image/heic", "image/heif", "video/mp4", "video/quicktime",
                 "audio/mp4", "audio/mpeg", "audio/wav"}
@@ -128,14 +129,22 @@ class LearningService:
         result["image_url"] = self._resource_url(pid, clip.get("image_resource"))
         return result
 
+    def _public_line(self, pid, line):
+        """2.29 narrator line: {text, audio_url}; null for older packs or an empty line."""
+        if not isinstance(line, dict) or not isinstance(line.get("text"), str) or not line["text"]:
+            return None
+        return {"text": line["text"], "audio_url": self._resource_url(pid, line.get("audio_resource"))}
+
     def _public_activity(self, pid, activity):
-        result = {key: activity.get(key) for key in ("id", "kind", "title", "concept", "instruction", "correct_choice")}
-        result.update(prompt=self._public_clip(pid, activity.get("prompt")), answer=self._public_clip(pid, activity.get("answer")), choices=[])
+        result = {key: activity.get(key) for key in ("id", "kind", "title", "concept", "instruction", "correct_choice", "style")}
+        result.update(prompt=self._public_clip(pid, activity.get("prompt")), answer=self._public_clip(pid, activity.get("answer")), choices=[],
+                      **{key: self._public_line(pid, activity.get(key)) for key in LINE_KEYS})
         for choice in activity.get("choices", []):
             row = {key: choice[key] for key in ("id", "label", "color") if key in choice}
             if activity.get("kind") == "color_choice":
                 row["colors"] = label_colors(str(choice.get("label") or ""))
-            row.update(evidence=self._public_clip(pid, choice.get("evidence")), image_url=self._resource_url(pid, choice.get("image_resource")))
+            row.update(evidence=self._public_clip(pid, choice.get("evidence")), image_url=self._resource_url(pid, choice.get("image_resource")),
+                       audio_url=self._resource_url(pid, choice.get("audio_resource")))
             result["choices"].append(row)
         return result
 
@@ -160,6 +169,8 @@ class LearningService:
                         "intro": self._readable(pack, payload.get("intro", "")),
                         "key_words": [w for w in payload.get("key_words", []) if isinstance(w, str)],
                         "activities": [self._public_activity(pack["id"], a) for a in payload.get("activities", [])],
+                        "greeting": self._public_line(pack["id"], payload.get("greeting")),
+                        "closing": self._public_line(pack["id"], payload.get("closing")),
                         "warnings": [self._readable(pack, w) for w in payload.get("warnings", [])]},
             "confirmations": [{"activity_id": a["id"], "digest": digest(a)} for a in payload.get("activities", [])],
         }
@@ -210,13 +221,15 @@ class LearningService:
     @staticmethod
     def _resources(pack):
         result = set()
-        for activity in pack["payload"].get("activities", []):
-            for clip in (activity.get("prompt"), activity.get("answer")):
-                if isinstance(clip, dict):
-                    result.update(name for key in ("audio_resource", "image_resource")
-                                  if isinstance(name := clip.get(key), str) and RESOURCE.fullmatch(name))
-            result.update(c["image_resource"] for c in activity.get("choices", [])
-                          if isinstance(c.get("image_resource"), str) and RESOURCE.fullmatch(c["image_resource"]))
+        payload = pack["payload"]
+        owners = [payload.get("greeting"), payload.get("closing")]
+        for activity in payload.get("activities", []):
+            owners += [activity.get("prompt"), activity.get("answer"), *[activity.get(key) for key in LINE_KEYS],
+                       *activity.get("choices", [])]
+        for owner in owners:
+            if isinstance(owner, dict):
+                result.update(name for key in ("audio_resource", "image_resource")
+                              if isinstance(name := owner.get(key), str) and RESOURCE.fullmatch(name))
         return result
 
     def resource(self, scope, pid, name):
@@ -255,6 +268,14 @@ class LearningService:
             name = owner.get("image_resource")
             if name is not None and name not in frames:
                 raise ValueError("图片不是本课的采样画面")
+        def line(value):
+            if value is None:
+                return
+            if not isinstance(value, dict) or set(value) - {"text", "audio_resource", "audio_hash", "origin"} \
+                    or not isinstance(value.get("text"), str) or not 0 < len(value["text"]) <= 160:
+                raise ValueError("旁白台词无效")
+            audio(value)
+        line(pack["payload"].get("greeting")); line(pack["payload"].get("closing"))
         activities = pack["payload"].get("activities", [])
         if not activities or len({a["id"] for a in activities}) != len(activities):
             raise ValueError("活动为空或编号重复")
@@ -267,6 +288,10 @@ class LearningService:
             if prompt.get("role") != prompt_role(raw["kind"]) or not isinstance(prompt.get("text"), str) or not prompt["text"]:
                 raise ValueError("题目角色无效")
             audio(prompt); image(prompt)
+            if raw.get("style") is not None and raw["kind"] not in STYLE_KINDS.get(raw["style"], ()):
+                raise ValueError("玩法无效")
+            for key in LINE_KEYS:
+                line(raw.get(key))
             if prompt.get("origin") == "source":
                 source = sources[prompt["source_id"]]
                 expected = clip_parameters(source, prompt["segment_id"])
@@ -278,7 +303,7 @@ class LearningService:
                 audio(answer)
             ids = [c["id"] for c in raw.get("choices", [])]
             for choice in raw.get("choices", []):
-                image(choice)
+                image(choice); audio(choice)
                 if not isinstance(choice.get("label"), str) or not choice["label"]:
                     raise ValueError("选项文字缺失")
             if raw["kind"] in CHOICE_KINDS:

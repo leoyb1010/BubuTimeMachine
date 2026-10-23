@@ -275,6 +275,8 @@ struct SpeakPracticeCard: View {
     let player: NativeLearningAudioPlayer
     /// 播放示范原声（老师的答案/歌词）。
     let playModel: () -> Void
+    /// 说出来时是否响提示音；课程自己有鼓励语音时关掉，避免两个声音叠在一起。
+    var chime = true
     /// 每次打完分回调（分数、是否算说出来）。
     let onScored: (Int, Bool) -> Void
 
@@ -472,7 +474,7 @@ struct SpeakPracticeCard: View {
         if passed {
             phase = .scored(score)
             celebration += 1
-            BubuSound.play(.milestone)
+            if chime { BubuSound.play(.milestone) }
             BubuHaptics.success()
         } else {
             phase = .retry

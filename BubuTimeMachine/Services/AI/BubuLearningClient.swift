@@ -91,6 +91,27 @@ nonisolated struct LearningChoiceDTO: Decodable, Sendable, Hashable, Identifiabl
     let colors: [String]?
     let evidence: LearningClipDTO?
     let imageUrl: String?
+    /// 2.29: the choice's own name read aloud; absent on older packs.
+    var audioUrl: String? = nil
+}
+
+/// 2.29 narrator line (`greeting`, `praise`, …): text is always shown, audio is optional.
+nonisolated struct LearningLineDTO: Decodable, Sendable, Hashable {
+    let text: String
+    var audioUrl: String? = nil
+
+    init(text: String, audioUrl: String? = nil) {
+        self.text = text
+        self.audioUrl = audioUrl
+    }
+
+    private enum CodingKeys: String, CodingKey { case text, audioUrl }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        audioUrl = try container.decodeIfPresent(String.self, forKey: .audioUrl)
+    }
 }
 
 nonisolated struct LearningActivityDTO: Decodable, Sendable, Hashable, Identifiable {
@@ -103,6 +124,11 @@ nonisolated struct LearningActivityDTO: Decodable, Sendable, Hashable, Identifia
     let prompt: LearningClipDTO?
     let answer: LearningClipDTO?
     let choices: [LearningChoiceDTO]
+    // 2.29: optional play style and narrator lines; missing and null decode the same.
+    var style: String? = nil
+    var warmup: LearningLineDTO? = nil
+    var praise: LearningLineDTO? = nil
+    var retryHint: LearningLineDTO? = nil
 
     var isChoice: Bool { ["listen_choice", "color_choice", "sort"].contains(kind) }
     var kindLabel: String {
@@ -123,6 +149,9 @@ nonisolated struct LearningPackDTO: Decodable, Sendable, Hashable {
         let summary: String
         let activities: [LearningActivityDTO]
         let warnings: [String]
+        /// 2.29: narrator greeting before the first activity and closing after the last.
+        var greeting: LearningLineDTO? = nil
+        var closing: LearningLineDTO? = nil
     }
     struct Confirmation: Codable, Sendable, Hashable { let activityId: String; let digest: String }
     let id: String
@@ -432,14 +461,16 @@ nonisolated struct BubuLearningClient: Sendable {
 
     /// Protected bytes (images, short clips). Thumbnails and detail images also land in a per-account disk cache.
     @concurrent
-    func mediaData(_ path: String, cache: Bool = false) async throws -> Data {
+    /// `background` (prefetch, widget/watch picks) uses its own small lane so it never delays images on screen.
+    func mediaData(_ path: String, cache: Bool = false, background: Bool = false) async throws -> Data {
         let file = cache ? LearningMediaCache.file(scope: scope, path: path) : nil
         if let file, let data = try? Data(contentsOf: file) {
             LearningMediaCache.touch(file)
             return data
         }
-        try await LearningMediaGate.shared.acquire()
-        defer { Task { await LearningMediaGate.shared.release() } }
+        let gate = background ? LearningMediaGate.background : LearningMediaGate.shared
+        try await gate.acquire()
+        defer { Task { await gate.release() } }
         let request = try await authorized(url(path), timeout: 60)
         let (data, response) = try await mediaSession.data(for: request, delegate: LearningRedirectBlocker())
         try check(response, data: data)
@@ -636,6 +667,7 @@ nonisolated func bubuErrorText(_ error: Error, fallback: String) -> String {
 /// Caps concurrent image/clip downloads; waiting callers that get cancelled (cell scrolled away) leave the queue.
 actor LearningMediaGate {
     static let shared = LearningMediaGate(limit: 6)
+    static let background = LearningMediaGate(limit: 2)
     private let limit: Int
     private var running = 0
     private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []

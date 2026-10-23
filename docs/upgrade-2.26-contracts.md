@@ -126,3 +126,56 @@
 - `audio_url` 可能为 `null`（服务器没有朗读声音），此时显示 `text`。没有合适画面的选项用 emoji + 文字作为 `label`。
 - 题目声音：中文/中英混合用 Tingting（备选 Meijia），纯英文用 Samantha（备选 Karen），单段不超过 12 秒。
 - 一节课里上传了内容完全相同的文件时，服务端按内容哈希只存一份素材、只解析一次，`warnings` 会提示“只按一份处理”。
+
+## 2.29 互动与声音
+
+家长反馈“题目声音破音、不清楚”。2.29 换成高质量合成声音，并给每节课加上更多可以点、可以听的互动。
+**全部是新增的可选字段**：旧课程包没有这些字段，新课程包里也可能为 `null`（例如服务器暂时没有朗读声音）。
+App 必须把“字段不存在”和 `null` 同样处理，不能因为缺字段解码失败。已有字段（`kind`、`prompt`、`answer`、`choices`、
+`correct_choice`、`confirmations` 等）含义不变。
+
+### 统一的“台词”对象 `Line`
+```json
+{"text": "Great job! 你找到了苹果！", "audio_url": "/learning/api/packs/<pid>/resources/<sha>.m4a"}
+```
+- `text`：字符串，1–160 字，始终存在（App 在没有声音时显示文字）。
+- `audio_url`：字符串或 `null`。与 `prompt.audio_url` 一样是同源相对路径，用同一个会话/Bearer 访问。
+- 服务端内部用 `audio_resource`（`<sha>.m4a`）存储，**对外一律是 `audio_url`**（与 2.28 的 prompt/answer 相同）。
+
+### 课程包（pack.payload）新增
+```json
+{"greeting": {"text": "Hi 宝贝！我是星星姐姐，今天我们一起玩秋天的游戏吧！", "audio_url": "…m4a"},
+ "closing":  {"text": "今天你真棒！leaf, apple, umbrella，我们明天再玩！", "audio_url": "…m4a"},
+ "activities": [{
+   "id": "a1", "kind": "listen_choice", "style": "find_it",
+   "warmup":     {"text": "看！这是什么呀？", "audio_url": "…m4a"},
+   "praise":     {"text": "Yes! Apple! 太棒啦！", "audio_url": "…m4a"},
+   "retry_hint": {"text": "再听一听，红红圆圆的是哪一个？", "audio_url": "…m4a"},
+   "prompt": {"role": "cue", "text": "Where is the apple? 苹果在哪里？", "audio_url": "…m4a", "image_url": null},
+   "answer": {"role": "answer", "text": "Yes! Apple! 是苹果！", "audio_url": "…m4a"},
+   "choices": [{"id": "apple", "label": "apple", "image_url": "…jpg", "audio_url": "…m4a"},
+               {"id": "umbrella", "label": "☂️ umbrella", "image_url": null, "audio_url": "…m4a"}]}]}
+```
+
+| JSON 路径 | 类型 | 说明 |
+|---|---|---|
+| `payload.greeting` | `Line` 或 `null` | 旁白“星星姐姐”开场白，进入课程时先播放。 |
+| `payload.closing` | `Line` 或 `null` | 结束语，最后一个活动完成后播放。 |
+| `activities[].style` | 字符串或 `null` | 玩法提示，只影响展示/动效，不改变判分：`classic`、`call_response`（我说你说，配 speak）、`find_it`（看画面找一找，配 listen_choice/sort，通常带 `image_url`）、`counting`（数一数，配 listen_choice/speak，选项是数字词）、`sing_along`（一起唱，配 music，`prompt` 可能是原片那一句歌）。未知值按 `classic` 处理。 |
+| `activities[].warmup` | `Line` 或 `null` | 题目前的一句暖场（“看！这是什么呀？”），在 `prompt` 之前播放。 |
+| `activities[].praise` | `Line` 或 `null` | 答对/跟说完成后的鼓励，可与 `answer` 连播（先 `answer` 再 `praise`），或只播 `praise`。 |
+| `activities[].retry_hint` | `Line` 或 `null` | 答错时的温柔提示（不说“错了”），播放后让孩子再选一次。 |
+| `activities[].choices[].audio_url` | 字符串或 `null` | 点一下选项就能听到选项名（只读选项文字本身，如 “apple”）。建议：点选项先播名字，再判定；或长按/小喇叭只听不答，由 App 决定。 |
+
+- `speak` / `music` 活动没有选项，`praise`、`retry_hint` 仍可能出现（跟说完成后鼓励 / 没听清时再试）。
+- `confirmations[].digest` 计算方式不变（覆盖整个活动，包括新字段），App 不需要改。
+- 新课程包的活动与题型数量规则不变：4–8 个活动，`kind` 仍只有 listen_choice / color_choice / sort / speak / music。
+
+### 声音
+- 声音来源（服务端自动回退，App 无需区分）：① 家里服务器上最好的 Apple 声音——Siri 自然语音「Li-Mu」（48kHz 神经网络普通话声音，同一个声音清楚地读中文和英文单词），没有时用已安装的 Premium/Enhanced 声音；② 普通系统声音（Tingting/Samantha）。
+  第二大脑的模型网关目前没有 Gemini 语音合成模型，所以不使用 Gemini 合成；合成全部在家里服务器本机完成，台词不外发。
+- 所有片段统一处理：原生采样率生成、不加增益，loudnorm 响度归一（-16 LUFS，真峰值 -2 dB），首尾各 30ms 淡入淡出，AAC 128k / 44.1kHz / 单声道 `.m4a`，峰值必须低于 -1 dBFS（不破音），静音片段不收。单段不超过 15 秒。
+- 同一句话（文字+声音+风格）只合成一次并缓存；2.28 里“题目声音 Tingting/Samantha、12 秒”的说明由本节取代。
+
+### 让已有课程用上新声音和互动
+旧课程不会自动重算。部署后对某节课调用 `POST courses/{cid}/retry`（或 `PATCH courses/{cid}` 修改说明）即重新生成，新版本自带以上字段；已发布旧版本变为 superseded，互动记录保留。

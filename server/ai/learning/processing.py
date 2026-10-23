@@ -65,7 +65,7 @@ def clip_parameters(source: dict, segment_id: str) -> dict:
 class MediaProcessor:
     def __init__(self, store, bridge, *, transcriber: Path | None = None, tts=None):
         self.store, self.bridge = store, bridge
-        # tts(text, target_path) -> bool; tests replace it, production uses macOS `say`.
+        # tts(text, target_path) -> bool; tests replace it, production uses speech.synthesize (best Apple voice, then `say`).
         self.tts = tts
         self.transcriber = Path(transcriber) if transcriber else bridge.root / "app/tools/transcribe"
         self.ffmpeg = os.environ.get("BUBU_FFMPEG", "ffmpeg")
@@ -373,7 +373,9 @@ class MediaProcessor:
         text = " ".join(str(text).split())
         if not text:
             return {}
-        synthesize = self.tts or (lambda value, path: speech.synthesize(value, path, ffmpeg=self.ffmpeg))
+        # Finished clips are cached by (text, voice, style) under the store, outside backups.
+        synthesize = self.tts or (lambda value, path: speech.synthesize(value, path, ffmpeg=self.ffmpeg,
+                                                                         cache_dir=self.store.root / "tts-cache"))
         with tempfile.TemporaryDirectory(prefix="bubu-tts-") as tmp:
             target = Path(tmp) / "speech.m4a"
             try:
@@ -383,6 +385,11 @@ class MediaProcessor:
             except (OSError, subprocess.SubprocessError, ProcessingUnavailable):
                 return {}
         return {"audio_resource": name, "audio_hash": sha, "origin": "tts"}
+
+    def line(self, family: str, text: str | None) -> dict | None:
+        """2.29 narrator line {text, audio_resource?}: greeting, closing, warm-up, praise, try-again hint."""
+        text = " ".join(text.split())[:160] if isinstance(text, str) else ""
+        return {"text": text, **self.speak(family, text)} if text else None
 
     def _content_frames(self, family: str, materials: list[dict]) -> list[dict]:
         """At most MAX_CONTENT_FRAMES verified sampled frames, spread across the course's files."""
@@ -462,7 +469,8 @@ class MediaProcessor:
         shared = [c.image_frame for c in activity.choices if c.image_frame is not None]
         choices = []
         for choice in activity.choices:
-            row = {"id": choice.id, "label": choice.label}
+            # Tapping an option says its name (the word itself, never the emoji).
+            row = {"id": choice.id, "label": choice.label, **{k: v for k, v in self.speak(family, choice.label).items() if k != "origin"}}
             if choice.image_frame is not None and shared.count(choice.image_frame) == 1:
                 row["image_resource"] = frames[choice.image_frame]["resource"]
             elif choice.emoji and activity.kind != "color_choice":
@@ -473,7 +481,9 @@ class MediaProcessor:
             choices.append(row)
         return {"id": activity.id, "kind": activity.kind, "title": activity.title, "concept": activity.concept,
                 "instruction": activity.instruction, "grounding": activity.grounding, "prompt": prompt, "answer": answer,
-                "choices": choices, "correct_choice": activity.correct_choice}
+                "choices": choices, "correct_choice": activity.correct_choice, "style": activity.style,
+                "warmup": self.line(family, activity.warmup_text), "praise": self.line(family, activity.praise_text),
+                "retry_hint": self.line(family, activity.retry_hint_text)}
 
     def compose_content(self, family: str, sources: list[dict], nonce: str, course: dict) -> dict:
         source_map = {}
@@ -552,7 +562,9 @@ class MediaProcessor:
             value = reply.get(key)
             return [" ".join(v.split()) for v in value if isinstance(v, str) and v.strip()] if isinstance(value, list) else []
         warnings = [w[:200] for w in strings("warnings")[:5]]
-        if any(clip and not clip.get("audio_resource") for a in built for clip in (a["prompt"], a["answer"])):
+        greeting, closing = self.line(family, reply.get("greeting")), self.line(family, reply.get("closing"))
+        lines = [greeting, closing, *[a[k] for a in built for k in ("prompt", "answer", "warmup", "praise", "retry_hint")]]
+        if any(clip and not clip.get("audio_resource") for clip in lines):
             warnings.append("这台服务器暂时没有可用的朗读声音，部分题目先只显示文字。")
         if "duplicate_files" in base:
             warnings.append("这节课里有内容完全相同的文件，只按一份处理。")
@@ -562,16 +574,18 @@ class MediaProcessor:
                 words.append(word[:40])
         return {**base, "intro": " ".join(str(reply.get("intro") or "").split())[:300],
                 "summary": " ".join(str(reply.get("summary") or "").split())[:500],
-                "key_words": words[:12], "activities": built, "warnings": warnings}
+                "key_words": words[:12], "activities": built, "warnings": warnings,
+                "greeting": greeting, "closing": closing}
 
 
 def content_schema() -> dict:
     """Structured output drops optional fields, so everything the lesson needs is required."""
     schema = ContentDraft.model_json_schema()
-    schema["required"] = ["title", "intro", "summary", "key_words", "activities", "warnings"]
+    schema["required"] = ["title", "intro", "summary", "key_words", "activities", "warnings", "greeting", "closing"]
     activity = schema.get("$defs", {}).get("ContentActivity")
     if activity:
-        activity["required"] = sorted(set(activity.get("required", [])) | {"answer_text", "choices", "correct_choice"})
+        activity["required"] = sorted(set(activity.get("required", [])) | {"answer_text", "choices", "correct_choice", "style",
+                                                                           "warmup_text", "praise_text", "retry_hint_text"})
     return schema
 
 
@@ -593,4 +607,13 @@ CONTENT_SYSTEM = (
     "8. music 的 prompt_text 是一句歌词；若 transcript 里有这一句，segment_ref 填那一行的 ref（如 m1/seg-0003），会剪出原片这一句。"
     "其他题型不要填 segment_ref。9. 不识别人脸、不涉及具体人物身份，不评价孩子能力。"
     "10. intro：给家长一两句话，说明今天学了什么、怎么陪孩子玩（不超过120字）；summary：今天的学习要点（不超过200字）；"
-    "key_words：本课重点词（最多8个）。返回约定JSON。")
+    "key_words：本课重点词（最多8个）。"
+    "11. 要好玩、有变化：每个活动给 style 玩法——call_response（我说你说：旁白说一句，孩子跟着说，用于 speak）、"
+    "find_it（看画面找一找，用于 listen_choice/sort，必须配 image_frame 画面）、counting（数一数，用于 listen_choice/sort/speak，"
+    "只数画面或歌词里真的出现的东西，选项是数字词如 one/two/three 或 一个/两个）、sing_along（一起唱，用于 music，尽量配 segment_ref 原片歌词）、"
+    "classic（普通）。一节课里尽量用到3种以上不同玩法。"
+    "12. 每个活动都写：warmup_text（题目前一句暖场，如“看！这是什么呀？”，≤30字）；praise_text（答对或说完后的热情鼓励，"
+    "如“Yes! Apple! 太棒啦！”，≤40字，每个活动换不同说法）；retry_hint_text（答错时温柔的再试提示，不说“错了”，"
+    "选择题的提示不能直接说出正确选项的文字，可以描述颜色、形状、声音，如“再听一听，红红圆圆的是哪一个？”，≤40字；music 活动填 null）。"
+    "13. 旁白是亲切的“星星姐姐”：greeting 是开场白（如“Hi 宝贝！我是星星姐姐，今天我们一起玩秋天的游戏吧！”，≤60字），"
+    "closing 是结束语，夸一夸并带一遍重点词（≤60字）。这些话都会用合成语音读给孩子听，要短、慢、清楚、开心。返回约定JSON。")

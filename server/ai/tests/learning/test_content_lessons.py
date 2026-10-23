@@ -306,4 +306,5 @@ def test_voice_detection_parses_localized_say_listing(monkeypatch):
 
 def test_synthesize_without_voice_is_text_only(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "pick_voice", lambda language: None)
+    monkeypatch.setattr(speech, "neural_helper", lambda: None)
     assert speech.synthesize("Apple", tmp_path / "a.m4a") is False
