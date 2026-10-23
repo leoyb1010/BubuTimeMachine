@@ -180,12 +180,24 @@ final class BubuTimeMachineUITests: XCTestCase {
         app.launchArguments = ["-uitest-in-memory", "-uitest-seed", "-uitest-tab", "3", "-uitest-journal-slow-import"]
         app.launch()
         XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 12))
-        app.buttons["journal.primary"].tap()
-        app.buttons["老师照片 / 视频"].tap()
-        try tapSystemPickerAsset(.photo, in: app)
-        try confirmSystemPickerSelection(in: app)
-        XCTAssertTrue(app.buttons["停止导入"].waitForExistence(timeout: 5))
-        app.buttons["停止导入"].tap()
+        let stop = app.buttons["停止导入"]
+        // XCUITest 每次点击后都要等 App 空闲。偶发情况下（长时间运行的 Duo 模拟器上实测），点「完成」后的空闲等待
+        // 被一直挡到 20 秒慢导入结束，停止键还没来得及点就消失了；同一时刻的截图里停止键与进度都正常可见。
+        // 这时导入已经完成、什么都没验证到：丢弃这份草稿只重来一次，第二次仍必须能在导入中途停下。
+        for attempt in 1...2 {
+            app.buttons["journal.primary"].tap()
+            app.buttons["老师照片 / 视频"].tap()
+            try tapSystemPickerAsset(.photo, in: app)
+            try confirmSystemPickerSelection(in: app)
+            if stop.waitForExistence(timeout: 5) { break }
+            XCTAssertTrue(attempt == 1 && app.staticTexts["已选 1 个素材"].exists, "慢导入期间必须出现「停止导入」")
+            print("BUBU-SLOW-IMPORT-RETRY: import finished before the post-tap idle wait returned")
+            attachScreenshot("school-import-finished-before-stop-retry", to: self)
+            app.buttons["以后再说"].tap()
+            app.buttons["丢弃草稿"].tap()
+            XCTAssertTrue(app.buttons["journal.primary"].waitForExistence(timeout: 5))
+        }
+        stop.tap()
         XCTAssertTrue(app.buttons["school.manual-report"].isEnabled)
         XCTAssertFalse(app.staticTexts["已选 1 个素材"].exists)
         app.buttons["以后再说"].tap()
@@ -281,10 +293,12 @@ final class BubuTimeMachineUITests: XCTestCase {
         guard grid.waitForExistence(timeout: 30), image.waitForExistence(timeout: 30) else {
             throw systemPickerFailure("Missing synthetic \(labels.english) asset", in: app)
         }
-        let confirmation = systemPickerConfirmation(in: app)
-        // 竖排栏时选择器侧边的完成键比网格晚进无障碍树：给它几秒，单选选择器只多等这几秒。
-        let requiresConfirmation = confirmation.waitForExistence(timeout: 5)
-        let beganWithEmptySelection = requiresConfirmation && systemPickerSelectionIsEmpty(grid: grid, confirmation: confirmation)
+        // 竖排栏（Duo 外屏）时选择器侧边只在已有选中项后才放出完成键，选中前查不到它：
+        // 不在点之前判定单选/多选，点完再等「单选自动收起」或「完成键可点」任一结果。
+        // 只有点之前确实观察到「完成键在、但不可点、无选中」才允许一次空选重试。
+        let initialConfirmation = systemPickerConfirmation(in: app)
+        let beganWithEmptySelection = initialConfirmation.waitForExistence(timeout: 2) &&
+            systemPickerSelectionIsEmpty(grid: grid, confirmation: initialConfirmation)
         let assetLabel = image.label
         attachScreenshot("school-system-picker-before-\(labels.english)", to: self)
         // The captured iPhone/iPad AX hierarchies have no asset Cells. These
@@ -312,50 +326,65 @@ final class BubuTimeMachineUITests: XCTestCase {
                 dx: assetBounds.midX - appBounds.minX,
                 dy: assetBounds.midY - appBounds.minY)).tap()
         }
-        if requiresConfirmation {
-            if !confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 15) {
-                // Hosted iPad evidence showed one unconfirmed tap: the same asset
-                // remained unselected and Done stayed disabled. Retry only that
-                // observed empty state, never a picker with an existing selection.
-                let canRetry = beganWithEmptySelection &&
-                    canRetryEmptySystemPicker(in: app, assetLabel: assetLabel, assetBounds: assetBounds)
-                // AX inspection may outlast a delayed successful selection. Let the
-                // caller confirm and verify its import instead of tapping it again.
-                if confirmation.exists && confirmation.isEnabled { return }
-                guard canRetry else {
-                    throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add; empty-state retry is unsafe", in: app)
-                }
-                let state = "PhotosPicker one-time empty-selection retry: \(assetLabel), frame=\(assetBounds), Done/Add disabled\n\(app.debugDescription)"
-                print(state)
-                let attachment = XCTAttachment(string: state)
-                attachment.name = "school-system-picker-empty-selection-retry"
-                attachment.lifetime = .keepAlways
-                add(attachment)
-                attachScreenshot("school-system-picker-empty-selection-retry", to: self)
-                // Screenshot/AX capture can take time. Reobserve immediately before
-                // tapping so a delayed successful selection is never toggled off.
-                let remainsEmpty = canRetryEmptySystemPicker(in: app, assetLabel: assetLabel, assetBounds: assetBounds)
-                if confirmation.exists && confirmation.isEnabled { return }
-                guard remainsEmpty else {
-                    throw systemPickerFailure("Picker selection changed before the bounded retry", in: app)
-                }
-                let retryImage = grid.images.matching(NSPredicate(
-                    format: "identifier == %@ AND label == %@", "PXGGridLayout-Info", assetLabel)).firstMatch
-                if retryImage.isHittable {
-                    retryImage.tap()
-                } else {
-                    let retryAppBounds = app.frame
-                    app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-                        dx: assetBounds.midX - retryAppBounds.minX,
-                        dy: assetBounds.midY - retryAppBounds.minY)).tap()
-                }
-                guard confirmation.wait(for: \.isEnabled, toEqual: true, timeout: 15) else {
-                    throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add after one empty-state retry", in: app)
-                }
-            }
-        } else if !content.waitForNonExistence(timeout: 15) {
-            throw systemPickerFailure("Selecting \(labels.english) did not dismiss the single-selection picker", in: app)
+        if waitForSystemPickerSelection(content: content, in: app, timeout: 15) { return }
+        // Hosted iPad evidence showed one unconfirmed tap: the same asset
+        // remained unselected and Done stayed disabled. Retry only that
+        // observed empty state, never a picker with an existing selection.
+        let canRetry = beganWithEmptySelection &&
+            canRetryEmptySystemPicker(in: app, assetLabel: assetLabel, assetBounds: assetBounds)
+        // AX inspection may outlast a delayed successful selection. Let the
+        // caller confirm and verify its import instead of tapping it again.
+        if systemPickerSelectionSettled(content: content, in: app) { return }
+        guard canRetry else {
+            throw systemPickerFailure("Selecting \(labels.english) neither dismissed the picker nor enabled Done/Add; empty-state retry is unsafe", in: app)
         }
+        let state = "PhotosPicker one-time empty-selection retry: \(assetLabel), frame=\(assetBounds), Done/Add disabled\n\(app.debugDescription)"
+        print(state)
+        let attachment = XCTAttachment(string: state)
+        attachment.name = "school-system-picker-empty-selection-retry"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        attachScreenshot("school-system-picker-empty-selection-retry", to: self)
+        // Screenshot/AX capture can take time. Reobserve immediately before
+        // tapping so a delayed successful selection is never toggled off.
+        let remainsEmpty = canRetryEmptySystemPicker(in: app, assetLabel: assetLabel, assetBounds: assetBounds)
+        if systemPickerSelectionSettled(content: content, in: app) { return }
+        guard remainsEmpty else {
+            throw systemPickerFailure("Picker selection changed before the bounded retry", in: app)
+        }
+        let retryImage = grid.images.matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", "PXGGridLayout-Info", assetLabel)).firstMatch
+        if retryImage.isHittable {
+            retryImage.tap()
+        } else {
+            let retryAppBounds = app.frame
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: assetBounds.midX - retryAppBounds.minX,
+                dy: assetBounds.midY - retryAppBounds.minY)).tap()
+        }
+        guard waitForSystemPickerSelection(content: content, in: app, timeout: 15) else {
+            throw systemPickerFailure("Selecting \(labels.english) did not enable Done/Add after one empty-state retry", in: app)
+        }
+    }
+
+    /// 选中一项后的合法结果：单选选择器自动收起，或完成键（导航栏里或竖排侧栏里）已可点。
+    @MainActor
+    private func systemPickerSelectionSettled(content: XCUIElement, in app: XCUIApplication) -> Bool {
+        if !content.exists { return true }
+        // 每次重新查找：竖排栏的完成键是选中后才出现的新元素。
+        let confirmation = systemPickerConfirmation(in: app)
+        return confirmation.exists && confirmation.isEnabled
+    }
+
+    @MainActor
+    private func waitForSystemPickerSelection(content: XCUIElement, in app: XCUIApplication,
+                                              timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if systemPickerSelectionSettled(content: content, in: app) { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        } while Date() < deadline
+        return systemPickerSelectionSettled(content: content, in: app)
     }
 
     @MainActor
@@ -894,7 +923,9 @@ final class BubuTimeMachineUITests: XCTestCase {
             if abs(offset) < 30 { offset = offset < 0 ? -30 : 30 }
             let start = origin.withOffset(CGVector(dx: x, dy: middle - offset / 2 - appBounds.minY))
             let end = origin.withOffset(CGVector(dx: x, dy: middle + offset / 2 - appBounds.minY))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // 松手前停一下，不留惯性：Duo 外屏键盘弹起时可视区只剩约 200pt，带惯性的拖动会把目标甩过头，
+            // 下一次反向拖又甩回来，18 次来回都落不进可视区。
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
         }
         print("School control reveal failed: \(element.identifier)\n\(app.debugDescription)")
         attachScreenshot("school-control-reveal-failure", to: self)
