@@ -52,10 +52,10 @@ final class BubuRouter {
 // MARK: - 每个窗口的路由接线（多窗口）
 /// router 是 per-scene 的（见 SceneRoot），深链只进收到它的那个窗口，两个窗口不会同时跳页。
 /// 剩下两处要指定「哪个窗口」：
-/// - 深链投递：用户正在看的窗口（appearsActive）声明优先接收，其余窗口仍允许接收——
-///   系统不会把小组件深链塞给背后那个窗口，也不会另开新窗口；
+/// - 深链投递：每个窗口都声明可接收，由系统挑一个已有窗口投递，不另开新窗口；
 /// - 控制中心 / Action Button 的「记一笔」是跨进程共享标志（SharedDefaults.pendingRecord），不属于任何窗口：
-///   多窗口时只由正在看的窗口认领；只有一个前台窗口时照旧直接认领。
+///   先进入前台的窗口认领并清掉标志，不会重复弹出。
+///   （appearsActive 在 iOS/iPadOS 上恒为 true，分不出「正在看的窗口」，所以不用它。）
 extension View {
     func bubuSceneRouting(_ router: BubuRouter) -> some View {
         modifier(BubuSceneRouting(router: router))
@@ -65,26 +65,20 @@ extension View {
 private struct BubuSceneRouting: ViewModifier {
     let router: BubuRouter
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.appearsActive) private var appearsActive
 
     func body(content: Content) -> some View {
         content
             .environment(router)
             .onOpenURL { router.handle($0) }
-            .handlesExternalEvents(preferring: appearsActive ? ["*"] : [], allowing: ["*"])
+            .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             .onAppear { claimPendingRecord() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { claimPendingRecord() }
-            }
-            .onChange(of: appearsActive) { _, active in
-                if active { claimPendingRecord() }
             }
     }
 
     private func claimPendingRecord() {
         guard SharedDefaults.pendingRecord else { return }
-        let foreground = UIApplication.shared.connectedScenes.filter { $0.activationState == .foregroundActive }
-        guard appearsActive || foreground.count <= 1 else { return }
         SharedDefaults.pendingRecord = false
         router.pendingQuickCapture = true
     }

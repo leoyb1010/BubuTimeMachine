@@ -182,7 +182,7 @@ struct VoiceMemoRecorderSheet: View {
                         .accessibilityLabel("取消")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("收好", systemImage: "checkmark", role: .confirm) { save() }
+                    Button("收好", systemImage: "tray.and.arrow.down", role: .confirm) { save() }
                         .disabled(pending == nil)
                 }
             }

@@ -99,6 +99,8 @@ struct NaturalCaptureReviewSheet: View {
             }
             .background(BubuTheme.Color.background.ignoresSafeArea())
             .navigationTitle("确认保存")
+            // 工具栏的保存按钮只显示图标，条数放在副标题（按钮旁白仍念「保存 N 条」）。
+            .navigationSubtitle(unconfirmedCount == 0 ? "" : "可保存 \(savableItems.count) 条")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

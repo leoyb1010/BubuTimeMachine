@@ -684,7 +684,7 @@ private struct SceneRoot: View {
         RootView()
             // Duo WS0：场景布局根（引导页、DEBUG 直达页也能读到 \.bubuLayout；Tab/弹窗内有更近的根覆盖）。
             .bubuLayoutRoot()
-            // 多窗口：深链优先投给正在看的窗口，「记一笔」只由前台窗口认领（见 BubuRouter.swift）。
+            // 多窗口：深链投给已有窗口，「记一笔」由先进入前台的窗口认领一次（见 BubuRouter.swift）。
             .bubuSceneRouting(router)
             // 仅 DEBUG：-uitest-layout WxH / -uitest-fake-fold h|v（见 BubuAdaptiveLayout.swift）。
             .bubuDebugLayoutFrame()

@@ -26,6 +26,7 @@ struct MilestonePickerSheet: View {
                 }
             }
             .navigationTitle("从清单添加")
+            .navigationSubtitle(selected.isEmpty ? "" : "已选 \(selected.count) 项")
             .scrollContentBackground(.hidden)
             .background(BubuTheme.Color.background)
             .navigationBarTitleDisplayMode(.inline)

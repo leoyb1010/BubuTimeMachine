@@ -121,18 +121,19 @@ nonisolated struct BubuLayout: Equatable, Sendable {
     var panes: [CGRect] {
         let safe = safeRect
         guard let fold, let axis = foldAxis, fold.intersects(safe) else { return safe.isEmpty ? [] : [safe] }
+        // 先算折痕两侧的原始跨度再建 CGRect：CGRect 会把负宽高标准化成正数，事后看 width 分不出“这一侧不存在”。
         let parts: [CGRect]
         switch axis {
         case .vertical:
-            parts = [CGRect(x: safe.minX, y: safe.minY, width: fold.minX - safe.minX, height: safe.height),
-                     CGRect(x: fold.maxX, y: safe.minY, width: safe.maxX - fold.maxX, height: safe.height)]
+            let lead = fold.minX - safe.minX, trail = safe.maxX - fold.maxX
+            parts = [lead > 0 ? CGRect(x: safe.minX, y: safe.minY, width: lead, height: safe.height) : nil,
+                     trail > 0 ? CGRect(x: fold.maxX, y: safe.minY, width: trail, height: safe.height) : nil].compactMap { $0 }
         case .horizontal:
-            parts = [CGRect(x: safe.minX, y: safe.minY, width: safe.width, height: fold.minY - safe.minY),
-                     CGRect(x: safe.minX, y: fold.maxY, width: safe.width, height: safe.maxY - fold.maxY)]
+            let top = fold.minY - safe.minY, bottom = safe.maxY - fold.maxY
+            parts = [top > 0 ? CGRect(x: safe.minX, y: safe.minY, width: safe.width, height: top) : nil,
+                     bottom > 0 ? CGRect(x: safe.minX, y: fold.maxY, width: safe.width, height: bottom) : nil].compactMap { $0 }
         }
-        // CGRect 会把负宽高标准化成正数，所以按“折痕两侧的真实跨度”过滤，而不是看 width/height。
-        return parts.filter { $0.minX < $0.maxX && $0.minY < $0.maxY && safe.contains(CGPoint(x: $0.midX, y: $0.midY)) }
-            .map { $0.intersection(safe) }.filter { !$0.isNull && $0.width > 0 && $0.height > 0 }
+        return parts.filter { $0.width > 0 && $0.height > 0 }
     }
 
     /// 矮屏取 short，否则取 regular。用于固定高度的大图、题图、地图。
