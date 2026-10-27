@@ -250,7 +250,10 @@ final class ServerConfig {
         // 兜底值永不落盘 → 每次冷启动重新求值，关掉也可能被再次打开。
         // 结论：没存过就是关。开启入口只有设置页那个开关（旁边已写明外发目的地）。
         self.aiEnabled = UserDefaults.standard.object(forKey: Self.aiEnabledKey) as? Bool ?? false
-        self.schoolVisionEnabled = UserDefaults.standard.object(forKey: Self.schoolVisionKey) as? Bool ?? false
+        // 例外（用户 2026-10-27 明确要求「直接内置」）：亲子桥识别默认开——新装手机曾因没开它一直用本机 OCR，
+        // 把 10月27日 读成 10月2日。只发用户主动导入的那张日表，且只到家里 mini（再交第二大脑 Gemini）。
+        // 关掉时 didSet 会落盘 false，之后一直保持关闭。
+        self.schoolVisionEnabled = UserDefaults.standard.object(forKey: Self.schoolVisionKey) as? Bool ?? true
         self.semanticSearchEnabled = UserDefaults.standard.object(
             forKey: Self.semanticSearchEnabledKey
         ) as? Bool ?? false
