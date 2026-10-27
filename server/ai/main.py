@@ -35,7 +35,7 @@ import httpx
 from collections import Counter, defaultdict, deque
 from datetime import datetime
 from pathlib import Path
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, UploadFile, File
@@ -64,6 +64,7 @@ logging.basicConfig(
 app = FastAPI(title="布布时光机 AI 服务", version="2.25.0")
 
 from learning.api import install_learning
+from learning.brain_bridge import BrainUnavailable
 from learning.runtime import get_service as get_learning_service
 install_learning(app, get_learning_service)
 
@@ -326,6 +327,12 @@ def require_intake_family_user(
 
 # ---------- 请求/响应模型 ----------
 
+def _school_bridge():
+    """亲子桥识别复用学习服务的第二大脑 Gemini 桥（学习未启用时 503）。"""
+    from learning.runtime import components
+    return components()[1]
+
+
 @app.post("/school-report/recognize", response_model=school_report.SchoolReportResp)
 async def recognize_school_report(request: Request, _: str = Depends(require_api_key)):
     # Bound streaming input before JSON decoding; never echo a Pydantic input containing a child photo.
@@ -338,14 +345,52 @@ async def recognize_school_report(request: Request, _: str = Depends(require_api
         req = school_report.SchoolReportReq.model_validate_json(body)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="图片或日期格式无效，请重新选择。") from exc
+    bridge = _school_bridge()
+    # Each reading holds a pool thread and a Gemini subprocess for up to 210 s; retries must not pile up.
+    if not _school_slots.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="亲子桥正在识别上一张，请稍后再试；原图仍保留。")
     try:
-        return await asyncio.to_thread(school_report.recognize, req, llm)
+        work = asyncio.ensure_future(asyncio.to_thread(school_report.recognize, req, bridge))
+    except BaseException:
+        _school_slots.release()
+        raise
+    work.add_done_callback(lambda _: _school_slots.release())
+    # Gemini at high effort takes ~90 s and Cloudflare drops a response with no first byte after 100 s.
+    # Fast outcomes keep their real status; slow ones commit to 200 and send whitespace (still valid
+    # JSON) until the result, with a late failure carried as {"detail", "status"} in the body.
+    if (await asyncio.wait({work}, timeout=_SCHOOL_HEARTBEAT_AFTER))[0]:
+        result, status = _school_outcome(work)
+        if status != 200:
+            raise HTTPException(status_code=status, detail=result)
+        return result
+
+    async def heartbeat():
+        while not (await asyncio.wait({work}, timeout=15))[0]:
+            yield b" "
+        result, status = _school_outcome(work)
+        yield (result.model_dump_json() if status == 200
+               else json.dumps({"detail": result, "status": status}, ensure_ascii=False)).encode()
+    return StreamingResponse(heartbeat(), media_type="application/json")
+
+
+_SCHOOL_HEARTBEAT_AFTER = 20
+_school_slots = BoundedSemaphore(2)
+
+
+def _school_outcome(work: asyncio.Future):
+    """Finished recognition -> (response or error detail, status)."""
+    try:
+        return work.result(), 200
     except school_report.SchoolReportError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return str(exc), 422
     except school_report.SchoolReportUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except LLMError as exc:
-        raise HTTPException(status_code=502, detail="亲子桥识别暂时失败，请稍后重试；原图仍保留。") from exc
+        return str(exc), 503
+    except BrainUnavailable:
+        return "亲子桥识别暂时失败，请稍后重试；原图仍保留。", 502
+    except Exception:  # e.g. Pillow raising on a malformed EXIF block; never a bare 500 or truncated stream
+        logger.exception("school recognition failed")
+        return "亲子桥识别暂时失败，请稍后重试；原图仍保留。", 502
+
 
 class RewriteReq(BaseModel):
     note: str = Field(..., max_length=4000)
@@ -835,12 +880,13 @@ async def intake_upload(
 ):
     """PhotoKit 系统后台直传原始资源；只落隔离目录，按大小与 SHA-256 收口。"""
     store = _intake_components()
+    # SQLite 调用（20 秒忙等）、fsync 与整文件校验都放到线程里：扫描器持锁时不能冻住整个事件循环。
     try:
-        batch = store.batch(batch_id)
+        batch = await asyncio.to_thread(store.batch, batch_id)
         owner = str(batch["owner"])
         if not verify_upload_token(x_bubu_upload_token or "", batch_id, asset_key, owner):
             raise HTTPException(status_code=401, detail="上传凭证无效或已过期。")
-        item = store.item(batch_id, asset_key)
+        item = await asyncio.to_thread(store.item, batch_id, asset_key)
         expected = int(item["expected_size"])
         declared = request.headers.get("content-length")
         if declared and expected > 0 and int(declared) != expected:
@@ -852,7 +898,7 @@ async def intake_upload(
         if shutil.disk_usage(store.root).free < minimum_free:
             raise HTTPException(status_code=507, detail="服务器空间不足，已暂停接收素材。")
         _check_rate("intake-upload:" + owner, 1_000)
-        store.mark_uploading(batch_id, asset_key)
+        await asyncio.to_thread(store.mark_uploading, batch_id, asset_key)
         temp_dir = store.root / "tmp"
         temp_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor, temp_name = tempfile.mkstemp(prefix="upload-", suffix=".part", dir=temp_dir)
@@ -878,9 +924,9 @@ async def intake_upload(
                     digest.update(chunk)
                     handle.write(chunk)
                 handle.flush()
-                os.fsync(handle.fileno())
-            result = store.stage_file(
-                batch_id, asset_key, temporary, digest.hexdigest(), size
+                await asyncio.to_thread(os.fsync, handle.fileno())
+            result = await asyncio.to_thread(
+                store.stage_file, batch_id, asset_key, temporary, digest.hexdigest(), size
             )
             if result["state"] == "staged":
                 try:
@@ -980,11 +1026,14 @@ def classify(req: ClassifyReq):
         data = llm.complete_json(sys, user, max_tokens=800)
     except LLMError as e:
         raise HTTPException(status_code=502, detail=str(e))
+    # 模型输出不可信：类型不对的字段降级，不能变成 500。
+    text = lambda key: data.get(key) if isinstance(data.get(key), str) else None
+    tags = data.get("visual_tags")
     return ClassifyResp(
-        suggested_title=data.get("suggested_title"),
-        event_cluster=data.get("event_cluster"),
-        place_name=data.get("place_name") or req.location_name,
-        visual_tags=data.get("visual_tags") or req.tags,
+        suggested_title=text("suggested_title"),
+        event_cluster=text("event_cluster"),
+        place_name=text("place_name") or req.location_name,
+        visual_tags=[t for t in tags if isinstance(t, str)] if isinstance(tags, list) and tags else req.tags,
     )
 
 
@@ -1003,8 +1052,8 @@ def detect_first_time(req: DetectFirstReq):
         raise HTTPException(status_code=502, detail=str(e))
     return DetectFirstResp(
         is_first=bool(data.get("is_first")),
-        what=data.get("what"),
-        confidence=float(data.get("confidence") or 0.0),
+        what=data.get("what") if isinstance(data.get("what"), str) else None,
+        confidence=_safe_confidence(data.get("confidence")),
     )
 
 

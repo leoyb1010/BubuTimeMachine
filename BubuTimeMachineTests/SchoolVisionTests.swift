@@ -59,17 +59,22 @@ import UIKit
     }
 
     @Test func modelFieldsAreFilledWithoutAReviewGate() throws {
-        let json = #"{"is_school_report":true,"date":"2026-09-24","fields":{"上午点心":"90%；食量佳；速度普通","午睡时间":"12:17–14:30","早上体温":"36.6°C"},"uncertain_fields":["午睡时间"],"model":"deepseek-flash"}"#
+        let json = #"{"is_school_report":true,"date":"2026-09-24","fields":{"上午点心":"90%；食量佳；速度普通","午睡时间":"12:17–14:30","早上体温":"36.6°C"},"uncertain_fields":["午睡时间"],"model":"gemini-3.8-flash"}"#
         let result = try JSONDecoder().decode(SchoolVisionResult.self, from: Data(json.utf8))
         let report = try result.report(sourceHash: "original")
         #expect(report[.morningSnack] == "90%；食量佳；速度普通")
         #expect(report[.temperatureAM] == "36.6°C")
         #expect(report.automaticallyImported == true)
         #expect(!report.confirmed)
-        #expect(report.recognitionModel == "deepseek-flash")
+        #expect(report.recognitionModel == "gemini-3.8-flash")
         #expect(report.reviewNotes?.contains(where: { $0.contains("午睡时间") }) == true)
         #expect(report.dateEvidence == "2026年9月24日")
-        #expect(SchoolDailyReport.from(note: "【幼儿园】\n\n" + report.noteBlock)?.recognitionModel == "deepseek-flash")
+        #expect(SchoolDailyReport.from(note: "【幼儿园】\n\n" + report.noteBlock)?.recognitionModel == "gemini-3.8-flash")
+        // Records read by DeepSeek before 2.31 keep their model line; unknown names are not trusted as cloud readings.
+        var legacy = report; legacy.recognitionModel = "deepseek-flash"
+        #expect(SchoolDailyReport.from(note: "【幼儿园】\n\n" + legacy.noteBlock)?.recognitionModel == "deepseek-flash")
+        var unknown = report; unknown.recognitionModel = "other-model"
+        #expect(SchoolDailyReport.from(note: "【幼儿园】\n\n" + unknown.noteBlock)?.recognitionModel == nil)
     }
 
     @Test func malformedOrInstructionLikeModelOutputCannotCreateAReport() throws {

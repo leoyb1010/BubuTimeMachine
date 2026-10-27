@@ -742,4 +742,5 @@ def verify_upload_token(token: str, batch_id: str, asset_key: str, owner: str) -
         return False
     payload = f"{batch_id}.{asset_key}.{owner}.{expires}"
     expected = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return secrets.compare_digest(provided, expected)
+    # 按字节比较：头里带非 ASCII 字符时 str 版 compare_digest 会抛 TypeError 变成 500。
+    return secrets.compare_digest(provided.encode("utf-8", "surrogateescape"), expected.encode("utf-8"))

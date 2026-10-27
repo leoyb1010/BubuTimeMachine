@@ -7,15 +7,23 @@ import json
 import sys
 from pathlib import Path
 
-import httpx
 import pytest
 from PIL import Image
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
-from llm import LLMClient, LLMError
-from school_report import SchoolReportError, SchoolReportReq, prepare_image, parse_report
+from school_report import FIELD_NAMES, SchoolReportError, SchoolReportReq, prepare_image, parse_report, recognize
+from learning.brain_bridge_runner import validate_request
+
+
+class FakeBridge:
+    def __init__(self, result):
+        self.result, self.calls = result, []
+
+    def complete_json(self, system, user, schema, **kwargs):
+        self.calls.append((system, user, schema, kwargs))
+        return self.result
 
 
 def image_data(fmt="JPEG"):
@@ -61,7 +69,7 @@ def test_report_fields_are_real_independent_values_not_guessed_defaults():
     parsed = parse_report(report())
     assert parsed.fields["上午点心"].startswith("90%")
     assert "中午午餐" not in parsed.fields
-    assert parsed.model == "deepseek-flash"
+    assert parsed.model == "gemini-3.8-flash"
 
 
 @pytest.mark.parametrize("change", [
@@ -81,7 +89,7 @@ def test_untrusted_model_output_rejected(change):
 def test_blank_values_are_omitted_and_unknown_date_stays_null():
     value = report()
     value.update(fields={"精神": "  ", "排便": "没有排便"}, date=None, uncertain_fields=["日期"])
-    assert parse_report(value).model_dump() == dict(is_school_report=True, date=None, fields={"排便": "没有排便"}, uncertain_fields=["日期"], model="deepseek-flash")
+    assert parse_report(value).model_dump() == dict(is_school_report=True, date=None, fields={"排便": "没有排便"}, uncertain_fields=["日期"], model="gemini-3.8-flash")
 
 
 def test_output_byte_limit():
@@ -115,7 +123,7 @@ def scoped_auth(monkeypatch):
     monkeypatch.setenv("SCHOOL_VISION_TOKEN", token)
     monkeypatch.setattr(main, "_API_KEY", "")
     monkeypatch.setattr(main, "_pocketbase_principal", lambda *args: None)
-    monkeypatch.setattr(main.llm, "complete_vision_json", lambda *args, **kwargs: report())
+    monkeypatch.setattr(main, "_school_bridge", lambda: FakeBridge(report()))
     with main._rate_lock:
         main._rate_buckets.clear()
     yield token
@@ -209,7 +217,7 @@ def test_scoped_token_is_subject_to_principal_rate_limit(scoped_auth, monkeypatc
 
 
 def test_endpoint_success_and_no_sensitive_validation_echo(client, monkeypatch):
-    monkeypatch.setattr(main.llm, "complete_vision_json", lambda *args, **kwargs: report())
+    monkeypatch.setattr(main, "_school_bridge", lambda: FakeBridge(report()))
     response = client.post("/school-report/recognize", json=payload())
     assert response.status_code == 200
     assert response.json()["fields"]["上午点心"].startswith("90%")
@@ -224,45 +232,74 @@ def test_endpoint_success_and_no_sensitive_validation_echo(client, monkeypatch):
 def test_endpoint_non_report_is_422(client, monkeypatch):
     value = report()
     value["is_school_report"] = False
-    monkeypatch.setattr(main.llm, "complete_vision_json", lambda *args, **kwargs: value)
+    monkeypatch.setattr(main, "_school_bridge", lambda: FakeBridge(value))
     assert client.post("/school-report/recognize", json=payload()).status_code == 422
 
 
-def test_vision_transport_exact_model_and_privacy(monkeypatch):
-    observed = []
-    def handler(request):
-        observed.append(json.loads(request.content))
-        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(report())}}]})
-    original = httpx.Client
-    def factory(**kwargs):
-        assert kwargs["trust_env"] is False
-        assert kwargs["follow_redirects"] is False
-        return original(transport=httpx.MockTransport(handler), **kwargs)
-    monkeypatch.setattr(httpx, "Client", factory)
-    client = LLMClient()
-    client.api_key = "test-placeholder"
-    client.base_url = "https://untrusted.example"
-    assert client.complete_vision_json("system", "text", image_data())["is_school_report"] is True
-    request = observed[0]
-    assert request["model"] == "deepseek-flash"
-    assert request["thinking"] == {"type": "disabled"}
-    assert request["response_format"] == {"type": "json_object"}
-    assert request["max_tokens"] == 3000
-    assert request["messages"][1]["content"][1]["image_url"]["detail"] == "original"
+def test_recognize_asks_brain_gemini_at_high_effort_with_strict_schema():
+    bridge = FakeBridge(report())
+    assert recognize(SchoolReportReq(**payload()), bridge).model == "gemini-3.8-flash"
+    system, user, schema, kwargs = bridge.calls[0]
+    assert kwargs == {"effort": "high"}
+    assert user[1]["image_url"]["detail"] == "high" and user[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert set(schema["properties"]["fields"]["required"]) == set(FIELD_NAMES)
+    validate_request(system, user, schema)  # what the second-brain runner will accept
 
 
-@pytest.mark.parametrize("status,attempts", [(401, 1), (402, 1), (429, 2), (503, 2)])
-def test_vision_bounded_retry_no_sensitive_error_logs(monkeypatch, caplog, status, attempts):
+class SlowBridge(FakeBridge):
+    def complete_json(self, system, user, schema, **kwargs):
+        import time
+        time.sleep(0.2)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def test_slow_recognition_streams_keepalive_then_result(client, monkeypatch):
+    monkeypatch.setattr(main, "_SCHOOL_HEARTBEAT_AFTER", 0.01)
+    monkeypatch.setattr(main, "_school_bridge", lambda: SlowBridge(report()))
+    response = client.post("/school-report/recognize", json=payload())
+    assert response.status_code == 200
+    assert json.loads(response.content)["fields"]["午睡时间"] == "12:17–14:30"
+
+
+def test_slow_failure_is_carried_in_body_after_status_committed(client, monkeypatch):
+    from learning.brain_bridge import BrainTimeout
+    monkeypatch.setattr(main, "_SCHOOL_HEARTBEAT_AFTER", 0.01)
+    monkeypatch.setattr(main, "_school_bridge", lambda: SlowBridge(BrainTimeout("x")))
+    response = client.post("/school-report/recognize", json=payload())
+    assert response.status_code == 200
+    assert json.loads(response.content) == {"detail": "亲子桥识别暂时失败，请稍后重试；原图仍保留。", "status": 502}
+
+
+def test_unexpected_reader_error_is_502_not_bare_500(client, monkeypatch):
+    monkeypatch.setattr(main, "_school_bridge", lambda: SlowBridge(SyntaxError("bad exif")))
+    assert client.post("/school-report/recognize", json=payload()).status_code == 502
+
+
+def test_busy_reader_refuses_instead_of_piling_up(client, monkeypatch):
+    monkeypatch.setattr(main, "_school_slots", main.BoundedSemaphore(1))
+    main._school_slots.acquire()
+    monkeypatch.setattr(main, "_school_bridge", lambda: FakeBridge(report()))
+    assert client.post("/school-report/recognize", json=payload()).status_code == 503
+
+
+def test_llm_retries_stop_at_the_shared_deadline(monkeypatch):
+    import llm as llm_module
     calls = []
-    def handler(request):
-        assert str(request.url) == "https://api.deepseek.com/chat/completions"
-        calls.append(1)
-        return httpx.Response(status, text="sensitive full image and secret")
-    original = httpx.Client
-    monkeypatch.setattr(httpx, "Client", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
-    client = LLMClient()
-    client.api_key = "test-placeholder"
-    with pytest.raises(LLMError):
-        client.complete_vision_json("s", "u", image_data())
-    assert len(calls) == attempts
-    assert "sensitive full image" not in caplog.text
+    def truncated(self, model, *args):
+        calls.append(model)
+        raise llm_module.LLMError("LLM 输出被截断: model=x max_tokens=1")
+    monkeypatch.setattr(llm_module.LLMClient, "_chat", truncated)
+    monkeypatch.setattr(llm_module, "TOTAL_DEADLINE", 0.0)
+    client = llm_module.LLMClient(); client.api_key = "test-placeholder"
+    with pytest.raises(llm_module.LLMError):
+        client.complete("s", "u")
+    assert len(calls) == 1
+
+
+def test_classify_survives_wrongly_typed_model_output(client, monkeypatch):
+    monkeypatch.setattr(main.llm, "complete_json", lambda *a, **k: {"suggested_title": 5, "visual_tags": "海边"})
+    response = client.post("/classify", json={"tags": ["海"]})
+    assert response.status_code == 200
+    assert response.json()["suggested_title"] is None and response.json()["visual_tags"] == ["海"]

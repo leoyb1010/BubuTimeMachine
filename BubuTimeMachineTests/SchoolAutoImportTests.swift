@@ -37,12 +37,13 @@ import Testing
         var draft = MemoryJournalDraft(id: UUID(), kind: .school, date: originalDate, source: "老师的原话")
         draft.schoolReport = report
         let id = try MemoryJournalWriter.save(draft, files: [], voice: nil, role: .papa, container: container)
-        report[.lunch] = "85%"
+        var corrected = report; corrected[.lunch] = "85%"
         let correctedDate = originalDate.addingTimeInterval(-86_400)
-        try MemoryJournalWriter.updateReport(id: id, date: correctedDate, report: report, container: container)
+        try MemoryJournalWriter.updateReport(id: id, date: correctedDate, report: corrected, container: container, editingBaseline: report)
         var incoming = SchoolDailyReport()
         incoming.candidates = ["精神": "佳", "参与度": "主动", "同伴互动": "佳", "中午午餐": "90%"]
         incoming.recognitionModel = "deepseek-flash"; incoming.adoptRecognizedValues()
+        incoming.dateEvidence = "2026年9月24日"
         try MemoryJournalWriter.updateReport(id: id, date: originalDate, report: incoming, container: container, fillingMissingOnly: true)
         let saved = try #require(try ModelContext(container).fetch(FetchDescriptor<Entry>()).first)
         let result = try #require(SchoolDailyReport.from(note: saved.note))
@@ -51,6 +52,35 @@ import Testing
         #expect(saved.happenedAt == correctedDate)
         #expect(saved.note?.contains("老师的原话") == true)
         #expect(try ModelContext(container).fetchCount(FetchDescriptor<Entry>()) == 1)
+    }
+
+    @Test func cloudReadingReplacesAnUnreviewedOCRMisreadIncludingTheDate() throws {
+        // Real case: sheet says 2026年10月27日, OCR read "1000年10月2日" and a wrong nap end.
+        let schema = SharedModelContainer.schema
+        let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)])
+        let ocrDate = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 2)))
+        var ocr = SchoolDailyReport()
+        ocr.candidates = ["午睡时间": "12:54–44:32", "上午点心": "85%", "早上体温": "33°C"]; ocr.adoptRecognizedValues()
+        var draft = MemoryJournalDraft(id: UUID(), kind: .school, date: ocrDate); draft.schoolReport = ocr
+        let id = try MemoryJournalWriter.save(draft, files: [], voice: nil, role: .papa, container: container)
+        var edit = ocr; edit[.morningSnack] = "80%"
+        try MemoryJournalWriter.updateReport(id: id, date: ocrDate, report: edit, container: container, editingBaseline: ocr)
+        let json = #"{"is_school_report":true,"date":"2026-10-27","fields":{"午睡时间":"12:54–14:30","上午点心":"85%；食量佳；速度普通","早上体温":"36.3°C"},"uncertain_fields":[],"model":"gemini-3.8-flash"}"#
+        let cloud = try JSONDecoder().decode(SchoolVisionResult.self, from: Data(json.utf8)).report(sourceHash: "x")
+        try MemoryJournalWriter.updateReport(id: id, date: ocrDate, report: cloud, container: container, fillingMissingOnly: true)
+        let saved = try #require(try ModelContext(container).fetch(FetchDescriptor<Entry>()).first)
+        let result = try #require(SchoolDailyReport.from(note: saved.note))
+        #expect(result[.nap] == "12:54–14:30")
+        #expect(result[.temperatureAM] == "36.3°C")
+        #expect(result[.morningSnack] == "80%") // the parent's edit survives
+        #expect(Calendar.current.dateComponents([.month, .day], from: saved.happenedAt) == DateComponents(month: 10, day: 27))
+        #expect(result.recognitionModel == "gemini-3.8-flash")
+        // A second cloud reading only fills gaps again.
+        var later = cloud; later[.nap] = "13:00–14:00"; later.dateEvidence = "2026年10月20日"
+        try MemoryJournalWriter.updateReport(id: id, date: saved.happenedAt, report: later, container: container, fillingMissingOnly: true)
+        let again = try #require(try ModelContext(container).fetch(FetchDescriptor<Entry>()).first)
+        #expect(SchoolDailyReport.from(note: again.note)?[.nap] == "12:54–14:30")
+        #expect(Calendar.current.component(.day, from: again.happenedAt) == 27)
     }
 
     @Test func originalDedupNeverDropsAddedTeacherTextOrManualValues() throws {

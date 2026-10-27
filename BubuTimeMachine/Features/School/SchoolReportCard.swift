@@ -23,7 +23,7 @@ struct SchoolReportCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if recognizing { Label("DeepSeek 正在补齐原表…", systemImage: "sparkle.magnifyingglass").font(.caption) }
+            if recognizing { Label("Gemini 正在补齐原表…", systemImage: "sparkle.magnifyingglass").font(.caption) }
             // 同一组面板在宽窄之间只换排列（AnyLayout），开合 / 旋转时面板里的状态不丢。
             let sideBySide = BubuAdaptive.isWide(sizeClass) && !typeSize.isAccessibilitySize
             (sideBySide ? AnyLayout(HStackLayout(alignment: .top, spacing: 12))
@@ -45,7 +45,7 @@ struct SchoolReportCard: View {
                     }.accessibilityLabel("看原表").accessibilityIdentifier("school.saved-original")
                 }
             }.padding(.horizontal, 4)
-            Label(report.automaticallyImported == true && !report.confirmed ? "\(report.recognitionModel == "deepseek-flash" ? "DeepSeek" : "本机")自动记录 · 已填写 \(report.values.count) 项" : "已核对 · 留住她的一天",
+            Label(report.automaticallyImported == true && !report.confirmed ? "\(SchoolVisionResult.cloudName(report.recognitionModel) ?? "本机")自动记录 · 已填写 \(report.values.count) 项" : "已核对 · 留住她的一天",
                   systemImage: report.automaticallyImported == true && !report.confirmed ? "doc.text.viewfinder" : "checkmark.seal")
                 .font(.caption2).foregroundStyle(env.theme.theme.textAccent).padding(.horizontal, 4)
                 .accessibilityIdentifier("school.record-status")
@@ -98,7 +98,7 @@ struct SchoolReportCard: View {
         }
         .task {
             if !attemptedAutomaticRepair, report.automaticallyImported == true,
-               report.recognitionModel != "deepseek-flash", original != nil, env.schoolVisionService() != nil {
+               SchoolVisionResult.cloudName(report.recognitionModel) == nil, original != nil, env.schoolVisionService() != nil {
                 attemptedAutomaticRepair = true
                 await recognizeOriginal()
             }
@@ -108,7 +108,7 @@ struct SchoolReportCard: View {
     private func recognizeOriginal() async {
         guard !recognizing else { return }
         guard let service = env.schoolVisionService() else {
-            recognitionMessage = "DeepSeek 尚未连接，原图和现有记录均保留。请开启亲子桥识别并检查连接配置。"
+            recognitionMessage = "亲子桥识别尚未连接，原图和现有记录均保留。请开启亲子桥识别并检查连接配置。"
             return
         }
         guard let original, let name = original.localFileName else {

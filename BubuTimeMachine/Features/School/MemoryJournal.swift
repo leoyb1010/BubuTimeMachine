@@ -176,16 +176,9 @@ enum MemoryJournalWriter {
             for media in matches where media.aiTags.contains("亲子桥原表") {
                 if let existing = media.entry, MemoryJournalKind.school.contains(existing.note) {
                     if existing.isArchived { throw JournalDraftError.reportArchived }
-                    if let incoming = draft.schoolReport, incoming.recognitionModel == "deepseek-flash",
-                       var previous = SchoolDailyReport.from(note: existing.note) {
-                        let originalValues = previous.values
-                        previous.candidates = incoming.values
-                        previous.adoptRecognizedValues() // Fill missing pieces only; never overwrite a parent's correction.
-                        if previous.values != originalValues {
-                            previous.recognitionModel = incoming.recognitionModel
-                            previous.reviewNotes = incoming.reviewNotes
-                            try updateReport(id: existing.id, date: existing.happenedAt, report: previous, container: container)
-                        }
+                    if let incoming = draft.schoolReport, SchoolVisionResult.cloudName(incoming.recognitionModel) != nil {
+                        try updateReport(id: existing.id, date: existing.happenedAt, report: incoming,
+                                         container: container, fillingMissingOnly: true)
                     }
                     return existing.id
                 }
@@ -227,8 +220,11 @@ enum MemoryJournalWriter {
             throw CocoaError(.fileReadNoSuchFile)
         }
         var corrected = report
+        var cloudDate: Date?
         if fillingMissingOnly, var latest = SchoolDailyReport.from(note: oldNote) {
-            latest.mergeMissing(from: report)
+            if latest.mergeMissing(from: report), latest.manuallyEditedFields?.contains(SchoolDailyReport.dateEditMarker) != true {
+                cloudDate = SchoolReportReading.date(from: report.dateEvidence, relativeTo: .now)?.date
+            }
             corrected = latest
         } else if let editingBaseline, var latest = SchoolDailyReport.from(note: oldNote) {
             var changed = Set(latest.manuallyEditedFields ?? [])
@@ -236,6 +232,7 @@ enum MemoryJournalWriter {
                 latest[field] = report[field]
                 changed.insert(field.rawValue)
             }
+            if date != entry.happenedAt { changed.insert(SchoolDailyReport.dateEditMarker) }
             latest.manuallyEditedFields = changed.sorted()
             latest.confirmed = report.confirmed
             corrected = latest
@@ -250,8 +247,10 @@ enum MemoryJournalWriter {
         }
         let replacement = oldNote.replacingCharacters(in: begin.lowerBound..<end.upperBound, with: corrected.noteBlock)
         guard replacement.utf8.count <= 100_000 else { throw JournalDraftError.tooMuchText }
+        let newDate = fillingMissingOnly ? cloudDate ?? entry.happenedAt : date
+        if fillingMissingOnly, replacement == oldNote, newDate == entry.happenedAt { return }
         entry.note = replacement
-        if !fillingMissingOnly { entry.happenedAt = date }
+        entry.happenedAt = newDate
         entry.editedAt = .now
         entry.syncState = .local
         do { try context.save() } catch { context.rollback(); throw error }

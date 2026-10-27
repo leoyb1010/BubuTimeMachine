@@ -101,6 +101,22 @@ struct CapsuleRemoteMergeTests {
         #expect(try reopened.fetch(FetchDescriptor<TimeCapsule>()).first?.encryptedBlobFileName == name)
     }
 
+    @Test("密文还没上传的胶囊只跳过这一条，不抛错卡住整批")
+    func missingBlobURLSkipsWithoutThrowing() async throws {
+        let fixture = try Fixture(); defer { fixture.clean() }
+        var remote = dto(id: UUID())
+        remote.encryptedBlobRemoteURL = nil
+        var downloads = 0
+        let merged = try await CapsuleRemoteMerge.merge(remote, in: fixture.context, directory: fixture.root,
+            resolveFile: { fixture.root.appendingPathComponent($0) }, isCurrent: { true }) { _ in
+            downloads += 1
+            return try fixture.temporary(Data())
+        }
+        #expect(!merged)
+        #expect(downloads == 0)
+        #expect(try fixture.context.fetchCount(FetchDescriptor<TimeCapsule>()) == 0)
+    }
+
     @Test("下载失败不推进游标，重新打开上下文后相同窗口可以补拉")
     func failedDownloadCanRetryAfterReopeningStore() async throws {
         let fixture = try Fixture(); defer { fixture.clean() }

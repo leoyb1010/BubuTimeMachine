@@ -74,8 +74,8 @@ struct AdvancedSettingsView: View {
                 Text("开启后，记录文字经家里的服务器交给 DeepSeek 写日记、旁白和周报；此开关不发送照片或语音。")
                     .font(BubuTheme.Font.caption)
                     .foregroundStyle(BubuTheme.Color.secondaryText)
-                Toggle("用 DeepSeek 自动读亲子桥", isOn: $config.schoolVisionEnabled)
-                Text("开启后，仅你主动导入的亲子桥图片经家里服务器发给 DeepSeek 多模态模型，自动填写并记录。老师照片、视频不会因此发给模型；关闭后只在本机识别。密钥由家里服务器保管。")
+                Toggle("用 Gemini 自动读亲子桥", isOn: $config.schoolVisionEnabled)
+                Text("开启后，仅你主动导入的亲子桥图片经家里服务器交给第二大脑的 Gemini 多模态模型（最高推理强度），自动填写并记录。老师照片、视频不会因此发给模型；关闭后只在本机识别。密钥由家里服务器保管。")
                     .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
                 if config.aiEnabled {
                     Toggle("搜索照片里的画面", isOn: $config.semanticSearchEnabled)
@@ -98,7 +98,7 @@ struct AdvancedSettingsView: View {
             } footer: {
                 Text(config.aiEnabled && !config.aiBaseURLString.isEmpty && config.aiBaseURL == nil
                      ? "为保护家庭服务器登录态，AI 地址必须是内置可信地址、与家庭服务器同源的 HTTPS 地址，或 Debug 本机回环地址。"
-                     : "各项 AI 授权分别控制：文字写作、亲子桥图片识别和照片搜索互不代开。App 复用家庭服务器登录态，不保存 DeepSeek 密钥。")
+                     : "各项 AI 授权分别控制：文字写作、亲子桥图片识别和照片搜索互不代开。App 复用家庭服务器登录态，不保存任何模型密钥。")
             }
 
             // 横屏整体回退开关：只对 iPhone 有意义（iPad、宽窗口一直跟随系统方向）。

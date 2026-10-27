@@ -10,9 +10,14 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import httpx
+
+
+TOTAL_DEADLINE = 85.0   # 秒，含重试与兜底
+MIN_ATTEMPT = 20.0      # 剩余不足时不再发起新一次调用
 
 
 class LLMError(Exception):
@@ -41,17 +46,21 @@ class LLMClient:
         # 只对瞬时错误兜底。401/402/403 等配置、鉴权、额度问题必须保留真实错误，
         # 否则排障时会被“首选与兜底模型均调用失败”抹平。
         errors: list[str] = []
+        # 调用方经 Cloudflare 隧道，源站 100 秒内不回首字节就 524：重试与兜底共用一个总时限。
+        deadline = time.monotonic() + TOTAL_DEADLINE
         for model in (self.model, self.fallback_model):
             budget = max_tokens
+            if errors and deadline - time.monotonic() < MIN_ATTEMPT:
+                break
             try:
-                return self._chat(model, system, user, budget, temperature)
+                return self._chat(model, system, user, budget, temperature, deadline)
             except LLMError as exc:
                 message = str(exc)
-                if message.startswith("LLM 输出被截断"):
+                if message.startswith("LLM 输出被截断") and deadline - time.monotonic() >= MIN_ATTEMPT:
                     # 推理模型的思考会吃掉预算：先给同一模型加倍预算再试一次，再考虑换模型。
                     budget = min(max_tokens * 2, 4000)
                     try:
-                        return self._chat(model, system, user, budget, temperature)
+                        return self._chat(model, system, user, budget, temperature, deadline)
                     except LLMError as retry_exc:
                         message = str(retry_exc)
                 errors.append(f"{model}: {message}")
@@ -65,56 +74,8 @@ class LLMClient:
         # 模型偶尔回一个数组/字符串；调用方全部按 dict 取字段，这里统一收口避免 500。
         return data if isinstance(data, dict) else {}
 
-    def complete_vision_json(self, system: str, user: str, image_base64: str) -> dict[str, Any]:
-        """Explicit opt-in school image recognition; never fall back to a text model."""
-        if not self.is_configured:
-            raise LLMError("未配置 DEEPSEEK_API_KEY")
-        payload = {
-            "model": "deepseek-flash", "thinking": {"type": "disabled"},
-            "response_format": {"type": "json_object"}, "max_tokens": 3000,
-            "temperature": 0.1, "stream": False,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": [
-                    {"type": "text", "text": user},
-                    {"type": "image_url", "image_url": {
-                        "url": "data:image/jpeg;base64," + image_base64, "detail": "original",
-                    }},
-                ]},
-            ],
-        }
-        # Fixed official host: a text-only proxy/base URL must not silently receive child photos.
-        for attempt in range(2):
-            try:
-                with httpx.Client(timeout=min(self.timeout, 90), trust_env=False, follow_redirects=False) as client:
-                    response = client.post("https://api.deepseek.com/chat/completions", json=payload,
-                                           headers={"Authorization": "Bearer " + self.api_key})
-            except httpx.HTTPError as exc:
-                if attempt == 0:
-                    continue
-                raise LLMError("视觉识别网络错误，请稍后重试。") from exc
-            if response.status_code != 200:
-                # No upstream bodies, credentials, image bytes, or model text in logs/errors.
-                if attempt == 0 and (response.status_code == 429 or response.status_code >= 500):
-                    continue
-                raise LLMError(f"LLM {response.status_code}: 视觉识别服务暂时不可用")
-            try:
-                if len(response.content) > 128 * 1024:
-                    raise ValueError()
-                choice = response.json()["choices"][0]
-                content = choice["message"]["content"]
-                if choice.get("finish_reason") != "stop" or not isinstance(content, str) or len(content.encode("utf-8")) > 32 * 1024:
-                    raise ValueError()
-                result = json.loads(content)
-                if not isinstance(result, dict):
-                    raise ValueError()
-                return result
-            except (KeyError, IndexError, TypeError, ValueError) as exc:
-                raise LLMError("视觉识别结果不完整，请重试。") from exc
-        raise LLMError("视觉识别服务暂时不可用。")
-
     def _chat(self, model: str, system: str, user: str,
-              max_tokens: int, temperature: float) -> str:
+              max_tokens: int, temperature: float, deadline: float) -> str:
         url = f"{self.base_url}/chat/completions"
         payload = {
             "model": model,
@@ -130,7 +91,8 @@ class LLMClient:
                    "Content-Type": "application/json"}
         try:
             # 家庭证据只发往显式配置的模型端点，不能被 shell/launchd 的代理环境改道。
-            with httpx.Client(timeout=self.timeout, trust_env=False) as client:
+            remaining = max(1.0, min(self.timeout, deadline - time.monotonic()))
+            with httpx.Client(timeout=remaining, trust_env=False) as client:
                 resp = client.post(url, json=payload, headers=headers)
         except httpx.HTTPError as e:
             raise LLMError(f"网络错误：{e}") from e

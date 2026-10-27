@@ -56,7 +56,7 @@ actor ThumbnailProvider {
     /// 取一张缩略图：内存命中 → 落盘缩略图 → 原图降采样（并补齐落盘）。
     func image(mediaId: UUID, thumbnailFileName: String?, localFileName: String?,
                isPhoto: Bool, size: SizeClass) async -> UIImage? {
-        let key = cacheKey(mediaId: mediaId, size: size)
+        let key = cacheKey(mediaId: mediaId, thumbnailFileName: thumbnailFileName, localFileName: localFileName, size: size)
         if let cached = cache.object(forKey: key as NSString) { return cached }
 
         if let running = inFlight[key] { return await running.value }
@@ -67,7 +67,12 @@ actor ThumbnailProvider {
         let thumbURL = thumbnailFileName.map { store.thumbnailURL(for: $0) }
         let mediaURL = localFileName.map { store.mediaURL(for: $0) }
 
+        // 落盘缩略图只有 600px：详情/相框档位有原图就先用原图，否则大图永远是糊的预览。
+        let preferOriginal = maxPixel > 900
         let task = Task<UIImage?, Never>.detached(priority: .userInitiated) {
+            if preferOriginal, let mediaURL, let img = Self.downsample(url: mediaURL, maxPixel: maxPixel) {
+                return img.preparingForDisplay() ?? img
+            }
             // 1) 已有落盘缩略图：降采样解码（缩略图本身已小，这步几乎零成本）。
             if let thumbURL, let img = Self.downsample(url: thumbURL, maxPixel: maxPixel) {
                 return img.preparingForDisplay() ?? img
@@ -100,7 +105,8 @@ actor ThumbnailProvider {
 
     func prefetch(_ refs: [Ref], size: SizeClass) {
         for r in refs {
-            let key = cacheKey(mediaId: r.mediaId, size: size)
+            let key = cacheKey(mediaId: r.mediaId, thumbnailFileName: r.thumbnailFileName,
+                               localFileName: r.localFileName, size: size)
             guard cache.object(forKey: key as NSString) == nil, inFlight[key] == nil else { continue }
             Task {
                 _ = await image(mediaId: r.mediaId, thumbnailFileName: r.thumbnailFileName,
@@ -131,8 +137,9 @@ actor ThumbnailProvider {
 
     // MARK: 工具
 
-    private func cacheKey(mediaId: UUID, size: SizeClass) -> String {
-        "\(mediaId.uuidString)|\(size.rawValue)"
+    /// 文件名进 key：同步先落 600px 预览、原图后到时换 key，不再一直命中旧的小图。
+    private func cacheKey(mediaId: UUID, thumbnailFileName: String?, localFileName: String?, size: SizeClass) -> String {
+        "\(mediaId.uuidString)|\(size.rawValue)|\(thumbnailFileName ?? "")|\(localFileName ?? "")"
     }
 
     private func estimatedCost(_ image: UIImage) -> Int {

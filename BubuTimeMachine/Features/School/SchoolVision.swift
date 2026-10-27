@@ -29,9 +29,18 @@ nonisolated struct SchoolVisionResult: Decodable, Sendable {
         case isSchoolReport = "is_school_report", uncertainFields = "uncertain_fields"
         case date, fields, model
     }
+    /// Server-side readers whose output counts as a full cloud reading. "deepseek-flash" stays
+    /// valid for records read before 2.31, when 亲子桥 moved to the second brain's Gemini.
+    static func cloudName(_ model: String?) -> String? {
+        switch model {
+        case "gemini-3.8-flash": "Gemini"
+        case "deepseek-flash": "DeepSeek"
+        default: nil
+        }
+    }
     func report(sourceHash: String) throws -> SchoolDailyReport {
         let allowed = Set(SchoolReportField.allCases.map(\.rawValue))
-        guard isSchoolReport, model == "deepseek-flash", fields.count <= allowed.count,
+        guard isSchoolReport, Self.cloudName(model) != nil, fields.count <= allowed.count,
               uncertainFields.count <= allowed.count + 1,
               uncertainFields.allSatisfy({ allowed.contains($0) || $0 == "日期" }),
               fields.allSatisfy({ allowed.contains($0.key) && $0.value.count <= 1000 && !$0.value.contains("【亲子桥") }) else {
@@ -100,9 +109,20 @@ nonisolated enum SchoolVisionSetup {
 
 extension SchoolDailyReport {
     /// Recognition may fill gaps, never erase a parent's correction or another section.
-    nonisolated mutating func mergeMissing(from incoming: SchoolDailyReport) {
+    /// Exception: in an unreviewed on-device OCR reading, cells the cloud read are overwritten (except
+    /// fields a parent edited), since OCR misreads would otherwise win forever. Returns whether that happened,
+    /// so the caller can also take the cloud-read date.
+    @discardableResult
+    nonisolated mutating func mergeMissing(from incoming: SchoolDailyReport) -> Bool {
         let wasConfirmed = confirmed
         let priorValues = values
+        let replacesOCR = !confirmed && SchoolVisionResult.cloudName(recognitionModel) == nil
+            && SchoolVisionResult.cloudName(incoming.recognitionModel) != nil
+        if replacesOCR {
+            // Cloud wins where it read something; a cell it left blank keeps the OCR value.
+            let kept = Set(manuallyEditedFields ?? [])
+            values = values.filter { kept.contains($0.key) || incoming.values[$0.key]?.isEmpty != false }
+        }
         candidates = incoming.values
         adoptRecognizedValues()
         recognitionModel = incoming.recognitionModel
@@ -110,5 +130,6 @@ extension SchoolDailyReport {
         if sourceHash == nil { sourceHash = incoming.sourceHash }
         if dateEvidence.isEmpty { dateEvidence = incoming.dateEvidence }
         confirmed = wasConfirmed && values == priorValues
+        return replacesOCR
     }
 }

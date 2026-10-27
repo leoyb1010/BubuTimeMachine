@@ -29,7 +29,7 @@ nonisolated struct SSDIntakeCandidate: Decodable, Identifiable, Sendable {
 }
 
 // MARK: - BubuAIService（AIService 真实实现）
-/// 调用自托管 FastAPI（背后接 DeepSeek）。亲子桥图片仅在独立授权开关开启且用户选图时发送。
+/// 调用自托管 FastAPI（文字接 DeepSeek，亲子桥图片接第二大脑 Gemini）。亲子桥图片仅在独立授权开关开启且用户选图时发送。
 /// 任意一步失败都抛错，UI 层各视图自行降级（保留 Mock 体验或提示稍后再试）。
 final class BubuAIService: AIService, @unchecked Sendable {
 
@@ -435,6 +435,11 @@ final class BubuAIService: AIService, @unchecked Sendable {
         let (data, response) = try await connection.data(for: req)
         try Self.check(response, data)
         guard data.count <= 32 * 1024 else { throw SchoolVisionError.invalidResponse }
+        // A slow reading is streamed as 200 behind keep-alive spaces, so a late failure arrives in the body.
+        struct LateFailure: Decodable { let detail: String; let status: Int }
+        if let failure = try? JSONDecoder().decode(LateFailure.self, from: data) {
+            throw APIError.server(failure.status, failure.detail)
+        }
         return try JSONDecoder().decode(SchoolVisionResult.self, from: data)
     }
 

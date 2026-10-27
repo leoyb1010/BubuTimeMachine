@@ -66,6 +66,9 @@ final class SyncEngine {
     private var changedThisRun = false
     /// 媒体缺文件全表扫描的脏标记：没有新媒体、上次也没缺文件时跳过每轮 2000+ 次 stat（D4-04）。
     private var downloadScanNeeded = true
+    /// 服务端 404 的文件地址：永久缺失，本次进程内不再重试、不算软失败（否则 10 个坏文件堵死所有下载、每轮报失败）。
+    /// ponytail: 只存内存，重启后重试一次；重新上传会换文件名 = 新地址，自然解除。
+    private var missingRemoteFiles = Set<String>()
     private var lastFullDownloadScanAt = Date.distantPast
     private static let downloadScanSafetyInterval: TimeInterval = 30 * 60
     /// 最近一次排期的时刻：冷启动 bootstrap 和 scene .active 各调一次 start()，不能连跑两轮。
@@ -921,7 +924,7 @@ final class SyncEngine {
                 item.remoteId = saved.id; item.syncState = Self.uploadCompletionState(item.syncState)
                 finishPushBookkeeping("milestones", itemId, state: item.syncState)
             }
-            catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; notePushFailure(error, collection: "milestones", id: itemId, label: "里程碑", item: "里程碑") }
+            catch { guard isCurrentRun else { return }; if let current = try? context.fetch(FetchDescriptor<Milestone>(predicate: #Predicate { $0.id == itemId })).first, current.syncState == .uploading { current.syncState = .failed }; notePushFailure(error, collection: "milestones", id: itemId, label: "里程碑", item: "里程碑") }
             finishItem()
             saveAndRefresh(context)
         }
@@ -951,7 +954,7 @@ final class SyncEngine {
                 item.remoteId = saved.id; item.syncState = Self.uploadCompletionState(item.syncState)
                 finishPushBookkeeping("firsttimes", itemId, state: item.syncState)
             }
-            catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; notePushFailure(error, collection: "firsttimes", id: itemId, label: "人生第一次", item: "第一次") }
+            catch { guard isCurrentRun else { return }; if let current = try? context.fetch(FetchDescriptor<FirstTime>(predicate: #Predicate { $0.id == itemId })).first, current.syncState == .uploading { current.syncState = .failed }; notePushFailure(error, collection: "firsttimes", id: itemId, label: "人生第一次", item: "第一次") }
             finishItem()
             saveAndRefresh(context)
         }
@@ -981,7 +984,7 @@ final class SyncEngine {
                 item.remoteId = saved.id; item.syncState = Self.uploadCompletionState(item.syncState)
                 finishPushBookkeeping("members", itemId, state: item.syncState)
             }
-            catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; notePushFailure(error, collection: "members", id: itemId, label: "家庭成员", item: "家庭成员") }
+            catch { guard isCurrentRun else { return }; if let current = try? context.fetch(FetchDescriptor<FamilyMember>(predicate: #Predicate { $0.id == itemId })).first, current.syncState == .uploading { current.syncState = .failed }; notePushFailure(error, collection: "members", id: itemId, label: "家庭成员", item: "家庭成员") }
             finishItem()
             saveAndRefresh(context)
         }
@@ -1015,6 +1018,12 @@ final class SyncEngine {
                             apiClient.uploadChildAvatar(profileLocalId: item.id, fileURL: url, fileName: fileName),
                             onProgress: { self.currentUploadProgress = $0 })
                         try checkRunValidity()
+                        // 上传期间档案可能被删：重新确认仍在，再碰模型。
+                        if try preserveDeletedUploadReceipt(saved.id, collection: "childprofile", requestScope: requestScope,
+                            descriptor: FetchDescriptor<ChildProfile>(predicate: #Predicate { $0.id == profileId }), in: context) {
+                            finishItem()
+                            continue
+                        }
                         if item.avatarMediaFileName == fileName { item.avatarRemoteURL = receipt.remoteURL }
                     }
                 }
@@ -1060,7 +1069,7 @@ final class SyncEngine {
                 item.syncState = Self.uploadCompletionState(item.syncState)
                 finishPushBookkeeping("healthrecords", itemId, state: item.syncState)
             }
-            catch { guard isCurrentRun else { return }; if item.syncState == .uploading { item.syncState = .failed }; notePushFailure(error, collection: "healthrecords", id: itemId, label: "健康记录", item: "健康记录") }
+            catch { guard isCurrentRun else { return }; if let current = try? context.fetch(FetchDescriptor<HealthRecord>(predicate: #Predicate { $0.id == itemId })).first, current.syncState == .uploading { current.syncState = .failed }; notePushFailure(error, collection: "healthrecords", id: itemId, label: "健康记录", item: "健康记录") }
             finishItem()
             saveAndRefresh(context)
         }
@@ -1096,7 +1105,10 @@ final class SyncEngine {
                 finishPushBookkeeping("vaccinerecords", vaccineId, state: item.syncState)
             } catch {
                 guard isCurrentRun else { return }
-                if Self.isMissingOptionalServerCollection(error, item: "疫苗记录") {
+                // 网络等待期间记录可能被删：只用重新取到的模型。
+                let vaccineDescriptor = FetchDescriptor<VaccineRecord>(predicate: #Predicate { $0.id == vaccineId })
+                if Self.isMissingOptionalServerCollection(error, item: "疫苗记录"),
+                   let item = try? context.fetch(vaccineDescriptor).first {
                     do {
                         let saved = try await apiClient.upsertHealthRecord(Self.makeHealthFallbackDTO(item))
                         if try preserveDeletedUploadReceipt(saved.id, collection: "healthrecords", requestScope: requestScope,
@@ -1110,11 +1122,11 @@ final class SyncEngine {
                         item.syncState = Self.uploadCompletionState(item.syncState)
                     } catch {
                         guard isCurrentRun else { return }
-                        if item.syncState == .uploading { item.syncState = .failed }
+                        if let current = try? context.fetch(vaccineDescriptor).first, current.syncState == .uploading { current.syncState = .failed }
                         notePushFailure(error, collection: "vaccinerecords", id: vaccineId, label: "疫苗记录", item: "疫苗记录")
                     }
                 } else {
-                    if item.syncState == .uploading { item.syncState = .failed }
+                    if let current = try? context.fetch(vaccineDescriptor).first, current.syncState == .uploading { current.syncState = .failed }
                     notePushFailure(error, collection: "vaccinerecords", id: vaccineId, label: "疫苗记录", item: "疫苗记录")
                 }
             }
@@ -1152,7 +1164,10 @@ final class SyncEngine {
                 finishPushBookkeeping("growthmeasurements", growthId, state: item.syncState)
             } catch {
                 guard isCurrentRun else { return }
-                if Self.isMissingOptionalServerCollection(error, item: "成长测量") {
+                // 网络等待期间记录可能被删：只用重新取到的模型。
+                let growthDescriptor = FetchDescriptor<GrowthMeasurement>(predicate: #Predicate { $0.id == growthId })
+                if Self.isMissingOptionalServerCollection(error, item: "成长测量"),
+                   let item = try? context.fetch(growthDescriptor).first {
                     do {
                         let saved = try await apiClient.upsertHealthRecord(Self.makeHealthFallbackDTO(item))
                         if try preserveDeletedUploadReceipt(saved.id, collection: "healthrecords", requestScope: requestScope,
@@ -1166,11 +1181,11 @@ final class SyncEngine {
                         item.syncState = Self.uploadCompletionState(item.syncState)
                     } catch {
                         guard isCurrentRun else { return }
-                        if item.syncState == .uploading { item.syncState = .failed }
+                        if let current = try? context.fetch(growthDescriptor).first, current.syncState == .uploading { current.syncState = .failed }
                         notePushFailure(error, collection: "growthmeasurements", id: growthId, label: "成长测量", item: "成长测量")
                     }
                 } else {
-                    if item.syncState == .uploading { item.syncState = .failed }
+                    if let current = try? context.fetch(growthDescriptor).first, current.syncState == .uploading { current.syncState = .failed }
                     notePushFailure(error, collection: "growthmeasurements", id: growthId, label: "成长测量", item: "成长测量")
                 }
             }
@@ -1617,17 +1632,17 @@ final class SyncEngine {
                                                            createOnly: version.createOnly)
                 if !(keptRemote && saved.encryptedBlobRemoteURL != nil), let fileName = capsule.encryptedBlobFileName {
                     let url = mediaStore.mediaURL(for: fileName)
-                    if FileManager.default.fileExists(atPath: url.path) {
-                        let receipt = try await Self.consumeUpload(apiClient.uploadTimeCapsuleBlob(
-                            capsuleId: capsule.id,
-                            dto: dto,
-                            fileURL: url,
-                            fileName: fileName
-                        ), onProgress: { self.currentUploadProgress = $0 })
-                        try checkRunValidity()
-                        saved.id = receipt.remoteId
-                        saved.encryptedBlobRemoteURL = receipt.remoteURL
-                    }
+                    // 密文丢了不能标 synced：否则服务端只剩一条没有文件的胶囊记录（永久失败，进同步中心）。
+                    guard FileManager.default.fileExists(atPath: url.path) else { throw APIError.network("本地文件不见了") }
+                    let receipt = try await Self.consumeUpload(apiClient.uploadTimeCapsuleBlob(
+                        capsuleId: capsule.id,
+                        dto: dto,
+                        fileURL: url,
+                        fileName: fileName
+                    ), onProgress: { self.currentUploadProgress = $0 })
+                    try checkRunValidity()
+                    saved.id = receipt.remoteId
+                    saved.encryptedBlobRemoteURL = receipt.remoteURL
                 }
                 guard try context.fetchCount(FetchDescriptor<TimeCapsule>(predicate: #Predicate { $0.id == capsuleId })) > 0 else {
                     PendingDeletion.enqueue(collection: "timecapsules", remoteId: saved.id, in: context)
@@ -1802,6 +1817,9 @@ final class SyncEngine {
         // 无 context 时不推进（没落库不能推进游标）；本轮无任何新记录/墓碑则游标保持不动（下轮空查询极廉价）。
         // 落盘失败时绝不把增量游标写到 UserDefaults，否则重启后会永久越过未保存记录。
         guard let context = modelContext else { return }
+        // 各 mergeRemote* 不再逐条 save（每次 save 都触发时光轴 @Query 重建，首轮 2000 条会卡死主线程）：
+        // 同一主上下文里 fetch 默认含未保存改动，整集合在这里随游标一次落盘（失败不推进游标，下轮幂等重拉）。
+        if context.hasChanges { changedThisRun = true }
         do {
             if let maxUpdated, !holdCursorForCurrentPull {
                 try SyncCheckpoint.commit(key: checkpointKey(for: collection), generation: checkpointGeneration,
@@ -2060,6 +2078,18 @@ final class SyncEngine {
         let fileName: String?
         let thumbName: String?
         let assignAsThumbnailOnly: Bool
+        /// 下载失败且服务端 404 时记下地址（永久缺失）。
+        var missingURL: String? = nil
+    }
+
+    nonisolated static func isMissingRemoteFile(_ error: Error) -> Bool {
+        if case APIError.server(404, _) = error { return true }
+        return false
+    }
+
+    /// 补文件失败：404 记入永久缺失跳过名单，其余算瞬时软失败。
+    private func noteDownloadFailure(_ error: Error, remoteURL: String) {
+        if Self.isMissingRemoteFile(error) { missingRemoteFiles.insert(remoteURL) } else { softFailureThisRun = true }
     }
 
     /// 下载 + 落盘 + 缩略图生成，全程在非主执行器上跑（MediaStore 是 Sendable struct）。
@@ -2088,7 +2118,8 @@ final class SyncEngine {
                                    assignAsThumbnailOnly: spec.assignAsThumbnailOnly)
         } catch {
             return DownloadOutcome(snapshot: spec.snapshot, fileName: nil, thumbName: nil,
-                                   assignAsThumbnailOnly: spec.assignAsThumbnailOnly)
+                                   assignAsThumbnailOnly: spec.assignAsThumbnailOnly,
+                                   missingURL: isMissingRemoteFile(error) ? spec.remoteURL : nil)
         }
     }
 
@@ -2122,6 +2153,7 @@ final class SyncEngine {
     private func runDownloadBatch(_ specs: [DownloadSpec],
                                   context: ModelContext, concurrency: Int,
                                   deadline: Date, label: String) async {
+        let specs = specs.filter { !missingRemoteFiles.contains($0.remoteURL) }
         guard !specs.isEmpty else { return }
         let api = apiClient
         let store = mediaStore
@@ -2142,8 +2174,8 @@ final class SyncEngine {
                         done += 1
                         saveAndRefresh(context)
                     } else if outcome.fileName == nil, isCurrentRun {
-                        // 下载失败属瞬时、可自愈；过时或已删除记录的成功结果已清理，不重建模型。
-                        softFailureThisRun = true
+                        // 下载失败属瞬时、可自愈（404 除外：记入跳过名单）；过时或已删除记录的成功结果已清理，不重建模型。
+                        if let missing = outcome.missingURL { missingRemoteFiles.insert(missing) } else { softFailureThisRun = true }
                     }
                 } catch {
                     recordFailure(error, item: "保存下载")
@@ -2186,8 +2218,9 @@ final class SyncEngine {
         // 全表扫描（2000+ 行 × stat）只在有新媒体合并进来、上次没下完或 30 分钟兜底时做（D4-04）。
         let scanDue = downloadScanNeeded ||
             Date.now.timeIntervalSince(lastFullDownloadScanAt) > Self.downloadScanSafetyInterval
+        // ponytail: 404 跳过名单在取上限之后过滤；坏文件超过 500 个才会挤占，届时再下推到查询里。
         let pendingMedia = scanDue ? ((try? Self.mediaNeedingDownload(in: context, limit: Self.downloadCountCap,
-            fileExists: mediaStore.fileExists(forMedia:))) ?? []) : []
+            fileExists: mediaStore.fileExists(forMedia:))) ?? []).filter { !missingRemoteFiles.contains($0.remoteURL ?? "") } : []
         if scanDue {
             lastFullDownloadScanAt = .now
             // 这一轮全部下完会在下一轮复扫确认；扫到 0 个才放下标记。
@@ -2257,7 +2290,7 @@ final class SyncEngine {
 
         let notes = (try? context.fetch(FetchDescriptor<VoiceNote>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
-        for note in notes.prefix(10) {
+        for note in notes.filter({ !missingRemoteFiles.contains($0.remoteURL ?? "") }).prefix(10) {
             guard isCurrentRun, Date() < deadline else { return }
             guard let remoteURL = note.remoteURL else { continue }
             currentSyncLabel = "下载语音"
@@ -2272,14 +2305,14 @@ final class SyncEngine {
                         self.isCurrentRun && $0.remoteId == remoteId && $0.remoteURL == remoteURL && $0.syncState == state
                     })
             } catch {
-                softFailureThisRun = true
+                noteDownloadFailure(error, remoteURL: remoteURL)
             }
             saveAndRefresh(context)
         }
 
         let comments = (try? context.fetch(FetchDescriptor<Comment>(
             predicate: #Predicate { $0.voiceFileName == nil && $0.remoteURL != nil }))) ?? []
-        for comment in comments.prefix(10) {
+        for comment in comments.filter({ !missingRemoteFiles.contains($0.remoteURL ?? "") }).prefix(10) {
             guard isCurrentRun, Date() < deadline else { return }
             guard let remoteURL = comment.remoteURL else { continue }
             currentSyncLabel = "下载家人语音"
@@ -2294,14 +2327,14 @@ final class SyncEngine {
                         self.isCurrentRun && $0.remoteId == remoteId && $0.remoteURL == remoteURL && $0.syncState == state
                     })
             } catch {
-                softFailureThisRun = true
+                noteDownloadFailure(error, remoteURL: remoteURL)
             }
             saveAndRefresh(context)
         }
 
         let memos = (try? context.fetch(FetchDescriptor<VoiceMemo>(
             predicate: #Predicate { $0.localFileName == nil && $0.remoteURL != nil }))) ?? []
-        for memo in memos.prefix(10) {
+        for memo in memos.filter({ !missingRemoteFiles.contains($0.remoteURL ?? "") }).prefix(10) {
             guard isCurrentRun, Date() < deadline else { return }
             guard let remoteURL = memo.remoteURL else { continue }
             currentSyncLabel = "下载成长之声"
@@ -2316,14 +2349,14 @@ final class SyncEngine {
                         self.isCurrentRun && $0.remoteId == remoteId && $0.remoteURL == remoteURL && $0.syncState == state
                     })
             } catch {
-                softFailureThisRun = true
+                noteDownloadFailure(error, remoteURL: remoteURL)
             }
             saveAndRefresh(context)
         }
 
         let profiles = (try? context.fetch(FetchDescriptor<ChildProfile>(
             predicate: #Predicate { $0.avatarMediaFileName == nil && $0.avatarRemoteURL != nil }))) ?? []
-        for profile in profiles.prefix(2) {
+        for profile in profiles.filter({ !missingRemoteFiles.contains($0.avatarRemoteURL ?? "") }).prefix(2) {
             guard isCurrentRun else { return }
             guard let remoteURL = profile.avatarRemoteURL else { continue }
             currentSyncLabel = "下载布布头像"
@@ -2338,7 +2371,7 @@ final class SyncEngine {
                         self.isCurrentRun && $0.remoteId == remoteId && $0.avatarRemoteURL == remoteURL && $0.syncState == state
                     })
             } catch {
-                softFailureThisRun = true
+                noteDownloadFailure(error, remoteURL: remoteURL)
             }
             saveAndRefresh(context)
         }
@@ -2394,7 +2427,6 @@ final class SyncEngine {
             entry.syncState = .synced
             context.insert(entry)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2445,7 +2477,6 @@ final class SyncEngine {
         media.syncState = .synced
         context.insert(media)
         downloadScanNeeded = true
-        saveAndRefresh(context)
         return true
     }
 
@@ -2468,7 +2499,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2549,7 +2579,6 @@ final class SyncEngine {
             context.insert(item)
         }
         try checkRunValidity()
-        saveAndRefresh(context)
         return true
     }
 
@@ -2579,7 +2608,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2598,7 +2626,6 @@ final class SyncEngine {
                 Self.log.notice("本机现在有多份布布档案；页面统一按 ChildProfile.canonical 选用一份")
             }
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2614,7 +2641,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         try backfillVaccineIfNeeded(from: dto, context: context)
         GrowthMeasurementBackfill.run(context: context, insertedSyncState: .synced, source: "health-fallback")
         return true
@@ -2633,7 +2659,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2649,7 +2674,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2674,7 +2698,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2696,7 +2719,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.entry = entry; item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 
@@ -2712,7 +2734,6 @@ final class SyncEngine {
             item.id = localId; Self.apply(dto, to: item); item.remoteId = dto.id; item.syncState = .synced
             context.insert(item)
         }
-        saveAndRefresh(context)
         return true
     }
 

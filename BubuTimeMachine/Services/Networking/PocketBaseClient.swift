@@ -644,8 +644,10 @@ nonisolated final class PocketBaseClient: NSObject, APIClient, @unchecked Sendab
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let body: [String: Any] = [
             "clientId": clientId,
-            "subscriptions": ["entries", "media", "comments", "milestones",
-                              "voicenotes", "voicememos", "healthrecords", "timecapsules"],
+            // 任一事件都触发整轮 syncNow，因此要覆盖 pullRemote 拉的全部集合（缺可选集合时 PB 只是收不到事件）。
+            "subscriptions": ["entries", "media", "comments", "milestones", "firsttimes", "members", "childprofile",
+                              "voicenotes", "voicememos", "healthrecords", "vaccinerecords", "growthmeasurements",
+                              "timecapsules"],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, resp) = try await URLSession.shared.data(for: req)

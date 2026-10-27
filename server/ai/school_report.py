@@ -56,7 +56,7 @@ class SchoolReportResp(BaseModel):
     date: Optional[str] = None
     fields: dict[str, str]
     uncertain_fields: list[str]
-    model: Literal["deepseek-flash"] = "deepseek-flash"
+    model: Literal["gemini-3.8-flash"] = "gemini-3.8-flash"
 
 
 def prepare_image(req: SchoolReportReq) -> str:
@@ -145,7 +145,25 @@ def parse_report(value: object) -> SchoolReportResp:
     return SchoolReportResp(date=date, fields={key: text.strip() for key, text in fields.items() if text.strip()}, uncertain_fields=list(dict.fromkeys(uncertain)))
 
 
-def recognize(req: SchoolReportReq, llm) -> SchoolReportResp:
+# Strict structured output: every allowed key is present, so blanks come back as "" rather than missing.
+SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["is_school_report", "date", "fields", "uncertain_fields"],
+    "properties": {
+        "is_school_report": {"type": "boolean"},
+        "date": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "fields": {"type": "object", "additionalProperties": False, "required": list(FIELD_NAMES),
+                   "properties": {name: {"type": "string"} for name in FIELD_NAMES}},
+        "uncertain_fields": {"type": "array", "items": {"type": "string", "enum": [*FIELD_NAMES, "日期"]}},
+    },
+}
+
+
+def recognize(req: SchoolReportReq, bridge) -> SchoolReportResp:
+    """Second-brain Gemini at its highest reasoning effort; the provider key never leaves the mini."""
     image = prepare_image(req)
-    result = llm.complete_vision_json(SYSTEM_PROMPT, "请逐栏录入这张原表，参考日期（不是表上日期）：" + req.reference_date, image)
-    return parse_report(result)
+    user = [
+        {"type": "text", "text": "请逐栏录入这张原表，参考日期（不是表上日期）：" + req.reference_date},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image, "detail": "high"}},
+    ]
+    return parse_report(bridge.complete_json(SYSTEM_PROMPT, user, SCHEMA, effort="high"))

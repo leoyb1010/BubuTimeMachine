@@ -15,6 +15,12 @@ enum Changelog {
     /// 倒序维护：最新版本放最前。
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            version: "2.31.0", date: "2026-10-27", title: "亲子桥读得更准",
+            highlights: [
+                "亲子桥改由家里第二大脑的 Gemini（最高推理强度）读取手写与勾选，不用另填密钥",
+                "以前 DeepSeek 读过的记录保留不动；本机识别的旧记录打开时会自动用 Gemini 补齐空栏"
+            ]),
+        ReleaseNote(
             version: "2.30.0", date: "2026-10-23", title: "为 iPhone Duo 准备好了",
             highlights: [
                 "合上用外屏、展开用内屏都能铺满；底栏和按钮在侧边竖排时位置清楚、不会被挤掉",

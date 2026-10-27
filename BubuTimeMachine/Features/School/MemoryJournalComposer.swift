@@ -250,8 +250,8 @@ struct MemoryJournalComposer: View {
                     .font(BubuTheme.Font.caption).accessibilityIdentifier("school.manual-report")
             }
             Text(env.config.schoolVisionEnabled
-                 ? "亲子桥交给 DeepSeek 读取手写与勾选，自动填写并记录。原图保留；老师照片和视频不会发给模型。"
-                 : "亲子桥在本机识别后自动记录。可在高级设置启用 DeepSeek 读取手写与勾选。")
+                 ? "亲子桥交给 Gemini 读取手写与勾选，自动填写并记录。原图保留；老师照片和视频不会发给模型。"
+                 : "亲子桥在本机识别后自动记录。可在高级设置启用 Gemini 读取手写与勾选。")
                 .font(BubuTheme.Font.caption).foregroundStyle(BubuTheme.Color.secondaryText)
         }
     }
@@ -424,9 +424,9 @@ struct MemoryJournalComposer: View {
         guard report, let service = env.schoolVisionService() else {
             var result = try await JournalImport.prepare(url: url, report: report, store: env.mediaStore)
             if report, env.config.schoolVisionEnabled, var recognized = result.schoolReport {
-                SchoolReportReading.addReview("DeepSeek 连接尚未配置，当前为本机识别；可在原记录中重新识别补齐", to: &recognized)
+                SchoolReportReading.addReview("亲子桥识别连接尚未配置，当前为本机识别；可在原记录中重新识别补齐", to: &recognized)
                 result.schoolReport = recognized
-                result.warning = "DeepSeek 未连接；原图已收好，本机识别可能漏读勾选项。"
+                result.warning = "亲子桥识别未连接；原图已收好，本机识别可能漏读勾选项。"
             }
             return result
         }
@@ -434,7 +434,7 @@ struct MemoryJournalComposer: View {
         let local = try await JournalImport.prepare(url: url, report: false, store: env.mediaStore)
         do {
             try Task.checkCancellation()
-            progress = "DeepSeek 正在读取整张亲子桥…"
+            progress = "Gemini 正在读取整张亲子桥…"
             let image = try await SchoolVisionImage.data(from: url)
             try Task.checkCancellation()
             let result = try await service.recognizeSchoolReport(image: image, referenceDate: date)
@@ -448,10 +448,10 @@ struct MemoryJournalComposer: View {
             try Task.checkCancellation()
             var fallback = try await JournalImport.prepare(url: url, report: true, store: env.mediaStore)
             if var report = fallback.schoolReport {
-                SchoolReportReading.addReview("DeepSeek 暂未完成，已保留原图并使用本机识别保底", to: &report)
+                SchoolReportReading.addReview("Gemini 暂未完成，已保留原图并使用本机识别保底", to: &report)
                 fallback.schoolReport = report
             }
-            fallback.warning = "DeepSeek 暂未完成，原图和本机已读到的数据仍会收好。"
+            fallback.warning = "Gemini 暂未完成，原图和本机已读到的数据仍会收好。"
             return fallback
         }
     }

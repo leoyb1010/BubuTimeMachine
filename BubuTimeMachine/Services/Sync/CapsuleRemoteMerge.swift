@@ -15,9 +15,9 @@ enum CapsuleRemoteMerge {
         let existing = try context.fetch(descriptor).first
         if let existing, existing.syncState != .synced { return false }
         let before = existing.map(Snapshot.init)
-        guard let remote = dto.encryptedBlobRemoteURL else {
-            throw APIError.network("时间胶囊密文尚未上传完成")
-        }
+        // 密文还没传上来：跳过这一条但不抛错，否则 apply() 卡住游标、后面所有胶囊每轮都被丢弃。
+        // 发送端补传文件会刷新服务器 updated，游标窗口会再次拉到它。
+        guard let remote = dto.encryptedBlobRemoteURL, !remote.isEmpty else { return false }
         let prefix = try identityPrefix(for: remote, capsuleID: id, serverUpdatedAt: dto.serverUpdatedAt)
         // A legacy v3 file is also a local version floor even before cryptoVersion
         // was backfilled. No recovery code or plaintext is needed for this check.
